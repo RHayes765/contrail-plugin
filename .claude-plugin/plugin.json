@@ -1,0 +1,14 @@
+{
+  "name": "contrail",
+  "description": "Contrail — AI harness engine for Salesforce work: org connections with human-set grants, metadata engine, safe deploys. Phase 0: engine-as-plugin.",
+  "version": "0.3.0",
+  "author": {
+    "name": "Ryley Hayes"
+  },
+  "mcpServers": {
+    "contrail-engine": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/server/dist/index.js"]
+    }
+  }
+}
