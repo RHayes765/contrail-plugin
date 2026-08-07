@@ -59,6 +59,17 @@ const STYLE = `
            font-size: 0.95rem; font-weight: 600; }
   button:hover { opacity: 0.9; }
   .ok { font-size: 2rem; margin-bottom: 0.5rem; }
+  h2 { font-size: 1rem; margin: 0 0 0.6rem; }
+  .chg { padding: 0.45rem 0.4rem; border-radius: 6px; }
+  .chg-label { font-family: ui-monospace, Consolas, monospace; font-size: 0.88rem; }
+  .chg-warn { font-size: 0.82rem; color: light-dark(#a32c2c, #e88c7c); margin-top: 0.15rem; }
+  .chg.danger { background: #8a1a1a15; }
+  .danger-card { border-color: #8a1a1a88; }
+  .danger-card h2 { color: light-dark(#a32c2c, #e88c7c); }
+  .v.bad { color: light-dark(#a32c2c, #e88c7c); font-weight: 600; }
+  .code-card { text-align: center; }
+  .code { font-family: ui-monospace, Consolas, monospace; font-size: 1.9rem; font-weight: 700;
+          letter-spacing: 0.12em; padding: 0.7rem 0; user-select: all; }
 `;
 
 function page(title: string, body: string): string {
@@ -170,6 +181,94 @@ export function renderSuccessPage(opts: {
       <h1>${opts.mode === 'connect' ? 'Connection saved' : 'Grants updated'}</h1>
       <p><strong>${esc(opts.alias)}</strong> is ready. ${esc(summary)}</p>
       <p class="note">You can close this tab and return to your conversation.</p>
+    </div>`,
+  );
+}
+
+export interface ApprovalPageOptions {
+  kind: 'deploy' | 'dml';
+  code: string;
+  expiresAt: string;
+  org: { alias: string; orgName: string | null; orgType: string; instanceUrl: string };
+  /** Non-destructive changes, one row each. */
+  changes: Array<{ label: string; warnings: string[] }>;
+  /** Destructive changes — rendered first, in red. */
+  destructive: Array<{ label: string; warnings: string[] }>;
+  /** Validation/test result lines. */
+  results: Array<{ label: string; value: string; bad?: boolean }>;
+  /** Blast radius lines. */
+  blast: string[];
+}
+
+/**
+ * The write-approval page. This page is the ONLY place the confirmation code
+ * appears — the agent never sees it, so reading it back is what approval
+ * means. Everything shown here also went to the agent except the code.
+ */
+export function renderApprovalPage(opts: ApprovalPageOptions): string {
+  const isProd = opts.org.orgType === 'production';
+  const badgeClass = isProd ? 'production' : opts.org.orgType === 'sandbox' ? 'sandbox' : 'other';
+  const title = opts.kind === 'deploy' ? 'Approve this deploy' : 'Approve this data change';
+
+  const row = (c: { label: string; warnings: string[] }, danger: boolean) => `
+    <div class="chg${danger ? ' danger' : ''}">
+      <div class="chg-label">${esc(c.label)}</div>
+      ${c.warnings.map((w) => `<div class="chg-warn">⚠ ${esc(w)}</div>`).join('')}
+    </div>`;
+
+  return page(
+    title,
+    `
+    <h1>${esc(title)}</h1>
+    <div class="card">
+      <div class="org-row"><span class="k">Target</span><span class="v"><strong>${esc(
+        opts.org.alias,
+      )}</strong> — ${esc(opts.org.orgName ?? '')}</span></div>
+      <div class="org-row"><span class="k">Type</span><span class="v"><span class="badge ${badgeClass}">${esc(
+        opts.org.orgType,
+      )}</span></span></div>
+      <div class="org-row"><span class="k">Instance</span><span class="v">${esc(
+        opts.org.instanceUrl,
+      )}</span></div>
+    </div>
+    ${
+      opts.destructive.length
+        ? `<div class="card danger-card"><h2>Destructive changes</h2>${opts.destructive
+            .map((c) => row(c, true))
+            .join('')}</div>`
+        : ''
+    }
+    ${
+      opts.changes.length
+        ? `<div class="card"><h2>Changes</h2>${opts.changes.map((c) => row(c, false)).join('')}</div>`
+        : ''
+    }
+    ${
+      opts.results.length
+        ? `<div class="card"><h2>Validation</h2>${opts.results
+            .map(
+              (r) =>
+                `<div class="org-row"><span class="k">${esc(r.label)}</span><span class="v${
+                  r.bad ? ' bad' : ''
+                }">${esc(r.value)}</span></div>`,
+            )
+            .join('')}</div>`
+        : ''
+    }
+    ${
+      opts.blast.length
+        ? `<div class="card"><h2>Blast radius</h2>${opts.blast
+            .map((b) => `<div class="chg"><div class="chg-label">${esc(b)}</div></div>`)
+            .join('')}</div>`
+        : ''
+    }
+    <div class="card code-card">
+      <h2>Confirmation code</h2>
+      <div class="code">${esc(opts.code)}</div>
+      <p class="note">If — and only if — you approve everything above, read this code back to
+        the agent. The agent cannot see this page. If anything looks wrong, close this tab and
+        nothing happens. The code is single-use and expires
+        ${esc(new Date(opts.expiresAt).toLocaleTimeString())}; re-validating replaces it.</p>
     </div>`,
   );
 }

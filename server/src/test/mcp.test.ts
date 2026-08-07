@@ -62,7 +62,7 @@ function textOf(result: Awaited<ReturnType<Client['callTool']>>): string {
 }
 
 describe('MCP surface', () => {
-  it('exposes exactly the P0.1–P0.3 tool set, all classified in TOOL_GRANT_MAP', async () => {
+  it('exposes exactly the P0.1–P0.4 tool set, all classified in TOOL_GRANT_MAP', async () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
@@ -71,6 +71,9 @@ describe('MCP surface', () => {
       'diff_artifact',
       'diff_orgs',
       'disconnect_org',
+      'dml_execute',
+      'dml_propose',
+      'execute_deploy',
       'get_audit_log',
       'get_debug_logs',
       'get_dependencies',
@@ -84,6 +87,7 @@ describe('MCP surface', () => {
       'retrieve_metadata',
       'search_metadata',
       'soql_query',
+      'validate_deploy',
     ]);
     for (const name of names) {
       expect(TOOL_GRANT_MAP, `${name} must be grant-classified`).toHaveProperty(name);

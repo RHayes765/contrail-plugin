@@ -46,6 +46,16 @@ export interface ContrailConfig {
     /** Inline wait before refresh_snapshot returns an in-progress result. */
     toolWaitMs: number;
   };
+  deploy: {
+    /** checkDeployStatus poll interval. */
+    pollIntervalMs: number;
+    /** Hard limit for one validation or deploy operation. */
+    deployTimeoutMs: number;
+    /** Confirmation code lifetime (spec §5: ~1h). */
+    codeTtlMs: number;
+    /** Inline wait before validate/execute return an in-progress result. */
+    toolWaitMs: number;
+  };
 }
 
 export const DEFAULT_CONFIG: ContrailConfig = {
@@ -64,6 +74,12 @@ export const DEFAULT_CONFIG: ContrailConfig = {
     types: ['ApexClass', 'ApexTrigger', 'Flow', 'CustomObject', 'CustomLabels', 'PermissionSet'],
     pollIntervalMs: 2000,
     retrieveTimeoutMs: 10 * 60 * 1000,
+    toolWaitMs: 25 * 1000,
+  },
+  deploy: {
+    pollIntervalMs: 2000,
+    deployTimeoutMs: 15 * 60 * 1000,
+    codeTtlMs: 60 * 60 * 1000,
     toolWaitMs: 25 * 1000,
   },
 };
@@ -89,6 +105,7 @@ export function loadConfig(): ContrailConfig {
     salesforce: { ...DEFAULT_CONFIG.salesforce, ...fromDisk.salesforce },
     oauth: { ...DEFAULT_CONFIG.oauth, ...fromDisk.oauth },
     snapshot: { ...DEFAULT_CONFIG.snapshot, ...fromDisk.snapshot },
+    deploy: { ...DEFAULT_CONFIG.deploy, ...fromDisk.deploy },
   };
 
   if (process.env.CONTRAIL_SF_CLIENT_ID) {

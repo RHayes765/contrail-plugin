@@ -7,13 +7,16 @@ import { ConnectFlowManager, type FlowOps } from './connect/flow.js';
 import { AccessTokenManager } from './salesforce/tokens.js';
 import { SnapshotStore } from './snapshot/store.js';
 import { SnapshotEngine } from './snapshot/engine.js';
+import { DeployEngine } from './deploy/engine.js';
+import { ApprovalPageServer } from './deploy/approval.js';
 import { registerTools, type ToolDeps } from './tools/register.js';
 import { registerMetadataTools } from './tools/metadata.js';
 import { registerDiffTools } from './tools/diff.js';
 import { registerDataTools } from './tools/data.js';
+import { registerDeployTools } from './tools/deploy.js';
 
 export const SERVER_NAME = 'contrail-engine';
-export const SERVER_VERSION = '0.3.0';
+export const SERVER_VERSION = '0.4.0';
 
 export function createDeps(overrides?: {
   db?: ContrailDb;
@@ -21,6 +24,7 @@ export function createDeps(overrides?: {
   config?: ContrailConfig;
   flowOps?: FlowOps;
   store?: SnapshotStore;
+  approvals?: ApprovalPageServer;
 }): ToolDeps {
   const db = overrides?.db ?? new ContrailDb();
   const tokens = overrides?.tokens ?? new KeychainTokenStore();
@@ -30,7 +34,8 @@ export function createDeps(overrides?: {
   const tokenMgr = new AccessTokenManager(db, tokens, config);
   const store = overrides?.store ?? new SnapshotStore();
   const engine = new SnapshotEngine(db, store, tokenMgr, config, audit);
-  return { db, tokens, audit, config, flows, tokenMgr, store, engine };
+  const deploys = new DeployEngine(db, store, tokenMgr, config, audit, overrides?.approvals);
+  return { db, tokens, audit, config, flows, tokenMgr, store, engine, deploys };
 }
 
 /**
@@ -43,5 +48,6 @@ export function createServer(deps: ToolDeps): McpServer {
   registerMetadataTools(server, deps);
   registerDiffTools(server, deps);
   registerDataTools(server, deps);
+  registerDeployTools(server, deps);
   return server;
 }

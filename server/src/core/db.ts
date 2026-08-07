@@ -7,10 +7,11 @@ import type {
   AuditEvent,
   ConnectionRecord,
   DependencyEdge,
+  DeployRequestRecord,
   OrgType,
 } from './types.js';
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 4;
 
 /**
  * Local SQLite store: connection metadata and the audit log (P0.1); the
@@ -98,6 +99,32 @@ export class ContrailDb {
             api_name, type, content, connection_id UNINDEXED, artifact_id UNINDEXED
           );
         `);
+      }
+      if (current < 3) {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS deploy_requests (
+            id                TEXT PRIMARY KEY,
+            workspace_id      TEXT NOT NULL DEFAULT 'default',
+            connection_id     TEXT NOT NULL,
+            kind              TEXT NOT NULL,
+            confirmation_code TEXT NOT NULL,
+            status            TEXT NOT NULL,
+            created_at        TEXT NOT NULL,
+            expires_at        TEXT NOT NULL,
+            executed_at       TEXT,
+            payload_path      TEXT,
+            payload_json      TEXT,
+            summary_json      TEXT NOT NULL,
+            validation_id     TEXT
+          );
+          CREATE INDEX IF NOT EXISTS idx_deploy_requests_conn
+            ON deploy_requests (connection_id, kind, status);
+        `);
+      }
+      if (current < 4) {
+        // Stores the execution outcome so a late poll after a long deploy
+        // still retrieves the result instead of a spurious error.
+        this.db.exec(`ALTER TABLE deploy_requests ADD COLUMN result_json TEXT;`);
       }
       this.db.pragma(`user_version = ${SCHEMA_VERSION}`);
     });
@@ -437,6 +464,140 @@ export class ContrailDb {
     return (rows as EdgeRow[]).map(rowToEdge);
   }
 
+  // ── deploy / dml requests (write-safety two-step, spec §5) ─────────────
+
+  insertDeployRequest(input: {
+    connectionId: string;
+    kind: 'deploy' | 'dml';
+    confirmationCode: string;
+    expiresAt: string;
+    payloadPath?: string | null;
+    payloadJson?: string | null;
+    summaryJson: string;
+    validationId?: string | null;
+  }): DeployRequestRecord {
+    const rec: DeployRequestRecord = {
+      id: randomUUID(),
+      workspaceId: 'default',
+      connectionId: input.connectionId,
+      kind: input.kind,
+      confirmationCode: input.confirmationCode,
+      status: 'validated',
+      createdAt: new Date().toISOString(),
+      expiresAt: input.expiresAt,
+      executedAt: null,
+      payloadPath: input.payloadPath ?? null,
+      payloadJson: input.payloadJson ?? null,
+      summaryJson: input.summaryJson,
+      validationId: input.validationId ?? null,
+      resultJson: null,
+    };
+    this.db
+      .prepare(
+        `INSERT INTO deploy_requests
+           (id, workspace_id, connection_id, kind, confirmation_code, status, created_at,
+            expires_at, executed_at, payload_path, payload_json, summary_json, validation_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        rec.id,
+        rec.workspaceId,
+        rec.connectionId,
+        rec.kind,
+        rec.confirmationCode,
+        rec.status,
+        rec.createdAt,
+        rec.expiresAt,
+        rec.executedAt,
+        rec.payloadPath,
+        rec.payloadJson,
+        rec.summaryJson,
+        rec.validationId,
+      );
+    return rec;
+  }
+
+  /** A new validation on the same target invalidates every earlier pending code (spec §5). */
+  supersedePendingRequests(connectionId: string, kind: 'deploy' | 'dml'): number {
+    const result = this.db
+      .prepare(
+        `UPDATE deploy_requests SET status = 'superseded'
+         WHERE connection_id = ? AND kind = ? AND status = 'validated'`,
+      )
+      .run(connectionId, kind);
+    return result.changes;
+  }
+
+  /** Lookup by code regardless of status; the caller branches on request.status. */
+  findRequestByCode(
+    connectionId: string,
+    kind: 'deploy' | 'dml',
+    code: string,
+  ): DeployRequestRecord | null {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM deploy_requests
+         WHERE connection_id = ? AND kind = ? AND confirmation_code = ? COLLATE NOCASE
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(connectionId, kind, code.trim());
+    return row ? rowToDeployRequest(row as DeployRequestRow) : null;
+  }
+
+  /**
+   * Atomically claim a validated request for execution. Returns true only for
+   * the single caller that flips 'validated'→'executing'; concurrent callers
+   * and re-runs get false. This is the single-use guarantee (spec §5) — the
+   * code is spent BEFORE the write dispatches, so a failed or duplicated
+   * execute can never re-drive it.
+   */
+  claimRequestForExecution(id: string): boolean {
+    const result = this.db
+      .prepare(
+        `UPDATE deploy_requests SET status = 'executing' WHERE id = ? AND status = 'validated'`,
+      )
+      .run(id);
+    return result.changes === 1;
+  }
+
+  finishDeployRequest(
+    id: string,
+    status: 'executed' | 'execution_failed',
+    resultJson: string,
+  ): void {
+    this.db
+      .prepare(
+        `UPDATE deploy_requests SET status = ?, executed_at = ?, result_json = ? WHERE id = ?`,
+      )
+      .run(status, new Date().toISOString(), resultJson, id);
+  }
+
+  setDeployRequestPayloadPath(id: string, payloadPath: string): void {
+    this.db
+      .prepare(`UPDATE deploy_requests SET payload_path = ? WHERE id = ?`)
+      .run(payloadPath, id);
+  }
+
+  updateDeployRequestStatus(
+    id: string,
+    status: 'executed' | 'executing' | 'expired' | 'superseded' | 'execution_failed',
+  ): void {
+    this.db
+      .prepare(`UPDATE deploy_requests SET status = ?, executed_at = ? WHERE id = ?`)
+      .run(status, status === 'executed' ? new Date().toISOString() : null, id);
+  }
+
+  /** Payload zips of superseded requests, so the caller can delete them. */
+  takeSupersededPayloadPaths(connectionId: string, kind: 'deploy' | 'dml'): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT payload_path FROM deploy_requests
+         WHERE connection_id = ? AND kind = ? AND status = 'superseded' AND payload_path IS NOT NULL`,
+      )
+      .all(connectionId, kind) as Array<{ payload_path: string }>;
+    return rows.map((r) => r.payload_path);
+  }
+
   // ── audit ──────────────────────────────────────────────────────────────
 
   insertAuditEvent(input: {
@@ -617,6 +778,42 @@ function rowToEdge(row: EdgeRow): DependencyEdge {
     toType: row.to_type,
     toName: row.to_name,
     source: row.source as DependencyEdge['source'],
+  };
+}
+
+interface DeployRequestRow {
+  id: string;
+  workspace_id: string;
+  connection_id: string;
+  kind: string;
+  confirmation_code: string;
+  status: string;
+  created_at: string;
+  expires_at: string;
+  executed_at: string | null;
+  payload_path: string | null;
+  payload_json: string | null;
+  summary_json: string;
+  validation_id: string | null;
+  result_json: string | null;
+}
+
+function rowToDeployRequest(row: DeployRequestRow): DeployRequestRecord {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    connectionId: row.connection_id,
+    kind: row.kind as DeployRequestRecord['kind'],
+    confirmationCode: row.confirmation_code,
+    status: row.status as DeployRequestRecord['status'],
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+    executedAt: row.executed_at,
+    payloadPath: row.payload_path,
+    payloadJson: row.payload_json,
+    summaryJson: row.summary_json,
+    validationId: row.validation_id,
+    resultJson: row.result_json,
   };
 }
 

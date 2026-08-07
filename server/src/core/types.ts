@@ -57,6 +57,27 @@ export interface DependencyEdge {
   source: 'org' | 'extractor';
 }
 
+/** A validated write awaiting (or past) human approval — deploys and DML share the table. */
+export interface DeployRequestRecord {
+  id: string;
+  workspaceId: string;
+  connectionId: string;
+  kind: 'deploy' | 'dml';
+  confirmationCode: string;
+  status: 'validated' | 'executing' | 'executed' | 'expired' | 'superseded' | 'execution_failed';
+  createdAt: string;
+  expiresAt: string;
+  executedAt: string | null;
+  /** Deploy zip on disk (deploys). */
+  payloadPath: string | null;
+  /** Proposed records JSON (DML). */
+  payloadJson: string | null;
+  summaryJson: string;
+  validationId: string | null;
+  /** Execution outcome JSON, set once terminal, so late polls still get the result. */
+  resultJson: string | null;
+}
+
 export interface AuditEvent {
   id: string;
   workspaceId: string;

@@ -31,6 +31,42 @@ export interface RetrieveStatus {
   fileProperties: FileProperties[];
 }
 
+export interface DeployComponentFailure {
+  componentType: string;
+  fullName: string;
+  problemType: string;
+  problem: string;
+  lineNumber?: string;
+}
+
+export interface DeployTestFailure {
+  name: string;
+  methodName: string;
+  message: string;
+  stackTrace: string;
+}
+
+export interface DeployResult {
+  id: string;
+  done: boolean;
+  status: string;
+  success: boolean;
+  checkOnly: boolean;
+  stateDetail?: string;
+  errorMessage?: string;
+  numberComponentsTotal: number;
+  numberComponentsDeployed: number;
+  numberComponentErrors: number;
+  numberTestsTotal: number;
+  numberTestsCompleted: number;
+  numberTestErrors: number;
+  componentFailures: DeployComponentFailure[];
+  testFailures: DeployTestFailure[];
+  codeCoverageWarnings: string[];
+}
+
+export type TestLevel = 'NoTestRun' | 'RunLocalTests' | 'RunSpecifiedTests' | 'RunAllTestsInOrg';
+
 export class MetadataSoapClient {
   /** Metadata API version number, e.g. "63.0" (no leading v). */
   private readonly versionNumber: string;
@@ -125,6 +161,103 @@ export class MetadataSoapClient {
         manageableState: p.manageableState,
         namespacePrefix: p.namespacePrefix,
       })),
+    };
+  }
+
+  /**
+   * Start a deploy of a package zip. checkOnly=true is a validation — nothing
+   * is committed; rollbackOnError is always true so partial failures never
+   * leave an org half-deployed.
+   */
+  async deploy(
+    zip: Buffer,
+    options: { checkOnly: boolean; testLevel: TestLevel; runTests: string[] },
+  ): Promise<string> {
+    const runTestsXml = options.runTests
+      .map((t) => `<met:runTests>${escapeXml(t)}</met:runTests>`)
+      .join('');
+    // DeployOptions elements must follow the WSDL sequence order —
+    // checkOnly, rollbackOnError, runTests, singlePackage, testLevel — or
+    // Salesforce rejects/misparses the request (runTests before singlePackage).
+    const body =
+      `<met:deploy><met:ZipFile>${zip.toString('base64')}</met:ZipFile>` +
+      `<met:DeployOptions>` +
+      `<met:checkOnly>${options.checkOnly}</met:checkOnly>` +
+      `<met:rollbackOnError>true</met:rollbackOnError>` +
+      runTestsXml +
+      `<met:singlePackage>true</met:singlePackage>` +
+      `<met:testLevel>${escapeXml(options.testLevel)}</met:testLevel>` +
+      `</met:DeployOptions></met:deploy>`;
+    const parsed = await this.call(body);
+    const id = xmlDig(parsed, 'Envelope', 'Body', 'deployResponse', 'result', 'id');
+    if (typeof id !== 'string' || !id) {
+      throw new ContrailError('deploy did not return an async operation id', 'soap_protocol');
+    }
+    return id;
+  }
+
+  /** Best-effort cancel of an in-flight deploy (used on timeout). */
+  async cancelDeploy(id: string): Promise<void> {
+    try {
+      await this.call(
+        `<met:cancelDeploy><met:asyncProcessId>${escapeXml(id)}</met:asyncProcessId></met:cancelDeploy>`,
+      );
+    } catch (err) {
+      log('warn', 'cancelDeploy failed', { id, err: String(err) });
+    }
+  }
+
+  async checkDeployStatus(id: string): Promise<DeployResult> {
+    const body =
+      `<met:checkDeployStatus><met:asyncProcessId>${escapeXml(id)}</met:asyncProcessId>` +
+      `<met:includeDetails>true</met:includeDetails></met:checkDeployStatus>`;
+    const parsed = await this.call(body);
+    const result = xmlDig(parsed, 'Envelope', 'Body', 'checkDeployStatusResponse', 'result') as
+      | Record<string, unknown>
+      | undefined;
+    if (!result) throw new ContrailError('malformed checkDeployStatus response', 'soap_protocol');
+
+    const details = (result.details ?? {}) as Record<string, unknown>;
+    const runTestResult = (details.runTestResult ?? {}) as Record<string, unknown>;
+    const bool = (v: unknown) => v === true || v === 'true';
+    const num = (v: unknown) => (typeof v === 'string' ? Number(v) || 0 : typeof v === 'number' ? v : 0);
+
+    return {
+      id,
+      done: bool(result.done),
+      status: String(result.status ?? ''),
+      success: bool(result.success),
+      checkOnly: bool(result.checkOnly),
+      stateDetail: typeof result.stateDetail === 'string' ? result.stateDetail : undefined,
+      errorMessage: typeof result.errorMessage === 'string' ? result.errorMessage : undefined,
+      numberComponentsTotal: num(result.numberComponentsTotal),
+      numberComponentsDeployed: num(result.numberComponentsDeployed),
+      numberComponentErrors: num(result.numberComponentErrors),
+      numberTestsTotal: num(result.numberTestsTotal),
+      numberTestsCompleted: num(result.numberTestsCompleted),
+      numberTestErrors: num(result.numberTestErrors),
+      componentFailures: asArray(details.componentFailures as Record<string, string>[]).map(
+        (f) => ({
+          componentType: f.componentType ?? '',
+          fullName: f.fullName ?? '',
+          problemType: f.problemType ?? '',
+          problem: f.problem ?? '',
+          lineNumber: f.lineNumber,
+        }),
+      ),
+      testFailures: asArray(
+        (runTestResult.failures ?? []) as Record<string, string>[],
+      ).map((f) => ({
+        name: f.name ?? '',
+        methodName: f.methodName ?? '',
+        message: f.message ?? '',
+        stackTrace: f.stackTrace ?? '',
+      })),
+      codeCoverageWarnings: asArray(
+        (runTestResult.codeCoverageWarnings ?? []) as Record<string, string>[],
+      )
+        .map((w) => w.message ?? '')
+        .filter(Boolean),
     };
   }
 

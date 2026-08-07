@@ -4,15 +4,17 @@ The Contrail engine shipped as a Claude plugin: a local stdio MCP server (the
 **Contrail Engine**) plus a skill carrying the house rules. Spec:
 `contrail-phase0-spec.md`.
 
-**Status: P0.3 — diff + data + diagnostics.** Everything from P0.1 (connection
-lifecycle, grants, audit) and P0.2 (snapshot engine, index/search, dependency
-graph), plus: semantic diff (`diff_orgs` bucketed by content hash,
-`diff_artifact` structural XML / line-level Apex — `metadata_read` required on
-BOTH connections), `soql_query` / `get_record` (`data_read`, row-capped with
-org-side counts), `get_debug_logs` / `get_flow_errors` (`diagnostics_read`).
-Flow inventory unions Metadata API + `FlowDefinitionView` (platform-delivered
-flows get their descriptor — Salesforce exposes no content for them). 18 tools,
-every one classified in the grant map. Deploys land in P0.4.
+**Status: P0.4 — deploys + write safety.** Everything from P0.1–P0.3 plus the
+write pipeline: `validate_deploy` (checkOnly package build with destructive-change
+detection, data-loss flags, blast radius) / `execute_deploy` (`metadata_write`),
+and `dml_propose` / `dml_execute` (`data_write`) with before/after previews.
+
+The write-safety invariant (spec §0/§5) is enforced, not aspirational: validation
+issues a confirmation code that appears **only** on a human-only localhost
+approval page — never in a tool result — so a prompt-injected agent with tool
+access cannot self-approve. Codes are single-use (atomically claimed before
+dispatch), expire in ~1h, and die on re-validation; every write, approval, and
+refusal is audited. 22 tools, all grant-classified. Next: P0.5 packaging + pilot.
 
 ## Layout
 
@@ -25,7 +27,9 @@ server/                         the Contrail Engine (TypeScript, Node >= 20)
   src/connect/                  connect/manage flows + localhost pages
   src/snapshot/                 snapshot store, artifact indexer, refresh engine
   src/deps/                     reference extractor, org dependency API, graph queries
-  src/tools/                    MCP tool registrations (lifecycle + metadata)
+  src/diff/                     semantic XML/Apex diff
+  src/deploy/                   deploy engine, package builder, confirmation codes, approval page
+  src/tools/                    MCP tool registrations (lifecycle + metadata + diff + data + deploy)
 ```
 
 Snapshots live under `%LOCALAPPDATA%\Contrail\snapshots\{connection}` — raw

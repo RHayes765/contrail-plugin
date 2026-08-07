@@ -9,6 +9,7 @@ import type { ConnectFlowManager } from '../connect/flow.js';
 import type { AccessTokenManager } from '../salesforce/tokens.js';
 import type { SnapshotStore } from '../snapshot/store.js';
 import type { SnapshotEngine } from '../snapshot/engine.js';
+import type { DeployEngine } from '../deploy/engine.js';
 import { ContrailError } from '../core/errors.js';
 import { grantedList, notGrantedList } from '../core/grants.js';
 import { log } from '../core/log.js';
@@ -22,6 +23,7 @@ export interface ToolDeps {
   tokenMgr: AccessTokenManager;
   store: SnapshotStore;
   engine: SnapshotEngine;
+  deploys: DeployEngine;
 }
 
 const PERMISSION_NOTES = [
@@ -272,7 +274,19 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
           connectionId = rec.id;
         }
         const events = audit.query({ connectionId, since: args.since, limit: args.limit });
-        return ok({ events, count: events.length });
+        // Snake_case for model consistency with every other tool's output.
+        return ok({
+          events: events.map((e) => ({
+            id: e.id,
+            ts: e.ts,
+            event_type: e.eventType,
+            connection_id: e.connectionId,
+            tool: e.tool,
+            outcome: e.outcome,
+            detail: e.detail,
+          })),
+          count: events.length,
+        });
       }),
   );
 }

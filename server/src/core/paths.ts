@@ -36,6 +36,11 @@ export function configPath(): string {
   return path.join(dataDir(), 'config.json');
 }
 
+/** Validated deploy zips awaiting (or past) execution. */
+export function deploysDir(): string {
+  return ensureDir(path.join(dataDir(), 'deploys'));
+}
+
 function ensureDir(dir: string): string {
   fs.mkdirSync(dir, { recursive: true });
   return dir;
