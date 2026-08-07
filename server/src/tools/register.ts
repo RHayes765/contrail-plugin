@@ -97,9 +97,14 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
           .string()
           .optional()
           .describe(
-            '"production" (default), "sandbox", or a My Domain login URL such as ' +
-              'https://acme.my.salesforce.com. Ignored in favor of the stored login host when ' +
-              're-authorizing an existing label.',
+            'Which Salesforce login endpoint to open. Pass this explicitly — it defaults to ' +
+              '"production" (login.salesforce.com), and sandbox credentials do NOT work there, ' +
+              'so guessing wrong wastes the human\'s login attempt. Use "sandbox" for any ' +
+              'sandbox (UAT/QA/staging/full copy) to open test.salesforce.com; "production" for ' +
+              'production, developer edition, scratch, and trial orgs; or a My Domain host such ' +
+              'as acme--uat.sandbox.my.salesforce.com when the user names one (preferred — ' +
+              'unambiguous). Ignored in favor of the stored login host when re-authorizing an ' +
+              'existing label.',
           ),
         label: z
           .string()

@@ -51,6 +51,18 @@ an org.
 - `connect_org` opens the human's browser; they log in as themselves and set grants
   on the completion page. If the tool returns a pending status, tell the user to
   finish in the browser, then confirm with `list_connections`.
+- **Always pass `login` explicitly — it defaults to production.** Sandbox
+  credentials do not work at `login.salesforce.com`, so a wrong guess wastes the
+  user's login attempt:
+  - sandbox (including UAT/QA/staging orgs, and any org name ending `--something`)
+    → `login: "sandbox"`
+  - production, developer edition, scratch, trial → `login: "production"`
+  - If the user names a My Domain host, pass it verbatim (e.g.
+    `login: "acme--uat.sandbox.my.salesforce.com"`) — it is unambiguous and
+    preferred over the keywords.
+  - If which one is unclear from the request, ask before opening the browser.
+  - Exception: when re-authorizing an existing label, the stored login host always
+    wins and `login` is ignored — you cannot send a re-auth to the wrong endpoint.
 - A sandbox refresh invalidates tokens: re-run `connect_org` with the existing label
   to re-authorize in place.
 - Confirm with the human before `disconnect_org` — it revokes the org token.
