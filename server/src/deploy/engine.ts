@@ -144,15 +144,21 @@ export class DeployEngine {
     // explicit warning on the destructive entry itself.
     const blast: string[] = [];
     for (const item of [...changes, ...destructive]) {
-      const graph = queryDependencies(this.db, conn.id, item.type, item.api_name, 'used_by', 1);
+      // Dependency edges for a flow are keyed on type 'Flow'; a FlowDefinition
+      // change (a deactivation) must look up dependents as its flow, or a
+      // widely-depended-on flow would show "nothing depends on this".
+      const lookupType = item.type === 'FlowDefinition' ? 'Flow' : item.type;
+      const graph = queryDependencies(this.db, conn.id, lookupType, item.api_name, 'used_by', 1);
       if (graph.nodes.length > 0) {
         const names = graph.nodes.slice(0, 5).map((n) => `${n.type}:${n.name}`);
         const parts =
           names.join(', ') +
           (graph.nodes.length > names.length ? ` +${graph.nodes.length - names.length} more` : '');
-        blast.push(`${item.type}:${item.api_name} ← used by ${parts}`);
+        blast.push(`${lookupType}:${item.api_name} ← used by ${parts}`);
         if (item.change === 'delete') {
           item.warnings.push(`deleting this breaks dependents: ${parts}`);
+        } else if (item.type === 'FlowDefinition') {
+          item.warnings.push(`deactivating this flow may break dependents: ${parts}`);
         }
       }
     }

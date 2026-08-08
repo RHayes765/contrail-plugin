@@ -242,6 +242,17 @@ export function analyzeChanges(
 ): { changes: ComponentChange[]; destructive: ComponentChange[] } {
   const changes: ComponentChange[] = [];
   for (const c of components) {
+    // A FlowDefinition setting activeVersionNumber 0 is a flow deactivation —
+    // label it plainly so the approval page doesn't read as a mysterious "ADD".
+    if (c.type === 'FlowDefinition' && /<activeVersionNumber>\s*0\s*<\/activeVersionNumber>/.test(c.content)) {
+      changes.push({
+        type: c.type,
+        api_name: c.api_name,
+        change: 'modify',
+        warnings: [`DEACTIVATES flow ${c.api_name} — turns off its active version.`],
+      });
+      continue;
+    }
     const existing = db.getArtifact(conn.id, c.type, c.api_name);
     const warnings: string[] = [];
     let change: ComponentChange['change'];

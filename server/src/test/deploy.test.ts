@@ -798,6 +798,14 @@ describe('flow deactivation (P0.6)', () => {
     expect(built.destructiveXml).toContain('<members>My_Flow</members>');
   });
 
+  it('passes a version-qualified flow member straight through (no invalid FlowDefinition)', async () => {
+    // "My_Flow-2" is a specific version, deletable without deactivation; the old
+    // auto-injection would have emitted an invalid FlowDefinition for it.
+    const built = buildDeployZip([], [{ type: 'Flow', api_name: 'My_Flow-2' }], '63.0', () => null);
+    expect(built.files.some((f) => f.startsWith('flowDefinitions/'))).toBe(false);
+    expect(built.destructiveXml).toContain('<members>My_Flow-2</members>');
+  });
+
   it('gives honest flow-deletion guidance when a destructive flow delete fails', async () => {
     failNextValidation = true;
     const result = await client.callTool({
@@ -819,14 +827,37 @@ describe('flow deactivation (P0.6)', () => {
     expect(result.isError).not.toBe(true);
     expect(text).toContain('validated');
     const parsed = JSON.parse(text.split('\n').slice(1).join('\n')) as {
-      changes: Array<{ type: string; api_name: string }>;
+      changes: Array<{ type: string; api_name: string; warnings: string[] }>;
     };
-    expect(parsed.changes.some((c) => c.type === 'FlowDefinition' && c.api_name === 'My_Flow')).toBe(
-      true,
-    );
+    const change = parsed.changes.find((c) => c.type === 'FlowDefinition' && c.api_name === 'My_Flow');
+    expect(change).toBeTruthy();
+    // Clearly labeled as a deactivation, not a mysterious "ADD".
+    expect(change!.warnings.join(' ')).toContain('DEACTIVATES flow My_Flow');
     // Code stays on the approval page, not in the tool result.
     const code = codeFromPage(presentedPages.at(-1)!);
     expect(text).not.toContain(code);
+  });
+
+  it('deactivate_flow surfaces flow dependents in the blast radius (Flow-typed lookup)', async () => {
+    // Something depends on My_Flow (edge stored under type 'Flow').
+    db.replaceEdges(connId, 'extractor', ['Flow'], [
+      {
+        connectionId: connId,
+        fromType: 'Flow',
+        fromName: 'Caller_Flow',
+        toType: 'Flow',
+        toName: 'My_Flow',
+        source: 'extractor',
+      },
+    ]);
+    const result = await client.callTool({
+      name: 'deactivate_flow',
+      arguments: { connection: 'deploy-org', flow: 'My_Flow' },
+    });
+    const parsed = JSON.parse(textOf(result).split('\n').slice(1).join('\n')) as {
+      blast_radius: string[];
+    };
+    expect(parsed.blast_radius.join(' ')).toContain('Caller_Flow');
   });
 
   it('deactivate_flow refuses without metadata_write', async () => {
