@@ -198,6 +198,8 @@ export interface ApprovalPageOptions {
   results: Array<{ label: string; value: string; bad?: boolean }>;
   /** Blast radius lines. */
   blast: string[];
+  /** Advisory warnings (e.g. new components with no permissions) — amber, near the top. */
+  warnings?: string[];
 }
 
 /**
@@ -232,6 +234,11 @@ export function renderApprovalPage(opts: ApprovalPageOptions): string {
       )}</span></div>
     </div>
     ${
+      opts.warnings && opts.warnings.length
+        ? `<div class="warn">${opts.warnings.map((w) => esc(w)).join('<br><br>')}</div>`
+        : ''
+    }
+    ${
       opts.destructive.length
         ? `<div class="card danger-card"><h2>Destructive changes</h2>${opts.destructive
             .map((c) => row(c, true))
@@ -262,14 +269,70 @@ export function renderApprovalPage(opts: ApprovalPageOptions): string {
             .join('')}</div>`
         : ''
     }
-    <div class="card code-card">
+    <div class="card code-card" id="code-card">
       <h2>Confirmation code</h2>
-      <div class="code">${esc(opts.code)}</div>
+      <div class="code" id="code">${esc(opts.code)}</div>
       <p class="note">If — and only if — you approve everything above, read this code back to
         the agent. The agent cannot see this page. If anything looks wrong, close this tab and
         nothing happens. The code is single-use and expires
         ${esc(new Date(opts.expiresAt).toLocaleTimeString())}; re-validating replaces it.</p>
-    </div>`,
+    </div>
+    <div class="card danger-card" id="dead" style="display:none">
+      <h2>This code is no longer valid</h2>
+      <p class="note" id="dead-why">Close this tab.</p>
+    </div>
+    <script>
+      // Blank the code whenever it can no longer be a live confirmation:
+      //  (a) the /status poll reports the request is no longer 'validated', OR
+      //  (b) sustained poll failure — the server is gone (process restart), so
+      //      we must not keep showing a code we can't confirm, OR
+      //  (c) the embedded expiry passes — works even with no server at all.
+      // Backend claimCode() is the real gate; this is defense-in-depth so a
+      // stale tab is never misread as a live code.
+      (function () {
+        var reasons = {
+          executed: 'This change has already been executed.',
+          executing: 'This change is currently being executed.',
+          superseded: 'A newer validation replaced this code.',
+          expired: 'This code has expired.',
+          locked: 'This code was locked after too many incorrect attempts.',
+          execution_failed: 'The execution failed; this code is spent.',
+          gone: 'This approval session has ended — the code can no longer be confirmed.'
+        };
+        var done = false;
+        function invalidate(status) {
+          if (done) return;
+          done = true;
+          var cc = document.getElementById('code-card');
+          var dead = document.getElementById('dead');
+          if (cc) cc.style.display = 'none';
+          if (dead) {
+            document.getElementById('dead-why').textContent =
+              reasons[status] || 'This code is no longer valid.';
+            dead.style.display = 'block';
+          }
+        }
+        var fails = 0;
+        function check() {
+          if (done) return;
+          fetch('/status' + location.search, { cache: 'no-store' })
+            .then(function (r) { return r.ok ? r.json() : { active: false, status: 'gone' }; })
+            .then(function (s) {
+              fails = 0;
+              if (s && s.active === false) invalidate(s.status);
+              else setTimeout(check, 3000);
+            })
+            .catch(function () {
+              // A gone server = code can't be confirmed; blank after a few misses.
+              if (++fails >= 3) invalidate('gone');
+              else setTimeout(check, 3000);
+            });
+        }
+        setTimeout(check, 3000);
+        var msLeft = ${JSON.stringify(new Date(opts.expiresAt).getTime())} - Date.now();
+        setTimeout(function () { invalidate('expired'); }, msLeft > 0 ? msLeft : 0);
+      })();
+    </script>`,
   );
 }
 

@@ -64,7 +64,14 @@ export interface DeployRequestRecord {
   connectionId: string;
   kind: 'deploy' | 'dml';
   confirmationCode: string;
-  status: 'validated' | 'executing' | 'executed' | 'expired' | 'superseded' | 'execution_failed';
+  status:
+    | 'validated'
+    | 'executing'
+    | 'executed'
+    | 'expired'
+    | 'superseded'
+    | 'execution_failed'
+    | 'locked';
   createdAt: string;
   expiresAt: string;
   executedAt: string | null;

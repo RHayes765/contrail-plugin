@@ -15,7 +15,7 @@ export const SECURITY_HEADERS = {
   // style/script allowances are what the pages actually use.
   'Content-Security-Policy':
     "frame-ancestors 'none'; default-src 'none'; style-src 'unsafe-inline'; " +
-    "script-src 'unsafe-inline'; form-action 'self'",
+    "script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'",
 } as const;
 
 export function listen(server: http.Server, port: number): Promise<void> {

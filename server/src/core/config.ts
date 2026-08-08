@@ -55,6 +55,8 @@ export interface ContrailConfig {
     codeTtlMs: number;
     /** Inline wait before validate/execute return an in-progress result. */
     toolWaitMs: number;
+    /** Wrong-code guesses that invalidate a pending code (brute-force guard). */
+    maxFailedAttempts: number;
   };
 }
 
@@ -81,6 +83,7 @@ export const DEFAULT_CONFIG: ContrailConfig = {
     deployTimeoutMs: 15 * 60 * 1000,
     codeTtlMs: 60 * 60 * 1000,
     toolWaitMs: 25 * 1000,
+    maxFailedAttempts: 5,
   },
 };
 

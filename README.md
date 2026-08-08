@@ -4,17 +4,26 @@ The Contrail engine shipped as a Claude plugin: a local stdio MCP server (the
 **Contrail Engine**) plus a skill carrying the house rules. Spec:
 `contrail-phase0-spec.md`.
 
-**Status: P0.4 — deploys + write safety.** Everything from P0.1–P0.3 plus the
-write pipeline: `validate_deploy` (checkOnly package build with destructive-change
-detection, data-loss flags, blast radius) / `execute_deploy` (`metadata_write`),
-and `dml_propose` / `dml_execute` (`data_write`) with before/after previews.
+**Status: P0.5 — hardening, skills, packaging.** Everything from P0.1–P0.4 (the
+full 22-tool surface: connections, metadata read, diff, data, diagnostics, and the
+two-step deploy/DML write pipeline) plus the P0.5 hardening:
 
-The write-safety invariant (spec §0/§5) is enforced, not aspirational: validation
-issues a confirmation code that appears **only** on a human-only localhost
-approval page — never in a tool result — so a prompt-injected agent with tool
-access cannot self-approve. Codes are single-use (atomically claimed before
-dispatch), expire in ~1h, and die on re-validation; every write, approval, and
-refusal is audited. 22 tools, all grant-classified. Next: P0.5 packaging + pilot.
+- **Brute-force guard** on confirmation codes — wrong guesses are counted and the
+  pending code is locked after a threshold (config `deploy.maxFailedAttempts`), on
+  top of the single-use / ~1h expiry / superseded-on-revalidation guarantees.
+- **Permissions-aware deploy warning** — `validate_deploy` flags new components
+  that will be invisible/inaccessible without companion permissions (FLS, object,
+  Apex, tab) when the package grants none.
+- **Native `Profile`/`CustomTab` deploys** and **self-invalidating approval pages**
+  (a stale tab polls its status and blanks the code once it's spent).
+- **Skills**: tuned house rules + a `building-salesforce-metadata` skill that
+  bakes in "components and their permissions travel together."
+- **Packaging**: one-command install (`npm install` builds via `prepare`) and an
+  esbuild single-file bundle option.
+
+The write-safety invariant (spec §0/§5) remains enforced, not aspirational: the
+confirmation code appears **only** on a human-only localhost approval page, never
+in a tool result, so a prompt-injected agent with tool access cannot self-approve.
 
 ## Layout
 
@@ -41,16 +50,33 @@ custom fields live).
 ## Build
 
 ```bash
-cd server && npm install && npm run build
+cd server && npm install
 ```
+
+`npm install` also builds (`dist/`) via the `prepare` script — one command gets
+you a runnable server. `npm run build` rebuilds after source changes; `npm test`
+runs the suite.
 
 ## Install
 
 **As a Claude Code / Cowork plugin:** add this directory as a local plugin
-(marketplace entry or `--plugin-dir`). The manifest starts the server over stdio.
-Note: `dist/` and `node_modules/` are gitignored, so any distribution channel
-that clones the repo (marketplace) needs a build step or a bundled artifact —
-a P0.5 packaging task. Local installs just build once as above.
+(marketplace entry or `--plugin-dir`). The manifest starts the server over stdio
+from `server/dist/index.js`.
+
+**Packaging reality:** two dependencies are native addons — `better-sqlite3`
+(SQLite) and `@napi-rs/keyring` (OS keychain). Native addons can't be bundled or
+committed cross-platform, so **every install needs an `npm install` step** to
+fetch their platform binaries (both ship prebuilds, so no compiler is required on
+common platforms). `dist/`, `dist-bundle/`, and `node_modules/` are gitignored.
+
+- **Pilot install (recommended):** `cd server && npm install` — installs deps and
+  builds `dist/` in one command. Point the plugin/Claude Desktop at
+  `server/dist/index.js`.
+- **Lean single-file artifact:** `npm run bundle` produces `dist-bundle/index.mjs`,
+  a single ESM file with every pure-JS dependency inlined and only the two native
+  addons left external. A target then needs just
+  `npm install --omit=dev better-sqlite3 @napi-rs/keyring` beside it. This is the
+  path for a future marketplace release; the pilot path above is simpler for now.
 
 **In Claude Desktop (manual MCP entry):** the config file lives at
 `%APPDATA%\Claude\claude_desktop_config.json` on Windows

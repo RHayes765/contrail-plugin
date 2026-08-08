@@ -11,7 +11,7 @@ import type {
   OrgType,
 } from './types.js';
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 /**
  * Local SQLite store: connection metadata and the audit log (P0.1); the
@@ -125,6 +125,13 @@ export class ContrailDb {
         // Stores the execution outcome so a late poll after a long deploy
         // still retrieves the result instead of a spurious error.
         this.db.exec(`ALTER TABLE deploy_requests ADD COLUMN result_json TEXT;`);
+      }
+      if (current < 5) {
+        // Brute-force guard: wrong-code guesses against a pending request are
+        // counted here and invalidate the code after a threshold.
+        this.db.exec(
+          `ALTER TABLE deploy_requests ADD COLUMN failed_attempts INTEGER NOT NULL DEFAULT 0;`,
+        );
       }
       this.db.pragma(`user_version = ${SCHEMA_VERSION}`);
     });
@@ -572,6 +579,13 @@ export class ContrailDb {
       .run(status, new Date().toISOString(), resultJson, id);
   }
 
+  getDeployRequestStatus(id: string): string | null {
+    const row = this.db
+      .prepare(`SELECT status FROM deploy_requests WHERE id = ?`)
+      .get(id) as { status: string } | undefined;
+    return row?.status ?? null;
+  }
+
   setDeployRequestPayloadPath(id: string, payloadPath: string): void {
     this.db
       .prepare(`UPDATE deploy_requests SET payload_path = ? WHERE id = ?`)
@@ -580,11 +594,58 @@ export class ContrailDb {
 
   updateDeployRequestStatus(
     id: string,
-    status: 'executed' | 'executing' | 'expired' | 'superseded' | 'execution_failed',
+    status: 'executed' | 'executing' | 'expired' | 'superseded' | 'execution_failed' | 'locked',
   ): void {
     this.db
       .prepare(`UPDATE deploy_requests SET status = ?, executed_at = ? WHERE id = ?`)
       .run(status, status === 'executed' ? new Date().toISOString() : null, id);
+  }
+
+  /**
+   * Record a wrong-code guess against the pending validated request for this
+   * connection+kind (brute-force guard). Increments its counter; once the
+   * threshold is reached the request is locked so even the correct code can no
+   * longer execute it — the human must re-validate. Returns what happened so
+   * the caller can shape the refusal message and audit.
+   */
+  registerFailedAttempt(
+    connectionId: string,
+    kind: 'deploy' | 'dml',
+    maxAttempts: number,
+  ): { pendingExisted: boolean; locked: boolean; attemptsRemaining: number; requestId?: string; payloadPath?: string | null } {
+    const row = this.db
+      .prepare(
+        `SELECT id, failed_attempts, payload_path FROM deploy_requests
+         WHERE connection_id = ? AND kind = ? AND status = 'validated'
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(connectionId, kind) as
+      | { id: string; failed_attempts: number; payload_path: string | null }
+      | undefined;
+    if (!row) return { pendingExisted: false, locked: false, attemptsRemaining: 0 };
+
+    const attempts = row.failed_attempts + 1;
+    if (attempts >= maxAttempts) {
+      this.db
+        .prepare(`UPDATE deploy_requests SET status = 'locked', failed_attempts = ? WHERE id = ?`)
+        .run(attempts, row.id);
+      return {
+        pendingExisted: true,
+        locked: true,
+        attemptsRemaining: 0,
+        requestId: row.id,
+        payloadPath: row.payload_path,
+      };
+    }
+    this.db
+      .prepare(`UPDATE deploy_requests SET failed_attempts = ? WHERE id = ?`)
+      .run(attempts, row.id);
+    return {
+      pendingExisted: true,
+      locked: false,
+      attemptsRemaining: maxAttempts - attempts,
+      requestId: row.id,
+    };
   }
 
   /** Payload zips of superseded requests, so the caller can delete them. */

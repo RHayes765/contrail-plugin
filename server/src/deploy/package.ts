@@ -41,6 +41,8 @@ const FILE_TYPES: Record<
   Flow: { dir: 'flows', ext: '.flow' },
   CustomObject: { dir: 'objects', ext: '.object' },
   PermissionSet: { dir: 'permissionsets', ext: '.permissionset' },
+  Profile: { dir: 'profiles', ext: '.profile' },
+  CustomTab: { dir: 'tabs', ext: '.tab' },
 };
 
 /** Child types that deploy wrapped inside a container document. */
@@ -264,6 +266,137 @@ export function analyzeChanges(
   });
 
   return { changes, destructive };
+}
+
+export interface PermissionCoverage {
+  /** Components that need a permission and are NOT granted anywhere in this package. */
+  uncovered: Array<{ type: string; api_name: string; permission: string }>;
+  /** True if the package itself contains a PermissionSet or Profile. */
+  has_permission_container: boolean;
+  warning: string | null;
+}
+
+/** A single thing that needs a permission grant to be usable. */
+interface PermissionNeed {
+  type: string;
+  api_name: string;
+  permission: string;
+  kind: 'field' | 'object' | 'class' | 'tab';
+}
+
+/** Custom entities (need explicit object permissions); standard objects don't. */
+function isCustomEntity(name: string): boolean {
+  return /__(c|b|e|x)$/i.test(name);
+}
+
+/** Extract the fullNames of inline <fields> in a CustomObject .object body. */
+function inlineFieldNames(objectXml: string): string[] {
+  const names: string[] = [];
+  for (const block of objectXml.match(/<fields>[\s\S]*?<\/fields>/g) ?? []) {
+    const m = block.match(/<fullName>([^<]+)<\/fullName>/);
+    if (m?.[1]) names.push(m[1].trim());
+  }
+  return names;
+}
+
+function permissionBlocks(text: string, tag: string): string[] {
+  return text.match(new RegExp(`<${tag}>[\\s\\S]*?</${tag}>`, 'g')) ?? [];
+}
+
+/**
+ * A grant counts only if the component is named in the right permission block
+ * AND the enabling flag is on — a mention with readable/allowRead/enabled=false
+ * (or a Hidden tab) is NOT coverage. False "covered" would defeat the warning.
+ */
+function isGranted(containerText: string, need: PermissionNeed): boolean {
+  const named = (block: string, tag: string, name: string): boolean =>
+    new RegExp(`<${tag}>\\s*${escapeRegex(name)}\\s*</${tag}>`, 'i').test(block);
+  const flagOn = (block: string, flag: string): boolean =>
+    new RegExp(`<${flag}>\\s*true\\s*</${flag}>`, 'i').test(block);
+
+  switch (need.kind) {
+    case 'field':
+      return permissionBlocks(containerText, 'fieldPermissions').some(
+        (b) => named(b, 'field', need.api_name) && flagOn(b, 'readable'),
+      );
+    case 'object':
+      return permissionBlocks(containerText, 'objectPermissions').some(
+        (b) => named(b, 'object', need.api_name) && flagOn(b, 'allowRead'),
+      );
+    case 'class':
+      return permissionBlocks(containerText, 'classAccesses').some(
+        (b) => named(b, 'apexClass', need.api_name) && flagOn(b, 'enabled'),
+      );
+    case 'tab': {
+      const blocks = [
+        ...permissionBlocks(containerText, 'tabVisibilities'),
+        ...permissionBlocks(containerText, 'tabSettings'),
+      ];
+      return blocks.some((b) => {
+        if (!named(b, 'tab', need.api_name)) return false;
+        const vis = b.match(/<visibility>\s*([^<]+?)\s*<\/visibility>/i)?.[1] ?? '';
+        return !/^(hidden|none)$/i.test(vis);
+      });
+    }
+  }
+}
+
+/**
+ * Check whether permission-needing components in the package are granted by a
+ * PermissionSet/Profile ALSO in the package. Advisory only — it never blocks a
+ * deploy, it warns so the human isn't surprised when new metadata is invisible.
+ * Custom fields authored inline in a full .object file are enumerated too, and a
+ * grant must be actually enabled (not merely mentioned) to count as coverage.
+ */
+export function analyzePermissionCoverage(components: ProposedComponent[]): PermissionCoverage {
+  const containers = components.filter((c) => c.type === 'PermissionSet' || c.type === 'Profile');
+  const hasContainer = containers.length > 0;
+  const containerText = containers.map((c) => c.content).join('\n');
+
+  const needs: PermissionNeed[] = [];
+  for (const c of components) {
+    if (c.type === 'CustomField') {
+      needs.push({ type: 'CustomField', api_name: c.api_name, permission: 'field-level security (FLS)', kind: 'field' });
+    } else if (c.type === 'ApexClass') {
+      needs.push({ type: 'ApexClass', api_name: c.api_name, permission: 'Apex class access', kind: 'class' });
+    } else if (c.type === 'CustomTab') {
+      needs.push({ type: 'CustomTab', api_name: c.api_name, permission: 'tab visibility', kind: 'tab' });
+    } else if (c.type === 'CustomObject') {
+      if (isCustomEntity(c.api_name)) {
+        needs.push({ type: 'CustomObject', api_name: c.api_name, permission: 'object permissions', kind: 'object' });
+      }
+      // Fields authored inline in the object file still need FLS.
+      for (const field of inlineFieldNames(c.content)) {
+        needs.push({
+          type: 'CustomField',
+          api_name: `${c.api_name}.${field}`,
+          permission: 'field-level security (FLS)',
+          kind: 'field',
+        });
+      }
+    }
+  }
+
+  const uncovered: PermissionCoverage['uncovered'] = needs
+    .filter((n) => !isGranted(containerText, n))
+    .map((n) => ({ type: n.type, api_name: n.api_name, permission: n.permission }));
+
+  let warning: string | null = null;
+  if (uncovered.length > 0) {
+    const list = uncovered.map((u) => `${u.type}:${u.api_name} (${u.permission})`).join('; ');
+    warning = hasContainer
+      ? `These new components are not granted by the permission set/profile in this package and ` +
+        `will be invisible or inaccessible to users until permissions are set: ${list}.`
+      : `This package adds ${uncovered.length} component(s) that need permissions but includes no ` +
+        `permission set or profile to grant them — they will deploy but stay invisible or ` +
+        `inaccessible until you set permissions (deploy a permission set alongside, or grant FLS/` +
+        `access afterward): ${list}.`;
+  }
+  return { uncovered, has_permission_container: hasContainer, warning };
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function readOldContent(

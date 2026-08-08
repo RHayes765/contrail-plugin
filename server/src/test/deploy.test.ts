@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
+import httpMod from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { strToU8, unzipSync } from 'fflate';
@@ -141,9 +142,26 @@ function stubSalesforce(): void {
 
 /** Pull the confirmation code out of the presented approval page HTML — the test plays the human. */
 function codeFromPage(html: string): string {
-  const m = html.match(/class="code">([A-Z2-9]{4}-[A-Z2-9]{4})</);
+  const m = html.match(/class="code"[^>]*>([A-Z2-9]{4}-[A-Z2-9]{4})</);
   if (!m) throw new Error('no code found in approval page');
   return m[1]!;
+}
+
+/** Raw HTTP GET that bypasses the globally-stubbed fetch (used to hit the real approval server). */
+function httpGet(urlStr: string): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const u = new URL(urlStr);
+    const req = httpMod.request(
+      { host: u.hostname, port: u.port, path: u.pathname + u.search, method: 'GET' },
+      (res) => {
+        let body = '';
+        res.on('data', (c) => (body += c));
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body }));
+      },
+    );
+    req.on('error', reject);
+    req.end();
+  });
 }
 
 function textOf(result: Awaited<ReturnType<Client['callTool']>>): string {
@@ -240,9 +258,12 @@ beforeEach(async () => {
   });
   // capture rendered pages: wrap present()
   const origPresent = approvals.present.bind(approvals);
-  approvals.present = async (html: string) => {
+  approvals.present = async (
+    html: string,
+    statusCheck?: () => { active: boolean; status: string },
+  ) => {
     presentedPages.push(html);
-    return origPresent(html);
+    return origPresent(html, statusCheck);
   };
 
   const config: ContrailConfig = {
@@ -334,6 +355,22 @@ describe('buildDeployZip', () => {
       ),
     ).toThrow(/invalid component name/);
   });
+
+  it('supports native Profile and CustomTab deploys', () => {
+    const built = buildDeployZip(
+      [
+        { type: 'Profile', api_name: 'Admin', content: '<Profile xmlns="x"/>' },
+        { type: 'CustomTab', api_name: 'Test_Widget__c', content: '<CustomTab xmlns="x"/>' },
+      ],
+      [],
+      '63.0',
+      () => null,
+    );
+    expect(built.files).toContain('profiles/Admin.profile');
+    expect(built.files).toContain('tabs/Test_Widget__c.tab');
+    expect(built.packageXml).toContain('<name>Profile</name>');
+    expect(built.packageXml).toContain('<name>CustomTab</name>');
+  });
 });
 
 describe('deploy SOAP DeployOptions ordering', () => {
@@ -390,6 +427,108 @@ describe('validate_deploy', () => {
   it('flags field type changes as possible data loss', async () => {
     const result = await validate(); // Picklist → Text vs snapshot
     expect(textOf(result)).toContain('FIELD TYPE CHANGE Picklist → Text');
+  });
+
+  it('warns when a package adds components that need permissions but grants none', async () => {
+    const result = await client.callTool({
+      name: 'validate_deploy',
+      arguments: {
+        connection: 'deploy-org',
+        components: [
+          {
+            type: 'CustomObject',
+            api_name: 'Test_Widget__c',
+            content: '<?xml version="1.0"?><CustomObject xmlns="x"><label>W</label></CustomObject>',
+          },
+        ],
+      },
+    });
+    const parsed = JSON.parse(textOf(result).split('\n').slice(1).join('\n')) as {
+      permission_warning: string | null;
+    };
+    expect(parsed.permission_warning).toBeTruthy();
+    expect(parsed.permission_warning).toContain('no');
+    expect(presentedPages.at(-1)).toContain('invisible or inaccessible');
+  });
+
+  it('flags inline object fields that lack FLS even when object perms are granted', async () => {
+    const result = await client.callTool({
+      name: 'validate_deploy',
+      arguments: {
+        connection: 'deploy-org',
+        components: [
+          {
+            type: 'CustomObject',
+            api_name: 'Gadget__c',
+            content:
+              '<?xml version="1.0"?><CustomObject xmlns="x"><label>G</label>' +
+              '<fields><fullName>Serial__c</fullName><type>Text</type></fields></CustomObject>',
+          },
+          {
+            type: 'PermissionSet',
+            api_name: 'G_Access',
+            content:
+              '<?xml version="1.0"?><PermissionSet xmlns="x"><label>G</label>' +
+              '<objectPermissions><allowRead>true</allowRead><object>Gadget__c</object></objectPermissions></PermissionSet>',
+          },
+        ],
+      },
+    });
+    const parsed = JSON.parse(textOf(result).split('\n').slice(1).join('\n')) as {
+      permission_warning: string | null;
+    };
+    // Object perms are granted, but the inline Serial__c field has no FLS → warn.
+    expect(parsed.permission_warning).toContain('Gadget__c.Serial__c');
+  });
+
+  it('does not count a disabled grant (readable=false) as coverage', async () => {
+    const result = await client.callTool({
+      name: 'validate_deploy',
+      arguments: {
+        connection: 'deploy-org',
+        components: [
+          { type: 'CustomField', api_name: 'Account.Foo__c', content: '<fields><fullName>Foo__c</fullName></fields>' },
+          {
+            type: 'PermissionSet',
+            api_name: 'F_Access',
+            content:
+              '<?xml version="1.0"?><PermissionSet xmlns="x"><label>F</label>' +
+              '<fieldPermissions><editable>false</editable><field>Account.Foo__c</field><readable>false</readable></fieldPermissions></PermissionSet>',
+          },
+        ],
+      },
+    });
+    const parsed = JSON.parse(textOf(result).split('\n').slice(1).join('\n')) as {
+      permission_warning: string | null;
+    };
+    expect(parsed.permission_warning).toContain('Account.Foo__c');
+  });
+
+  it('does not warn when the package grants permissions for the new component', async () => {
+    const result = await client.callTool({
+      name: 'validate_deploy',
+      arguments: {
+        connection: 'deploy-org',
+        components: [
+          {
+            type: 'CustomObject',
+            api_name: 'Test_Widget__c',
+            content: '<?xml version="1.0"?><CustomObject xmlns="x"><label>W</label></CustomObject>',
+          },
+          {
+            type: 'PermissionSet',
+            api_name: 'W_Access',
+            content:
+              '<?xml version="1.0"?><PermissionSet xmlns="x"><label>W</label>' +
+              '<objectPermissions><allowRead>true</allowRead><object>Test_Widget__c</object></objectPermissions></PermissionSet>',
+          },
+        ],
+      },
+    });
+    const parsed = JSON.parse(textOf(result).split('\n').slice(1).join('\n')) as {
+      permission_warning: string | null;
+    };
+    expect(parsed.permission_warning).toBeNull();
   });
 
   it('refuses without metadata_write and audits', async () => {
@@ -449,6 +588,39 @@ describe('execute_deploy code lifecycle', () => {
       db.queryAuditEvents({}).some(
         (e) => e.eventType === 'deploy.refused' && e.detail?.reason === 'no_matching_code',
       ),
+    ).toBe(true);
+  });
+
+  it('locks the pending code after too many wrong guesses (brute-force guard)', async () => {
+    await validate();
+    const code = codeFromPage(presentedPages[0]!);
+    // maxFailedAttempts defaults to 5 → the 5th wrong guess locks it.
+    for (let i = 0; i < 4; i++) {
+      const r = await client.callTool({
+        name: 'execute_deploy',
+        arguments: { connection: 'deploy-org', confirmation_code: `WRONG-CD${i}` },
+      });
+      expect(r.isError).toBe(true);
+      expect(textOf(r)).toMatch(/attempt\(s\) remain/);
+    }
+    const fifth = await client.callTool({
+      name: 'execute_deploy',
+      arguments: { connection: 'deploy-org', confirmation_code: 'WRONG-CDX' },
+    });
+    expect(textOf(fifth)).toContain('locked');
+
+    // Even the CORRECT code no longer works — the human must re-validate.
+    const correct = await client.callTool({
+      name: 'execute_deploy',
+      arguments: { connection: 'deploy-org', confirmation_code: code },
+    });
+    expect(correct.isError).toBe(true);
+    expect(textOf(correct)).toContain('locked');
+    expect(deployCounter.realDeploys).toBe(0);
+    expect(
+      db
+        .queryAuditEvents({})
+        .some((e) => e.eventType === 'deploy.refused' && e.detail?.reason === 'too_many_attempts'),
     ).toBe(true);
   });
 
@@ -607,6 +779,30 @@ describe('approval URL is never handed to the agent', () => {
     expect(text).not.toContain('/approve?s=');
     await client2.close();
     db2.close();
+  });
+});
+
+describe('approval page staleness', () => {
+  it('reports active while validated and inactive after execution', async () => {
+    await validate();
+    const approveUrl = openedUrls.at(-1)!;
+    const statusUrl = approveUrl.replace('/approve', '/status');
+
+    const before = JSON.parse((await httpGet(statusUrl)).body);
+    expect(before).toMatchObject({ active: true, status: 'validated' });
+
+    // The served page carries the self-invalidation poll.
+    const pageHtml = (await httpGet(approveUrl)).body;
+    expect(pageHtml).toContain("fetch('/status'");
+
+    const code = codeFromPage(presentedPages.at(-1)!);
+    await client.callTool({
+      name: 'execute_deploy',
+      arguments: { connection: 'deploy-org', confirmation_code: code },
+    });
+
+    const after = JSON.parse((await httpGet(statusUrl)).body);
+    expect(after).toMatchObject({ active: false, status: 'executed' });
   });
 });
 

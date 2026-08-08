@@ -16,6 +16,7 @@ import { ApprovalPageServer } from './approval.js';
 import { renderApprovalPage } from '../connect/pages.js';
 import {
   analyzeChanges,
+  analyzePermissionCoverage,
   buildDeployZip,
   type ComponentChange,
   type ProposedComponent,
@@ -46,6 +47,8 @@ export interface DeployValidationSummary {
   test_failure_detail: unknown;
   code_coverage_warnings: string[];
   blast_radius: string[];
+  /** Advisory: new components that will be invisible/inaccessible without permissions. */
+  permission_warning: string | null;
   expires_at: string;
 }
 
@@ -127,6 +130,7 @@ export class DeployEngine {
       input.components,
       input.destructive,
     );
+    const permCoverage = analyzePermissionCoverage(input.components);
 
     // Blast radius per touched component; deletions with dependents get an
     // explicit warning on the destructive entry itself.
@@ -211,6 +215,7 @@ export class DeployEngine {
       test_failure_detail: this.gateTestDetail(conn, result),
       code_coverage_warnings: result.codeCoverageWarnings.slice(0, 10),
       blast_radius: blast,
+      permission_warning: permCoverage.warning,
       expires_at: expiresAt,
     };
 
@@ -246,7 +251,10 @@ export class DeployEngine {
           },
         ],
         blast,
+        warnings: permCoverage.warning ? [permCoverage.warning] : [],
       }),
+      this.requestStatusCheck(request.id),
+      this.config.deploy.codeTtlMs + 60_000,
     );
 
     this.audit.record('deploy.validated', {
@@ -393,6 +401,14 @@ export class DeployEngine {
     );
   }
 
+  /** Status probe for the approval page: active only while the code is still executable. */
+  private requestStatusCheck(requestId: string): () => { active: boolean; status: string } {
+    return () => {
+      const status = this.db.getDeployRequestStatus(requestId) ?? 'gone';
+      return { active: status === 'validated', status };
+    };
+  }
+
   /** Persist the terminal outcome, clean up the zip, and return the payload. */
   private finishExecution(
     conn: ConnectionRecord,
@@ -466,6 +482,8 @@ export class DeployEngine {
         ],
         blast: [],
       }),
+      this.requestStatusCheck(request.id),
+      this.config.deploy.codeTtlMs + 60_000,
     );
 
     this.audit.record('dml.proposed', {
@@ -597,15 +615,40 @@ export class DeployEngine {
     | { kind: 'terminal'; result: Record<string, unknown> } {
     const request = this.db.findRequestByCode(conn.id, kind, code);
     if (!request) {
+      // Wrong code — count it against the pending request as a brute-force
+      // guard. After the threshold the pending code is locked, so guessing
+      // can never outlast a single issued code.
+      const attempt = this.db.registerFailedAttempt(
+        conn.id,
+        kind,
+        this.config.deploy.maxFailedAttempts,
+      );
       this.audit.record(`${kind}.refused`, {
         connectionId: conn.id,
         tool,
         outcome: 'refused',
-        detail: { reason: 'no_matching_code' },
+        detail: {
+          reason: attempt.locked ? 'too_many_attempts' : 'no_matching_code',
+          attempts_remaining: attempt.pendingExisted ? attempt.attemptsRemaining : null,
+          locked: attempt.locked,
+        },
       });
+      if (attempt.locked) {
+        if (attempt.payloadPath) safeUnlink(attempt.payloadPath);
+        throw new ContrailError(
+          `Too many incorrect codes — the pending ${
+            kind === 'deploy' ? 'deploy' : 'change'
+          } on "${conn.alias}" has been locked and its code invalidated. Re-validate to get a ` +
+            `fresh code. (This is the brute-force guard.)`,
+          'code_locked',
+        );
+      }
       throw new ContrailError(
-        `No ${kind === 'deploy' ? 'deploy' : 'change'} on "${conn.alias}" matches that code. ` +
-          `Codes are single-use, expire after ~1 hour, and are replaced by re-validation — ask ` +
+        `No ${kind === 'deploy' ? 'deploy' : 'change'} on "${conn.alias}" matches that code.` +
+          (attempt.pendingExisted
+            ? ` ${attempt.attemptsRemaining} attempt(s) remain before the pending code is locked.`
+            : '') +
+          ` Codes are single-use, expire after ~1 hour, and are replaced by re-validation — ask ` +
           `the human to re-read the code from the approval page, or validate again.`,
         'bad_confirmation_code',
       );
@@ -617,17 +660,25 @@ export class DeployEngine {
         : { executed: request.status === 'executed' };
       return { kind: 'terminal', result: { ...stored, already_completed: true } };
     }
-    if (request.status === 'superseded' || request.status === 'expired') {
+    if (
+      request.status === 'superseded' ||
+      request.status === 'expired' ||
+      request.status === 'locked'
+    ) {
       this.audit.record(`${kind}.refused`, {
         connectionId: conn.id,
         tool,
         outcome: 'refused',
         detail: { reason: request.status, requestId: request.id },
       });
+      const why =
+        request.status === 'expired'
+          ? 'it timed out'
+          : request.status === 'locked'
+            ? 'it was locked after too many incorrect attempts'
+            : 'a newer validation replaced it';
       throw new ContrailError(
-        `That confirmation code is ${request.status} — ${
-          request.status === 'expired' ? 'it timed out' : 'a newer validation replaced it'
-        }. Validate again for a fresh one.`,
+        `That confirmation code is ${request.status} — ${why}. Validate again for a fresh one.`,
         'code_unusable',
       );
     }

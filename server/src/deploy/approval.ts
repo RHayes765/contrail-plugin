@@ -17,9 +17,12 @@ interface ApprovalSession {
   server: http.Server;
   html: string;
   hardTimeout: NodeJS.Timeout;
+  /** Live status of the underlying request, so the page can self-invalidate. */
+  statusCheck?: () => { active: boolean; status: string };
 }
 
-const SESSION_TTL_MS = 20 * 60 * 1000;
+/** Fallback lifetime when the caller doesn't specify one. */
+const DEFAULT_SESSION_TTL_MS = 20 * 60 * 1000;
 
 export class ApprovalPageServer {
   private readonly sessions = new Map<string, ApprovalSession>();
@@ -31,7 +34,11 @@ export class ApprovalPageServer {
   ) {}
 
   /** Render `html` at a fresh session URL and open the human's browser at it. */
-  async present(html: string): Promise<{ url: string; opened: boolean }> {
+  async present(
+    html: string,
+    statusCheck?: () => { active: boolean; status: string },
+    ttlMs: number = DEFAULT_SESSION_TTL_MS,
+  ): Promise<{ url: string; opened: boolean }> {
     const sessionId = randomUUID();
     const server = http.createServer((req, res) => {
       this.handle(sessionId, req, res);
@@ -44,7 +51,10 @@ export class ApprovalPageServer {
     const session: ApprovalSession = {
       server,
       html,
-      hardTimeout: setTimeout(() => this.close(sessionId), SESSION_TTL_MS),
+      statusCheck,
+      // Keep the page's status endpoint reachable at least as long as the code
+      // can be valid, so the self-invalidation poll can observe it going dead.
+      hardTimeout: setTimeout(() => this.close(sessionId), ttlMs),
     };
     session.hardTimeout.unref?.();
     this.sessions.set(sessionId, session);
@@ -72,6 +82,18 @@ export class ApprovalPageServer {
     const url = new URL(req.url ?? '/', 'http://localhost');
     if (url.pathname === '/favicon.ico') {
       res.writeHead(204).end();
+      return;
+    }
+    // Same-origin poll so a stale tab self-invalidates instead of showing a
+    // dead code as if it were live.
+    if (req.method === 'GET' && url.pathname === '/status' && url.searchParams.get('s') === sessionId) {
+      const state = session.statusCheck ? session.statusCheck() : { active: true, status: 'unknown' };
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff',
+      });
+      res.end(JSON.stringify(state));
       return;
     }
     if (req.method === 'GET' && url.pathname === '/approve' && url.searchParams.get('s') === sessionId) {

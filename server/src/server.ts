@@ -16,7 +16,7 @@ import { registerDataTools } from './tools/data.js';
 import { registerDeployTools } from './tools/deploy.js';
 
 export const SERVER_NAME = 'contrail-engine';
-export const SERVER_VERSION = '0.4.0';
+export const SERVER_VERSION = '0.5.0';
 
 export function createDeps(overrides?: {
   db?: ContrailDb;
