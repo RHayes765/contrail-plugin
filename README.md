@@ -4,9 +4,16 @@ The Contrail engine shipped as a Claude plugin: a local stdio MCP server (the
 **Contrail Engine**) plus a skill carrying the house rules. Spec:
 `contrail-phase0-spec.md`.
 
-**Status: P0.5 — hardening, skills, packaging.** Everything from P0.1–P0.4 (the
-full 22-tool surface: connections, metadata read, diff, data, diagnostics, and the
-two-step deploy/DML write pipeline) plus the P0.5 hardening:
+**Status: P0.6 — flow deactivation** (in progress, on top of the completed
+P0.1–P0.5 Phase 0 surface). Contrail can now deactivate flows: a `Flow` listed in
+`validate_deploy`'s `destructive` list auto-deactivates before deletion (active
+flows no longer block teardown), and a `deactivate_flow` tool turns off a flow
+without deleting it — both through the same two-step human approval. Native
+`FlowDefinition` deploy type added. 23 tools.
+
+**P0.5 — hardening, skills, packaging.** The full P0.1–P0.4 surface (connections,
+metadata read, diff, data, diagnostics, two-step deploy/DML write pipeline) plus
+the P0.5 hardening:
 
 - **Brute-force guard** on confirmation codes — wrong guesses are counted and the
   pending code is locked after a threshold (config `deploy.maxFailedAttempts`), on

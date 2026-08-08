@@ -113,6 +113,7 @@ export const TOOL_GRANT_MAP: Readonly<Record<string, Grant | null>> = {
   get_flow_errors: 'diagnostics_read',
   validate_deploy: 'metadata_write',
   execute_deploy: 'metadata_write',
+  deactivate_flow: 'metadata_write',
   dml_propose: 'data_write',
   dml_execute: 'data_write',
 };

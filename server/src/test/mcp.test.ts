@@ -62,11 +62,12 @@ function textOf(result: Awaited<ReturnType<Client['callTool']>>): string {
 }
 
 describe('MCP surface', () => {
-  it('exposes exactly the P0.1–P0.4 tool set, all classified in TOOL_GRANT_MAP', async () => {
+  it('exposes exactly the current tool set, all classified in TOOL_GRANT_MAP', async () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
       'connect_org',
+      'deactivate_flow',
       'describe_schema',
       'diff_artifact',
       'diff_orgs',

@@ -43,7 +43,18 @@ const FILE_TYPES: Record<
   PermissionSet: { dir: 'permissionsets', ext: '.permissionset' },
   Profile: { dir: 'profiles', ext: '.profile' },
   CustomTab: { dir: 'tabs', ext: '.tab' },
+  FlowDefinition: { dir: 'flowDefinitions', ext: '.flowDefinition' },
 };
+
+const XMLNS_META = 'http://soap.sforce.com/2006/04/metadata';
+
+/** Metadata body that deactivates a flow (all versions off). */
+export function flowDeactivationXml(): string {
+  return (
+    `<?xml version="1.0" encoding="UTF-8"?>\n<FlowDefinition xmlns="${XMLNS_META}">\n` +
+    `    <activeVersionNumber>0</activeVersionNumber>\n</FlowDefinition>\n`
+  );
+}
 
 /** Child types that deploy wrapped inside a container document. */
 const CHILD_TYPES: Record<

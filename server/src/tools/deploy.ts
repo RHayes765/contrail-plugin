@@ -5,6 +5,7 @@ import { ok, fail, guarded } from './register.js';
 import type { ConnectionRecord } from '../core/types.js';
 import { ConnectionNotFoundError } from '../core/errors.js';
 import { assertGrant } from '../core/gate.js';
+import { flowDeactivationXml } from '../deploy/package.js';
 import type { TestLevel } from '../salesforce/metadataSoap.js';
 
 /**
@@ -120,6 +121,56 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
             return ok(
               { ...r.summary, approval_page: r.approval },
               `Validation passed. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`,
+            );
+          }
+        }
+      }),
+  );
+
+  server.registerTool(
+    'deactivate_flow',
+    {
+      title: 'Deactivate a flow',
+      description:
+        'Deactivate a flow (turn off its active version). Required before an active flow can be ' +
+        'deleted, and useful for switching off automation. Routes through the same two-step ' +
+        'approval as any write: this validates the change and opens the approval page; the human ' +
+        'reads the code back to execute_deploy. (Deleting an active flow via validate_deploy\'s ' +
+        'destructive list auto-deactivates it — use this tool to deactivate without deleting.)',
+      inputSchema: {
+        connection: z.string().describe('Target connection alias (or id).'),
+        flow: z.string().describe('Flow API name (DeveloperName).'),
+      },
+    },
+    async (args: { connection: string; flow: string }) =>
+      guarded(async () => {
+        const conn = requireConnection(args.connection, 'deactivate_flow');
+        if (!/^[A-Za-z0-9_]+$/.test(args.flow)) return fail('invalid flow API name');
+        const outcome = await deploys.validateDeploy(conn, {
+          components: [
+            { type: 'FlowDefinition', api_name: args.flow, content: flowDeactivationXml() },
+          ],
+          destructive: [],
+          testLevel: 'NoTestRun',
+          runTests: [],
+        });
+        switch (outcome.status) {
+          case 'in_progress':
+            return ok(
+              { progress: outcome.progress, started_at: outcome.started_at },
+              'Still validating — call deactivate_flow again with the same flow to check on it.',
+            );
+          case 'failed':
+            return fail(`Deactivation validation errored: ${outcome.error}`);
+          case 'complete': {
+            const r = outcome.result;
+            if (!r.validation_passed) {
+              return ok(r.failure ?? {}, 'Validation FAILED — no confirmation code was issued.');
+            }
+            return ok(
+              { ...r.summary, approval_page: r.approval },
+              `Deactivation of flow "${args.flow}" validated. TARGET: ${conn.alias} ` +
+                `(${conn.orgType}). ${APPROVAL_INSTRUCTIONS} Execute it with execute_deploy.`,
             );
           }
         }

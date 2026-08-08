@@ -356,11 +356,12 @@ describe('buildDeployZip', () => {
     ).toThrow(/invalid component name/);
   });
 
-  it('supports native Profile and CustomTab deploys', () => {
+  it('supports native Profile, CustomTab, and FlowDefinition deploys', () => {
     const built = buildDeployZip(
       [
         { type: 'Profile', api_name: 'Admin', content: '<Profile xmlns="x"/>' },
         { type: 'CustomTab', api_name: 'Test_Widget__c', content: '<CustomTab xmlns="x"/>' },
+        { type: 'FlowDefinition', api_name: 'My_Flow', content: '<FlowDefinition xmlns="x"/>' },
       ],
       [],
       '63.0',
@@ -368,8 +369,8 @@ describe('buildDeployZip', () => {
     );
     expect(built.files).toContain('profiles/Admin.profile');
     expect(built.files).toContain('tabs/Test_Widget__c.tab');
-    expect(built.packageXml).toContain('<name>Profile</name>');
-    expect(built.packageXml).toContain('<name>CustomTab</name>');
+    expect(built.files).toContain('flowDefinitions/My_Flow.flowDefinition');
+    expect(built.packageXml).toContain('<name>FlowDefinition</name>');
   });
 });
 
@@ -779,6 +780,54 @@ describe('approval URL is never handed to the agent', () => {
     expect(text).not.toContain('/approve?s=');
     await client2.close();
     db2.close();
+  });
+});
+
+describe('flow deactivation (P0.6)', () => {
+  it('auto-injects a FlowDefinition deactivation into the zip when deleting a Flow', async () => {
+    const result = await client.callTool({
+      name: 'validate_deploy',
+      arguments: {
+        connection: 'deploy-org',
+        destructive: [{ type: 'Flow', api_name: 'My_Flow' }],
+      },
+    });
+    const parsed = JSON.parse(textOf(result).split('\n').slice(1).join('\n')) as {
+      flow_deactivations: string[];
+    };
+    // The engine injected a FlowDefinition deactivation ahead of the delete.
+    expect(parsed.flow_deactivations).toEqual(['My_Flow']);
+    expect(presentedPages.at(-1)).toContain('deactivate');
+    // A deploy actually went to (stubbed) Salesforce.
+    expect(lastDeployBody).toContain('<met:deploy>');
+  });
+
+  it('deactivate_flow validates a standalone deactivation and routes through approval', async () => {
+    const result = await client.callTool({
+      name: 'deactivate_flow',
+      arguments: { connection: 'deploy-org', flow: 'My_Flow' },
+    });
+    const text = textOf(result);
+    expect(result.isError).not.toBe(true);
+    expect(text).toContain('validated');
+    const parsed = JSON.parse(text.split('\n').slice(1).join('\n')) as {
+      changes: Array<{ type: string; api_name: string }>;
+    };
+    expect(parsed.changes.some((c) => c.type === 'FlowDefinition' && c.api_name === 'My_Flow')).toBe(
+      true,
+    );
+    // Code stays on the approval page, not in the tool result.
+    const code = codeFromPage(presentedPages.at(-1)!);
+    expect(text).not.toContain(code);
+  });
+
+  it('deactivate_flow refuses without metadata_write', async () => {
+    const result = await client.callTool({
+      name: 'deactivate_flow',
+      arguments: { connection: 'read-only', flow: 'My_Flow' },
+    });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain('metadata_write');
   });
 });
 
