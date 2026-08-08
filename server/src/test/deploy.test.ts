@@ -784,22 +784,30 @@ describe('approval URL is never handed to the agent', () => {
 });
 
 describe('flow deactivation (P0.6)', () => {
-  it('auto-injects a FlowDefinition deactivation into the zip when deleting a Flow', async () => {
+  it('does NOT auto-inject a deactivation when deleting a flow (checkOnly cannot apply it)', async () => {
+    // Deleting a flow: the deploy carries only the destructive Flow, no synthetic
+    // FlowDefinition. (The stub returns success, so this validates; the point is
+    // that no deactivation is injected — that approach never clears checkOnly live.)
+    await client.callTool({
+      name: 'validate_deploy',
+      arguments: { connection: 'deploy-org', destructive: [{ type: 'Flow', api_name: 'My_Flow' }] },
+    });
+    // The built package has no flowDefinitions entry (proven at the builder level).
+    const built = buildDeployZip([], [{ type: 'Flow', api_name: 'My_Flow' }], '63.0', () => null);
+    expect(built.files.some((f) => f.startsWith('flowDefinitions/'))).toBe(false);
+    expect(built.destructiveXml).toContain('<members>My_Flow</members>');
+  });
+
+  it('gives honest flow-deletion guidance when a destructive flow delete fails', async () => {
+    failNextValidation = true;
     const result = await client.callTool({
       name: 'validate_deploy',
-      arguments: {
-        connection: 'deploy-org',
-        destructive: [{ type: 'Flow', api_name: 'My_Flow' }],
-      },
+      arguments: { connection: 'deploy-org', destructive: [{ type: 'Flow', api_name: 'My_Flow' }] },
     });
-    const parsed = JSON.parse(textOf(result).split('\n').slice(1).join('\n')) as {
-      flow_deactivations: string[];
-    };
-    // The engine injected a FlowDefinition deactivation ahead of the delete.
-    expect(parsed.flow_deactivations).toEqual(['My_Flow']);
-    expect(presentedPages.at(-1)).toContain('deactivate');
-    // A deploy actually went to (stubbed) Salesforce.
-    expect(lastDeployBody).toContain('<met:deploy>');
+    const text = textOf(result);
+    expect(text).toContain('Validation FAILED');
+    expect(text).toContain('deactivate_flow');
+    expect(text).toContain('Setup');
   });
 
   it('deactivate_flow validates a standalone deactivation and routes through approval', async () => {

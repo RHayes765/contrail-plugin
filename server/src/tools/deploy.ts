@@ -132,11 +132,12 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
     {
       title: 'Deactivate a flow',
       description:
-        'Deactivate a flow (turn off its active version). Required before an active flow can be ' +
-        'deleted, and useful for switching off automation. Routes through the same two-step ' +
-        'approval as any write: this validates the change and opens the approval page; the human ' +
-        'reads the code back to execute_deploy. (Deleting an active flow via validate_deploy\'s ' +
-        'destructive list auto-deactivates it — use this tool to deactivate without deleting.)',
+        'Deactivate a flow (turn off its active version) — to switch off automation, or as the ' +
+        'first step before trying to delete a flow. Routes through the same two-step approval as ' +
+        'any write: this validates the change and opens the approval page; the human reads the ' +
+        'code back to execute_deploy. Note: deleting a flow via the Metadata API is unreliable ' +
+        'even after deactivation ("insufficient access rights on cross-reference id"); if a ' +
+        'destructive delete fails, delete the flow in Setup → Flows.',
       inputSchema: {
         connection: z.string().describe('Target connection alias (or id).'),
         flow: z.string().describe('Flow API name (DeveloperName).'),

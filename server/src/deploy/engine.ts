@@ -18,7 +18,6 @@ import {
   analyzeChanges,
   analyzePermissionCoverage,
   buildDeployZip,
-  flowDeactivationXml,
   type ComponentChange,
   type ProposedComponent,
   type ProposedDeletion,
@@ -50,8 +49,6 @@ export interface DeployValidationSummary {
   blast_radius: string[];
   /** Advisory: new components that will be invisible/inaccessible without permissions. */
   permission_warning: string | null;
-  /** Flows this deploy will deactivate (as a prerequisite to deleting them). */
-  flow_deactivations: string[];
   expires_at: string;
 }
 
@@ -124,20 +121,14 @@ export class DeployEngine {
 
     const versionNumber = this.config.salesforce.apiVersion.replace(/^v/, '');
 
-    // Salesforce refuses to destructively delete an ACTIVE flow. The Metadata
-    // API applies additive changes before destructive ones, so injecting a
-    // FlowDefinition (activeVersionNumber 0) for each deleted Flow deactivates
-    // it first, in the same deploy — active flows then delete cleanly. Skipped
-    // if the caller already supplied a FlowDefinition for that flow.
-    const explicitFlowDefs = new Set(
-      input.components.filter((c) => c.type === 'FlowDefinition').map((c) => c.api_name.toLowerCase()),
-    );
-    const flowDeactivations: ProposedComponent[] = input.destructive
-      .filter((d) => d.type === 'Flow' && !explicitFlowDefs.has(d.api_name.toLowerCase()))
-      .map((d) => ({ type: 'FlowDefinition', api_name: d.api_name, content: flowDeactivationXml() }));
-
-    const zipComponents = [...input.components, ...flowDeactivations];
-    const built = buildDeployZip(zipComponents, input.destructive, versionNumber, (type, name) =>
+    // NOTE: we deliberately do NOT auto-inject a FlowDefinition deactivation
+    // when deleting a Flow. Deactivation only takes effect on execute, but the
+    // checkOnly validation gate evaluates the destructive delete against the
+    // org's current (still-active) state, so a combined package never
+    // validates. Flow deactivation is its own step (deactivate_flow); flow
+    // deletion via the Metadata API is unreliable regardless (see the failure
+    // guidance below).
+    const built = buildDeployZip(input.components, input.destructive, versionNumber, (type, name) =>
       this.metaXmlFromSnapshot(conn, type, name),
     );
     const { changes, destructive } = analyzeChanges(
@@ -186,6 +177,15 @@ export class DeployEngine {
           testErrors: result.numberTestErrors,
         },
       });
+      const deletingFlow = input.destructive.some((d) => d.type === 'Flow');
+      const note = deletingFlow
+        ? 'Validation failed — no confirmation code was issued. Deleting a flow via the ' +
+          'Metadata API is unreliable: an ACTIVE flow must be turned off first with ' +
+          'deactivate_flow, and even an INACTIVE flow often fails validation with ' +
+          '"insufficient access rights on cross-reference id". If it does, delete the flow in ' +
+          'Setup → Flows (its objects can be deleted here once the flow is gone). Fix any other ' +
+          'failures and re-validate.'
+        : 'Validation failed — no confirmation code was issued. Fix the failures and validate again.';
       return {
         summary: null,
         validation_passed: false,
@@ -196,7 +196,7 @@ export class DeployEngine {
           tests_run: result.numberTestsTotal,
           test_failures: result.numberTestErrors,
           test_failure_detail: this.gateTestDetail(conn, result),
-          note: 'Validation failed — no confirmation code was issued. Fix the failures and validate again.',
+          note,
         },
         approval: null,
       };
@@ -233,7 +233,6 @@ export class DeployEngine {
       code_coverage_warnings: result.codeCoverageWarnings.slice(0, 10),
       blast_radius: blast,
       permission_warning: permCoverage.warning,
-      flow_deactivations: flowDeactivations.map((f) => f.api_name),
       expires_at: expiresAt,
     };
 
@@ -269,16 +268,7 @@ export class DeployEngine {
           },
         ],
         blast,
-        warnings: [
-          ...(permCoverage.warning ? [permCoverage.warning] : []),
-          ...(flowDeactivations.length
-            ? [
-                `Will deactivate ${flowDeactivations.length} flow(s) before deleting: ${flowDeactivations
-                  .map((f) => f.api_name)
-                  .join(', ')}.`,
-              ]
-            : []),
-        ],
+        warnings: permCoverage.warning ? [permCoverage.warning] : [],
       }),
       this.requestStatusCheck(request.id),
       this.config.deploy.codeTtlMs + 60_000,

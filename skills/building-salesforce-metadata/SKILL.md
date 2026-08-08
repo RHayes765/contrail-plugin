@@ -49,13 +49,17 @@ the human approves one coherent, usable change.
   record's Id, e.g. to create children). `<status>Active</status>` is required for
   it to run on trigger; dev orgs don't enforce flow test coverage, production does.
   Every element needs `locationX`/`locationY`. `interviewLabel` is required.
-- **Deleting a flow**: an **active** flow can't be destructively deleted directly.
-  `validate_deploy` handles this for you — listing a `Flow` in `destructive`
-  auto-injects a `FlowDefinition` deactivation ahead of the delete in the same
-  package (surfaced as `flow_deactivations` in the summary). To deactivate without
-  deleting (e.g. to turn off automation, or to free objects a flow references so
-  they can be deleted), use `deactivate_flow`. Deleting an object a flow depends on
-  fails until the flow is gone — delete or deactivate the flow first.
+- **Deactivating a flow**: use `deactivate_flow` (turns off the active version via a
+  `FlowDefinition` deploy, through the normal two-step approval). This works
+  reliably — use it to switch off automation.
+- **Deleting a flow is unreliable via the Metadata API.** An active flow can't be
+  deleted; and even after `deactivate_flow`, a destructive `Flow` delete often fails
+  validation with "insufficient access rights on cross-reference id" (a Salesforce
+  quirk — object/permission-set destructive deletes work fine, flows specifically
+  do not). When you need a flow gone, deactivate it with `deactivate_flow` and
+  delete it in **Setup → Flows**; don't loop on destructive `Flow` deploys.
+  An object a flow references can't be deleted until the flow itself is gone, so the
+  object teardown waits on the UI deletion.
 - **Namespaces** can contain single underscores (`sales_channel__Foo`), so split a
   qualified API name at the **first** `__`, never with a greedy pattern.
 - **Names**: components deploy under `type/Name.ext`; the tools reject names with
