@@ -1,0 +1,27 @@
+{
+  "manifest_version": "0.3",
+  "name": "contrail",
+  "display_name": "Contrail",
+  "version": "0.0.0",
+  "description": "AI harness for Salesforce work: org connections with human-set grants, metadata search & diffs, dependency graphs, SOQL, and human-approved deploys.",
+  "long_description": "Contrail lets Claude work inside your Salesforce orgs the way an architect would — searching metadata, tracing dependencies, diffing orgs, querying records — while every write (deploys and DML) requires a human-read confirmation code shown only on a local approval page. Access is scoped per-connection by five explicit grants (metadata read/write, data read/write, diagnostics), enforced server-side. Refresh tokens live in the OS keychain; everything runs locally.",
+  "author": {
+    "name": "Ryley Hayes"
+  },
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.mjs",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/index.mjs"]
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "win32"],
+    "runtimes": {
+      "node": ">=22"
+    }
+  },
+  "keywords": ["salesforce", "metadata", "deploy", "soql", "mcp"],
+  "license": "UNLICENSED"
+}
