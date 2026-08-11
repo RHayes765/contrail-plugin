@@ -1,7 +1,16 @@
-# Contrail install — instructions for Claude
+# Contrail manual install — instructions for Claude
 
-**You are being asked to install the Contrail Engine plugin for your human.** This
-file lives at the root of the unzipped Contrail package. Follow these steps in
+**You are being asked to install the Contrail Engine plugin for your human.**
+
+> **Check first:** this is the FALLBACK path. The normal way to install Contrail is
+> the one-click extension — the human opens Claude Desktop **Settings → Extensions →
+> Advanced settings → Install Extension…** and picks `contrail-<version>.mcpb` from
+> the distribution folder. No build, no config editing, done. Only continue with
+> this file if the extension route failed on their machine, their Claude Desktop has
+> no Extensions page, or they're installing into **Claude Code** rather than Claude
+> Desktop.
+
+This file lives at the root of the unzipped Contrail package. Follow the steps in
 order. You need terminal (Bash/PowerShell) and file-editing tools — you have them
 if you're Claude Code or a Cowork desktop session with this folder connected.
 
@@ -17,9 +26,11 @@ their personal preferences. **Merge, never overwrite**, and back it up first.
    **absolute path** — call it `CONTRAIL_ROOT`. It must be a permanent location
    (e.g. `~/Documents/Contrail`, not a temp/Downloads folder), because the plugin
    runs from this path every time Claude Desktop starts.
-2. Check Node.js is installed and version ≥ 20: `node --version`. If it's missing
-   or older, stop and tell the human to install Node 20+ from nodejs.org, then
-   resume.
+2. Check Node.js is installed and version ≥ 22: `node --version`. If it's missing
+   or older, stop and tell the human to install the current **LTS** from
+   nodejs.org, then resume. Any Node 22+ works — the native modules ship prebuilt
+   binaries that are not tied to a specific Node version, so do **not** downgrade
+   Node if something fails; diagnose instead.
 
 ## Step 1 — Build the engine
 
@@ -30,10 +41,11 @@ npm install
 ```
 
 This installs dependencies and builds `dist/` automatically (via the `prepare`
-script). It downloads two native modules (`better-sqlite3`, `@napi-rs/keyring`) as
-prebuilt binaries — no compiler needed on Windows/macOS. When it finishes, confirm
-`server/dist/index.js` exists. If `npm install` reports a build error, run
-`npm run build` and report the output.
+script). Both native modules (`better-sqlite3`, `@napi-rs/keyring`) arrive as
+prebuilt binaries — no compiler is ever needed on Windows/macOS; if you see
+node-gyp output at all, something is wrong (check the Node version is ≥ 22 and
+retry). When it finishes, confirm `server/dist/index.js` exists. If `npm install`
+reports an error, run `npm run build` and report the output.
 
 ## Step 2 — Register the plugin in Claude Desktop
 
@@ -94,6 +106,15 @@ add `CONTRAIL_ROOT` as a local plugin directory. The build step (step 1) is the 
   the `mcpServers` key, never overwrite the file, and back it up first.
 - **Forward slashes in the path.** Backslashes in JSON string values get mangled;
   `C:/Users/.../server/dist/index.js` works fine in a Node arg on Windows.
+- **Windows Store (MSIX) installs of Claude Desktop can read a *virtualized* config**
+  at `%LOCALAPPDATA%\Packages\Claude_<id>\LocalCache\Roaming\Claude\claude_desktop_config.json`
+  instead of the `%APPDATA%` one. If your edit verifiably parses but the server never
+  loads, check whether that path exists and edit the copy the app actually reads
+  (compare modification timestamps after a restart).
+- **macOS: GUI apps don't inherit your shell PATH.** If Node was installed via nvm
+  or another shell-profile-managed tool, `"command": "node"` may fail even though
+  `node` works in Terminal. Use the absolute path to the node binary (from
+  `which node`) as `command` instead.
 - **Restart is mandatory** and must be a full quit — the MCP server is a persistent
   process started at launch; rebuilding or editing config does nothing until restart.
 - **Keep the folder put.** The config points at an absolute path; moving or deleting

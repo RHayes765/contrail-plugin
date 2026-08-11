@@ -2,44 +2,38 @@
 
 Contrail turns Claude into a Salesforce-aware workspace: connect an org once (you
 log in as yourself), then browse metadata, search, map dependencies, diff orgs, run
-SOQL, and deploy — with **every write requiring your explicit approval**. This guide
-gets it installed and running. The install itself is done *by Claude* for you; your
-job is mostly downloading, unzipping, and approving.
+SOQL, and deploy — with **every write requiring your explicit approval**.
 
-## What you need first
+Installing it is now a one-click affair: Contrail ships as a Claude Desktop
+**extension** (a `.mcpb` file). No developer tools, no Node.js, no config files.
 
-- **Claude Desktop** (where you'll use Contrail day to day).
-- **A Claude that can run commands and edit files** to do the install — either
-  Claude Code, or a Claude Desktop **Cowork** session with a folder connected. (A
-  plain chat can't install it; it needs terminal + file access.)
-- **Node.js 20 or newer** — check by running `node --version`; if missing, install
-  from https://nodejs.org (the "LTS" build).
+## What you need
 
-## Step 1 — Download and unzip
+- **Claude Desktop**, reasonably up to date (Settings must have an **Extensions**
+  page — if yours doesn't, update the app first).
+- The **`contrail-<version>.mcpb`** file from the Google Drive folder.
 
-1. Download `contrail-plugin.zip` from the Google Drive link.
-2. Unzip it to a **permanent** location you won't move or delete — e.g.
-   `Documents/Contrail`. **Not** your Downloads folder or a temp dir: the plugin
-   runs from wherever you put it, every time Claude Desktop starts, so if it moves
-   the plugin breaks.
+That's the whole list.
 
-## Step 2 — Let Claude install it
+## Step 1 — Install the extension
 
-1. Open your install-capable Claude (Claude Code, or Cowork with the unzipped
-   `Contrail` folder connected).
-2. Tell it: **"Follow the INSTALL_FOR_CLAUDE.md in this folder to install the
-   Contrail plugin."** (That file is in the folder you just unzipped.)
-3. Claude will build the engine and register it in your Claude Desktop config. It
-   will ask you to do one manual thing: **fully quit and reopen Claude Desktop**
-   (quit from the system tray / menu bar — closing the window isn't enough). MCP
-   plugins only load at startup.
+1. Download `contrail-<version>.mcpb` from Google Drive.
+2. In Claude Desktop, open **Settings → Extensions → Advanced settings →
+   "Install Extension…"** and pick the downloaded file.
+   (On some machines simply double-clicking the `.mcpb` file works too — but the
+   Settings path works everywhere.)
+3. Review the install dialog and confirm. Make sure Contrail shows as **enabled**
+   in the Extensions list afterward.
 
-## Step 3 — Confirm it's working
+You can delete the downloaded file when done — the extension is self-contained and
+managed by Claude Desktop from here on.
 
-In a new Claude Desktop conversation, ask: **"List my Contrail connections."** If it
+## Step 2 — Confirm it's working
+
+Start a **new** conversation and ask: **"List my Contrail connections."** If it
 comes back with an empty list (rather than "tool not found"), you're installed.
 
-## Step 4 — Connect an org
+## Step 3 — Connect an org
 
 Just ask Claude in plain language:
 
@@ -64,7 +58,7 @@ the app as *"Salesforce CLI"* — that's expected in this build; log in normally
 Each teammate connects their **own** orgs; nothing is shared, and grants are
 per-connection.
 
-## Step 5 — Using it
+## Step 4 — Using it
 
 Ask in plain language. A few things it's good at:
 
@@ -84,12 +78,23 @@ Ask in plain language. A few things it's good at:
 
 ## Good to know
 
-- **Keep the unzipped folder where it is.** Moving/deleting it breaks the plugin
-  (re-run the install if you must relocate it).
 - **Your login is yours.** Contrail stores the refresh token in your OS keychain
   only — never in files it shares — and every org action is attributed to you.
 - **Changing an org's grants later:** ask Claude to *"manage the <alias> connection"*
   — it reopens the grants page for you to adjust.
-- **Trouble?** If the Contrail tools don't appear, make sure you fully quit and
-  reopened Claude Desktop after install. If they still don't, hand your install
-  Claude the `INSTALL_FOR_CLAUDE.md` again and ask it to verify the registration.
+- **Updating Contrail:** install the newer `.mcpb` the same way; your connections
+  and grants are kept (they live in your local Contrail data folder, not in the
+  extension).
+
+## Troubleshooting
+
+- **Tools don't appear in a chat:** check Settings → Extensions — Contrail must be
+  listed *and* enabled. Try toggling it off and on, then start a new conversation.
+- **The install window closes silently with no error:** a known Claude Desktop bug
+  on a few Windows builds. Update Claude Desktop and retry; if it persists, use the
+  fallback below.
+- **Fallback (no Extensions page, or install keeps failing):** the Drive folder also
+  has `contrail-plugin.zip` — a manual install driven by your own Claude. Unzip it
+  somewhere permanent, then tell Claude Code (or a Cowork session with the folder
+  connected): *"Follow the INSTALL_FOR_CLAUDE.md in this folder."* That path needs
+  Node.js 22+ installed, which Claude will check for you.

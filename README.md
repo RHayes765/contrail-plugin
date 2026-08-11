@@ -4,12 +4,18 @@ The Contrail engine shipped as a Claude plugin: a local stdio MCP server (the
 **Contrail Engine**) plus a skill carrying the house rules. Spec:
 `contrail-phase0-spec.md`.
 
-**Status: P0.6 — flow deactivation** (in progress, on top of the completed
-P0.1–P0.5 Phase 0 surface). Contrail can now deactivate flows: a `Flow` listed in
-`validate_deploy`'s `destructive` list auto-deactivates before deletion (active
-flows no longer block teardown), and a `deactivate_flow` tool turns off a flow
-without deleting it — both through the same two-step human approval. Native
-`FlowDefinition` deploy type added. 23 tools.
+**Status: v0.7.0 — one-click packaging (MCPB)** on top of the completed
+P0.1–P0.6 Phase 0 surface. `npm run mcpb` builds `contrail-<version>.mcpb`, a
+single MCP Bundle that installs into Claude Desktop via Settings → Extensions
+(no Node install, no npm, no config editing on the target machine) and covers
+Windows x64/ARM and macOS Intel/Apple Silicon from one file. 23 tools.
+
+**P0.6 — flow deactivation.** A `deactivate_flow` tool turns off a flow without
+deleting it, through the same two-step human approval (native `FlowDefinition`
+deploy type, `activeVersionNumber` 0). Deleting flows through Metadata API
+`destructiveChanges` is unreliable even when inactive (a Salesforce quirk, not a
+Contrail one) — `validate_deploy` says so honestly and points at the Setup UI
+for the deletion itself.
 
 **P0.5 — hardening, skills, packaging.** The full P0.1–P0.4 surface (connections,
 metadata read, diff, data, diagnostics, two-step deploy/DML write pipeline) plus
@@ -37,7 +43,7 @@ in a tool result, so a prompt-injected agent with tool access cannot self-approv
 ```
 .claude-plugin/plugin.json      plugin manifest (registers the MCP server)
 skills/salesforce-house-rules/  the house rules skill
-server/                         the Contrail Engine (TypeScript, Node >= 20)
+server/                         the Contrail Engine (TypeScript, Node >= 22)
   src/core/                     config, SQLite store (index/graph/audit), keychain, grants
   src/salesforce/               OAuth (PKCE), REST/Tooling client, Metadata API SOAP client
   src/connect/                  connect/manage flows + localhost pages
@@ -66,24 +72,30 @@ runs the suite.
 
 ## Install
 
+**One-click (recommended for teammates): the MCPB extension.** `npm run mcpb`
+(scripts/mcpb.mjs) produces `dist-mcpb/contrail-<version>.mcpb` — manifest +
+esbuild server bundle + both native addons with prebuilt binaries for all four
+Claude Desktop platforms (win32 x64/arm64, darwin x64/arm64). The recipient
+installs it via Claude Desktop **Settings → Extensions → Advanced settings →
+Install Extension…** — Claude Desktop runs it on its own bundled Node, so the
+target machine needs nothing installed. See `Getting Started.md`.
+
 **As a Claude Code / Cowork plugin:** add this directory as a local plugin
 (marketplace entry or `--plugin-dir`). The manifest starts the server over stdio
-from `server/dist/index.js`.
+from `server/dist/index.js` (build first: `cd server && npm install`).
 
-**Packaging reality:** two dependencies are native addons — `better-sqlite3`
-(SQLite) and `@napi-rs/keyring` (OS keychain). Native addons can't be bundled or
-committed cross-platform, so **every install needs an `npm install` step** to
-fetch their platform binaries (both ship prebuilds, so no compiler is required on
-common platforms). `dist/`, `dist-bundle/`, and `node_modules/` are gitignored.
+**Packaging reality:** two dependencies are native addons, both N-API (ABI-stable
+across Node versions ≥ 22). `better-sqlite3` v13 ships prebuilds for every
+platform *inside* its npm package with no install script; `@napi-rs/keyring`
+resolves a per-platform package at install time (the mcpb script vendors all four
+platforms' binaries into the bundle instead). No compiler is ever needed. For
+from-source installs, `npm install` still fetches deps and builds `dist/` via the
+`prepare` script. `dist/`, `dist-bundle/`, `dist-mcpb/`, and `node_modules/` are
+gitignored.
 
-- **Pilot install (recommended):** `cd server && npm install` — installs deps and
-  builds `dist/` in one command. Point the plugin/Claude Desktop at
-  `server/dist/index.js`.
 - **Lean single-file artifact:** `npm run bundle` produces `dist-bundle/index.mjs`,
   a single ESM file with every pure-JS dependency inlined and only the two native
-  addons left external. A target then needs just
-  `npm install --omit=dev better-sqlite3 @napi-rs/keyring` beside it. This is the
-  path for a future marketplace release; the pilot path above is simpler for now.
+  addons left external (the mcpb bundle is this file plus staged addons).
 
 **In Claude Desktop (manual MCP entry):** the config file lives at
 `%APPDATA%\Claude\claude_desktop_config.json` on Windows
