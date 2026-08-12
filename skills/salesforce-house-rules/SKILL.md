@@ -86,7 +86,49 @@ an org.
   to re-authorize in place.
 - Confirm with the human before `disconnect_org` — it revokes the org token.
 
-## 5. Reporting
+## 5. Large artifacts — read past the truncation
+
+`retrieve_metadata` caps each artifact at **60,000 characters** and appends
+`… [truncated N of M chars]`. That guard protects the context window, not the data:
+real orgs routinely exceed it (a mature `Account.object` or a big screen flow runs
+past 100 KB), and acting on a half-read flow or object is how you miss the branch
+that mattered.
+
+**The whole file is on disk.** When the tool result says it truncated, and you have
+file tools (Claude Code, or a Cowork session with folder access), read the snapshot
+copy directly:
+
+```
+<data dir>/snapshots/<connection-id>/current/<folder>/<Name>.<ext>
+```
+
+- **Data dir** — Windows `%LOCALAPPDATA%\Contrail`, macOS
+  `~/Library/Application Support/Contrail`, Linux `~/.local/share/contrail`
+  (overridden by `CONTRAIL_DATA_DIR` if set).
+- **`<connection-id>` is the UUID `id` from `list_connections`, not the alias.**
+  Look it up; do not guess or use the alias as a folder name.
+- **Layout is standard Salesforce source format**: `objects/Account.object`,
+  `flows/My_Flow.flow`, `classes/MyClass.cls`, `layouts/…`. If unsure of the exact
+  filename, list or glob the folder rather than guessing at a name.
+
+Preconditions and honesty:
+
+- This works **only where a snapshot covers that type** — run `refresh_snapshot`
+  first if the folder or file is absent. The `source` field in the tool result tells
+  you what you got: `snapshot` means the file is on disk; for Apex, `tooling_api_live`
+  means the live org was authoritative and the snapshot copy may be stale or missing.
+- The snapshot is a point-in-time copy, so for anything you are about to change,
+  confirm freshness (`refresh_snapshot`) before trusting it.
+- **In a plain Claude Desktop chat there are no file tools.** Say so plainly rather
+  than pretending — then work within the truncated view by narrowing the request
+  (retrieve the specific child component, e.g. `CustomField` `Account.My_Field__c`,
+  instead of the whole object).
+
+Reading the file does not repeal the reason for the cap: pull out the parts you
+need — search the file, quote the relevant elements — rather than dumping 160 KB of
+XML into the conversation.
+
+## 6. Reporting
 
 - When summarizing org state or changes, name the org alias and type in the first
   sentence.

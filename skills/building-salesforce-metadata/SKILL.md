@@ -34,6 +34,16 @@ you (`permission_warning`), but the right habit is to not need the warning:
 Present the permission set alongside the components when you propose the deploy, so
 the human approves one coherent, usable change.
 
+## Editing existing metadata: read the whole thing first
+
+When you modify an existing flow or object rather than authoring a new one, work
+from the **complete** current definition. `retrieve_metadata` truncates at 60,000
+characters (`… [truncated N of M chars]`), and real flows and objects routinely
+exceed that — editing from a half-read definition is how you drop an element or
+overwrite a branch you never saw. If the result is truncated, read the full file
+from the snapshot on disk (see **salesforce-house-rules → Large artifacts**), or
+narrow the retrieve to the specific child component you're changing.
+
 ## Metadata details that actually bite (from real deploys)
 
 - **Objects need** `deploymentStatus`, `label`, `pluralLabel`, `nameField` (with a
