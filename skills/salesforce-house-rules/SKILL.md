@@ -86,17 +86,29 @@ an org.
   to re-authorize in place.
 - Confirm with the human before `disconnect_org` — it revokes the org token.
 
-## 5. Large artifacts — read past the truncation
+## 5. Large artifacts — read the whole thing
 
-`retrieve_metadata` caps each artifact at **60,000 characters** and appends
-`… [truncated N of M chars]`. That guard protects the context window, not the data:
-real orgs routinely exceed it (a mature `Account.object` or a big screen flow runs
-past 100 KB), and acting on a half-read flow or object is how you miss the branch
-that mattered.
+`retrieve_metadata` returns up to **250,000 characters** per artifact by default,
+which fits a large real flow whole. Pass `max_bytes` (up to 2,000,000) when you
+need more; one call is also bounded to ~2 MB across all `names`.
 
-**The whole file is on disk.** When the tool result says it truncated, and you have
-file tools (Claude Code, or a Cowork session with folder access), read the snapshot
-copy directly:
+**Read the artifact whole before you reason about it.** Acting on a half-read flow
+is how you miss the branch that mattered, and a partial read produces confident
+wrong answers rather than obviously incomplete ones. Reading is cheap and
+reversible; a wrong diagnosis is neither.
+
+Every result now tells you exactly what you got:
+
+- `bytes_total` / `bytes_returned` — the real size vs what you received
+- `truncated` — true only when something was actually cut
+- `truncated_reason` — `max_bytes` (this artifact hit its budget) or
+  `call_budget` (earlier names in the same call used the allowance; ask for
+  fewer names)
+- `snapshot_path` — the absolute file path, included whenever content was cut
+
+If `truncated` is true and you have file tools (Claude Code, or a Cowork session
+with folder access), read `snapshot_path` directly rather than guessing at what
+was cut. The layout, if you need to find a file yourself:
 
 ```
 <data dir>/snapshots/<connection-id>/current/<folder>/<Name>.<ext>
@@ -120,13 +132,13 @@ Preconditions and honesty:
 - The snapshot is a point-in-time copy, so for anything you are about to change,
   confirm freshness (`refresh_snapshot`) before trusting it.
 - **In a plain Claude Desktop chat there are no file tools.** Say so plainly rather
-  than pretending — then work within the truncated view by narrowing the request
+  than pretending — then work within what you have by narrowing the request
   (retrieve the specific child component, e.g. `CustomField` `Account.My_Field__c`,
   instead of the whole object).
 
-Reading the file does not repeal the reason for the cap: pull out the parts you
-need — search the file, quote the relevant elements — rather than dumping 160 KB of
-XML into the conversation.
+Reading a big artifact is fine; *repeating* it is not. Pull out the parts you need —
+quote the relevant elements — rather than echoing 160 KB of XML back into the
+conversation.
 
 ## 6. Reporting
 

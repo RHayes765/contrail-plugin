@@ -18,7 +18,19 @@ import { queryDependencies } from '../deps/graph.js';
 const NAME_RE = /^[A-Za-z0-9_.\- ]+$/;
 const TYPE_RE = /^[A-Za-z]+$/;
 
-const MAX_CONTENT_PER_ARTIFACT = 60_000;
+/**
+ * Read budget. The old 60 KB cap was sized for a comfortable tool result, but
+ * it silently amputated the artifacts that most need reading whole — a 133 KB
+ * flow came back as a fragment, and analysing a fragment of flow XML produces
+ * confident wrong answers. Reads are cheap and recoverable; a bad diagnosis is
+ * not. So the default now clears a large real flow, an explicit max_bytes
+ * raises it to the ceiling, and nothing is ever cut without saying so.
+ */
+const DEFAULT_CONTENT_BYTES = 250_000;
+/** Even an explicit request stops here — one artifact should not eat a context window. */
+const MAX_CONTENT_BYTES = 2_000_000;
+/** Ceiling across ALL names in one call (names accepts up to 10). */
+const CALL_CONTENT_BUDGET = 2_000_000;
 
 /** Container file location + child tag for fragment types. */
 const CHILD_SPEC: Record<string, { parentType: string; tag: string }> = {
@@ -176,6 +188,18 @@ export function registerMetadataTools(server: McpServer, deps: ToolDeps): void {
           .min(1)
           .max(10)
           .describe('Full API names; children dotted (Account.MyField__c).'),
+        max_bytes: z
+          .number()
+          .int()
+          .min(1_000)
+          .max(MAX_CONTENT_BYTES)
+          .optional()
+          .describe(
+            `Per-artifact content budget. Default ${DEFAULT_CONTENT_BYTES} bytes, which fits ` +
+              `a large flow whole; raise it up to ${MAX_CONTENT_BYTES} to read something bigger. ` +
+              'Whenever content is cut, the result says so and gives bytes_total plus ' +
+              'snapshot_path, so you can read the file directly instead of guessing.',
+          ),
         include_dependencies: z
           .boolean()
           .optional()
@@ -187,11 +211,14 @@ export function registerMetadataTools(server: McpServer, deps: ToolDeps): void {
       type: string;
       names: string[];
       include_dependencies?: boolean;
+      max_bytes?: number;
     }) =>
       guarded(async () => {
         const conn = requireConnection(args.connection, 'retrieve_metadata');
         if (!TYPE_RE.test(args.type)) return fail('invalid metadata type');
         const includeDeps = args.include_dependencies !== false;
+        const perArtifact = Math.min(args.max_bytes ?? DEFAULT_CONTENT_BYTES, MAX_CONTENT_BYTES);
+        let budgetLeft = CALL_CONTENT_BUDGET;
         const results: Array<Record<string, unknown>> = [];
         for (const name of args.names) {
           if (!NAME_RE.test(name)) {
@@ -200,12 +227,29 @@ export function registerMetadataTools(server: McpServer, deps: ToolDeps): void {
           }
           try {
             const content = await fetchArtifactContent(deps, conn, args.type, name);
+            const allowed = Math.max(0, Math.min(perArtifact, budgetLeft));
+            const cut = clampContent(content.body, allowed);
+            budgetLeft -= cut.body.length;
             const entry: Record<string, unknown> = {
               api_name: name,
               type: args.type,
-              content: truncateContent(content.body),
+              content: cut.body,
               source: content.source,
+              bytes_total: content.body.length,
+              bytes_returned: cut.body.length,
+              truncated: cut.truncated,
             };
+            if (cut.truncated) {
+              entry.truncated_reason =
+                allowed < perArtifact ? 'call_budget' : 'max_bytes';
+              // Point at the file so the caller can finish the job itself
+              // rather than re-reading in blind slices.
+              const rec = db.getArtifact(conn.id, args.type, name);
+              const onDisk = rec?.filePath
+                ? deps.store.currentFilePath(conn.id, rec.filePath)
+                : null;
+              if (onDisk) entry.snapshot_path = onDisk;
+            }
             if (content.note) entry.note = content.note;
             if (includeDeps) {
               entry.uses = db
@@ -631,9 +675,13 @@ function splitChildName(type: string, name: string): [string, string] {
   return [name.slice(0, idx), name.slice(idx + 1)];
 }
 
-function truncateContent(body: string): string {
-  if (body.length <= MAX_CONTENT_PER_ARTIFACT) return body;
-  return `${body.slice(0, MAX_CONTENT_PER_ARTIFACT)}\n… [truncated ${
-    body.length - MAX_CONTENT_PER_ARTIFACT
-  } of ${body.length} chars]`;
+function clampContent(body: string, allowed: number): { body: string; truncated: boolean } {
+  if (body.length <= allowed) return { body, truncated: false };
+  // Keep the inline marker as well as the structured fields: a model reading
+  // the content must see the cut at the point it happens, not only in a
+  // sibling key it might skim past.
+  return {
+    body: `${body.slice(0, allowed)}\n… [truncated ${body.length - allowed} more characters]`,
+    truncated: true,
+  };
 }

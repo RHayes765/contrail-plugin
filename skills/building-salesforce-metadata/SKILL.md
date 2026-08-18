@@ -37,12 +37,48 @@ the human approves one coherent, usable change.
 ## Editing existing metadata: read the whole thing first
 
 When you modify an existing flow or object rather than authoring a new one, work
-from the **complete** current definition. `retrieve_metadata` truncates at 60,000
-characters (`… [truncated N of M chars]`), and real flows and objects routinely
-exceed that — editing from a half-read definition is how you drop an element or
-overwrite a branch you never saw. If the result is truncated, read the full file
-from the snapshot on disk (see **salesforce-house-rules → Large artifacts**), or
-narrow the retrieve to the specific child component you're changing.
+from the **complete** current definition — editing from a half-read definition is
+how you drop an element or overwrite a branch you never saw.
+
+`retrieve_metadata` returns up to 250,000 characters per artifact, which fits a
+large flow whole; raise it with `max_bytes` (ceiling 2,000,000) for anything
+bigger. Check the `truncated` flag rather than eyeballing the length. If it is
+true, the result carries `snapshot_path` — read that file directly, or narrow the
+retrieve to the specific child component you're changing.
+
+## Deploying something large: pass a file, never retype it
+
+**Never re-emit a large artifact as a `content` string.** A 130 KB flow cannot be
+reproduced byte-exactly through generated output, and one transposed character in
+flow XML is either a failed deploy or — far worse — a silently wrong behaviour that
+validates clean.
+
+Instead, write the edited source to a file and give `validate_deploy` the path:
+
+```jsonc
+{
+  "connection": "uat",
+  "components": [
+    { "type": "Flow", "api_name": "Send_Invoice", "content_file": "<staging>/Send_Invoice.flow" }
+  ]
+}
+```
+
+- Pass **`content`** for small, hand-authored components; **`content_file`** for
+  anything large or anything you edited from a retrieved copy. Exactly one of the
+  two per component — passing both is an error, because Contrail will not guess
+  which one you meant to deploy.
+- The path must be **absolute**, and must sit inside Contrail's `staging/`
+  directory (under the data dir — the error message prints the exact path),
+  inside its `snapshots/` tree, or inside a directory the human listed in
+  `deploy.allowedSourceRoots` in `config.json`. Anywhere else is refused: those
+  bytes get deployed to a live org, so the allowlist is deliberate. You cannot
+  widen it — only the human can, by editing their config.
+- The file is read **at validation time** and frozen into the approved package.
+  Editing it afterwards cannot change what `execute_deploy` sends, so the human
+  approves exactly the bytes that were reviewed.
+- The approval page shows the source path and a SHA-256 of the file, so say which
+  file you used when you present the summary.
 
 ## Metadata details that actually bite (from real deploys)
 

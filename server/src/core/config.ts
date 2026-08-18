@@ -57,6 +57,13 @@ export interface ContrailConfig {
     toolWaitMs: number;
     /** Wrong-code guesses that invalidate a pending code (brute-force guard). */
     maxFailedAttempts: number;
+    /**
+     * Extra directories validate_deploy may read content_file from, on top of
+     * Contrail's own staging/ and snapshots/. Absolute paths only. This is
+     * deliberately config-file-only: widening what can be deployed is the
+     * human's decision, and no tool call can do it.
+     */
+    allowedSourceRoots: string[];
   };
 }
 
@@ -84,6 +91,9 @@ export const DEFAULT_CONFIG: ContrailConfig = {
     codeTtlMs: 60 * 60 * 1000,
     toolWaitMs: 25 * 1000,
     maxFailedAttempts: 5,
+    // Empty by default: staging/ and snapshots/ are always allowed, and
+    // anything wider is an explicit decision the human writes down.
+    allowedSourceRoots: [],
   },
 };
 

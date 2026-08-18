@@ -41,6 +41,22 @@ export function deploysDir(): string {
   return ensureDir(path.join(dataDir(), 'deploys'));
 }
 
+/** Extracted org snapshots. Also a read-only source root for deploys. */
+export function snapshotsDir(): string {
+  return ensureDir(path.join(dataDir(), 'snapshots'));
+}
+
+/**
+ * Scratch space an agent can write edited metadata into and then name in
+ * validate_deploy's content_file. Contrail owns the directory, so it is an
+ * allowed deploy source with no configuration at all — which is what makes
+ * "edit a 133 KB flow and deploy it" work without the XML ever passing
+ * through a model's output.
+ */
+export function stagingDir(): string {
+  return ensureDir(path.join(dataDir(), 'staging'));
+}
+
 function ensureDir(dir: string): string {
   fs.mkdirSync(dir, { recursive: true });
   return dir;

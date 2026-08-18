@@ -17,6 +17,9 @@ export interface ProposedComponent {
   api_name: string;
   /** Full source for file types; the child XML block for CustomField/ValidationRule/CustomLabel. */
   content: string;
+  /** Set when the content was read from disk — shown to the human, audited. */
+  source_path?: string;
+  source_sha256?: string;
 }
 
 export interface ProposedDeletion {
@@ -29,6 +32,9 @@ export interface ComponentChange {
   api_name: string;
   change: 'add' | 'modify' | 'unchanged_content' | 'delete';
   warnings: string[];
+  /** Provenance for file-sourced components; absent when content was inline. */
+  source_path?: string;
+  source_sha256?: string;
 }
 
 /** File placement per deployable type (metadata format). */
@@ -250,6 +256,7 @@ export function analyzeChanges(
         api_name: c.api_name,
         change: 'modify',
         warnings: [`DEACTIVATES flow ${c.api_name} — turns off its active version.`],
+        ...sourceOf(c),
       });
       continue;
     }
@@ -275,7 +282,7 @@ export function analyzeChanges(
         }
       }
     }
-    changes.push({ type: c.type, api_name: c.api_name, change, warnings });
+    changes.push({ type: c.type, api_name: c.api_name, change, warnings, ...sourceOf(c) });
   }
 
   const destructive: ComponentChange[] = deletions.map((d) => {
@@ -288,6 +295,13 @@ export function analyzeChanges(
   });
 
   return { changes, destructive };
+}
+
+/** Provenance fields, present only when the component was read from a file. */
+function sourceOf(c: ProposedComponent): { source_path?: string; source_sha256?: string } {
+  return c.source_path
+    ? { source_path: c.source_path, source_sha256: c.source_sha256 }
+    : {};
 }
 
 export interface PermissionCoverage {

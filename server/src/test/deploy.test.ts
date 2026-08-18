@@ -952,3 +952,145 @@ describe('dml two-step', () => {
     expect(textOf(result)).toContain('data_write');
   });
 });
+
+/**
+ * Deploy-from-file. The motivating failure: a 133 KB flow cannot be re-emitted
+ * as a tool argument byte-exactly, and one transposed character in flow XML is
+ * either a failed deploy or a silently wrong behaviour. So the bytes travel by
+ * path instead — and the tests below check the bytes that reach the package,
+ * not just that the call succeeded.
+ */
+describe('validate_deploy from a file on disk', () => {
+  function stagingFile(name: string, content: string): string {
+    const dir = path.join(tmp, 'staging');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, name);
+    fs.writeFileSync(file, content, 'utf8');
+    return file;
+  }
+
+  /** The exact bytes the built package holds for one member. */
+  function deployedFile(entryName: string): string {
+    const b64 = /<met:ZipFile>([^<]+)<\/met:ZipFile>/.exec(lastDeployBody)?.[1] ?? '';
+    const entries = unzipSync(new Uint8Array(Buffer.from(b64, 'base64')));
+    const key = Object.keys(entries).find((k) => k.endsWith(entryName));
+    return key ? Buffer.from(entries[key]!).toString('utf8') : '';
+  }
+
+  it('deploys the file’s bytes exactly — including the characters a model would mangle', async () => {
+    // Non-ASCII, tabs, CRLF, trailing space: everything that survives a file
+    // read and does not reliably survive being retyped.
+    const xml =
+      '<?xml version="1.0" encoding="UTF-8"?>\r\n' +
+      '<CustomObject xmlns="http://soap.sforce.com/2006/04/metadata">\r\n' +
+      '\t<label>Fáçade — “quoted”   </label>\r\n' +
+      `\t<description>${'long '.repeat(2000)}</description>\r\n` +
+      '</CustomObject>';
+    const file = stagingFile('Test_Widget__c.object', xml);
+
+    const result = await client.callTool({
+      name: 'validate_deploy',
+      arguments: {
+        connection: 'deploy-org',
+        components: [
+          { type: 'CustomObject', api_name: 'Test_Widget__c', content_file: file },
+        ],
+      },
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(deployedFile('Test_Widget__c.object')).toBe(xml);
+  });
+
+  it('shows the human which file and fingerprint they are approving', async () => {
+    const file = stagingFile('Approve_Me__c.object', '<CustomObject><label>A</label></CustomObject>');
+    await client.callTool({
+      name: 'validate_deploy',
+      arguments: {
+        connection: 'deploy-org',
+        components: [{ type: 'CustomObject', api_name: 'Approve_Me__c', content_file: file }],
+      },
+    });
+    const page = presentedPages.at(-1) ?? '';
+    // The approver did not type these bytes, so the page must say where they came from.
+    expect(page).toContain('staging');
+    expect(page).toContain('Approve_Me__c.object');
+    expect(page).toMatch(/sha256 [0-9a-f]{16}/);
+  });
+
+  it('refuses a path outside the allowed roots rather than deploying it', async () => {
+    const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'contrail-elsewhere-'));
+    const secret = path.join(elsewhere, 'secrets.object');
+    fs.writeFileSync(secret, 'ANTHROPIC_API_KEY=sk-ant-real', 'utf8');
+    try {
+      const result = await client.callTool({
+        name: 'validate_deploy',
+        arguments: {
+          connection: 'deploy-org',
+          components: [{ type: 'CustomObject', api_name: 'Test_Widget__c', content_file: secret }],
+        },
+      });
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toMatch(/outside every allowed deploy source root/);
+    } finally {
+      fs.rmSync(elsewhere, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses both content and content_file — it will not guess which one you meant', async () => {
+    const file = stagingFile('Both__c.object', '<CustomObject/>');
+    const result = await client.callTool({
+      name: 'validate_deploy',
+      arguments: {
+        connection: 'deploy-org',
+        components: [
+          {
+            type: 'CustomObject',
+            api_name: 'Test_Widget__c',
+            content: '<CustomObject><label>different</label></CustomObject>',
+            content_file: file,
+          },
+        ],
+      },
+    });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toMatch(/not both/);
+  });
+
+  it('refuses a component carrying neither, and points at the staging directory', async () => {
+    const result = await client.callTool({
+      name: 'validate_deploy',
+      arguments: {
+        connection: 'deploy-org',
+        components: [{ type: 'CustomObject', api_name: 'Test_Widget__c' }],
+      },
+    });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toMatch(/content or content_file/);
+    expect(textOf(result)).toContain('staging');
+  });
+
+  it('freezes the bytes at validation — editing the file afterwards cannot change the deploy', async () => {
+    const file = stagingFile('Frozen__c.object', '<CustomObject><label>APPROVED</label></CustomObject>');
+    await client.callTool({
+      name: 'validate_deploy',
+      arguments: {
+        connection: 'deploy-org',
+        components: [{ type: 'CustomObject', api_name: 'Frozen__c', content_file: file }],
+      },
+    });
+    const code = codeFromPage(presentedPages.at(-1)!);
+
+    // Swap the file for something the human never saw.
+    fs.writeFileSync(file, '<CustomObject><label>SWAPPED</label></CustomObject>', 'utf8');
+
+    const executed = await client.callTool({
+      name: 'execute_deploy',
+      arguments: { connection: 'deploy-org', confirmation_code: code },
+    });
+    expect(executed.isError).not.toBe(true);
+    // execute replays the stored package; the swap is invisible to it.
+    expect(deployedFile('Frozen__c.object')).toContain('APPROVED');
+    expect(deployedFile('Frozen__c.object')).not.toContain('SWAPPED');
+  });
+});

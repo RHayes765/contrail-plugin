@@ -256,6 +256,9 @@ export class DeployEngine {
         changes: changes.map((c) => ({
           label: `${c.change.toUpperCase()}  ${c.type}:${c.api_name}`,
           warnings: c.warnings,
+          ...(c.source_path
+            ? { detail: `from ${c.source_path}  ·  sha256 ${(c.source_sha256 ?? '').slice(0, 16)}…` }
+            : {}),
         })),
         destructive: destructive.map((c) => ({
           label: `DELETE  ${c.type}:${c.api_name}`,

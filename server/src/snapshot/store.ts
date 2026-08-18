@@ -80,6 +80,18 @@ export class SnapshotStore {
     }
   }
 
+  /**
+   * Absolute path of a file in the current/ tree, or null if it would escape.
+   * retrieve_metadata hands this back so a caller holding real file tools can
+   * read a huge artifact directly instead of paging it through tool results.
+   */
+  currentFilePath(connectionId: string, relPath: string): string | null {
+    const dir = path.join(this.connDir(connectionId), 'current');
+    const target = path.resolve(dir, relPath);
+    if (!target.startsWith(path.resolve(dir) + path.sep)) return null;
+    return fs.existsSync(target) ? target : null;
+  }
+
   readCurrentFile(connectionId: string, relPath: string): string | null {
     const dir = path.join(this.connDir(connectionId), 'current');
     const target = path.resolve(dir, relPath);
