@@ -30,7 +30,9 @@ let client: Client;
 let connId: string;
 let presentedPages: string[];
 let openedUrls: string[];
-let deployCounter: { validations: number; realDeploys: number };
+let deployCounter: { validations: number; realDeploys: number; quickDeploys: number };
+let lastQuickValidationId = '';
+let failNextQuickDeploy = false;
 let lastDeployBody = '';
 let failNextValidation = false;
 
@@ -65,6 +67,29 @@ function stubSalesforce(): void {
             `<deployResponse xmlns="http://soap.sforce.com/2006/04/metadata">
                <result><id>0Af-${checkOnly ? 'check' : 'real'}-${deployCounter.validations}-${deployCounter.realDeploys}</id></result>
              </deployResponse>`,
+          ),
+        );
+      }
+      if (body.includes('<met:deployRecentValidation>')) {
+        if (failNextQuickDeploy) {
+          failNextQuickDeploy = false;
+          return new Response(
+            soapEnvelope(
+              `<soapenv:Fault><faultcode>INVALID_ID_FIELD</faultcode>
+               <faultstring>The validation is no longer available for quick deployment</faultstring>
+               </soapenv:Fault>`,
+            ),
+            { status: 500 },
+          );
+        }
+        deployCounter.quickDeploys += 1;
+        lastQuickValidationId =
+          /<met:validationId>([^<]+)<\/met:validationId>/.exec(body)?.[1] ?? '';
+        return new Response(
+          soapEnvelope(
+            `<deployRecentValidationResponse xmlns="http://soap.sforce.com/2006/04/metadata">
+               <result>0Af-quick-${deployCounter.quickDeploys}</result>
+             </deployRecentValidationResponse>`,
           ),
         );
       }
@@ -178,7 +203,9 @@ beforeEach(async () => {
   store = new SnapshotStore(path.join(tmp, 'snapshots'));
   presentedPages = [];
   openedUrls = [];
-  deployCounter = { validations: 0, realDeploys: 0 };
+  deployCounter = { validations: 0, realDeploys: 0, quickDeploys: 0 };
+  lastQuickValidationId = '';
+  failNextQuickDeploy = false;
   const tokens = new MemoryTokenStore();
   const grants = emptyGrantSet();
   grants.metadata_read = true;
@@ -1092,5 +1119,56 @@ describe('validate_deploy from a file on disk', () => {
     // execute replays the stored package; the swap is invisible to it.
     expect(deployedFile('Frozen__c.object')).toContain('APPROVED');
     expect(deployedFile('Frozen__c.object')).not.toContain('SWAPPED');
+  });
+});
+
+/**
+ * Quick deploy (S10 parity with the desktop engine). A tests-ran validation
+ * executes via deployRecentValidation — the zip is not re-sent; NoTestRun is
+ * ineligible; an org-side refusal falls back to the full deploy and says so.
+ * The approval ritual (code, page, claim machinery) is untouched.
+ */
+describe('quick deploy of a validated package', () => {
+  async function approvedCode(extra: Record<string, unknown> = {}) {
+    const result = await validate(extra);
+    expect(result.isError).not.toBe(true);
+    return codeFromPage(presentedPages.at(-1)!);
+  }
+
+  it('a tests-ran validation deploys via deployRecentValidation, not a fresh zip', async () => {
+    const code = await approvedCode({ test_level: 'RunSpecifiedTests', run_tests: ['InvoiceServiceTest'] });
+    const before = deployCounter.realDeploys;
+    const result = await client.callTool({
+      name: 'execute_deploy',
+      arguments: { connection: 'deploy-org', confirmation_code: code },
+    });
+    expect(result.isError).not.toBe(true);
+    expect(deployCounter.quickDeploys).toBe(1);
+    expect(deployCounter.realDeploys).toBe(before);
+    expect(lastQuickValidationId).toMatch(/^0Af-check/);
+    expect(textOf(result)).toContain('"quick_deploy": true');
+  });
+
+  it('a NoTestRun validation deploys the stored zip classically', async () => {
+    const code = await approvedCode();
+    await client.callTool({
+      name: 'execute_deploy',
+      arguments: { connection: 'deploy-org', confirmation_code: code },
+    });
+    expect(deployCounter.quickDeploys).toBe(0);
+    expect(deployCounter.realDeploys).toBe(1);
+  });
+
+  it('an org-side refusal falls back to the zip and reports it — never a dead end', async () => {
+    const code = await approvedCode({ test_level: 'RunSpecifiedTests', run_tests: ['InvoiceServiceTest'] });
+    failNextQuickDeploy = true;
+    const result = await client.callTool({
+      name: 'execute_deploy',
+      arguments: { connection: 'deploy-org', confirmation_code: code },
+    });
+    expect(result.isError).not.toBe(true);
+    expect(deployCounter.realDeploys).toBe(1);
+    expect(textOf(result)).toContain('"quick_deploy": false');
+    expect(textOf(result)).toContain('quick_deploy_fallback');
   });
 });

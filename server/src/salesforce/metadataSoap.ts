@@ -196,6 +196,29 @@ export class MetadataSoapClient {
     return id;
   }
 
+  /**
+   * Quick deploy: ask the org to deploy the package it ALREADY validated,
+   * identified by the validation's async id. Tests are not re-run — the org
+   * reuses the validation's results — and the bytes deployed are, by the
+   * org's own guarantee, exactly the validated ones. Only available when the
+   * validation ran tests and is recent (~10 days); the org refuses otherwise,
+   * and the caller falls back to a full deploy.
+   */
+  async deployRecentValidation(validationId: string): Promise<string> {
+    const body =
+      `<met:deployRecentValidation><met:validationId>${escapeXml(validationId)}` +
+      `</met:validationId></met:deployRecentValidation>`;
+    const parsed = await this.call(body);
+    const id = xmlDig(parsed, 'Envelope', 'Body', 'deployRecentValidationResponse', 'result');
+    if (typeof id !== 'string' || !id) {
+      throw new ContrailError(
+        'deployRecentValidation did not return a deploy id',
+        'soap_protocol',
+      );
+    }
+    return id;
+  }
+
   /** Best-effort cancel of an in-flight deploy (used on timeout). */
   async cancelDeploy(id: string): Promise<void> {
     try {

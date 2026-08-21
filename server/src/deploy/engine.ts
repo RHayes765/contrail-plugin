@@ -357,14 +357,41 @@ export class DeployEngine {
     };
     if (job) job.progress = 'deploying (checkOnly=false)';
 
+    // Quick deploy when the validation ran tests: the org deploys the
+    // package it already validated (same bytes, its own guarantee) without
+    // re-running the tests. Both faster and STRICTER than replaying the zip —
+    // nothing between validation and execution can substitute a package.
+    // NoTestRun validations are not eligible; any org-side refusal falls back
+    // to the classic full deploy of the stored zip.
+    const quickEligible =
+      typeof request.validationId === 'string' &&
+      request.validationId.length > 0 &&
+      (options.testLevel ?? 'NoTestRun') !== 'NoTestRun';
+    let quickDeploy = false;
+    let quickFallbackReason: string | null = null;
+
     let deployId: string;
     let result;
     try {
-      deployId = await soap.deploy(zip, {
-        checkOnly: false,
-        testLevel: options.testLevel ?? 'NoTestRun',
-        runTests: options.runTests ?? [],
-      });
+      if (quickEligible) {
+        try {
+          deployId = await soap.deployRecentValidation(request.validationId as string);
+          quickDeploy = true;
+        } catch (err) {
+          quickFallbackReason = String(err instanceof Error ? err.message : err).slice(0, 300);
+          deployId = await soap.deploy(zip, {
+            checkOnly: false,
+            testLevel: options.testLevel ?? 'NoTestRun',
+            runTests: options.runTests ?? [],
+          });
+        }
+      } else {
+        deployId = await soap.deploy(zip, {
+          checkOnly: false,
+          testLevel: options.testLevel ?? 'NoTestRun',
+          runTests: options.runTests ?? [],
+        });
+      }
       result = await this.pollDeploy(soap, deployId, job, async (id) => {
         // On timeout, try to cancel the in-flight deploy so it does not
         // commit after we have given up waiting.
@@ -392,6 +419,8 @@ export class DeployEngine {
       connection: conn.alias,
       deployed: result.success,
       status: result.status,
+      quick_deploy: quickDeploy,
+      ...(quickFallbackReason ? { quick_deploy_fallback: quickFallbackReason } : {}),
       components_deployed: result.numberComponentsDeployed,
       component_errors: result.numberComponentErrors,
       component_failures: result.componentFailures.slice(0, 25),
