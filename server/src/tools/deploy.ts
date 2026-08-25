@@ -25,6 +25,90 @@ const APPROVAL_INSTRUCTIONS =
   'it is not available to you anywhere. Present this summary (destructive changes first), ' +
   'then ask the human to review the page and read the code back if they approve.';
 
+const REF_RE = /^[A-Za-z][A-Za-z0-9_]*$/;
+const REF_TOKEN_RE = /^@\{([A-Za-z][A-Za-z0-9_]*)\.id\}$/;
+
+/**
+ * Grammar/shape validation for a multi-step plan. Semantics (FLS, required
+ * fields, validation rules) are the ORG's to judge at execute — with
+ * all_or_none defaulting true, an org refusal rolls back cleanly and spends
+ * the code, same as a flat failure. What must be exact here is the reference
+ * grammar: a token that survives to the org malformed gets "substituted" into
+ * garbage, and the preview would have lied about what gets written.
+ * Returns an error message, or null when the plan is well-formed.
+ */
+function validateDmlPlan(args: {
+  operation?: string;
+  object?: string;
+  records?: unknown[];
+  ids?: unknown[];
+  steps?: Array<{
+    ref?: string;
+    operation: 'insert' | 'update' | 'delete';
+    object: string;
+    record?: Record<string, unknown>;
+    id?: string;
+  }>;
+}): string | null {
+  if (args.operation || args.object || args.records || args.ids) {
+    return 'Send either steps (a plan) or the flat operation/object fields — not both.';
+  }
+  const steps = args.steps ?? [];
+  // Tokens may only cite EXPLICIT refs of EARLIER INSERT steps: inserts are
+  // the only steps whose composite response carries an id (update/delete
+  // return 204 with no body), and forward/self references can never resolve.
+  const insertRefsSoFar = new Set<string>();
+  const allRefs = new Set<string>();
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i]!;
+    const where = `step ${i + 1}`;
+    if (!/^[A-Za-z0-9_]+$/.test(step.object)) return `${where}: invalid object API name`;
+    if (step.ref !== undefined) {
+      if (!REF_RE.test(step.ref)) return `${where}: invalid ref "${step.ref}" (letters/digits/_, start with a letter)`;
+      if (allRefs.has(step.ref)) return `${where}: duplicate ref "${step.ref}"`;
+      allRefs.add(step.ref);
+    }
+    const checkToken = (value: string, slot: string): string | null => {
+      const m = REF_TOKEN_RE.exec(value);
+      if (!m) return `${where}: ${slot} contains "@{" but is not a whole-value "@{ref.id}" token`;
+      if (!insertRefsSoFar.has(m[1]!)) {
+        return `${where}: ${slot} references "@{${m[1]}.id}" which is not an EARLIER insert step's ref`;
+      }
+      return null;
+    };
+
+    if (step.operation === 'insert') {
+      if (!step.record || Object.keys(step.record).length === 0) return `${where}: insert requires record`;
+      if (step.id !== undefined) return `${where}: insert must not carry id`;
+    } else {
+      if (step.id === undefined) return `${where}: ${step.operation} requires id (a record id or "@{ref.id}")`;
+      if (!ID_RE.test(step.id)) {
+        const bad = checkToken(step.id, 'id');
+        if (bad) return bad;
+      }
+      if (step.operation === 'update' && (!step.record || Object.keys(step.record).length === 0)) {
+        return `${where}: update requires record`;
+      }
+      if (step.operation === 'delete' && step.record !== undefined) {
+        return `${where}: delete must not carry record`;
+      }
+    }
+
+    for (const [key, value] of Object.entries(step.record ?? {})) {
+      if (!/^[A-Za-z0-9_]+$/.test(key)) return `${where}: invalid field name "${key}"`;
+      // Salesforce rejects Id inside a PATCH body — the target lives in `id`.
+      if (key.toLowerCase() === 'id') return `${where}: never put Id inside record — the target goes in the id slot`;
+      if (typeof value === 'string' && /@\{/.test(value)) {
+        const bad = checkToken(value, `field "${key}"`);
+        if (bad) return bad;
+      }
+    }
+
+    if (step.operation === 'insert' && step.ref) insertRefsSoFar.add(step.ref);
+  }
+  return null;
+}
+
 export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
   const { db, audit, deploys, config } = deps;
 
@@ -270,34 +354,106 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
     {
       title: 'Propose a data change (two-step)',
       description:
-        'Stage an insert, update, or delete with a before/after preview. Nothing touches the ' +
-        'org until the human reads the confirmation code from the approval page and you pass ' +
-        'it to dml_execute. All-or-none semantics; max 200 rows.',
+        'Stage a data change with a before/after preview. Nothing touches the org until the ' +
+        'human reads the confirmation code from the approval page and you pass it to ' +
+        'dml_execute. TWO SHAPES: (a) flat — one operation on one object, max 200 rows, ' +
+        'all-or-none; (b) a PLAN — 2–25 ordered steps, one record each, where a later step ' +
+        'references an earlier INSERT step\'s created id with the whole-value token ' +
+        '"@{ref.id}" (in field values, or as the id of an update/delete). Use a plan to seed ' +
+        'linked test data in ONE approval: e.g. insert Account (ref "acct") → insert Contact ' +
+        '{AccountId: "@{acct.id}"} → … → update "@{opp.id}". The org resolves the tokens ' +
+        'server-side. all_or_none (default true) rolls the whole plan back on any failure; ' +
+        'false keeps successful steps and fails only dependents — the approval page states ' +
+        'which mode the human is approving.',
       inputSchema: {
         connection: z.string().describe('Target connection alias (or id).'),
-        operation: z.enum(['insert', 'update', 'delete']),
-        object: z.string().describe('SObject API name, e.g. Account or Invoice__c.'),
+        operation: z
+          .enum(['insert', 'update', 'delete'])
+          .optional()
+          .describe('Flat shape only. Omit when sending steps.'),
+        object: z
+          .string()
+          .optional()
+          .describe('Flat shape only: SObject API name, e.g. Account or Invoice__c.'),
         records: z
           .array(z.record(z.unknown()))
           .max(200)
           .optional()
-          .describe('For insert/update: field maps (update rows must include Id).'),
+          .describe('Flat insert/update: field maps (update rows must include Id).'),
         ids: z
           .array(z.string())
           .max(200)
           .optional()
-          .describe('For delete: record ids.'),
+          .describe('Flat delete: record ids.'),
+        steps: z
+          .array(
+            z.object({
+              ref: z
+                .string()
+                .max(40)
+                .optional()
+                .describe('Handle for this step\'s created id; letters/digits/_, must start with a letter.'),
+              operation: z.enum(['insert', 'update', 'delete']),
+              object: z.string(),
+              record: z
+                .record(z.unknown())
+                .optional()
+                .describe('insert/update: the field map. Never include Id — the target goes in `id`.'),
+              id: z
+                .string()
+                .optional()
+                .describe('update/delete: a literal record id or "@{ref.id}".'),
+            }),
+          )
+          .min(2)
+          .max(25)
+          .optional()
+          .describe('Plan shape: ordered steps, one record each. Mutually exclusive with operation/object.'),
+        all_or_none: z
+          .boolean()
+          .optional()
+          .describe('Plan shape: default true (atomic). false = keep successes, fail dependents.'),
       },
     },
     async (args: {
       connection: string;
-      operation: 'insert' | 'update' | 'delete';
-      object: string;
+      operation?: 'insert' | 'update' | 'delete';
+      object?: string;
       records?: Array<Record<string, unknown>>;
       ids?: string[];
+      steps?: Array<{
+        ref?: string;
+        operation: 'insert' | 'update' | 'delete';
+        object: string;
+        record?: Record<string, unknown>;
+        id?: string;
+      }>;
+      all_or_none?: boolean;
     }) =>
       guarded(async () => {
         const conn = requireConnection(args.connection, 'dml_propose');
+
+        if (args.steps) {
+          const bad = validateDmlPlan(args);
+          if (bad) return fail(bad);
+          const preview = await deploys.proposeDml(conn, {
+            plan: true,
+            version: 2,
+            all_or_none: args.all_or_none ?? true,
+            steps: args.steps,
+          });
+          return ok(
+            preview,
+            `Proposed — nothing executed. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`,
+          );
+        }
+
+        if (args.all_or_none !== undefined) {
+          return fail('all_or_none applies only to plans (steps) — the flat shape is always all-or-none.');
+        }
+        if (!args.operation || !args.object) {
+          return fail('Provide either steps (a plan) or operation + object (flat).');
+        }
         if (!/^[A-Za-z0-9_]+$/.test(args.object)) return fail('invalid object API name');
         if (args.operation === 'delete') {
           if (!args.ids?.length) return fail('delete requires ids.');
@@ -307,6 +463,11 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
           for (const r of args.records) {
             for (const key of Object.keys(r)) {
               if (!/^[A-Za-z0-9_]+$/.test(key)) return fail(`invalid field name "${key}"`);
+            }
+            for (const v of Object.values(r)) {
+              if (typeof v === 'string' && /@\{/.test(v)) {
+                return fail('reference tokens ("@{ref.id}") are only valid inside a plan (steps).');
+              }
             }
             if (args.operation === 'update' && !ID_RE.test(String(r.Id ?? r.id ?? ''))) {
               return fail('every update record needs a valid Id.');

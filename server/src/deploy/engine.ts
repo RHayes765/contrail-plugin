@@ -7,7 +7,61 @@ import type { ConnectionRecord, DeployRequestRecord } from '../core/types.js';
 import type { AccessTokenManager } from '../salesforce/tokens.js';
 import type { SnapshotStore } from '../snapshot/store.js';
 import { MetadataSoapClient, type DeployResult, type TestLevel } from '../salesforce/metadataSoap.js';
-import { RestClient, stripAttributes } from '../salesforce/rest.js';
+import {
+  RestClient,
+  stripAttributes,
+  type CompositeSubrequest,
+  type CompositeSubresponse,
+} from '../salesforce/rest.js';
+
+// ── multi-step DML plans ─────────────────────────────────────────────────
+
+/**
+ * One step of an ordered DML plan. Later steps may cite an EARLIER insert
+ * step's created id with the token "@{ref.id}" (whole-value only) — in field
+ * values, or as the id of an update/delete. The token is passed to Salesforce
+ * verbatim; the org's Composite API substitutes the real id server-side, so
+ * the id never round-trips through the agent.
+ */
+export interface DmlPlanStep {
+  /** Optional handle for this step's created id; /^[A-Za-z][A-Za-z0-9_]*$/, unique. */
+  ref?: string;
+  operation: 'insert' | 'update' | 'delete';
+  object: string;
+  /** insert/update: the field map (never contains Id — the target is `id`). */
+  record?: Record<string, unknown>;
+  /** update/delete: a literal record id or "@{ref.id}". */
+  id?: string;
+}
+
+/** The plan shape stored verbatim in payload_json (discriminated by `plan`). */
+export interface DmlPlanInput {
+  plan: true;
+  version: 2;
+  all_or_none: boolean;
+  steps: DmlPlanStep[];
+}
+
+export interface DmlFlatInput {
+  operation: 'insert' | 'update' | 'delete';
+  object: string;
+  records?: Array<Record<string, unknown>>;
+  ids?: string[];
+}
+
+export type DmlInput = DmlFlatInput | DmlPlanInput;
+
+export function isDmlPlan(input: DmlInput): input is DmlPlanInput {
+  return (input as DmlPlanInput).plan === true;
+}
+
+/** The whole value must be the token — a token embedded in prose is a mistake. */
+export const REF_TOKEN_RE = /^@\{([A-Za-z][A-Za-z0-9_]*)\.id\}$/;
+
+/** The org-side referenceId for step i (explicit ref wins; tokens may only cite explicit refs). */
+function stepReferenceId(step: DmlPlanStep, index: number): string {
+  return step.ref ?? `step_${index + 1}`;
+}
 import { queryDependencies } from '../deps/graph.js';
 import { deploysDir } from '../core/paths.js';
 import { ContrailError } from '../core/errors.js';
@@ -478,15 +532,7 @@ export class DeployEngine {
 
   // ── dml ────────────────────────────────────────────────────────────────
 
-  async proposeDml(
-    conn: ConnectionRecord,
-    input: {
-      operation: 'insert' | 'update' | 'delete';
-      object: string;
-      records?: Array<Record<string, unknown>>;
-      ids?: string[];
-    },
-  ): Promise<Record<string, unknown>> {
+  async proposeDml(conn: ConnectionRecord, input: DmlInput): Promise<Record<string, unknown>> {
     const superseded = this.db.supersedePendingRequests(conn.id, 'dml');
     if (superseded > 0) {
       this.audit.record('dml.superseded', {
@@ -496,7 +542,9 @@ export class DeployEngine {
       });
     }
     const rest = new RestClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
-    const preview = await this.buildDmlPreview(rest, input);
+    const preview = isDmlPlan(input)
+      ? await this.buildDmlPlanPreview(rest, input)
+      : await this.buildDmlPreview(rest, input);
 
     const code = generateConfirmationCode();
     const expiresAt = new Date(Date.now() + this.config.deploy.codeTtlMs).toISOString();
@@ -509,8 +557,45 @@ export class DeployEngine {
       summaryJson: JSON.stringify(preview),
     });
 
-    const rowLabels = (preview.rows as Array<{ label: string; warnings: string[] }>).slice(0, 50);
-    const extra = (preview.rows as unknown[]).length - rowLabels.length;
+    const allRows = preview.rows as Array<{
+      label: string;
+      warnings: string[];
+      detail?: string;
+      destructive?: boolean;
+    }>;
+    const rowLabels = allRows.slice(0, 50);
+    const extra = allRows.length - rowLabels.length;
+    const overflow = extra > 0 ? [{ label: `… and ${extra} more rows`, warnings: [] }] : [];
+    // Per-row routing: a plan can MIX operations, so delete steps go to the
+    // danger card individually. The flat path keeps its single-operation split.
+    const isDelete = (row: { destructive?: boolean }) =>
+      isDmlPlan(input) ? row.destructive === true : input.operation === 'delete';
+    const changes = [...rowLabels.filter((r) => !isDelete(r)), ...overflow];
+    const destructive = rowLabels.filter((r) => isDelete(r));
+
+    // The Mode line is a PROMISE about failure behaviour — it must match what
+    // execution will actually do, per plan.
+    const allOrNone = isDmlPlan(input) ? input.all_or_none : true;
+    const results = isDmlPlan(input)
+      ? [
+          { label: 'Plan', value: `${input.steps.length} steps` },
+          {
+            label: 'Operations',
+            value: summarizeOps(input.steps),
+          },
+          {
+            label: 'Mode',
+            value: allOrNone
+              ? 'all-or-none (any failure rolls back every step)'
+              : 'continue-on-failure (successful steps are KEPT; steps referencing a failed step fail)',
+          },
+        ]
+      : [
+          { label: 'Operation', value: `${input.operation.toUpperCase()} ${input.object}` },
+          { label: 'Rows', value: String(preview.row_count) },
+          { label: 'Mode', value: 'all-or-none (any failure rolls back every row)' },
+        ];
+
     const approval = await this.approvals.present(
       renderApprovalPage({
         kind: 'dml',
@@ -522,20 +607,17 @@ export class DeployEngine {
           orgType: conn.orgType,
           instanceUrl: conn.instanceUrl,
         },
-        changes:
-          input.operation === 'delete'
-            ? []
-            : [...rowLabels, ...(extra > 0 ? [{ label: `… and ${extra} more rows`, warnings: [] }] : [])],
-        destructive:
-          input.operation === 'delete'
-            ? [...rowLabels, ...(extra > 0 ? [{ label: `… and ${extra} more rows`, warnings: [] }] : [])]
-            : [],
-        results: [
-          { label: 'Operation', value: `${input.operation.toUpperCase()} ${input.object}` },
-          { label: 'Rows', value: String(preview.row_count) },
-          { label: 'Mode', value: 'all-or-none (any failure rolls back every row)' },
-        ],
+        changes,
+        destructive,
+        results,
         blast: [],
+        ...(isDmlPlan(input) && !input.all_or_none
+          ? {
+              warnings: [
+                'This plan is NOT atomic — approve only if partial completion is acceptable.',
+              ],
+            }
+          : {}),
       }),
       this.requestStatusCheck(request.id),
       this.config.deploy.codeTtlMs + 60_000,
@@ -544,12 +626,20 @@ export class DeployEngine {
     this.audit.record('dml.proposed', {
       connectionId: conn.id,
       tool: 'dml_propose',
-      detail: {
-        requestId: request.id,
-        operation: input.operation,
-        object: input.object,
-        rows: preview.row_count,
-      },
+      detail: isDmlPlan(input)
+        ? {
+            requestId: request.id,
+            plan: true,
+            steps: input.steps.length,
+            operations: summarizeOps(input.steps),
+            all_or_none: input.all_or_none,
+          }
+        : {
+            requestId: request.id,
+            operation: input.operation,
+            object: input.object,
+            rows: preview.row_count,
+          },
     });
     return {
       connection: conn.alias,
@@ -572,13 +662,11 @@ export class DeployEngine {
       };
     }
     const request = claim.request;
-    const input = JSON.parse(request.payloadJson ?? '{}') as {
-      operation: 'insert' | 'update' | 'delete';
-      object: string;
-      records?: Array<Record<string, unknown>>;
-      ids?: string[];
-    };
+    const input = JSON.parse(request.payloadJson ?? '{}') as DmlInput;
     const rest = new RestClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
+    if (isDmlPlan(input)) {
+      return this.executeDmlPlan(conn, rest, request, input);
+    }
     const version = this.config.salesforce.apiVersion;
 
     let results: Array<{ id?: string; success: boolean; errors?: unknown[] }>;
@@ -625,12 +713,19 @@ export class DeployEngine {
 
     const failures = results.filter((r) => !r.success);
     const succeeded = failures.length === 0;
+    // Created ids used to be thrown away — the agent needs them for follow-up
+    // work (and cleanup plans need them to name their targets).
+    const createdIds =
+      input.operation === 'insert'
+        ? results.filter((r) => r.success && r.id).map((r) => r.id as string)
+        : [];
     const payload = {
       connection: conn.alias,
       operation: input.operation,
       object: input.object,
       executed: succeeded,
       rows: results.length,
+      ...(createdIds.length ? { created_ids: createdIds } : {}),
       failures: failures.slice(0, 25).map((f) => stripAttributes(f)),
       ...(succeeded
         ? {}
@@ -647,6 +742,153 @@ export class DeployEngine {
         object: input.object,
         rows: results.length,
         failures: failures.length,
+      },
+    });
+    return payload;
+  }
+
+  /**
+   * Execute an approved multi-step plan as ONE Composite API call. Reference
+   * tokens are passed through verbatim — the org substitutes created ids
+   * server-side, so ids never transit the agent. Success is judged per
+   * subrequest httpStatusCode (the top-level call returns 200 even when steps
+   * failed — there is no `success` flag to read here).
+   */
+  private async executeDmlPlan(
+    conn: ConnectionRecord,
+    rest: RestClient,
+    request: DeployRequestRecord,
+    input: DmlPlanInput,
+  ): Promise<Record<string, unknown>> {
+    const version = this.config.salesforce.apiVersion;
+    const refIds = input.steps.map((s, i) => stepReferenceId(s, i));
+    const subrequests: CompositeSubrequest[] = input.steps.map((step, i) => {
+      const base = `/services/data/${version}/sobjects/${step.object}`;
+      if (step.operation === 'insert') {
+        return { method: 'POST' as const, url: base, referenceId: refIds[i]!, body: step.record ?? {} };
+      }
+      if (step.operation === 'update') {
+        return {
+          method: 'PATCH' as const,
+          url: `${base}/${step.id}`,
+          referenceId: refIds[i]!,
+          body: step.record ?? {},
+        };
+      }
+      return { method: 'DELETE' as const, url: `${base}/${step.id}`, referenceId: refIds[i]! };
+    });
+
+    let responses: CompositeSubresponse[];
+    try {
+      responses = (await rest.composite(subrequests, input.all_or_none)).compositeResponse;
+    } catch (err) {
+      const message = String(err instanceof Error ? err.message : err);
+      const payload = {
+        connection: conn.alias,
+        plan: true,
+        all_or_none: input.all_or_none,
+        executed: false,
+        error_message: message,
+        note:
+          'The plan did not complete. The confirmation code is spent — verify the org state ' +
+          'and re-propose for a fresh code if you still want the change.',
+      };
+      this.db.finishDeployRequest(request.id, 'execution_failed', JSON.stringify(payload));
+      this.audit.record('dml.execution_failed', {
+        connectionId: conn.id,
+        tool: 'dml_execute',
+        outcome: 'error',
+        detail: { requestId: request.id, plan: true, error: message },
+      });
+      return payload;
+    }
+
+    const byRef = new Map(responses.map((r) => [r.referenceId, r]));
+    // Which refs actually failed (non-2xx, not counting rollback/halt markers)?
+    // PROCESSING_HALTED is overloaded: with all_or_none it marks rolled-back or
+    // halted SIBLINGS of the real failure; without it, it marks steps whose
+    // referenced step failed. Classify accordingly or the report lies.
+    const errorCodeOf = (r: CompositeSubresponse | undefined): string | null => {
+      const body = r?.body;
+      if (Array.isArray(body) && body[0] && typeof body[0] === 'object') {
+        return String((body[0] as { errorCode?: unknown }).errorCode ?? '');
+      }
+      return null;
+    };
+
+    const steps = input.steps.map((step, i) => {
+      const ref = refIds[i]!;
+      const res = byRef.get(ref);
+      const status = res?.httpStatusCode ?? 0;
+      const ok = status >= 200 && status < 300;
+      const halted = errorCodeOf(res) === 'PROCESSING_HALTED';
+      const outcome = ok
+        ? 'succeeded'
+        : halted
+          ? input.all_or_none
+            ? 'rolled_back'
+            : 'dependent_failed'
+          : 'failed';
+      const createdId =
+        ok && step.operation === 'insert' && res && typeof res.body === 'object' && res.body
+          ? ((res.body as { id?: string }).id ?? null)
+          : null;
+      return {
+        step: i + 1,
+        ...(step.ref ? { ref: step.ref } : {}),
+        operation: step.operation,
+        object: step.object,
+        status: outcome,
+        ...(createdId ? { id: createdId } : {}),
+        ...(!ok && !halted ? { errors: res?.body ?? null } : {}),
+      };
+    });
+
+    const failedCount = steps.filter((s) => s.status !== 'succeeded').length;
+    const createdIds: Record<string, string> = {};
+    for (const s of steps) {
+      if (s.ref && 'id' in s && typeof s.id === 'string') createdIds[s.ref] = s.id;
+    }
+
+    const executed = failedCount === 0;
+    // Atomic: any failure means the org rolled everything back — the request
+    // failed as a unit. Non-atomic: partial success is a real (approved-as-such)
+    // outcome; only a total loss counts as execution_failed.
+    const terminalStatus = input.all_or_none
+      ? executed
+        ? 'executed'
+        : 'execution_failed'
+      : steps.some((s) => s.status === 'succeeded')
+        ? 'executed'
+        : 'execution_failed';
+
+    const payload = {
+      connection: conn.alias,
+      plan: true,
+      all_or_none: input.all_or_none,
+      executed,
+      steps,
+      ...(Object.keys(createdIds).length ? { created_ids: createdIds } : {}),
+      failures: steps.filter((s) => s.status === 'failed'),
+      ...(executed
+        ? {}
+        : {
+            note: input.all_or_none
+              ? 'all-or-none: every step was rolled back because at least one failed.'
+              : 'continue-on-failure: successful steps were KEPT; failed/dependent steps were not applied.',
+          }),
+    };
+    this.db.finishDeployRequest(request.id, terminalStatus, JSON.stringify(payload));
+    this.audit.record(executed ? 'dml.executed' : 'dml.execution_failed', {
+      connectionId: conn.id,
+      tool: 'dml_execute',
+      outcome: executed ? 'success' : 'error',
+      detail: {
+        requestId: request.id,
+        plan: true,
+        steps: steps.length,
+        failures: failedCount,
+        all_or_none: input.all_or_none,
       },
     });
     return payload;
@@ -760,6 +1002,134 @@ export class DeployEngine {
       return { kind: 'running', request };
     }
     return { kind: 'claimed', request };
+  }
+
+  /**
+   * Preview for a multi-step plan: one honest row per step, prefixed with its
+   * ordinal. Reference tokens render SYMBOLICALLY ("<new Account from step 1>")
+   * because the real id does not exist yet; the raw token is shown on the
+   * row's detail line so the reviewer sees exactly what the org will resolve.
+   * Pre-checks (old→new values, existence) run only for literal-id steps —
+   * a token target cannot be queried before it exists.
+   */
+  private async buildDmlPlanPreview(
+    rest: RestClient,
+    input: DmlPlanInput,
+  ): Promise<Record<string, unknown> & { rows: unknown[]; row_count: number }> {
+    // Map declared refs to their (1-based) step + object, for symbolic labels.
+    const refToStep = new Map<string, { step: number; object: string }>();
+    input.steps.forEach((s, i) => {
+      if (s.ref) refToStep.set(s.ref, { step: i + 1, object: s.object });
+    });
+    const symbolic = (token: string): string => {
+      const ref = REF_TOKEN_RE.exec(token)?.[1];
+      const target = ref ? refToStep.get(ref) : undefined;
+      return target ? `<new ${target.object} from step ${target.step}>` : token;
+    };
+
+    const rows: Array<{
+      label: string;
+      warnings: string[];
+      detail?: string;
+      destructive?: boolean;
+    }> = [];
+    for (let i = 0; i < input.steps.length; i++) {
+      const step = input.steps[i]!;
+      const ordinal = `Step ${i + 1}`;
+      const refNote = step.ref ? ` (ref "${step.ref}")` : '';
+      const tokenFields = Object.entries(step.record ?? {}).filter(
+        ([, v]) => typeof v === 'string' && REF_TOKEN_RE.test(v),
+      );
+      const detail =
+        tokenFields.length || (step.id && REF_TOKEN_RE.test(step.id))
+          ? 'references: ' +
+            [
+              ...(step.id && REF_TOKEN_RE.test(step.id) ? [`target ← ${step.id}`] : []),
+              ...tokenFields.map(([k, v]) => `${k} ← ${String(v)}`),
+            ].join(', ')
+          : undefined;
+
+      if (step.operation === 'insert') {
+        const shown = Object.fromEntries(
+          Object.entries(step.record ?? {}).map(([k, v]) => [
+            k,
+            typeof v === 'string' && REF_TOKEN_RE.test(v) ? symbolic(v) : v,
+          ]),
+        );
+        rows.push({
+          label: `${ordinal} · INSERT ${step.object}${refNote}: ${previewFields(shown)}`,
+          warnings: [],
+          ...(detail ? { detail } : {}),
+        });
+        continue;
+      }
+
+      const idIsToken = REF_TOKEN_RE.test(step.id ?? '');
+      const target = idIsToken ? symbolic(step.id!) : (step.id ?? '');
+
+      if (step.operation === 'delete') {
+        let warnings: string[] = [];
+        if (!idIsToken && step.id) {
+          try {
+            const found = await rest.query<{ Id: string }>(
+              `SELECT Id FROM ${step.object} WHERE Id = '${step.id}'`,
+              1,
+            );
+            if (found.length === 0) {
+              warnings = ['record not found in pre-check — it may already be gone or the id is wrong'];
+            }
+          } catch (err) {
+            log('warn', 'could not pre-check id for DML plan delete preview', { err: String(err) });
+            warnings = ['could not verify this id exists (pre-check failed)'];
+          }
+        }
+        rows.push({
+          label: `${ordinal} · DELETE ${step.object} ${target}`,
+          warnings,
+          destructive: true,
+          ...(detail ? { detail } : {}),
+        });
+        continue;
+      }
+
+      // update — old→new labels only when the target id is literal.
+      let prior: Record<string, unknown> | undefined;
+      if (!idIsToken && step.id) {
+        const fields = Object.keys(step.record ?? {});
+        try {
+          const soql = `SELECT Id${fields.length ? ', ' + fields.join(', ') : ''} FROM ${
+            step.object
+          } WHERE Id = '${step.id}'`;
+          prior = (await rest.query<Record<string, unknown>>(soql, 1))[0];
+        } catch (err) {
+          log('warn', 'could not fetch before-values for DML plan preview', { err: String(err) });
+        }
+      }
+      const changes = Object.entries(step.record ?? {})
+        .map(([k, v]) => {
+          const shown = typeof v === 'string' && REF_TOKEN_RE.test(v) ? symbolic(v) : JSON.stringify(v);
+          const old = prior?.[k];
+          return prior && old !== undefined ? `${k}: ${JSON.stringify(old)} → ${shown}` : `${k} = ${shown}`;
+        })
+        .join(', ');
+      rows.push({
+        label: `${ordinal} · UPDATE ${step.object} ${target}: ${truncateLabel(changes)}`,
+        warnings:
+          !idIsToken && step.id && !prior
+            ? ['record not found in pre-check — verify the id']
+            : [],
+        ...(detail ? { detail } : {}),
+      });
+    }
+
+    return {
+      plan: true,
+      all_or_none: input.all_or_none,
+      steps: input.steps.length,
+      operations: summarizeOps(input.steps),
+      row_count: rows.length,
+      rows,
+    };
   }
 
   private async buildDmlPreview(
@@ -993,6 +1363,13 @@ function previewFields(record: Record<string, unknown>): string {
 
 function truncateLabel(s: string): string {
   return s.length > 300 ? `${s.slice(0, 300)}…` : s;
+}
+
+/** "3 insert / 1 update" — the operations line for plan previews and audits. */
+function summarizeOps(steps: DmlPlanStep[]): string {
+  const counts = new Map<string, number>();
+  for (const s of steps) counts.set(s.operation, (counts.get(s.operation) ?? 0) + 1);
+  return [...counts.entries()].map(([op, n]) => `${n} ${op}`).join(' / ');
 }
 
 function delay(ms: number): Promise<void> {

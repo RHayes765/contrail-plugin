@@ -35,6 +35,11 @@ let lastQuickValidationId = '';
 let failNextQuickDeploy = false;
 let lastDeployBody = '';
 let failNextValidation = false;
+let failCompositeRef: string | null = null;
+let lastCompositeBody: {
+  allOrNone: boolean;
+  compositeRequest: Array<{ method: string; url: string; referenceId: string; body?: unknown }>;
+} | null = null;
 
 function soapEnvelope(inner: string): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -142,6 +147,52 @@ function stubSalesforce(): void {
         ),
       );
     }
+    // The FULL Composite API (ordered subrequests + @{ref.id} substitution).
+    // Must stay AFTER the more specific /composite/sobjects branch above.
+    if (url.endsWith('/composite')) {
+      const body = JSON.parse(String(init?.body ?? '{}')) as {
+        allOrNone: boolean;
+        compositeRequest: Array<{ method: string; url: string; referenceId: string; body?: unknown }>;
+      };
+      lastCompositeBody = body;
+      const subs = body.compositeRequest;
+      const failing = failCompositeRef !== null && subs.some((s) => s.referenceId === failCompositeRef);
+      let minted = 0;
+      const compositeResponse = subs.map((sub) => {
+        if (sub.referenceId === failCompositeRef) {
+          return {
+            referenceId: sub.referenceId,
+            httpStatusCode: 400,
+            body: [{ errorCode: 'FIELD_CUSTOM_VALIDATION_EXCEPTION', message: 'blocked by validation rule' }],
+          };
+        }
+        // Realistic PROCESSING_HALTED semantics: with allOrNone every sibling
+        // of the failure halts; without it, only steps that REFERENCE the
+        // failed ref halt (the org can't resolve their token).
+        const referencesFailed =
+          failCompositeRef !== null &&
+          (JSON.stringify(sub.body ?? {}).includes(`@{${failCompositeRef}.id}`) ||
+            sub.url.includes(`@{${failCompositeRef}.id}`));
+        if (failing && (body.allOrNone || referencesFailed)) {
+          return {
+            referenceId: sub.referenceId,
+            httpStatusCode: 400,
+            body: [{ errorCode: 'PROCESSING_HALTED', message: 'halted' }],
+          };
+        }
+        if (sub.method === 'POST') {
+          minted += 1;
+          return {
+            referenceId: sub.referenceId,
+            httpStatusCode: 201,
+            body: { id: `001PLAN0000000${minted}AAA`, success: true, errors: [] },
+          };
+        }
+        return { referenceId: sub.referenceId, httpStatusCode: 204, body: null };
+      });
+      // Top-level 200 even with failures — success lives per subrequest.
+      return new Response(JSON.stringify({ compositeResponse }));
+    }
     if (url.includes('/query?q=')) {
       const q = decodeURIComponent(url);
       if (q.includes('FROM Account')) {
@@ -206,6 +257,8 @@ beforeEach(async () => {
   deployCounter = { validations: 0, realDeploys: 0, quickDeploys: 0 };
   lastQuickValidationId = '';
   failNextQuickDeploy = false;
+  failCompositeRef = null;
+  lastCompositeBody = null;
   const tokens = new MemoryTokenStore();
   const grants = emptyGrantSet();
   grants.metadata_read = true;
@@ -1170,5 +1223,277 @@ describe('quick deploy of a validated package', () => {
     expect(deployCounter.realDeploys).toBe(1);
     expect(textOf(result)).toContain('"quick_deploy": false');
     expect(textOf(result)).toContain('quick_deploy_fallback');
+  });
+});
+
+/**
+ * S14 — multi-step DML plans. The invariant set: ONE code approves an ordered
+ * chain; reference tokens reach the org VERBATIM (the org substitutes, ids
+ * never transit the agent); the approval page tells the truth about the
+ * atomicity mode; delete steps land in the danger card; and the reference
+ * grammar is validated shut before anything is staged.
+ */
+describe('multi-step dml plans', () => {
+  const FIVE_STEP_PLAN = [
+    { ref: 'acct', operation: 'insert', object: 'Account', record: { Name: 'Plan Test Account' } },
+    {
+      ref: 'con',
+      operation: 'insert',
+      object: 'Contact',
+      record: { LastName: 'PlanTest', AccountId: '@{acct.id}' },
+    },
+    {
+      ref: 'opp',
+      operation: 'insert',
+      object: 'Opportunity',
+      record: { Name: 'Plan Opp', StageName: 'Prospecting', AccountId: '@{acct.id}' },
+    },
+    {
+      operation: 'insert',
+      object: 'OpportunityContactRole',
+      record: { OpportunityId: '@{opp.id}', ContactId: '@{con.id}', Role: 'Decision Maker' },
+    },
+    {
+      operation: 'update',
+      object: 'Opportunity',
+      id: '@{opp.id}',
+      record: { StageName: 'Qualification' },
+    },
+  ];
+
+  async function proposePlan(extra: Record<string, unknown> = {}) {
+    return client.callTool({
+      name: 'dml_propose',
+      arguments: { connection: 'deploy-org', steps: FIVE_STEP_PLAN, ...extra },
+    });
+  }
+
+  it('the 5-step use case: one page, one code, tokens sent verbatim, ids returned', async () => {
+    const propose = await proposePlan();
+    expect(propose.isError).not.toBe(true);
+    const proposeText = textOf(propose);
+    const page = presentedPages.at(-1)!;
+    const code = codeFromPage(page);
+    expect(proposeText).not.toContain(code); // THE invariant
+    // The page walks every step, symbolically for references.
+    expect(page).toContain('Step 1 · INSERT Account');
+    expect(page).toContain('Step 4 · INSERT OpportunityContactRole');
+    expect(page).toContain('Step 5 · UPDATE Opportunity');
+    expect(page).toContain('new Account from step 1');
+    expect(page).toContain('all-or-none (any failure rolls back every step)');
+
+    const exec = await client.callTool({
+      name: 'dml_execute',
+      arguments: { connection: 'deploy-org', confirmation_code: code },
+    });
+    const execText = textOf(exec);
+    expect(execText).toContain('"executed": true');
+    // The org received the tokens UNRESOLVED — substitution is Salesforce's.
+    const sent = JSON.stringify(lastCompositeBody);
+    expect(sent).toContain('@{acct.id}');
+    expect(sent).toContain('@{opp.id}');
+    expect(lastCompositeBody!.compositeRequest.map((s) => s.referenceId).slice(0, 3)).toEqual([
+      'acct',
+      'con',
+      'opp',
+    ]);
+    // Created ids come back, keyed by ref.
+    expect(execText).toContain('"acct"');
+    expect(execText).toContain('001PLAN0000000');
+    expect(db.queryAuditEvents({}).map((e) => e.eventType)).toContain('dml.executed');
+  });
+
+  it('the page is honest about continue-on-failure mode', async () => {
+    await proposePlan({ all_or_none: false });
+    const page = presentedPages.at(-1)!;
+    expect(page).toContain('continue-on-failure');
+    expect(page).toContain('KEPT');
+    expect(page).not.toContain('rolls back every step');
+    expect(page).toContain('NOT atomic');
+  });
+
+  it('a mixed plan routes delete steps to the destructive card', async () => {
+    await client.callTool({
+      name: 'dml_propose',
+      arguments: {
+        connection: 'deploy-org',
+        steps: [
+          { ref: 'a', operation: 'insert', object: 'Account', record: { Name: 'Keep' } },
+          { operation: 'delete', object: 'Account', id: '001000000000001AAA' },
+        ],
+      },
+    });
+    const page = presentedPages.at(-1)!;
+    expect(page).toContain('Destructive changes');
+    expect(page).toContain('Step 2 · DELETE Account');
+    expect(page).toContain('Step 1 · INSERT Account');
+  });
+
+  it('all-or-none failure: everything reports rolled back, nothing "executed"', async () => {
+    await proposePlan();
+    const code = codeFromPage(presentedPages.at(-1)!);
+    failCompositeRef = 'opp';
+    const exec = await client.callTool({
+      name: 'dml_execute',
+      arguments: { connection: 'deploy-org', confirmation_code: code },
+    });
+    const text = textOf(exec);
+    expect(text).toContain('"executed": false');
+    expect(text).toContain('rolled_back');
+    expect(text).toContain('rolled back');
+    expect(text).not.toContain('"id": "001PLAN'); // no ids from a rolled-back plan
+  });
+
+  it('continue-on-failure: independent steps keep their ids, dependents fail honestly', async () => {
+    await proposePlan({ all_or_none: false });
+    const code = codeFromPage(presentedPages.at(-1)!);
+    failCompositeRef = 'opp';
+    const exec = await client.callTool({
+      name: 'dml_execute',
+      arguments: { connection: 'deploy-org', confirmation_code: code },
+    });
+    const text = textOf(exec);
+    expect(text).toContain('"executed": false');
+    // Account + Contact (independent of opp) succeeded and kept their ids…
+    expect(text).toContain('"acct"');
+    expect(text).toContain('"con"');
+    // …while the OCR and the update, which reference opp, are dependent failures.
+    expect(text).toContain('dependent_failed');
+    expect(text).toContain('KEPT');
+  });
+
+  it('the reference grammar is validated shut', async () => {
+    const cases: Array<{ steps: unknown[]; want: RegExp }> = [
+      {
+        // forward reference
+        steps: [
+          { operation: 'insert', object: 'Contact', record: { AccountId: '@{acct.id}' } },
+          { ref: 'acct', operation: 'insert', object: 'Account', record: { Name: 'X' } },
+        ],
+        want: /not an EARLIER insert/,
+      },
+      {
+        // ref to a non-insert step
+        steps: [
+          { ref: 'upd', operation: 'update', object: 'Account', id: '001000000000001AAA', record: { Name: 'Y' } },
+          { operation: 'insert', object: 'Contact', record: { AccountId: '@{upd.id}' } },
+        ],
+        want: /not an EARLIER insert/,
+      },
+      {
+        // unknown ref
+        steps: [
+          { ref: 'a', operation: 'insert', object: 'Account', record: { Name: 'X' } },
+          { operation: 'insert', object: 'Contact', record: { AccountId: '@{ghost.id}' } },
+        ],
+        want: /not an EARLIER insert/,
+      },
+      {
+        // Id inside an update record
+        steps: [
+          { ref: 'a', operation: 'insert', object: 'Account', record: { Name: 'X' } },
+          { operation: 'update', object: 'Account', id: '@{a.id}', record: { Id: '001000000000001AAA', Name: 'Y' } },
+        ],
+        want: /never put Id inside record/,
+      },
+      {
+        // stray non-token @{…} value
+        steps: [
+          { ref: 'a', operation: 'insert', object: 'Account', record: { Name: 'X' } },
+          { operation: 'insert', object: 'Contact', record: { Description: 'see @{a.id} above', LastName: 'Z' } },
+        ],
+        want: /whole-value/,
+      },
+      {
+        // duplicate ref
+        steps: [
+          { ref: 'a', operation: 'insert', object: 'Account', record: { Name: 'X' } },
+          { ref: 'a', operation: 'insert', object: 'Account', record: { Name: 'Y' } },
+        ],
+        want: /duplicate ref/,
+      },
+    ];
+    for (const c of cases) {
+      const result = await client.callTool({
+        name: 'dml_propose',
+        arguments: { connection: 'deploy-org', steps: c.steps },
+      });
+      expect(result.isError, JSON.stringify(c.steps).slice(0, 80)).toBe(true);
+      expect(textOf(result)).toMatch(c.want);
+    }
+  });
+
+  it('tokens are refused in the FLAT shape, and plan+flat fields cannot mix', async () => {
+    const flat = await client.callTool({
+      name: 'dml_propose',
+      arguments: {
+        connection: 'deploy-org',
+        operation: 'insert',
+        object: 'Contact',
+        records: [{ LastName: 'X', AccountId: '@{acct.id}' }],
+      },
+    });
+    expect(flat.isError).toBe(true);
+    expect(textOf(flat)).toMatch(/only valid inside a plan/);
+
+    const mixed = await client.callTool({
+      name: 'dml_propose',
+      arguments: {
+        connection: 'deploy-org',
+        operation: 'insert',
+        object: 'Account',
+        steps: [
+          { ref: 'a', operation: 'insert', object: 'Account', record: { Name: 'X' } },
+          { operation: 'insert', object: 'Contact', record: { LastName: 'Y' } },
+        ],
+      },
+    });
+    expect(mixed.isError).toBe(true);
+    expect(textOf(mixed)).toMatch(/not both/);
+  });
+
+  it('a plan supersedes a pending flat DML — one pending write per connection', async () => {
+    await client.callTool({
+      name: 'dml_propose',
+      arguments: {
+        connection: 'deploy-org',
+        operation: 'update',
+        object: 'Account',
+        records: [{ Id: '001000000000001AAA', Name: 'Flat Change' }],
+      },
+    });
+    const flatCode = codeFromPage(presentedPages.at(-1)!);
+    await proposePlan();
+    const planCode = codeFromPage(presentedPages.at(-1)!);
+    // The flat code died with the supersede; the plan code works.
+    const stale = await client.callTool({
+      name: 'dml_execute',
+      arguments: { connection: 'deploy-org', confirmation_code: flatCode },
+    });
+    expect(stale.isError).toBe(true);
+    const fresh = await client.callTool({
+      name: 'dml_execute',
+      arguments: { connection: 'deploy-org', confirmation_code: planCode },
+    });
+    expect(textOf(fresh)).toContain('"executed": true');
+  });
+
+  it('flat inserts now return created ids (the cleanup path needs them)', async () => {
+    await client.callTool({
+      name: 'dml_propose',
+      arguments: {
+        connection: 'deploy-org',
+        operation: 'insert',
+        object: 'Account',
+        records: [{ Name: 'Flat Insert' }],
+      },
+    });
+    const code = codeFromPage(presentedPages.at(-1)!);
+    const exec = await client.callTool({
+      name: 'dml_execute',
+      arguments: { connection: 'deploy-org', confirmation_code: code },
+    });
+    expect(textOf(exec)).toContain('"created_ids"');
+    expect(textOf(exec)).toContain('001NEW00000000');
   });
 });

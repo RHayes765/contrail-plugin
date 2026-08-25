@@ -60,6 +60,16 @@ an org.
   building-salesforce-metadata skill).
 - The same two-step contract applies to data: `dml_propose` → human reads the
   proposal and the approval page → `dml_execute` with the code they give you.
+- **Linked test data takes ONE approval, not five.** When records reference each
+  other (Account → Contact → Opportunity → OpportunityContactRole → an update to
+  fire automation), propose a **plan**: `steps: [...]` with one record per step,
+  where a later step cites an earlier INSERT's created id as the whole-value
+  token `"@{ref.id}"` (in field values, or as the `id` of an update/delete).
+  Give reference steps a `ref` (e.g. `"acct"`); the org resolves tokens
+  server-side and the result returns the created ids per ref. `all_or_none`
+  defaults true (any failure rolls back every step); pass `false` only when
+  partial completion is genuinely acceptable — the approval page tells the human
+  which mode they are approving, so say it in your summary too.
 - If validation results change or time passes (codes expire in ~1 hour and are
   invalidated by re-validation), re-validate rather than reusing a stale code.
 - After a successful deploy, run `refresh_snapshot` so the local index and

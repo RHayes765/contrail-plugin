@@ -2,6 +2,22 @@ import type { AccessTokenManager } from './tokens.js';
 import type { ConnectionRecord } from '../core/types.js';
 import { ContrailError } from '../core/errors.js';
 
+/** One ordered operation inside a Composite API call (see RestClient.composite). */
+export interface CompositeSubrequest {
+  method: 'POST' | 'PATCH' | 'DELETE';
+  /** Full path, e.g. /services/data/v63.0/sobjects/Account — may carry "@{ref.id}" tokens. */
+  url: string;
+  referenceId: string;
+  body?: Record<string, unknown>;
+}
+
+/** One subrequest's outcome. Insert bodies carry {id, success, errors}; update/delete are null. */
+export interface CompositeSubresponse {
+  referenceId: string;
+  httpStatusCode: number;
+  body: unknown;
+}
+
 /**
  * REST + Tooling API client for one connection. Row-capped query helpers with
  * queryMore pagination; one automatic retry on 401 after invalidating the
@@ -43,6 +59,30 @@ export class RestClient {
   async describeGlobal(): Promise<{ sobjects: Array<Record<string, unknown>> }> {
     const res = await this.request(`/services/data/${this.apiVersion}/sobjects`);
     return (await res.json()) as { sobjects: Array<Record<string, unknown>> };
+  }
+
+  /**
+   * The full Composite API: up to 25 ordered subrequests in ONE call, with
+   * native "@{referenceId.id}" substitution — a later subrequest can use an
+   * earlier insert's created id, resolved org-side. allOrNone=true is genuine
+   * cross-step atomicity (any failure rolls back every subrequest);
+   * allOrNone=false keeps successes and fails only dependents.
+   *
+   * NOT the /composite/sobjects collections endpoint: that one is a single
+   * operation over many records; this one is many operations in sequence.
+   * Success is per-subrequest httpStatusCode — the top-level response is 200
+   * even when subrequests failed, so callers must never look for a `success`
+   * flag here.
+   */
+  async composite(
+    subrequests: CompositeSubrequest[],
+    allOrNone: boolean,
+  ): Promise<{ compositeResponse: CompositeSubresponse[] }> {
+    const res = await this.request(`/services/data/${this.apiVersion}/composite`, {
+      method: 'POST',
+      body: JSON.stringify({ allOrNone, compositeRequest: subrequests }),
+    });
+    return (await res.json()) as { compositeResponse: CompositeSubresponse[] };
   }
 
   private async runQuery<T>(
