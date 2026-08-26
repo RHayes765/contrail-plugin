@@ -1,7 +1,72 @@
 import Database from 'better-sqlite3';
+import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { ContrailError } from './errors.js';
 import { dbPath } from './paths.js';
 import { normalizeGrants, type GrantSet } from './grants.js';
+
+// ── split-brain guard ────────────────────────────────────────────────────
+//
+// On this machine class (MSIX-packaged hosts), two processes can open "the
+// same" database path through DIFFERENT filesystem views: a containerized
+// process gets a copy-on-write overlay clone while an outside process keeps
+// the real file. Both are self-consistent, SQLite's locking never meets, and
+// interleaved checkpoints from the two lineages corrupt the shared pages —
+// this destroyed a real database on 2026-08-26.
+//
+// The guard: stamp a 31-bit hash of the file's OS identity (volume + NTFS
+// file id) into PRAGMA application_id — a header slot, so it needs no table
+// and works at every schema version either engine can open. A COW clone is a
+// physically different file with a different id, so a forked view fails the
+// check on its next open, BEFORE any pragma or migration writes. A deliberate
+// replacement (restore, copied-in backup) re-stamps by dropping a marker file
+// `<db>.adopt` next to the database.
+
+/** FNV-1a over the identity string, folded to a positive 31-bit non-zero int. */
+function fileIdentityStamp(file: string): number | null {
+  let stat: fs.BigIntStats;
+  try {
+    stat = fs.statSync(file, { bigint: true });
+  } catch {
+    return null;
+  }
+  if (stat.ino === 0n) return null; // non-NTFS / unsupported: guard degrades off
+  const identity = `${stat.dev}:${stat.ino}`;
+  let h = 0x811c9dc5;
+  for (let i = 0; i < identity.length; i++) {
+    h ^= identity.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  h = h & 0x7fffffff;
+  return h === 0 ? 1 : h;
+}
+
+/** Throws before ANY write when the opened file is not the stamped lineage. */
+function assertDbLineage(db: Database.Database): void {
+  const expected = fileIdentityStamp(db.name);
+  if (expected === null) return;
+  const stored = db.pragma('application_id', { simple: true }) as number;
+  if (stored === expected) return;
+  const adoptMarker = `${db.name}.adopt`;
+  if (stored === 0 || fs.existsSync(adoptMarker)) {
+    // Never stamped (pre-guard database or fresh file), or a deliberate
+    // replacement announced via the marker: adopt this file as the lineage.
+    db.pragma(`application_id = ${expected}`);
+    try {
+      fs.rmSync(adoptMarker, { force: true });
+    } catch {
+      /* marker cleanup is best-effort */
+    }
+    return;
+  }
+  throw new ContrailError(
+    `This database file is not the one this data directory last used — it is a copy ` +
+      `(restored backup, or an MSIX-virtualized overlay view of ${db.name}). Writes are ` +
+      `refused to prevent a split-brain fork. If this replacement was deliberate, create ` +
+      `an empty file named "${adoptMarker}" and reopen.`,
+    'db_lineage_mismatch',
+  );
+}
 import type {
   ArtifactRecord,
   AuditEvent,
@@ -24,9 +89,19 @@ export class ContrailDb {
 
   constructor(filePath: string = dbPath()) {
     this.db = new Database(filePath);
-    this.db.pragma('journal_mode = WAL');
-    this.db.pragma('foreign_keys = ON');
-    this.migrate();
+    try {
+      // The lineage check runs FIRST — before WAL mode, before migrations —
+      // so a mismatched view is refused without writing to the database.
+      assertDbLineage(this.db);
+      this.db.pragma('journal_mode = WAL');
+      this.db.pragma('foreign_keys = ON');
+      this.migrate();
+    } catch (err) {
+      // A refused open must not leak the handle — a locked file with no
+      // owner object is its own incident.
+      this.db.close();
+      throw err;
+    }
   }
 
   private migrate(): void {
