@@ -124,9 +124,11 @@ was cut. The layout, if you need to find a file yourself:
 <data dir>/snapshots/<connection-id>/current/<folder>/<Name>.<ext>
 ```
 
-- **Data dir** — Windows `%LOCALAPPDATA%\Contrail`, macOS
-  `~/Library/Application Support/Contrail`, Linux `~/.local/share/contrail`
-  (overridden by `CONTRAIL_DATA_DIR` if set).
+- **Data dir** — Windows `%USERPROFILE%\.contrail` (kept OUT of AppData so
+  MSIX-containerized hosts and normal processes see the same physical files;
+  a legacy `%LOCALAPPDATA%\Contrail` install migrates automatically on first
+  run), macOS `~/Library/Application Support/Contrail`, Linux
+  `~/.local/share/contrail` (overridden by `CONTRAIL_DATA_DIR` if set).
 - **`<connection-id>` is the UUID `id` from `list_connections`, not the alias.**
   Look it up; do not guess or use the alias as a folder name.
 - **Layout is standard Salesforce source format**: `objects/Account.object`,
