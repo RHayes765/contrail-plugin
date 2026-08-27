@@ -37,6 +37,9 @@ an org.
   the component change list, test results, and blast radius.
 - **Destructive changes are summarized prominently** — deletions, field type changes,
   and anything that can lose data lead the summary, never buried in a list.
+  Deletions are accepted for **any** metadata type, including types Contrail cannot
+  author — cleaning up stray metadata is a feature. The guard is the human approval
+  and the prominence, not a type gate.
 - **The confirmation code is not available to you.** Validation opens an approval
   page in the human's browser; the code appears only there. Present your summary,
   direct the human to the page, and wait for them to read the code back. Only pass

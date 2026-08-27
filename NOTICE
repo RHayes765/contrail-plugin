@@ -1,0 +1,12 @@
+Contrail — NOTICE
+
+Portions of the skills under skills/ are adapted from the Salesforce Skills
+Library, forcedotcom/sf-skills (https://github.com/forcedotcom/sf-skills),
+Copyright (c) Salesforce, Inc., licensed under the Apache License, Version 2.0
+(see LICENSE-APACHE-2.0 in this repository).
+
+Each adapted skill's SKILL.md carries a footer identifying the upstream commit
+it was adapted from and the nature of the modifications (retargeted from
+sf CLI / Salesforce DX MCP tooling to the Contrail engine tools; workflow
+restructured for Contrail's human-approval write contract). The upstream
+repository is the source of truth for the original, unmodified skills.
