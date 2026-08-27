@@ -80,7 +80,25 @@ export const DEFAULT_CONFIG: ContrailConfig = {
     toolWaitMs: 25 * 1000,
   },
   snapshot: {
-    types: ['ApexClass', 'ApexTrigger', 'Flow', 'CustomObject', 'CustomLabels', 'PermissionSet'],
+    // Integration/eventing types (ConnectedApp, NamedCredential,
+    // ExternalCredential, PlatformEventChannel[Member],
+    // ManagedEventSubscription) are deployable and indexable but kept OUT of
+    // the default manifest — retrieve them explicitly via refresh_snapshot
+    // types, or add them here.
+    types: [
+      'ApexClass',
+      'ApexTrigger',
+      'Flow',
+      'CustomObject',
+      'CustomLabels',
+      'PermissionSet',
+      'CustomTab',
+      'FlexiPage',
+      'CustomApplication',
+      'ReportType',
+      'ApexPage',
+      'GlobalValueSet',
+    ],
     pollIntervalMs: 2000,
     retrieveTimeoutMs: 10 * 60 * 1000,
     toolWaitMs: 25 * 1000,

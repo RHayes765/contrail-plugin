@@ -37,6 +37,8 @@ const CHILD_SPEC: Record<string, { parentType: string; tag: string }> = {
   CustomField: { parentType: 'CustomObject', tag: 'fields' },
   ValidationRule: { parentType: 'CustomObject', tag: 'validationRules' },
   CustomLabel: { parentType: 'CustomLabels', tag: 'labels' },
+  ListView: { parentType: 'CustomObject', tag: 'listViews' },
+  RecordType: { parentType: 'CustomObject', tag: 'recordTypes' },
 };
 
 export function registerMetadataTools(server: McpServer, deps: ToolDeps): void {

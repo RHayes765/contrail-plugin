@@ -19,6 +19,34 @@ export interface IndexedArtifact {
   content: string;
 }
 
+/** One-file-per-artifact types: top-level snapshot dir + extension → type. */
+const SIMPLE_DIR_TYPES: Array<{ dir: string; ext: string; type: string }> = [
+  { dir: 'classes', ext: '.cls', type: 'ApexClass' },
+  { dir: 'triggers', ext: '.trigger', type: 'ApexTrigger' },
+  { dir: 'flows', ext: '.flow', type: 'Flow' },
+  { dir: 'permissionsets', ext: '.permissionset', type: 'PermissionSet' },
+  { dir: 'tabs', ext: '.tab', type: 'CustomTab' },
+  { dir: 'flexipages', ext: '.flexipage', type: 'FlexiPage' },
+  { dir: 'applications', ext: '.app', type: 'CustomApplication' },
+  { dir: 'reportTypes', ext: '.reportType', type: 'ReportType' },
+  { dir: 'pages', ext: '.page', type: 'ApexPage' },
+  { dir: 'globalValueSets', ext: '.globalValueSet', type: 'GlobalValueSet' },
+  { dir: 'connectedApps', ext: '.connectedApp', type: 'ConnectedApp' },
+  { dir: 'namedCredentials', ext: '.namedCredential', type: 'NamedCredential' },
+  { dir: 'externalCredentials', ext: '.externalCredential', type: 'ExternalCredential' },
+  { dir: 'platformEventChannels', ext: '.platformEventChannel', type: 'PlatformEventChannel' },
+  {
+    dir: 'platformEventChannelMembers',
+    ext: '.platformEventChannelMember',
+    type: 'PlatformEventChannelMember',
+  },
+  {
+    dir: 'managedEventSubscriptions',
+    ext: '.managedEventSubscription',
+    type: 'ManagedEventSubscription',
+  },
+];
+
 export function indexSnapshotFiles(
   files: Map<string, Uint8Array>,
   fileProps: FileProperties[],
@@ -53,22 +81,20 @@ export function indexSnapshotFiles(
     const content = Buffer.from(bytes).toString('utf8');
     const name = fileBaseName(relPath);
 
-    if (relPath.startsWith('classes/') && relPath.endsWith('.cls')) {
-      push('ApexClass', name, relPath, content);
-    } else if (relPath.startsWith('triggers/') && relPath.endsWith('.trigger')) {
-      push('ApexTrigger', name, relPath, content);
-    } else if (relPath.startsWith('flows/') && relPath.endsWith('.flow')) {
-      push('Flow', name, relPath, content);
-    } else if (relPath.startsWith('objects/') && relPath.endsWith('.object')) {
+    if (relPath.startsWith('objects/') && relPath.endsWith('.object')) {
       const objectProp = props.get(`CustomObject:${name.toLowerCase()}`);
       push('CustomObject', name, relPath, content);
-      for (const block of extractChildBlocks(content, 'fields')) {
-        const child = blockFullName(block);
-        if (child) push('CustomField', `${name}.${child}`, relPath, block, objectProp);
-      }
-      for (const block of extractChildBlocks(content, 'validationRules')) {
-        const child = blockFullName(block);
-        if (child) push('ValidationRule', `${name}.${child}`, relPath, block, objectProp);
+      const childTags: Array<[string, string]> = [
+        ['fields', 'CustomField'],
+        ['validationRules', 'ValidationRule'],
+        ['listViews', 'ListView'],
+        ['recordTypes', 'RecordType'],
+      ];
+      for (const [tag, childType] of childTags) {
+        for (const block of extractChildBlocks(content, tag)) {
+          const child = blockFullName(block);
+          if (child) push(childType, `${name}.${child}`, relPath, block, objectProp);
+        }
       }
     } else if (relPath.startsWith('labels/') && relPath.endsWith('.labels')) {
       const labelsProp = props.get('CustomLabels:customlabels');
@@ -77,10 +103,15 @@ export function indexSnapshotFiles(
         const child = blockFullName(block);
         if (child) push('CustomLabel', child, relPath, block, labelsProp);
       }
-    } else if (relPath.startsWith('permissionsets/') && relPath.endsWith('.permissionset')) {
-      push('PermissionSet', name, relPath, content);
     } else {
-      log('debug', 'snapshot file not indexed (unmapped type)', { relPath });
+      const simple = SIMPLE_DIR_TYPES.find(
+        (s) => relPath.startsWith(`${s.dir}/`) && relPath.endsWith(s.ext),
+      );
+      if (simple) {
+        push(simple.type, name, relPath, content);
+      } else {
+        log('debug', 'snapshot file not indexed (unmapped type)', { relPath });
+      }
     }
   }
   return artifacts;

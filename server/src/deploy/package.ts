@@ -40,7 +40,13 @@ export interface ComponentChange {
 /** File placement per deployable type (metadata format). */
 const FILE_TYPES: Record<
   string,
-  { dir: string; ext: string; metaRoot?: string }
+  {
+    dir: string;
+    ext: string;
+    metaRoot?: string;
+    /** Default -meta.xml when the snapshot has none (types whose meta needs more than apiVersion+status). */
+    metaXml?: (apiVersion: string, apiName: string) => string;
+  }
 > = {
   ApexClass: { dir: 'classes', ext: '.cls', metaRoot: 'ApexClass' },
   ApexTrigger: { dir: 'triggers', ext: '.trigger', metaRoot: 'ApexTrigger' },
@@ -50,6 +56,35 @@ const FILE_TYPES: Record<
   Profile: { dir: 'profiles', ext: '.profile' },
   CustomTab: { dir: 'tabs', ext: '.tab' },
   FlowDefinition: { dir: 'flowDefinitions', ext: '.flowDefinition' },
+  // S17: declarative UI / reporting types.
+  FlexiPage: { dir: 'flexipages', ext: '.flexipage' },
+  CustomApplication: { dir: 'applications', ext: '.app' },
+  ReportType: { dir: 'reportTypes', ext: '.reportType' },
+  GlobalValueSet: { dir: 'globalValueSets', ext: '.globalValueSet' },
+  ApexPage: {
+    dir: 'pages',
+    ext: '.page',
+    metaRoot: 'ApexPage',
+    // ApexPage meta requires a <label> and has no <status>.
+    metaXml: (v, name) =>
+      `<?xml version="1.0" encoding="UTF-8"?>\n<ApexPage xmlns="${XMLNS}">\n` +
+      `    <apiVersion>${escapeXml(v)}</apiVersion>\n` +
+      `    <label>${escapeXml(name)}</label>\n</ApexPage>\n`,
+  },
+  // S17: integration / eventing types (deployable + indexable; not in the
+  // default snapshot manifest — retrieve explicitly via refresh_snapshot types).
+  ConnectedApp: { dir: 'connectedApps', ext: '.connectedApp' },
+  NamedCredential: { dir: 'namedCredentials', ext: '.namedCredential' },
+  ExternalCredential: { dir: 'externalCredentials', ext: '.externalCredential' },
+  PlatformEventChannel: { dir: 'platformEventChannels', ext: '.platformEventChannel' },
+  PlatformEventChannelMember: {
+    dir: 'platformEventChannelMembers',
+    ext: '.platformEventChannelMember',
+  },
+  ManagedEventSubscription: {
+    dir: 'managedEventSubscriptions',
+    ext: '.managedEventSubscription',
+  },
 };
 
 const XMLNS_META = 'http://soap.sforce.com/2006/04/metadata';
@@ -87,6 +122,20 @@ const CHILD_TYPES: Record<
     ext: '.labels',
     tag: 'labels',
     parentFromName: () => 'CustomLabels',
+  },
+  ListView: {
+    containerRoot: 'CustomObject',
+    dir: 'objects',
+    ext: '.object',
+    tag: 'listViews',
+    parentFromName: (n) => n.split('.')[0] ?? '',
+  },
+  RecordType: {
+    containerRoot: 'CustomObject',
+    dir: 'objects',
+    ext: '.object',
+    tag: 'recordTypes',
+    parentFromName: (n) => n.split('.')[0] ?? '',
   },
 };
 
@@ -130,6 +179,7 @@ export function buildDeployZip(
       if (fileSpec.metaRoot) {
         const meta =
           metaXmlLookup(c.type, c.api_name) ??
+          fileSpec.metaXml?.(apiVersionNumber, c.api_name) ??
           `<?xml version="1.0" encoding="UTF-8"?>\n<${fileSpec.metaRoot} xmlns="${XMLNS}">\n` +
             `    <apiVersion>${escapeXml(apiVersionNumber)}</apiVersion>\n` +
             `    <status>Active</status>\n</${fileSpec.metaRoot}>\n`;
@@ -178,6 +228,12 @@ export function buildDeployZip(
     files.set(container.path, strToU8(doc));
   }
 
+  // Deletions are deliberately NOT gated by the deployable-type allowlist:
+  // destructiveChanges needs only a manifest entry, every deletion is
+  // approval-gated and destructive-prominent, and removing types Contrail
+  // cannot author (stray-metadata cleanup) is a feature. Name/type syntax is
+  // still validated. Pinned by test — do not "fix" this into the FILE_TYPES
+  // gate.
   for (const d of deletions) {
     validateTypeAndName(d.type, d.api_name);
   }
@@ -281,6 +337,14 @@ export function analyzeChanges(
           );
         }
       }
+      // Full-document UI types replace, never merge: an element missing from
+      // the proposed content is REMOVED from the org's definition.
+      if ((c.type === 'FlexiPage' || c.type === 'CustomApplication') && change === 'modify') {
+        warnings.push(
+          `WHOLE-DOCUMENT REPLACE — this deploy fully replaces the org's ${c.type}; ` +
+            `anything not present in the proposed content is removed.`,
+        );
+      }
     }
     changes.push({ type: c.type, api_name: c.api_name, change, warnings, ...sourceOf(c) });
   }
@@ -317,7 +381,7 @@ interface PermissionNeed {
   type: string;
   api_name: string;
   permission: string;
-  kind: 'field' | 'object' | 'class' | 'tab';
+  kind: 'field' | 'object' | 'class' | 'tab' | 'page' | 'application';
 }
 
 /** Custom entities (need explicit object permissions); standard objects don't. */
@@ -363,6 +427,14 @@ function isGranted(containerText: string, need: PermissionNeed): boolean {
       return permissionBlocks(containerText, 'classAccesses').some(
         (b) => named(b, 'apexClass', need.api_name) && flagOn(b, 'enabled'),
       );
+    case 'page':
+      return permissionBlocks(containerText, 'pageAccesses').some(
+        (b) => named(b, 'apexPage', need.api_name) && flagOn(b, 'enabled'),
+      );
+    case 'application':
+      return permissionBlocks(containerText, 'applicationVisibilities').some(
+        (b) => named(b, 'application', need.api_name) && flagOn(b, 'visible'),
+      );
     case 'tab': {
       const blocks = [
         ...permissionBlocks(containerText, 'tabVisibilities'),
@@ -397,6 +469,10 @@ export function analyzePermissionCoverage(components: ProposedComponent[]): Perm
       needs.push({ type: 'ApexClass', api_name: c.api_name, permission: 'Apex class access', kind: 'class' });
     } else if (c.type === 'CustomTab') {
       needs.push({ type: 'CustomTab', api_name: c.api_name, permission: 'tab visibility', kind: 'tab' });
+    } else if (c.type === 'ApexPage') {
+      needs.push({ type: 'ApexPage', api_name: c.api_name, permission: 'Visualforce page access', kind: 'page' });
+    } else if (c.type === 'CustomApplication') {
+      needs.push({ type: 'CustomApplication', api_name: c.api_name, permission: 'app visibility', kind: 'application' });
     } else if (c.type === 'CustomObject') {
       if (isCustomEntity(c.api_name)) {
         needs.push({ type: 'CustomObject', api_name: c.api_name, permission: 'object permissions', kind: 'object' });
