@@ -9,6 +9,29 @@ Contrail treats the Salesforce org as the first-class object. These rules are no
 optional etiquette — they are the operating contract for every session that touches
 an org.
 
+## Load the specialist skill first
+
+These house rules govern **how** Contrail touches an org. They do not carry the
+domain knowledge for building things well — that lives in sibling skills, and
+working from memory where one exists is how you produce confident, wrong
+Salesforce. Load the matching skill *before* you author or diagnose, not after a
+deploy fails:
+
+| Doing this | Load |
+|---|---|
+| Any metadata authored for deploy — packaging, permissions, inline vs file | `building-salesforce-metadata` |
+| Apex classes, triggers, async jobs, REST resources | `platform-apex-generate` |
+| Apex test classes, coverage warnings, test failures | `platform-apex-test-generate` |
+| Custom objects — sharing model, name field, description upkeep | `platform-custom-object-generate` |
+| Custom fields, picklists, roll-up summaries, master-detail | `platform-custom-field-generate` |
+| Permission sets — FLS, object, Apex, page, app, tab access | `platform-permission-set-generate` |
+| Validation rules and their formulas | `platform-validation-rule-generate` |
+| Debug logs, governor limits, stack traces | `platform-apex-logs-debug` |
+
+Not every environment has every skill installed. One that will not load simply
+does not exist here — say so plainly and proceed on these house rules alone,
+rather than inventing what the skill would have said.
+
 ## 1. Never guess an org
 
 - Every action names its target connection explicitly, by alias. If the user says
