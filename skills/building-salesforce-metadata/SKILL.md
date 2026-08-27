@@ -106,6 +106,20 @@ Instead, write the edited source to a file and give `validate_deploy` the path:
   delete it in **Setup → Flows**; don't loop on destructive `Flow` deploys.
   An object a flow references can't be deleted until the flow itself is gone, so the
   object teardown waits on the UI deletion.
+- **Custom metadata is metadata twice over.** The TYPE is a `CustomObject` named
+  `X__mdt` (deploy it like any object, fields included). The RECORDS deploy as
+  type `CustomMetadata` with dotted names `Type.Record` — the type name **without**
+  the `__mdt` suffix — and a `<CustomMetadata>` body of `<label>`, `<protected>`,
+  and `<values><field>Field__c</field><value xsi:type="xsd:string">…</value></values>`
+  per field. One package may carry the type AND its records. `dml_propose` refuses
+  `__mdt` objects by design: the REST API cannot write custom-metadata records.
+  On a record **modify**, fields omitted from the content are reset — always start
+  from the retrieved record, not from memory.
+- **Page layouts** (`Layout`) are named `Object-Layout Name` — spaces are normal,
+  and standard layouts include parens (`Account-Account (Marketing) Layout`).
+  Deploying a layout **replaces the whole document** and **assigns nothing**:
+  which profiles see it is `layoutAssignments` in Profile metadata (or Setup).
+  Prefer retrieve → edit → deploy over authoring a layout from scratch.
 - **Namespaces** can contain single underscores (`sales_channel__Foo`), so split a
   qualified API name at the **first** `__`, never with a greedy pattern.
 - **Names**: components deploy under `type/Name.ext`; the tools reject names with

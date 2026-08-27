@@ -367,6 +367,8 @@ const TYPE_DIRS: Record<string, string> = {
   PlatformEventChannel: 'platformEventChannels',
   PlatformEventChannelMember: 'platformEventChannelMembers',
   ManagedEventSubscription: 'managedEventSubscriptions',
+  Layout: 'layouts',
+  CustomMetadata: 'customMetadata',
 };
 
 /** The refreshed types' own directories — null if any requested type has no known mapping. */

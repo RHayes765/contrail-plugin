@@ -123,23 +123,23 @@ describe('S17 deployable types', () => {
   });
 
   it('PIN: deletions are NOT gated by the deployable-type allowlist', () => {
-    // Layout is not deployable through Contrail; deleting one must still build.
+    // Dashboard is not deployable through Contrail; deleting one must still build.
     const built = buildDeployZip(
       [],
       [
-        { type: 'Layout', api_name: 'Invoice__c-Invoice Layout' },
+        { type: 'Dashboard', api_name: 'Ops-Weekly Dashboard' },
         { type: 'ManagedEventSubscription', api_name: 'Old_Sub' },
       ],
       V,
       noMeta,
     );
     expect(built.files).toContain('destructiveChangesPost.xml');
-    expect(built.destructiveXml).toContain('<name>Layout</name>');
+    expect(built.destructiveXml).toContain('<name>Dashboard</name>');
     expect(built.destructiveXml).toContain('<members>Old_Sub</members>');
   });
 
   it('an undeployable type still fails loudly on the additive path', () => {
-    expect(() => buildDeployZip([comp('Layout', 'X-Y', '<Layout/>')], [], V, noMeta)).toThrow(
+    expect(() => buildDeployZip([comp('Dashboard', 'X-Y', '<Dashboard/>')], [], V, noMeta)).toThrow(
       /not deployable through Contrail/,
     );
   });
@@ -240,7 +240,7 @@ describe('S17 snapshot indexing', () => {
         'globalValueSets/Region.globalValueSet': strToU8('<GlobalValueSet/>'),
         'connectedApps/Contrail.connectedApp': strToU8('<ConnectedApp/>'),
         'managedEventSubscriptions/Sub.managedEventSubscription': strToU8('<ManagedEventSubscription/>'),
-        'layouts/Invoice__c-Layout.layout': strToU8('<Layout/>'), // still unmapped
+        'dashboards/Ops.dashboard': strToU8('<Dashboard/>'), // still unmapped
       }),
     );
     const artifacts = indexSnapshotFiles(files, [], '2026-08-26T00:00:00.000Z');
@@ -257,12 +257,138 @@ describe('S17 snapshot indexing', () => {
     expect(keys.has('ListView:Invoice__c.All_Open')).toBe(true);
     expect(keys.has('RecordType:Invoice__c.Standard')).toBe(true);
     expect(keys.has('CustomField:Invoice__c.Amount__c')).toBe(true); // unchanged behavior
-    expect([...keys].some((k) => k.startsWith('Layout:') || k.includes('meta'))).toBe(false);
+    expect([...keys].some((k) => k.startsWith('Dashboard:') || k.includes('meta'))).toBe(false);
 
     // Child fragments carry their own block, not the whole container.
     const lv = artifacts.find((a) => a.type === 'ListView')!;
     expect(lv.content).toContain('<fullName>All_Open</fullName>');
     expect(lv.content).not.toContain('recordTypes');
     expect(lv.filePath).toBe('objects/Invoice__c.object');
+  });
+});
+
+describe('S19: Layout and CustomMetadata', () => {
+  it('places layouts (spaces and all) and custom metadata records correctly', () => {
+    const built = buildDeployZip(
+      [
+        comp('Layout', 'Invoice__c-Invoice Layout', '<Layout/>'),
+        comp('CustomMetadata', 'Billing_Config.Default_Terms', '<CustomMetadata/>'),
+      ],
+      [],
+      V,
+      noMeta,
+    );
+    expect(built.files).toContain('layouts/Invoice__c-Invoice Layout.layout');
+    expect(built.files).toContain('customMetadata/Billing_Config.Default_Terms.md');
+    expect(built.packageXml).toContain('<name>Layout</name>');
+    expect(built.packageXml).toContain('<members>Invoice__c-Invoice Layout</members>');
+    expect(built.packageXml).toContain('<name>CustomMetadata</name>');
+    expect(built.packageXml).toContain('<members>Billing_Config.Default_Terms</members>');
+  });
+
+  it('one package carries a __mdt type definition AND its records', () => {
+    const built = buildDeployZip(
+      [
+        comp('CustomObject', 'Billing_Config__mdt', '<CustomObject/>'),
+        comp('CustomMetadata', 'Billing_Config.Default_Terms', '<CustomMetadata/>'),
+        comp('CustomMetadata', 'Billing_Config.Rush_Terms', '<CustomMetadata/>'),
+      ],
+      [],
+      V,
+      noMeta,
+    );
+    expect(built.files).toContain('objects/Billing_Config__mdt.object');
+    expect(built.files).toContain('customMetadata/Billing_Config.Default_Terms.md');
+    expect(built.files).toContain('customMetadata/Billing_Config.Rush_Terms.md');
+    expect(built.packageXml).toContain('<members>Billing_Config__mdt</members>');
+  });
+
+  it('warns per change kind: layout add = unassigned; layout/record modify = replace', () => {
+    const conn = { id: 'conn-1', alias: 'dev' } as ConnectionRecord;
+    const dbAdd = { getArtifact: () => null } as unknown as ContrailDb;
+    const storeNone = { readCurrentFile: () => null } as unknown as SnapshotStore;
+    const added = analyzeChanges(
+      dbAdd,
+      storeNone,
+      conn,
+      [comp('Layout', 'Invoice__c-Invoice Layout', '<Layout>new</Layout>')],
+      [],
+    );
+    expect(added.changes[0]!.change).toBe('add');
+    expect(added.changes[0]!.warnings.join(' ')).toMatch(/NOT ASSIGNED/);
+
+    const dbMod = {
+      getArtifact: () => ({ filePath: 'x' }),
+    } as unknown as ContrailDb;
+    const storeOld = { readCurrentFile: () => '<old/>' } as unknown as SnapshotStore;
+    const modified = analyzeChanges(
+      dbMod,
+      storeOld,
+      conn,
+      [
+        comp('Layout', 'Invoice__c-Invoice Layout', '<Layout>new</Layout>'),
+        comp('CustomMetadata', 'Billing_Config.Default_Terms', '<CustomMetadata>new</CustomMetadata>'),
+      ],
+      [],
+    );
+    expect(modified.changes[0]!.warnings.join(' ')).toMatch(/WHOLE-DOCUMENT REPLACE/);
+    expect(modified.changes[0]!.warnings.join(' ')).not.toMatch(/NOT ASSIGNED/);
+    expect(modified.changes[1]!.warnings.join(' ')).toMatch(/FULL-RECORD REPLACE/);
+  });
+
+  it('indexes layouts (decoding percent-escapes) and custom metadata records', () => {
+    const files = new Map(
+      Object.entries({
+        'layouts/Invoice__c-Invoice Layout.layout': strToU8('<Layout/>'),
+        'layouts/Account-Account %28Marketing%29 Layout.layout': strToU8('<Layout/>'),
+        'customMetadata/Billing_Config.Default_Terms.md': strToU8('<CustomMetadata/>'),
+      }),
+    );
+    const artifacts = indexSnapshotFiles(files, [], '2026-08-27T00:00:00.000Z');
+    const keys = new Set(artifacts.map((a) => `${a.type}:${a.apiName}`));
+    expect(keys.has('Layout:Invoice__c-Invoice Layout')).toBe(true);
+    expect(keys.has('Layout:Account-Account (Marketing) Layout')).toBe(true); // decoded
+    expect(keys.has('CustomMetadata:Billing_Config.Default_Terms')).toBe(true);
+    // The file path stays as retrieved (encoded) so snapshot reads resolve.
+    const marketing = artifacts.find((a) => a.apiName.includes('(Marketing)'))!;
+    expect(marketing.filePath).toBe('layouts/Account-Account %28Marketing%29 Layout.layout');
+  });
+
+  it('paren-named standard layouts round-trip: index decoded, deploy encoded, member literal', () => {
+    const name = 'Account-Account (Marketing) Layout';
+    const built = buildDeployZip([comp('Layout', name, '<Layout/>')], [], V, noMeta);
+    // The zip entry mirrors the retrieve encoding; the manifest stays literal.
+    expect(built.files).toContain('layouts/Account-Account %28Marketing%29 Layout.layout');
+    expect(built.packageXml).toContain(`<members>${name}</members>`);
+  });
+
+  it('__mdt fields never trigger the FLS permission warning (cmdt has no FLS)', () => {
+    const cov = analyzePermissionCoverage([
+      comp(
+        'CustomObject',
+        'Billing_Config__mdt',
+        '<CustomObject><fields><fullName>Rate__c</fullName></fields></CustomObject>',
+      ),
+      comp('CustomField', 'Billing_Config__mdt.Extra__c', '<fields/>'),
+      comp('CustomMetadata', 'Billing_Config.Default_Terms', '<CustomMetadata/>'),
+    ]);
+    expect(cov.uncovered).toEqual([]);
+    expect(cov.warning).toBeNull();
+  });
+
+  it('a stray % beside real escapes decodes the escapes and keeps the stray', () => {
+    const files = new Map(
+      Object.entries({ 'layouts/Odd-100% %28VIP%29 Layout.layout': strToU8('<Layout/>') }),
+    );
+    const artifacts = indexSnapshotFiles(files, [], '2026-08-27T00:00:00.000Z');
+    expect(artifacts[0]!.apiName).toBe('Odd-100% (VIP) Layout');
+  });
+
+  it('a literal % that is not an escape survives indexing unchanged', () => {
+    const files = new Map(
+      Object.entries({ 'layouts/Odd-100% Done Layout.layout': strToU8('<Layout/>') }),
+    );
+    const artifacts = indexSnapshotFiles(files, [], '2026-08-27T00:00:00.000Z');
+    expect(artifacts[0]!.apiName).toBe('Odd-100% Done Layout');
   });
 });

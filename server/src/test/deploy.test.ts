@@ -1003,6 +1003,22 @@ describe('dml two-step', () => {
     expect(db.queryAuditEvents({}).map((e) => e.eventType)).toContain('dml.executed');
   });
 
+  it('refuses __mdt objects on the flat path with a pointer to the metadata route (S19)', async () => {
+    const result = await client.callTool({
+      name: 'dml_propose',
+      arguments: {
+        connection: 'deploy-org',
+        operation: 'insert',
+        object: 'Trigger_Action__mdt',
+        records: [{ Label: 'Nope' }],
+      },
+    });
+    const text = textOf(result);
+    expect(text).toMatch(/METADATA, not data/);
+    expect(text).toMatch(/CustomMetadata/);
+    expect(text).toMatch(/<Type>\.<Record>/);
+  });
+
   it('deletes render in the destructive section of the approval page', async () => {
     await client.callTool({
       name: 'dml_propose',
@@ -1403,6 +1419,14 @@ describe('multi-step dml plans', () => {
           { operation: 'insert', object: 'Contact', record: { Description: 'see @{a.id} above', LastName: 'Z' } },
         ],
         want: /whole-value/,
+      },
+      {
+        // custom metadata records are metadata, not data (S19)
+        steps: [
+          { ref: 'a', operation: 'insert', object: 'Account', record: { Name: 'X' } },
+          { operation: 'insert', object: 'Trigger_Action__mdt', record: { Label: 'Y' } },
+        ],
+        want: /METADATA, not data.*CustomMetadata/,
       },
       {
         // duplicate ref

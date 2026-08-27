@@ -98,6 +98,8 @@ export const DEFAULT_CONFIG: ContrailConfig = {
       'ReportType',
       'ApexPage',
       'GlobalValueSet',
+      'Layout',
+      'CustomMetadata',
     ],
     pollIntervalMs: 2000,
     retrieveTimeoutMs: 10 * 60 * 1000,

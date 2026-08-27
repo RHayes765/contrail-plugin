@@ -63,6 +63,14 @@ function validateDmlPlan(args: {
     const step = steps[i]!;
     const where = `step ${i + 1}`;
     if (!/^[A-Za-z0-9_]+$/.test(step.object)) return `${where}: invalid object API name`;
+    if (/__mdt$/i.test(step.object)) {
+      return (
+        `${where}: ${step.object} is a custom metadata type — its records are METADATA, ` +
+        `not data, and the REST API cannot write them. Deploy the record instead: ` +
+        `validate_deploy with type CustomMetadata, api_name "<Type>.<Record>" ` +
+        `(type name without __mdt).`
+      );
+    }
     if (step.ref !== undefined) {
       if (!REF_RE.test(step.ref)) return `${where}: invalid ref "${step.ref}" (letters/digits/_, start with a letter)`;
       if (allRefs.has(step.ref)) return `${where}: duplicate ref "${step.ref}"`;
@@ -143,7 +151,8 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
                   'ApexClass, ApexTrigger, ApexPage, Flow, CustomObject, PermissionSet, ' +
                     'CustomTab, FlexiPage, CustomApplication, ReportType, GlobalValueSet, ' +
                     'ConnectedApp, NamedCredential, ExternalCredential, PlatformEventChannel(Member), ' +
-                    'ManagedEventSubscription, or child types CustomField / ValidationRule / ' +
+                    'ManagedEventSubscription, Layout, CustomMetadata (records, dotted ' +
+                    'Type.Record names), or child types CustomField / ValidationRule / ' +
                     'CustomLabel / ListView / RecordType.',
                 ),
               api_name: z.string().describe('Full API name; children dotted (Account.MyField__c).'),
@@ -458,6 +467,14 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
           return fail('Provide either steps (a plan) or operation + object (flat).');
         }
         if (!/^[A-Za-z0-9_]+$/.test(args.object)) return fail('invalid object API name');
+        if (/__mdt$/i.test(args.object)) {
+          return fail(
+            `${args.object} is a custom metadata type — its records are METADATA, not ` +
+              `data, and the REST API cannot write them. Deploy the record instead: ` +
+              `validate_deploy with type CustomMetadata, api_name "<Type>.<Record>" ` +
+              `(type name without __mdt).`,
+          );
+        }
         if (args.operation === 'delete') {
           if (!args.ids?.length) return fail('delete requires ids.');
           if (args.ids.some((i) => !ID_RE.test(i))) return fail('invalid record id in ids.');

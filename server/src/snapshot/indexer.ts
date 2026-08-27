@@ -45,6 +45,8 @@ const SIMPLE_DIR_TYPES: Array<{ dir: string; ext: string; type: string }> = [
     ext: '.managedEventSubscription',
     type: 'ManagedEventSubscription',
   },
+  { dir: 'layouts', ext: '.layout', type: 'Layout' },
+  { dir: 'customMetadata', ext: '.md', type: 'CustomMetadata' },
 ];
 
 export function indexSnapshotFiles(
@@ -142,7 +144,26 @@ function blockFullName(block: string): string | null {
 
 function fileBaseName(relPath: string): string {
   const base = relPath.split('/').at(-1) ?? relPath;
-  return base.replace(/\.[^.]+$/, '');
+  const stripped = base.replace(/\.[^.]+$/, '');
+  // Retrieve zips percent-encode special characters in FILE names (a layout
+  // named "Account (Marketing) Layout" arrives as "Account %28Marketing%29
+  // Layout.layout") while fileProperties carry the decoded fullName. Decode
+  // so the index key matches the real API name; a literal '%' that is not an
+  // escape leaves the name as-is.
+  try {
+    return decodeURIComponent(stripped);
+  } catch {
+    // A stray literal '%' alongside real escapes: decode escape-by-escape so
+    // the valid ones resolve and the stray survives, instead of one bad byte
+    // poisoning the whole name.
+    return stripped.replace(/%[0-9A-Fa-f]{2}/g, (m) => {
+      try {
+        return decodeURIComponent(m);
+      } catch {
+        return m;
+      }
+    });
+  }
 }
 
 function sha256(content: string): string {

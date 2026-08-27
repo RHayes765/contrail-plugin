@@ -85,6 +85,18 @@ const FILE_TYPES: Record<
     dir: 'managedEventSubscriptions',
     ext: '.managedEventSubscription',
   },
+  // S19: legacy page layouts. fullName is "Object-Layout Name" — spaces,
+  // parens, apostrophes are all normal ("Account-Account (Marketing) Layout").
+  // Retrieve zips percent-encode such characters in FILE names (the indexer
+  // decodes); deploy zips mirror that via fileSafeName, with the literal
+  // fullName in package.xml members.
+  Layout: { dir: 'layouts', ext: '.layout' },
+  // S19: custom metadata RECORDS (the record's TYPE is a CustomObject named
+  // X__mdt and deploys through the CustomObject path — one package may carry
+  // the type and its records together). fullName is dotted "Type.Record"
+  // with the type name WITHOUT the __mdt suffix; metadata format uses the
+  // bare .md extension.
+  CustomMetadata: { dir: 'customMetadata', ext: '.md' },
 };
 
 const XMLNS_META = 'http://soap.sforce.com/2006/04/metadata';
@@ -139,7 +151,10 @@ const CHILD_TYPES: Record<
   },
 };
 
-const NAME_RE = /^[A-Za-z0-9_.\- ]+$/;
+// Parens/apostrophe/ampersand are legal in layout labels (every standard
+// object ships an "Object (Marketing) Layout"); path safety stays with the
+// explicit '/', '\', '..' guards in validateTypeAndName.
+const NAME_RE = /^[A-Za-z0-9_.\- ()'&]+$/;
 const XMLNS = 'http://soap.sforce.com/2006/04/metadata';
 
 export interface BuiltPackage {
@@ -174,7 +189,7 @@ export function buildDeployZip(
     const fileSpec = FILE_TYPES[c.type];
     if (fileSpec) {
       const short = c.api_name;
-      const path = `${fileSpec.dir}/${short}${fileSpec.ext}`;
+      const path = `${fileSpec.dir}/${fileSafeName(short)}${fileSpec.ext}`;
       files.set(path, strToU8(c.content));
       if (fileSpec.metaRoot) {
         const meta =
@@ -284,6 +299,20 @@ function manifestXml(
   );
 }
 
+/**
+ * Zip entry names mirror what retrieve produces: characters outside the
+ * filename-safe set (parens and friends) are percent-encoded, while the
+ * package.xml <members> keeps the literal fullName — that pairing is how the
+ * Metadata API matches a member to its file.
+ */
+function fileSafeName(name: string): string {
+  return name.replace(/[^A-Za-z0-9 _.\-]/g, (ch) =>
+    Array.from(new TextEncoder().encode(ch))
+      .map((b) => '%' + b.toString(16).toUpperCase().padStart(2, '0'))
+      .join(''),
+  );
+}
+
 function validateTypeAndName(type: string, name: string): void {
   if (!/^[A-Za-z]+$/.test(type)) throw new ContrailError(`invalid type "${type}"`, 'bad_component');
   if (!NAME_RE.test(name) || name.includes('/') || name.includes('\\') || name.includes('..')) {
@@ -339,12 +368,32 @@ export function analyzeChanges(
       }
       // Full-document UI types replace, never merge: an element missing from
       // the proposed content is REMOVED from the org's definition.
-      if ((c.type === 'FlexiPage' || c.type === 'CustomApplication') && change === 'modify') {
+      if (
+        (c.type === 'FlexiPage' || c.type === 'CustomApplication' || c.type === 'Layout') &&
+        change === 'modify'
+      ) {
         warnings.push(
           `WHOLE-DOCUMENT REPLACE — this deploy fully replaces the org's ${c.type}; ` +
             `anything not present in the proposed content is removed.`,
         );
       }
+      // Custom metadata records deploy as full replacements too: a field with
+      // no <values> entry in this content is reset on the org's record.
+      if (c.type === 'CustomMetadata' && change === 'modify') {
+        warnings.push(
+          `FULL-RECORD REPLACE — fields omitted from this content are reset to ` +
+            `null/default on the deployed record.`,
+        );
+      }
+    }
+    // A layout deploy never assigns the layout: assignment lives in Profile
+    // metadata (layoutAssignments) or Setup. Say so for NEW layouts, which
+    // otherwise deploy and then sit unused.
+    if (c.type === 'Layout' && change === 'add') {
+      warnings.push(
+        `NEW LAYOUT IS NOT ASSIGNED by this deploy — profiles keep their current ` +
+          `layout until layoutAssignments change (Profile metadata or Setup).`,
+      );
     }
     changes.push({ type: c.type, api_name: c.api_name, change, warnings, ...sourceOf(c) });
   }
@@ -464,7 +513,10 @@ export function analyzePermissionCoverage(components: ProposedComponent[]): Perm
   const needs: PermissionNeed[] = [];
   for (const c of components) {
     if (c.type === 'CustomField') {
-      needs.push({ type: 'CustomField', api_name: c.api_name, permission: 'field-level security (FLS)', kind: 'field' });
+      // __mdt parents excepted: custom metadata type fields have no FLS.
+      if (!/__mdt\./i.test(c.api_name)) {
+        needs.push({ type: 'CustomField', api_name: c.api_name, permission: 'field-level security (FLS)', kind: 'field' });
+      }
     } else if (c.type === 'ApexClass') {
       needs.push({ type: 'ApexClass', api_name: c.api_name, permission: 'Apex class access', kind: 'class' });
     } else if (c.type === 'CustomTab') {
@@ -477,6 +529,9 @@ export function analyzePermissionCoverage(components: ProposedComponent[]): Perm
       if (isCustomEntity(c.api_name)) {
         needs.push({ type: 'CustomObject', api_name: c.api_name, permission: 'object permissions', kind: 'object' });
       }
+      // Custom metadata type fields have NO field-level security — flagging
+      // them would demand a fieldPermissions grant Salesforce rejects.
+      if (/__mdt$/i.test(c.api_name)) continue;
       // Fields authored inline in the object file still need FLS.
       for (const field of inlineFieldNames(c.content)) {
         needs.push({
