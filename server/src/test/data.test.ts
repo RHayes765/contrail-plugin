@@ -15,6 +15,9 @@ let tmp: string;
 let db: ContrailDb;
 let client: Client;
 let flowInterviewStatusSupported = true;
+let apexTestsDone = true;
+let apexTestsAborted = false;
+let apexHugeRun = false;
 
 function stubSalesforce(): void {
   vi.stubGlobal('fetch', async (input: string | URL, _init?: RequestInit) => {
@@ -30,6 +33,9 @@ function stubSalesforce(): void {
       );
     }
     const q = decodeURIComponent(url);
+    if (url.includes('/tooling/runTestsAsynchronous')) {
+      return new Response(JSON.stringify('707000000000001AAA'));
+    }
     if (url.includes('/tooling/query')) {
       if (q.includes('FROM ApexLog')) {
         return new Response(
@@ -47,6 +53,91 @@ function stubSalesforce(): void {
                 StartTime: '2026-08-06T10:00:00.000Z',
               },
             ],
+          }),
+        );
+      }
+      if (q.includes('FROM ApexTestQueueItem')) {
+        const status = apexTestsAborted ? 'Aborted' : apexTestsDone ? 'Completed' : 'Processing';
+        return new Response(
+          JSON.stringify({
+            totalSize: 2,
+            done: true,
+            records: [
+              { Status: status, ApexClassId: '01p000000000001AAA' },
+              { Status: 'Completed', ApexClassId: '01p000000000003AAA' },
+            ],
+          }),
+        );
+      }
+      if (q.includes('FROM ApexTestResult')) {
+        if (apexTestsAborted) {
+          return new Response(JSON.stringify({ totalSize: 0, done: true, records: [] }));
+        }
+        if (apexHugeRun) {
+          const records = Array.from({ length: 2001 }, (_, i) => ({
+            Outcome: 'Pass',
+            MethodName: `method_${String(i).padStart(4, '0')}`,
+            Message: null,
+            StackTrace: null,
+            RunTime: 5,
+            ApexClass: { Name: 'HugeSuiteTest' },
+          }));
+          return new Response(JSON.stringify({ totalSize: records.length, done: true, records }));
+        }
+        return new Response(
+          JSON.stringify({
+            totalSize: 3,
+            done: true,
+            records: [
+              {
+                Outcome: 'Pass',
+                MethodName: 'creates_invoice',
+                Message: null,
+                StackTrace: null,
+                RunTime: 120,
+                ApexClass: { Name: 'InvoiceServiceTest' },
+              },
+              {
+                Outcome: 'Pass',
+                MethodName: 'rejects_negative_amount',
+                Message: null,
+                StackTrace: null,
+                RunTime: 80,
+                ApexClass: { Name: 'InvoiceServiceTest' },
+              },
+              {
+                Outcome: 'Fail',
+                MethodName: 'sends_reminder',
+                Message: 'System.AssertException: Assertion Failed',
+                StackTrace: 'Class.InvoiceServiceTest.sends_reminder: line 42',
+                RunTime: 95,
+                ApexClass: { Name: 'InvoiceServiceTest' },
+              },
+            ],
+          }),
+        );
+      }
+      if (q.includes('FROM ApexCodeCoverageAggregate')) {
+        return new Response(
+          JSON.stringify({
+            totalSize: 1,
+            done: true,
+            records: [
+              {
+                NumLinesCovered: 90,
+                NumLinesUncovered: 10,
+                ApexClassOrTrigger: { Name: 'InvoiceService' },
+              },
+            ],
+          }),
+        );
+      }
+      if (q.includes('FROM ApexCodeCoverage')) {
+        return new Response(
+          JSON.stringify({
+            totalSize: 1,
+            done: true,
+            records: [{ ApexClassOrTriggerId: '01p000000000002AAA' }],
           }),
         );
       }
@@ -223,6 +314,9 @@ afterEach(async () => {
   db.close();
   fs.rmSync(tmp, { recursive: true, force: true });
   flowInterviewStatusSupported = true;
+  apexTestsDone = true;
+  apexTestsAborted = false;
+  apexHugeRun = false;
 });
 
 function textOf(result: Awaited<ReturnType<Client['callTool']>>): string {
@@ -339,6 +433,133 @@ describe('get_debug_logs', () => {
     });
     const parsed = JSON.parse(textOf(result)) as { body: string };
     expect(parsed.body).toContain('EXCEPTION: something broke');
+  });
+});
+
+describe('run_apex_tests', () => {
+  it('submits and returns a pollable run id with the rollback note', async () => {
+    const result = await client.callTool({
+      name: 'run_apex_tests',
+      arguments: { connection: 'data-org', class_names: ['InvoiceServiceTest'] },
+    });
+    const parsed = JSON.parse(textOf(result)) as { test_run_id: string; status: string; note: string };
+    expect(parsed.test_run_id).toBe('707000000000001AAA');
+    expect(parsed.status).toBe('Queued');
+    expect(parsed.note).toContain('no DML');
+  });
+
+  it('demands exactly one of class_names, tests, test_run_id', async () => {
+    const result = await client.callTool({
+      name: 'run_apex_tests',
+      arguments: {
+        connection: 'data-org',
+        class_names: ['A'],
+        test_run_id: '707000000000001AAA',
+      },
+    });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain('exactly one');
+  });
+
+  it('reports in-progress while the queue is still running', async () => {
+    apexTestsDone = false;
+    const result = await client.callTool({
+      name: 'run_apex_tests',
+      arguments: { connection: 'data-org', test_run_id: '707000000000001AAA' },
+    });
+    const parsed = JSON.parse(textOf(result)) as { status: string; queue: Record<string, number> };
+    expect(parsed.status).toBe('InProgress');
+    expect(parsed.queue.Processing).toBe(1);
+  });
+
+  it('returns outcomes, failure detail, and per-class coverage when complete', async () => {
+    const result = await client.callTool({
+      name: 'run_apex_tests',
+      arguments: { connection: 'data-org', test_run_id: '707000000000001AAA' },
+    });
+    const parsed = JSON.parse(textOf(result)) as {
+      status: string;
+      totals: { run: number; passed: number; failed: number; skipped: number };
+      failures: Array<{ method: string; message: string; stack_trace: string }>;
+      by_class: Record<string, { passed: number; failed: number }>;
+      coverage: Array<{ class: string; percent: number }>;
+    };
+    expect(parsed.status).toBe('Completed');
+    expect(parsed.totals).toMatchObject({ run: 3, passed: 2, failed: 1, skipped: 0 });
+    expect(parsed.failures[0]).toMatchObject({
+      method: 'sends_reminder',
+      message: 'System.AssertException: Assertion Failed',
+    });
+    expect(parsed.failures[0]!.stack_trace).toContain('line 42');
+    expect(parsed.by_class.InvoiceServiceTest).toMatchObject({ passed: 2, failed: 1 });
+    expect(parsed.coverage[0]).toMatchObject({ class: 'InvoiceService', percent: 90 });
+  });
+
+  it('rejects malformed class and method names before any org call', async () => {
+    const bad = await client.callTool({
+      name: 'run_apex_tests',
+      arguments: { connection: 'data-org', class_names: ["Bad'Name"] },
+    });
+    expect(bad.isError).toBe(true);
+    const badMethod = await client.callTool({
+      name: 'run_apex_tests',
+      arguments: {
+        connection: 'data-org',
+        tests: [{ class_name: 'Fine', methods: ["als'o bad"] }],
+      },
+    });
+    expect(badMethod.isError).toBe(true);
+  });
+
+  it('an aborted run is NEVER reported as a pass', async () => {
+    apexTestsAborted = true;
+    const result = client.callTool({
+      name: 'run_apex_tests',
+      arguments: { connection: 'data-org', test_run_id: '707000000000001AAA' },
+    });
+    const parsed = JSON.parse(textOf(await result)) as {
+      status: string;
+      totals: { run: number };
+      queue: Record<string, number>;
+      note: string;
+    };
+    expect(parsed.status).toBe('Aborted');
+    expect(parsed.totals.run).toBe(0);
+    expect(parsed.queue.Aborted).toBe(1);
+    expect(parsed.note).toContain('Do NOT read the totals as a pass');
+  });
+
+  it('a run larger than the result cap is flagged PARTIAL, never quoted as complete', async () => {
+    apexHugeRun = true;
+    const result = client.callTool({
+      name: 'run_apex_tests',
+      arguments: { connection: 'data-org', test_run_id: '707000000000001AAA' },
+    });
+    const parsed = JSON.parse(textOf(await result)) as {
+      totals: { run: number };
+      results_truncated?: boolean;
+      results_note?: string;
+    };
+    expect(parsed.results_truncated).toBe(true);
+    expect(parsed.totals.run).toBe(2000);
+    expect(parsed.results_note).toContain('PARTIAL');
+  });
+
+  it('an empty test_run_id is rejected at the schema, not crashed on', async () => {
+    const result = await client.callTool({
+      name: 'run_apex_tests',
+      arguments: { connection: 'data-org', test_run_id: '' },
+    });
+    expect(result.isError).toBe(true);
+  });
+
+  it('is gated on diagnostics_read', async () => {
+    const result = await client.callTool({
+      name: 'run_apex_tests',
+      arguments: { connection: 'data-only', class_names: ['InvoiceServiceTest'] },
+    });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain('diagnostics_read');
   });
 });
 

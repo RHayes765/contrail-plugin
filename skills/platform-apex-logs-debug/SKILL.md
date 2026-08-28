@@ -153,10 +153,13 @@ noisier levels mean less usable evidence, not more.
 8. **Fix loop**: one consolidated `validate_deploy` carrying the fixed class(es) and
    test class, with `test_level: "RunSpecifiedTests"` and `run_tests` naming the
    relevant test classes (prefer `RunLocalTests` for production targets).
-   Verification = the validation's test results — there is no standalone test
-   runner. Then the approval ritual: the human reads the code from the approval
-   page and you pass it to `execute_deploy`, then `refresh_snapshot` — see
-   **salesforce-house-rules §3**. Final confirmation is a fresh log from a human
+   Verification = the validation's test results. Then the approval ritual: the
+   human reads the code from the approval page and you pass it to
+   `execute_deploy`, then `refresh_snapshot` — see **salesforce-house-rules §3**.
+   After the fix lands, re-run the relevant tests standalone with
+   `run_apex_tests` (rolls back, no approval) instead of spending another
+   validate cycle — and if a trace flag is active, that run also produces fresh
+   debug logs to confirm against. Final confirmation is a fresh log from a human
    reproduction showing the pattern gone.
    If the fix introduces a **new** Apex class, ship a permission set granting
    `classAccesses` in the same package (see **building-salesforce-metadata**).
@@ -349,7 +352,7 @@ Verify: <validate_deploy test expectation + what a clean re-captured log will sh
 | Report all six fields per issue | complete, actionable findings |
 | Classify every finding | lets the user prioritize |
 | Diagnosis here; code authoring per platform-apex-generate | separation of concerns |
-| Tests exist only inside `validate_deploy` | no standalone runner — never promise a test run outside it |
+| New/edited code executes only via `validate_deploy` | already-deployed tests re-run standalone via `run_apex_tests` (rolls back; also regenerates logs under an active trace flag) |
 | Read `LIMIT_USAGE` before declaring limits safe | earlier consumers may own the budget |
 
 ---

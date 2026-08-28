@@ -86,6 +86,7 @@ describe('MCP surface', () => {
       'manage_connection',
       'refresh_snapshot',
       'retrieve_metadata',
+      'run_apex_tests',
       'search_metadata',
       'soql_query',
       'validate_deploy',

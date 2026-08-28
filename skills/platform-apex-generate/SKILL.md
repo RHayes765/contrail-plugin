@@ -32,8 +32,10 @@ invocable methods, and triggers; and for evidence-based review of existing `.cls
   compiler**, reached through `validate_deploy` (checkOnly). Never describe Apex as
   valid, compiling, or deploy-ready before that gate has run and passed.
 - **No anonymous Apex, ever.** There is no ad-hoc execution or smoke-test path. The
-  only way generated code executes is through Apex tests running inside
-  `validate_deploy` (`test_level` + `run_tests`). There is no standalone test runner.
+  only way generated code executes is through Apex tests: inside `validate_deploy`
+  (`test_level` + `run_tests`) while the code is landing, or — once deployed — via
+  `run_apex_tests` (standalone Tooling API runner; test transactions roll back, no
+  approval, `diagnostics_read`-gated).
 - **Never author `-meta.xml` files or a manifest.** Contrail generates the meta XML
   from its configured apiVersion; when modifying an existing class, the snapshot's
   existing meta wins. You do not choose the API version — when a rule below depends
@@ -133,9 +135,11 @@ Writing the source is the midpoint, not the finish line.
      human to grant `diagnostics_read` on the connection via `manage_connection`
      (then re-validate), or to read the failure in the org's own Apex test
      results — never guess at hidden assertion messages.
-   - **Coverage honesty**: the result carries `code_coverage_warnings` (up to 10
-     org-side threshold warnings). There is no per-class coverage percentage report
-     in Contrail — never invent one.
+   - **Coverage honesty**: the validate result carries `code_coverage_warnings` (up
+     to 10 org-side threshold warnings) and no percentages — never invent one. For
+     real per-class numbers, `run_apex_tests` after the deploy lands returns
+     aggregate coverage for the classes the tests exercise — the org-wide union
+     of all tests touching them, not this run's contribution alone.
    - **Bound the loop.** Each cycle is a real org round-trip. After ~3 failed
      validation cycles, stop, present the remaining failures and your best
      diagnosis, and let the human steer.

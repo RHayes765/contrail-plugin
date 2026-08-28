@@ -81,7 +81,7 @@ Nothing is global. Connections are created on demand, per engagement — each pe
 | `refresh_snapshot` | `metadata_read` | Manifest-driven re-retrieve; also runs on-demand staleness checks |
 | `soql_query` / `get_record` | `data_read` | Row-capped, count included |
 | `dml_propose` / `dml_execute` | `data_write` | Two-step (see §5) |
-| `get_debug_logs` / `get_flow_errors` | `diagnostics_read` | Incidental record data accepted knowingly |
+| `get_debug_logs` / `get_flow_errors` / `run_apex_tests` (test transactions commit no DML, hence no approval ritual) | `diagnostics_read` | Incidental record data accepted knowingly |
 | `validate_deploy` | `metadata_write` | Builds package + `checkOnly=true`; returns change summary, blast radius, validation results, and a confirmation code |
 | `execute_deploy` | `metadata_write` | Requires the confirmation code from `validate_deploy` (see §5) |
 | `get_audit_log` | — | Local, exportable |

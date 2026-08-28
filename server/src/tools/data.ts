@@ -205,6 +205,106 @@ export function registerDataTools(server: McpServer, deps: ToolDeps): void {
   );
 
   server.registerTool(
+    'run_apex_tests',
+    {
+      title: 'Run Apex tests standalone (no deploy)',
+      description:
+        'Run already-deployed Apex tests via the Tooling API. No DML from the test ' +
+        'transactions is committed — no records are created, updated, or deleted — so this ' +
+        'needs no approval; the run DOES write test-history and coverage rows, spend the ' +
+        'org\'s daily async-test allowance, and generate debug logs under an active trace ' +
+        'flag. Two-step: submit with class_names (or tests for method-level targeting) and ' +
+        'get a test_run_id; call again with test_run_id to poll, then read per-method ' +
+        'outcomes and per-class aggregate coverage. NEW or edited test classes must reach ' +
+        'the org first via validate_deploy / execute_deploy.',
+      inputSchema: {
+        connection: z.string().describe('Connection alias (or id).'),
+        class_names: z
+          .array(z.string())
+          .min(1)
+          .max(50)
+          .optional()
+          .describe('Test classes to run whole. Exactly one of class_names, tests, test_run_id.'),
+        tests: z
+          .array(
+            z.object({
+              class_name: z.string(),
+              methods: z.array(z.string()).min(1).max(50).optional(),
+            }),
+          )
+          .min(1)
+          .max(50)
+          .optional()
+          .describe('Method-level targeting: per class, optionally specific test methods.'),
+        test_run_id: z
+          .string()
+          .regex(/^[a-zA-Z0-9]{15}([a-zA-Z0-9]{3})?$/)
+          .optional()
+          .describe('AsyncApexJob id from a previous submit — polls status and results.'),
+      },
+    },
+    async (args: {
+      connection: string;
+      class_names?: string[];
+      tests?: Array<{ class_name: string; methods?: string[] }>;
+      test_run_id?: string;
+    }) =>
+      guarded(async () => {
+        const conn = requireConnection(args.connection, 'run_apex_tests');
+        const client = rest(conn);
+        const modes = [args.class_names, args.tests, args.test_run_id].filter(
+          (v) => v !== undefined,
+        );
+        if (modes.length !== 1) {
+          return fail('Pass exactly one of class_names, tests, or test_run_id.');
+        }
+
+        if (args.test_run_id !== undefined) {
+          return pollApexTestRun(client, conn.alias, args.test_run_id);
+        }
+
+        const APEX_NAME = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)?$/;
+        const METHOD_NAME = /^[A-Za-z][A-Za-z0-9_]*$/;
+        for (const name of args.class_names ?? args.tests!.map((t) => t.class_name)) {
+          if (!APEX_NAME.test(name)) return fail(`invalid Apex class name "${name}"`);
+        }
+        for (const t of args.tests ?? []) {
+          for (const m of t.methods ?? []) {
+            if (!METHOD_NAME.test(m)) return fail(`invalid test method name "${m}"`);
+          }
+        }
+
+        const body = args.class_names
+          ? { classNames: args.class_names.join(',') }
+          : {
+              tests: args.tests!.map((t) => ({
+                className: t.class_name,
+                ...(t.methods ? { testMethods: t.methods } : {}),
+              })),
+            };
+        const res = await client.request(
+          `/services/data/${config.salesforce.apiVersion}/tooling/runTestsAsynchronous`,
+          { method: 'POST', body: JSON.stringify(body) },
+        );
+        const runId = (await res.json()) as unknown;
+        if (typeof runId !== 'string' || !SF_ID_RE.test(runId)) {
+          return fail(
+            `unexpected response from the test runner: ${JSON.stringify(runId).slice(0, 200)}`,
+          );
+        }
+        return ok({
+          connection: conn.alias,
+          test_run_id: runId,
+          status: 'Queued',
+          note:
+            'Submitted — no DML from the tests is committed (the run does write test-history ' +
+            'rows and spend the async-test allowance). Call run_apex_tests again with this ' +
+            'test_run_id to poll for results.',
+        });
+      }),
+  );
+
+  server.registerTool(
     'get_flow_errors',
     {
       title: 'List flow interview problems',
@@ -287,4 +387,174 @@ function truncateDeep(value: unknown): unknown {
     return out;
   }
   return value;
+}
+
+const SF_ID_RE = /^[a-zA-Z0-9]{15}([a-zA-Z0-9]{3})?$/;
+
+/**
+ * Poll a runTestsAsynchronous job: queue status while running; on completion,
+ * per-method outcomes plus per-class aggregate coverage for the classes these
+ * tests exercised. Coverage is best-effort — its failure never sinks results.
+ */
+async function pollApexTestRun(client: RestClient, alias: string, runId: string) {
+  if (!SF_ID_RE.test(runId)) return fail('invalid test_run_id');
+  const queue = await client.toolingQuery<{
+    Status: string;
+    ApexClassId: string;
+  }>(`SELECT Status, ApexClassId FROM ApexTestQueueItem WHERE ParentJobId = '${runId}'`);
+  if (queue.length === 0) {
+    return fail(
+      `No test run found for id ${runId} — it may predate what the org retains, or belong to another org.`,
+    );
+  }
+  const queueCounts: Record<string, number> = {};
+  for (const item of queue) queueCounts[item.Status] = (queueCounts[item.Status] ?? 0) + 1;
+  const done = queue.every((item) => ['Completed', 'Failed', 'Aborted'].includes(item.Status));
+  if (!done) {
+    return ok({
+      connection: alias,
+      test_run_id: runId,
+      status: 'InProgress',
+      queue: queueCounts,
+      note: 'Still running — call run_apex_tests again with test_run_id to check.',
+    });
+  }
+  // Terminal is NOT the same as passed: an aborted run or a class-level failure
+  // leaves queue items in Aborted/Failed with few or no ApexTestResult rows —
+  // reporting that as "Completed, 0 failures" would be a false green.
+  const allCompleted = queue.every((item) => item.Status === 'Completed');
+  const terminalStatus = allCompleted
+    ? 'Completed'
+    : queue.some((item) => item.Status === 'Aborted')
+      ? 'Aborted'
+      : 'Failed';
+
+  const RESULT_CAP = 2000;
+  const rows = await client.toolingQuery<{
+    Outcome: string;
+    MethodName: string;
+    Message: string | null;
+    StackTrace: string | null;
+    RunTime: number | null;
+    ApexClass: { Name: string } | null;
+  }>(
+    `SELECT Outcome, MethodName, Message, StackTrace, RunTime, ApexClass.Name ` +
+      `FROM ApexTestResult WHERE AsyncApexJobId = '${runId}' ORDER BY MethodName`,
+    RESULT_CAP + 1,
+  );
+  const resultsTruncated = rows.length > RESULT_CAP;
+  if (resultsTruncated) rows.length = RESULT_CAP;
+  const totals = { run: rows.length, passed: 0, failed: 0, skipped: 0 };
+  const byClass: Record<string, { passed: number; failed: number; skipped: number }> = {};
+  for (const r of rows) {
+    const cls = r.ApexClass?.Name ?? '(unknown)';
+    const bucket = (byClass[cls] ??= { passed: 0, failed: 0, skipped: 0 });
+    if (r.Outcome === 'Pass') {
+      totals.passed += 1;
+      bucket.passed += 1;
+    } else if (r.Outcome === 'Skip') {
+      totals.skipped += 1;
+      bucket.skipped += 1;
+    } else {
+      totals.failed += 1; // Fail and CompileFail alike
+      bucket.failed += 1;
+    }
+  }
+  const failures = rows
+    .filter((r) => r.Outcome !== 'Pass' && r.Outcome !== 'Skip')
+    .slice(0, 100)
+    .map((r) => ({
+      class: r.ApexClass?.Name ?? null,
+      method: r.MethodName,
+      outcome: r.Outcome,
+      message: r.Message,
+      stack_trace: r.StackTrace,
+      runtime_ms: r.RunTime,
+    }));
+
+  let coverage:
+    | Array<{
+        class: string;
+        percent: number | null;
+        lines_covered: number;
+        lines_uncovered: number;
+      }>
+    | undefined;
+  let coverageNote: string | undefined;
+  try {
+    const testClassIds = [...new Set(queue.map((q) => q.ApexClassId))].filter((id) =>
+      SF_ID_RE.test(id),
+    );
+    if (testClassIds.length > 0) {
+      const covered = await client.toolingQuery<{ ApexClassOrTriggerId: string }>(
+        `SELECT ApexClassOrTriggerId FROM ApexCodeCoverage WHERE ApexTestClassId IN (` +
+          testClassIds.map((id) => `'${id}'`).join(',') +
+          `)`,
+        2000,
+      );
+      const coveredIds = [...new Set(covered.map((c) => c.ApexClassOrTriggerId))].filter((id) =>
+        SF_ID_RE.test(id),
+      );
+      if (coveredIds.length > 0) {
+        const agg = await client.toolingQuery<{
+          NumLinesCovered: number | null;
+          NumLinesUncovered: number | null;
+          ApexClassOrTrigger: { Name: string } | null;
+        }>(
+          `SELECT ApexClassOrTrigger.Name, NumLinesCovered, NumLinesUncovered ` +
+            `FROM ApexCodeCoverageAggregate WHERE ApexClassOrTriggerId IN (` +
+            coveredIds.map((id) => `'${id}'`).join(',') +
+            `)`,
+          2000,
+        );
+        coverage = agg.map((a) => {
+          const coveredLines = a.NumLinesCovered ?? 0;
+          const total = coveredLines + (a.NumLinesUncovered ?? 0);
+          return {
+            class: a.ApexClassOrTrigger?.Name ?? '(unknown)',
+            percent: total > 0 ? Math.round((coveredLines / total) * 1000) / 10 : null,
+            lines_covered: coveredLines,
+            lines_uncovered: a.NumLinesUncovered ?? 0,
+          };
+        });
+        coverageNote =
+          'Org-wide aggregate coverage for the classes these tests exercise — the union of ' +
+          'ALL tests that touch them, not attributable to this run alone.';
+      }
+    }
+    if (!coverage) {
+      coverageNote = 'No coverage rows were available for this run.';
+    }
+  } catch (err) {
+    coverageNote = `Coverage unavailable: ${String(err instanceof Error ? err.message : err).slice(0, 200)}`;
+  }
+
+  return ok({
+    connection: alias,
+    test_run_id: runId,
+    status: terminalStatus,
+    queue: queueCounts,
+    totals,
+    by_class: byClass,
+    failures,
+    ...(terminalStatus !== 'Completed'
+      ? {
+          note:
+            `Run ended ${terminalStatus} — some test classes never produced results ` +
+            `(aborted from Setup, or the class failed before its tests ran). ` +
+            `Do NOT read the totals as a pass.`,
+        }
+      : {}),
+    ...(resultsTruncated
+      ? {
+          results_truncated: true,
+          results_note: `Showing the first ${RESULT_CAP} results — totals are PARTIAL, not the whole run.`,
+        }
+      : {}),
+    ...(totals.failed > 100
+      ? { failures_note: `Showing first 100 of ${totals.failed} failures.` }
+      : {}),
+    ...(coverage ? { coverage } : {}),
+    ...(coverageNote ? { coverage_note: coverageNote } : {}),
+  });
 }

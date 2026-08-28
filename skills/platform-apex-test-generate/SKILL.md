@@ -19,16 +19,29 @@ metadata:
 
 # Generating Apex Tests
 
-Generate production-ready Apex test classes and verify them through Contrail's single
-validated deploy — not through a standalone test runner, because Contrail has none.
+Generate production-ready Apex test classes and verify them through the right one of
+Contrail's TWO test paths: the validated deploy (for code that is not in the org yet)
+or the standalone `run_apex_tests` runner (for tests already deployed).
 
 ## How tests run in Contrail — read this first
 
-Contrail has **no standalone Apex test runner and no anonymous Apex**. Apex tests execute
-in exactly one place: inside `validate_deploy` (checkOnly), driven by its `test_level`
-and `run_tests` arguments — every PASSING validation opens a human approval page, and
-every run is a full checkOnly round-trip against the live org, not a free background
-loop. That reshapes the classic author → run → fix cycle into:
+Contrail has **no anonymous Apex**, and Apex tests execute on two paths — pick by
+where the code lives:
+
+- **Code you are authoring or changing** runs only inside `validate_deploy`
+  (checkOnly), driven by `test_level` and `run_tests` — the org compiles the new
+  code and runs its tests in one gate. Every PASSING validation opens a human
+  approval page, and every run is a full checkOnly round-trip, not a free loop.
+- **Tests already deployed** run standalone via `run_apex_tests` — Tooling API,
+  test transactions always roll back, NO approval needed, gated on the
+  `diagnostics_read` grant. Submit with `class_names` (or `tests` for
+  method-level targeting) to get a `test_run_id`; poll with that id until
+  `Completed`, then read per-method outcomes and per-class **aggregate** coverage
+  — the org-wide union of ALL tests touching those classes, not this run alone. Use it to re-run suites, iterate on failures after a deploy
+  landed, impact-check before proposing changes, or answer coverage questions —
+  each run spends the org's daily async-test allowance.
+
+For the authoring path, that reshapes the classic author → run → fix cycle into:
 
 **Author the class under test and its test class TOGETHER, put them in ONE package, and
 validate ONCE.** Read compile errors, test failures, and coverage warnings from that one
@@ -46,13 +59,16 @@ What `validate_deploy` returns — this is everything you can honestly claim abo
 
 Plainly stated limits — do not promise around them:
 
-- **Per-class coverage percentages are NOT available.** Contrail surfaces only the
-  `code_coverage_warnings` strings the org returns — nothing else. If asked for a
-  coverage report: `coverage_report=unavailable: validate_deploy returns coverage
-  warning strings only, not per-class percentages`. Treat any coverage warning as a
-  blocker to fix, not a number to negotiate.
-- **`run_tests` is class-granular** (Metadata API `runTests`, max 50 class names).
-  There is no method-level targeting; "run just this one method" is not possible.
+- **`validate_deploy` has no per-class coverage percentages.** It surfaces only the
+  `code_coverage_warnings` strings the org returns. For real percentages, run
+  `run_apex_tests` after the deploy lands — its result carries per-class aggregate
+  coverage for the classes the tests exercise (the org-wide union of all tests
+  touching them, so say "aggregate", never "coverage from these tests"). Treat any
+  coverage warning as a blocker to fix, not a number to negotiate.
+- **`validate_deploy`'s `run_tests` is class-granular** (Metadata API `runTests`,
+  max 50 class names). Method-level targeting exists only on the standalone path:
+  `run_apex_tests` with `tests: [{class_name, methods}]` — already-deployed tests
+  only.
 - **`test_failure_detail` requires the `diagnostics_read` grant.** Without it the
   result carries a withheld marker and a failure count only. Check `get_permissions`
   up front; if the grant is missing and tests fail, report

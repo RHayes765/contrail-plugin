@@ -28,7 +28,7 @@ const banned = [
   { re: /run_code_analyzer/i, why: 'DX MCP analyzer tool — no Contrail equivalent' },
   { re: /--target-org/i, why: 'sf CLI org addressing — Contrail names connections' },
   { re: /\bexecute_metadata_action\b/i, why: 'DX MCP generation pipeline — no Contrail equivalent' },
-  { re: /\bapex\s+run\s+test\b/i, why: 'standalone test runner — tests run inside validate_deploy' },
+  { re: /\bapex\s+run\s+test\b/i, why: 'sf CLI test invocation — Contrail runs tests via validate_deploy or run_apex_tests' },
 ];
 
 let failures = 0;
