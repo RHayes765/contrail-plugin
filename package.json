@@ -1,6 +1,6 @@
 {
   "name": "contrail-plugin",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "private": true,
   "description": "Marketplace-install manifest: the two native N-API dependencies the bundled server (server/dist-plugin/index.mjs) resolves at runtime. Prebuilds ship inside these tarballs, so npm ci --ignore-scripts is sufficient — no build step.",
   "dependencies": {

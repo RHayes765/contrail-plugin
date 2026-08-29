@@ -25463,6 +25463,9 @@ var TOOL_GRANT_MAP = {
   get_setup_audit: "metadata_read",
   soql_query: "data_read",
   get_record: "data_read",
+  // Resolved entirely from permission sobjects the data API already exposes
+  // to data_read — the tool adds interpretation, not new reach.
+  explain_access: "data_read",
   get_debug_logs: "diagnostics_read",
   run_apex_tests: "diagnostics_read",
   get_flow_errors: "diagnostics_read",
@@ -31762,7 +31765,7 @@ function getUpdateNotice(installedVersion, repo, enabled) {
 }
 
 // src/core/version.ts
-var ENGINE_VERSION = "0.16.0";
+var ENGINE_VERSION = "0.17.0";
 
 // src/tools/register.ts
 var UPDATE_REPO = "RHayes765/contrail-plugin";
@@ -33163,6 +33166,131 @@ function registerDataTools(server, deps) {
       const res = await rest(conn).request(path7);
       const record2 = truncateDeep(stripAttributes(await res.json()));
       return ok({ connection: conn.alias, object: args.object, record: record2 });
+    })
+  );
+  server.registerTool(
+    "explain_access",
+    {
+      title: "Explain a user's object/field access (CRUD + FLS)",
+      description: 'Answer "can this user see/edit this object (or field), and WHY": resolves the user, rolls up ObjectPermissions/FieldPermissions across their profile and permission sets (permission set groups are covered \u2014 their materialized sets, muting included, carry the rows), names which assignment grants each bit, and counts who else holds each granting set. v1 scope, stated honestly: CRUD/FLS only \u2014 record-level sharing (org-wide defaults, roles, sharing rules, teams) is NOT evaluated, so "can read" here means object+field access, not visibility of any particular record.',
+      inputSchema: {
+        connection: external_exports.string().describe("Connection alias (or id)."),
+        user: external_exports.string().min(1).max(120).describe("The user: a user id, username, or full name."),
+        object: external_exports.string().describe("SObject API name, e.g. Account or Invoice__c."),
+        field: external_exports.string().optional().describe('Field API name on that object (with or without the "Object." prefix).')
+      }
+    },
+    async (args) => guarded(async () => {
+      const conn = requireConnection(args.connection, "explain_access");
+      if (!/^[A-Za-z0-9_]+$/.test(args.object)) return fail("invalid object API name");
+      let fieldName = null;
+      if (args.field !== void 0) {
+        const raw = args.field.includes(".") ? args.field.split(".").slice(-1)[0] : args.field;
+        if (!/^[A-Za-z0-9_]+$/.test(raw)) return fail("invalid field API name");
+        fieldName = raw;
+      }
+      const client = rest(conn);
+      const esc3 = (s) => s.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+      const uref = args.user.trim();
+      let userWhere;
+      if (/^[a-zA-Z0-9]{15}([a-zA-Z0-9]{3})?$/.test(uref)) {
+        userWhere = `Id = '${uref}'`;
+      } else if (uref.includes("@")) {
+        userWhere = `Username = '${esc3(uref)}'`;
+      } else {
+        userWhere = `Name = '${esc3(uref)}'`;
+      }
+      const users = await client.query(
+        `SELECT Id, Name, Username, IsActive, Profile.Name FROM User WHERE ${userWhere} LIMIT 5`,
+        5
+      );
+      if (users.length === 0) {
+        return fail(`No user matches "${uref}" on ${conn.alias} (tried ${userWhere.split(" ")[0]}).`);
+      }
+      if (users.length > 1) {
+        return fail(
+          `${users.length} users match "${uref}" \u2014 use the username or id: ` + users.map((u) => `${u.Name} <${u.Username}>`).join(", ")
+        );
+      }
+      const user = users[0];
+      const assignmentSub = `(SELECT PermissionSetId FROM PermissionSetAssignment WHERE AssigneeId = '${user.Id}')`;
+      const objPerms = await client.query(
+        `SELECT Parent.Id, Parent.Label, Parent.IsOwnedByProfile, Parent.Profile.Name, PermissionsRead, PermissionsCreate, PermissionsEdit, PermissionsDelete, PermissionsViewAllRecords, PermissionsModifyAllRecords FROM ObjectPermissions WHERE SobjectType = '${esc3(args.object)}' AND ParentId IN ${assignmentSub}`,
+        200
+      );
+      const grantorName = (p) => p?.IsOwnedByProfile ? `Profile: ${p.Profile?.Name ?? "(unnamed)"}` : p?.Label ?? "(unknown permission set)";
+      const rollup = (pick2) => {
+        const via = objPerms.filter(pick2).map((r) => grantorName(r.Parent));
+        return { granted: via.length > 0, via: [...new Set(via)] };
+      };
+      const objectAccess = {
+        read: rollup((r) => r.PermissionsRead),
+        create: rollup((r) => r.PermissionsCreate),
+        edit: rollup((r) => r.PermissionsEdit),
+        delete: rollup((r) => r.PermissionsDelete),
+        view_all_records: rollup((r) => r.PermissionsViewAllRecords),
+        modify_all_records: rollup((r) => r.PermissionsModifyAllRecords)
+      };
+      let fieldAccess;
+      if (fieldName) {
+        const fq = `${args.object}.${fieldName}`;
+        const fieldPerms = await client.query(
+          `SELECT Parent.Id, Parent.Label, Parent.IsOwnedByProfile, Parent.Profile.Name, PermissionsRead, PermissionsEdit FROM FieldPermissions WHERE SobjectType = '${esc3(args.object)}' AND Field = '${esc3(fq)}' AND ParentId IN ${assignmentSub}`,
+          200
+        );
+        const frollup = (pick2) => {
+          const via = fieldPerms.filter(pick2).map((r) => grantorName(r.Parent));
+          return { granted: via.length > 0, via: [...new Set(via)] };
+        };
+        fieldAccess = {
+          field: fq,
+          read: frollup((r) => r.PermissionsRead),
+          edit: frollup((r) => r.PermissionsEdit),
+          ...fieldPerms.length === 0 ? {
+            note: "No FLS rows for this field on any of the user's permission containers. Required, master-detail, and system fields carry no FLS and are readable wherever the object is; for an ordinary field this means NO access. Verify the field API name if in doubt (describe_schema)."
+          } : {}
+        };
+      }
+      const grantorIds = [
+        ...new Set(objPerms.map((r) => r.Parent?.Id).filter((id) => !!id))
+      ];
+      let grantors = [];
+      if (grantorIds.length > 0) {
+        const counts = /* @__PURE__ */ new Map();
+        try {
+          const rows = await client.query(
+            `SELECT PermissionSetId, COUNT(Id) n FROM PermissionSetAssignment WHERE PermissionSetId IN (${grantorIds.map((i) => `'${i}'`).join(",")}) GROUP BY PermissionSetId`,
+            200
+          );
+          for (const r of rows) counts.set(r.PermissionSetId, r.n);
+        } catch {
+        }
+        const seen = /* @__PURE__ */ new Set();
+        for (const r of objPerms) {
+          if (!r.Parent?.Id || seen.has(r.Parent.Id)) continue;
+          seen.add(r.Parent.Id);
+          grantors.push({
+            name: grantorName(r.Parent),
+            assignees: counts.get(r.Parent.Id) ?? null
+          });
+        }
+      }
+      return ok({
+        connection: conn.alias,
+        user: {
+          id: user.Id,
+          name: user.Name,
+          username: user.Username,
+          active: user.IsActive,
+          profile: user.Profile?.Name ?? null
+        },
+        object: args.object,
+        object_access: objectAccess,
+        ...fieldAccess ? { field_access: fieldAccess } : {},
+        grantors,
+        ...user.IsActive ? {} : { warning: "This user is INACTIVE \u2014 they cannot log in regardless of permissions." },
+        note: 'CRUD/FLS only (v1): record-level sharing \u2014 org-wide defaults, role hierarchy, sharing rules, teams, territories \u2014 is NOT evaluated. "Read: granted" means the user can access the object/field, not that any specific record is visible to them.'
+      });
     })
   );
   server.registerTool(
