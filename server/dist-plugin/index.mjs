@@ -3331,8 +3331,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path7) {
-      let input = path7;
+    function removeDotSegments(path11) {
+      let input = path11;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -3584,8 +3584,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path7, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path7 && path7 !== "/" ? path7 : void 0;
+        const [path11, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path11 && path11 !== "/" ? path11 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -7004,12 +7004,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs13, exportName) {
+    function addFormats(ajv, list, fs14, exportName) {
       var _a2;
       var _b2;
       (_a2 = (_b2 = ajv.opts.code).formats) !== null && _a2 !== void 0 ? _a2 : _b2.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs13[f]);
+        ajv.addFormat(f, fs14[f]);
     }
     module.exports = exports = formatsPlugin;
     Object.defineProperty(exports, "__esModule", { value: true });
@@ -9309,10 +9309,10 @@ function assignProp(target, prop, value) {
     configurable: true
   });
 }
-function getElementAtPath(obj, path7) {
-  if (!path7)
+function getElementAtPath(obj, path11) {
+  if (!path11)
     return obj;
-  return path7.reduce((acc, key2) => acc?.[key2], obj);
+  return path11.reduce((acc, key2) => acc?.[key2], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -9632,11 +9632,11 @@ function aborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path7, issues) {
+function prefixIssues(path11, issues) {
   return issues.map((iss) => {
     var _a2;
     (_a2 = iss).path ?? (_a2.path = []);
-    iss.path.unshift(path7);
+    iss.path.unshift(path11);
     return iss;
   });
 }
@@ -17637,8 +17637,8 @@ function getErrorMap() {
 
 // node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path7, errorMaps, issueData } = params;
-  const fullPath = [...path7, ...issueData.path || []];
+  const { data, path: path11, errorMaps, issueData } = params;
+  const fullPath = [...path11, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -17754,11 +17754,11 @@ var errorUtil;
 
 // node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path7, key2) {
+  constructor(parent, value, path11, key2) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path7;
+    this._path = path11;
     this._key = key2;
   }
   get path() {
@@ -21330,11 +21330,11 @@ function normalizeObjectSchema(schema) {
   }
   return void 0;
 }
-function getDotPath(path7) {
-  if (path7.length === 0) {
+function getDotPath(path11) {
+  if (path11.length === 0) {
     return "object root";
   }
-  return path7.reduce((acc, seg, index) => {
+  return path11.reduce((acc, seg, index) => {
     if (index === 0) {
       return String(seg);
     }
@@ -25301,6 +25301,7 @@ var OAuthFlowError = class extends ContrailError {
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 function dataDir() {
   const override = process.env.CONTRAIL_DATA_DIR;
@@ -25381,6 +25382,17 @@ function snapshotsDir() {
 }
 function stagingDir() {
   return ensureDir(path.join(dataDir(), "staging"));
+}
+function vendorDir() {
+  const override = process.env.CONTRAIL_VENDOR_DIR;
+  if (override) return override;
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  for (const candidate of [path.join(here, "..", "vendor"), path.join(here, "..", "..", "vendor")]) {
+    if (fs.existsSync(path.join(candidate, "apex-ls", "dist", "server.node.js"))) {
+      return path.resolve(candidate);
+    }
+  }
+  return null;
 }
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
@@ -25476,7 +25488,11 @@ var TOOL_GRANT_MAP = {
   dml_execute: "data_write",
   apex_propose: "data_write",
   apex_execute: "data_write",
-  set_trace_flag: "diagnostics_read"
+  set_trace_flag: "diagnostics_read",
+  // Local static diagnostics (vendored language servers): no org, no grant —
+  // zero-cost local reads, the same class as list_connections.
+  check_apex: null,
+  check_soql: null
 };
 
 // src/core/db.ts
@@ -26262,6 +26278,10 @@ var DEFAULT_CONFIG = {
   updates: {
     checkEnabled: true
   },
+  localDiagnostics: {
+    enabled: true,
+    timeoutMs: 30 * 1e3
+  },
   deploy: {
     pollIntervalMs: 2e3,
     deployTimeoutMs: 15 * 60 * 1e3,
@@ -26294,6 +26314,7 @@ function loadConfig() {
     oauth: { ...DEFAULT_CONFIG.oauth, ...fromDisk.oauth },
     snapshot: { ...DEFAULT_CONFIG.snapshot, ...fromDisk.snapshot },
     updates: { ...DEFAULT_CONFIG.updates, ...fromDisk.updates },
+    localDiagnostics: { ...DEFAULT_CONFIG.localDiagnostics, ...fromDisk.localDiagnostics },
     deploy: { ...DEFAULT_CONFIG.deploy, ...fromDisk.deploy }
   };
   if (process.env.CONTRAIL_SF_CLIENT_ID) {
@@ -26322,7 +26343,7 @@ import { randomUUID as randomUUID2 } from "node:crypto";
 import process8 from "node:process";
 import { Buffer as Buffer2 } from "node:buffer";
 import path2 from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
 import { promisify as promisify5 } from "node:util";
 import childProcess from "node:child_process";
 import fs8, { constants as fsConstants2 } from "node:fs/promises";
@@ -26577,7 +26598,7 @@ async function defaultBrowser2() {
 
 // node_modules/open/index.js
 var execFile5 = promisify5(childProcess.execFile);
-var __dirname = path2.dirname(fileURLToPath(import.meta.url));
+var __dirname = path2.dirname(fileURLToPath2(import.meta.url));
 var localXdgOpenPath = path2.join(__dirname, "xdg-open");
 var { platform, arch } = process8;
 async function getWindowsDefaultBrowserFromWsl() {
@@ -29003,9 +29024,9 @@ function asArray(value) {
   if (value === void 0 || value === null) return [];
   return Array.isArray(value) ? value : [value];
 }
-function xmlDig(node, ...path7) {
+function xmlDig(node, ...path11) {
   let current = node;
-  for (const key2 of path7) {
+  for (const key2 of path11) {
     if (current === null || typeof current !== "object") return void 0;
     const obj = current;
     if (key2 in obj) {
@@ -29274,35 +29295,35 @@ var RestClient = class {
   async runQuery(basePath, soql, maxRows) {
     const records = [];
     let totalSize = null;
-    let path7 = `${basePath}?q=${encodeURIComponent(soql)}`;
-    while (path7 && records.length < maxRows) {
-      const res = await this.request(path7);
+    let path11 = `${basePath}?q=${encodeURIComponent(soql)}`;
+    while (path11 && records.length < maxRows) {
+      const res = await this.request(path11);
       const data = await res.json();
       if (totalSize === null && typeof data.totalSize === "number") totalSize = data.totalSize;
       records.push(...data.records ?? []);
-      path7 = data.done === false && data.nextRecordsUrl ? data.nextRecordsUrl : null;
+      path11 = data.done === false && data.nextRecordsUrl ? data.nextRecordsUrl : null;
     }
     return { records: records.slice(0, maxRows), totalSize };
   }
   /** Authenticated request against the connection's instance; 401 → refresh once and retry. */
-  async request(path7, init) {
-    let res = await this.rawRequest(path7, init);
+  async request(path11, init) {
+    let res = await this.rawRequest(path11, init);
     if (res.status === 401) {
       this.tokenMgr.invalidate(this.conn.id);
-      res = await this.rawRequest(path7, init);
+      res = await this.rawRequest(path11, init);
     }
     if (!res.ok) {
       const body = await res.text();
       throw new ContrailError(
-        `Salesforce API error ${res.status} on ${path7.split("?")[0]}: ${truncate(body, 500)}`,
+        `Salesforce API error ${res.status} on ${path11.split("?")[0]}: ${truncate(body, 500)}`,
         "salesforce_api_error"
       );
     }
     return res;
   }
-  async rawRequest(path7, init) {
+  async rawRequest(path11, init) {
     const accessToken = await this.tokenMgr.getAccessToken(this.conn);
-    const url = path7.startsWith("http") ? path7 : new URL(path7, this.conn.instanceUrl).toString();
+    const url = path11.startsWith("http") ? path11 : new URL(path11, this.conn.instanceUrl).toString();
     return fetch(url, {
       ...init,
       headers: {
@@ -30275,8 +30296,8 @@ function buildDeployZip(components, deletions, apiVersionNumber, metaXmlLookup) 
     const fileSpec = FILE_TYPES[c.type];
     if (fileSpec) {
       const short = c.api_name;
-      const path7 = `${fileSpec.dir}/${fileSafeName(short)}${fileSpec.ext}`;
-      files.set(path7, strToU8(c.content));
+      const path11 = `${fileSpec.dir}/${fileSafeName(short)}${fileSpec.ext}`;
+      files.set(path11, strToU8(c.content));
       if (fileSpec.metaRoot) {
         const meta = metaXmlLookup(c.type, c.api_name) ?? fileSpec.metaXml?.(apiVersionNumber, c.api_name) ?? `<?xml version="1.0" encoding="UTF-8"?>
 <${fileSpec.metaRoot} xmlns="${XMLNS}">
@@ -30284,7 +30305,7 @@ function buildDeployZip(components, deletions, apiVersionNumber, metaXmlLookup) 
     <status>Active</status>
 </${fileSpec.metaRoot}>
 `;
-        files.set(`${path7}-meta.xml`, strToU8(meta));
+        files.set(`${path11}-meta.xml`, strToU8(meta));
       }
       addMember(c.type, c.api_name);
       continue;
@@ -30298,9 +30319,9 @@ function buildDeployZip(components, deletions, apiVersionNumber, metaXmlLookup) 
           "bad_component"
         );
       }
-      const path7 = `${childSpec.dir}/${parent}${childSpec.ext}`;
-      const key2 = `${childSpec.containerRoot}:${path7}`;
-      const container = containers.get(key2) ?? { root: childSpec.containerRoot, path: path7, blocks: [] };
+      const path11 = `${childSpec.dir}/${parent}${childSpec.ext}`;
+      const key2 = `${childSpec.containerRoot}:${path11}`;
+      const container = containers.get(key2) ?? { root: childSpec.containerRoot, path: path11, blocks: [] };
       container.blocks.push(c.content.trim());
       containers.set(key2, container);
       addMember(c.type, c.api_name);
@@ -31765,7 +31786,7 @@ function getUpdateNotice(installedVersion, repo, enabled) {
 }
 
 // src/core/version.ts
-var ENGINE_VERSION = "0.17.0";
+var ENGINE_VERSION = "0.18.0";
 
 // src/tools/register.ts
 var UPDATE_REPO = "RHayes765/contrail-plugin";
@@ -32692,41 +32713,41 @@ function rootElement(doc) {
   if (!name) return null;
   return { name, value: doc[name] };
 }
-function diffNode(a, b, path7, changes, state) {
+function diffNode(a, b, path11, changes, state) {
   if (changes.length > MAX_CHANGES) {
     state.truncated = true;
     return;
   }
   if (deepEqual(a, b)) return;
   if (Array.isArray(a) || Array.isArray(b)) {
-    diffCollection(asArray(a), asArray(b), path7, changes, state);
+    diffCollection(asArray(a), asArray(b), path11, changes, state);
     return;
   }
   const aKeyed = isObject2(a) && itemKey(a) !== null;
   const bKeyed = isObject2(b) && itemKey(b) !== null;
   if ((aKeyed || bKeyed) && (a == null || isObject2(a)) && (b == null || isObject2(b))) {
-    diffCollection(a == null ? [] : [a], b == null ? [] : [b], path7, changes, state);
+    diffCollection(a == null ? [] : [a], b == null ? [] : [b], path11, changes, state);
     return;
   }
   if (isObject2(a) && isObject2(b)) {
-    diffObjectFields(a, b, path7, changes, state);
+    diffObjectFields(a, b, path11, changes, state);
     return;
   }
-  changes.push({ kind: "scalar", path: path7, a: summarize(a), b: summarize(b) });
+  changes.push({ kind: "scalar", path: path11, a: summarize(a), b: summarize(b) });
 }
-function diffObjectFields(a, b, path7, changes, state) {
+function diffObjectFields(a, b, path11, changes, state) {
   const keys = /* @__PURE__ */ new Set([...Object.keys(a), ...Object.keys(b)]);
   for (const key2 of keys) {
-    diffNode(a[key2], b[key2], path7 ? `${path7}.${key2}` : key2, changes, state);
+    diffNode(a[key2], b[key2], path11 ? `${path11}.${key2}` : key2, changes, state);
   }
 }
-function diffCollection(a, b, path7, changes, state) {
+function diffCollection(a, b, path11, changes, state) {
   const aKeyed = keyItems(a);
   const bKeyed = keyItems(b);
   if (!aKeyed || !bKeyed) {
     changes.push({
       kind: "unkeyed",
-      path: path7,
+      path: path11,
       note: `list changed (${a.length} \u2192 ${b.length} items; no stable key to match on)`
     });
     return;
@@ -32734,15 +32755,15 @@ function diffCollection(a, b, path7, changes, state) {
   for (const [key2, aItem] of aKeyed) {
     const bItem = bKeyed.get(key2);
     if (bItem === void 0) {
-      changes.push({ kind: "removed", path: path7, key: key2 });
+      changes.push({ kind: "removed", path: path11, key: key2 });
     } else if (isObject2(aItem) && isObject2(bItem)) {
-      diffObjectFields(aItem, bItem, `${path7}[${key2}]`, changes, state);
+      diffObjectFields(aItem, bItem, `${path11}[${key2}]`, changes, state);
     } else {
-      diffNode(aItem, bItem, `${path7}[${key2}]`, changes, state);
+      diffNode(aItem, bItem, `${path11}[${key2}]`, changes, state);
     }
   }
   for (const key2 of bKeyed.keys()) {
-    if (!aKeyed.has(key2)) changes.push({ kind: "added", path: path7, key: key2 });
+    if (!aKeyed.has(key2)) changes.push({ kind: "added", path: path11, key: key2 });
   }
 }
 function keyItems(items) {
@@ -33162,8 +33183,8 @@ function registerDataTools(server, deps) {
       if (args.fields?.some((f) => !/^[A-Za-z0-9_.]+$/.test(f))) {
         return fail("invalid field name");
       }
-      const path7 = `/services/data/${config2.salesforce.apiVersion}/sobjects/${encodeURIComponent(args.object)}/${encodeURIComponent(args.id)}` + (args.fields?.length ? `?fields=${encodeURIComponent(args.fields.join(","))}` : "");
-      const res = await rest(conn).request(path7);
+      const path11 = `/services/data/${config2.salesforce.apiVersion}/sobjects/${encodeURIComponent(args.object)}/${encodeURIComponent(args.id)}` + (args.fields?.length ? `?fields=${encodeURIComponent(args.fields.join(","))}` : "");
+      const res = await rest(conn).request(path11);
       const record2 = truncateDeep(stripAttributes(await res.json()));
       return ok({ connection: conn.alias, object: args.object, record: record2 });
     })
@@ -34085,7 +34106,604 @@ function registerDeployTools(server, deps) {
   );
 }
 
+// src/tools/localdiag.ts
+var APEX_ADVISORY = "Semantic findings here are judged against the Apex standard library and this source alone \u2014 the checker cannot see the org. Syntax errors are definitive; treat semantic findings as strong hints and validate_deploy as the authority.";
+function renderResult(result, language) {
+  if (!result.checked) {
+    return ok(
+      {
+        checked: false,
+        language,
+        unavailable: result.unavailable,
+        detail: result.detail
+      },
+      `${language === "apex" ? "check_apex" : "check_soql"}=unavailable: ${result.unavailable}. The input was NOT checked \u2014 do not treat this as a pass; fall back to validate_deploy as the authority.`
+    );
+  }
+  const errors = result.diagnostics.filter((d) => d.severity === "error").length;
+  const warnings = result.diagnostics.filter((d) => d.severity === "warning").length;
+  const advisory = language === "apex" && result.diagnostics.some((d) => !/\.syntax$/.test(d.code ?? ""));
+  return ok({
+    checked: true,
+    language,
+    error_count: errors,
+    warning_count: warnings,
+    diagnostics: result.diagnostics,
+    ...advisory ? { note: APEX_ADVISORY } : {}
+  });
+}
+function registerLocalDiagTools(server, deps) {
+  server.registerTool(
+    "check_apex",
+    {
+      title: "Check Apex locally (static diagnostics, no org)",
+      description: "Static Apex diagnostics from a local Salesforce language server \u2014 free, offline, no org traffic, no approval. Catches syntax errors definitively, plus semantic findings against the Apex standard library. Run it on authored Apex BEFORE validate_deploy spends an org round trip. Honest limits: it is NOT the org's compiler and sees NO org metadata \u2014 references to org-specific custom types and fields are silently TOLERATED (a typo in Custom_Field__c will not be flagged here), so a clean result never replaces validate_deploy. Each check takes a few seconds (a fresh checker runs per call \u2014 the price of trustworthy results). If the result says unavailable, the code was NOT checked \u2014 say so and move on to validate_deploy.",
+      inputSchema: {
+        code: external_exports.string().min(1).max(5e5).describe("The Apex source, verbatim."),
+        type: external_exports.enum(["class", "trigger", "anonymous"]).optional().describe("What the source is (default class) \u2014 selects the parser.")
+      }
+    },
+    async (args) => guarded(async () => {
+      if (args.code.trim().length === 0) return fail("The source is empty.");
+      const result = await deps.localDiag.checkApex(args.code, args.type ?? "class");
+      return renderResult(result, "apex");
+    })
+  );
+  server.registerTool(
+    "check_soql",
+    {
+      title: "Check SOQL syntax locally (no org)",
+      description: "Parse a SOQL query with a local Salesforce language server \u2014 free, offline, no org traffic. SYNTAX ONLY: it does not know the org's objects or fields, so a clean parse says the grammar is right, not that the query will run. Use it before sending novel or generated SOQL to soql_query. If the result says unavailable, the query was NOT checked.",
+      inputSchema: {
+        query: external_exports.string().min(1).max(5e4).describe("The SOQL query, verbatim.")
+      }
+    },
+    async (args) => guarded(async () => {
+      if (args.query.trim().length === 0) return fail("The query is empty.");
+      const result = await deps.localDiag.checkSoql(args.query);
+      return renderResult(result, "soql");
+    })
+  );
+}
+
+// src/localdiag/runner.ts
+import { spawn } from "node:child_process";
+import fs13 from "node:fs";
+import path9 from "node:path";
+import { pathToFileURL as pathToFileURL3 } from "node:url";
+
+// src/localdiag/apex.ts
+import path7 from "node:path";
+import { pathToFileURL } from "node:url";
+
+// src/localdiag/lspClient.ts
+var HEADER_SEP = Buffer.from("\r\n\r\n", "ascii");
+var CONTENT_LENGTH_RE = /Content-Length:\s*(\d+)/i;
+var LspClient = class {
+  constructor(child, label) {
+    this.child = child;
+    this.label = label;
+    child.stdout?.on("data", (chunk) => this.onData(chunk));
+    child.stderr?.on("data", (chunk) => {
+      log("debug", `[lsp:${label}] ${chunk.toString("utf8").trimEnd()}`);
+    });
+    child.stdin?.on("error", (err2) => {
+      log("debug", `[lsp:${label}] stdin: ${String(err2)}`);
+    });
+    child.on(
+      "exit",
+      (code) => this.failAll(new Error(`${label} language server exited (code ${code})`))
+    );
+    child.on("error", (err2) => this.failAll(err2 instanceof Error ? err2 : new Error(String(err2))));
+  }
+  nextId = 1;
+  buffer = Buffer.alloc(0);
+  pending = /* @__PURE__ */ new Map();
+  requestHandlers = /* @__PURE__ */ new Map();
+  notificationHandlers = /* @__PURE__ */ new Map();
+  dead = null;
+  /** Register the answer for a server→client request (e.g. workspace/configuration). */
+  onRequest(method, handler) {
+    this.requestHandlers.set(method, handler);
+  }
+  /** Subscribe to a server notification; returns the unsubscribe. */
+  onNotification(method, handler) {
+    const set = this.notificationHandlers.get(method) ?? /* @__PURE__ */ new Set();
+    set.add(handler);
+    this.notificationHandlers.set(method, set);
+    return () => set.delete(handler);
+  }
+  request(method, params, timeoutMs) {
+    if (this.dead) return Promise.reject(this.dead);
+    const id = this.nextId++;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`${method} timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      timer.unref?.();
+      this.pending.set(id, { resolve, reject, timer });
+      this.send({ jsonrpc: "2.0", id, method, params });
+    });
+  }
+  notify(method, params) {
+    if (this.dead) return;
+    this.send({ jsonrpc: "2.0", method, params });
+  }
+  get alive() {
+    return this.dead === null;
+  }
+  /** Polite shutdown then a hard kill — one-shot semantics, never lingers. */
+  dispose() {
+    if (!this.dead) {
+      try {
+        this.notify("shutdown", void 0);
+        this.notify("exit", void 0);
+      } catch {
+      }
+    }
+    try {
+      this.child.kill();
+    } catch {
+    }
+    this.failAll(new Error(`${this.label} language server disposed`));
+  }
+  send(msg) {
+    if (this.dead) return;
+    const body = Buffer.from(JSON.stringify(msg), "utf8");
+    const header = Buffer.from(`Content-Length: ${body.length}\r
+\r
+`, "ascii");
+    try {
+      this.child.stdin?.write(Buffer.concat([header, body]));
+    } catch (err2) {
+      this.failAll(err2 instanceof Error ? err2 : new Error(String(err2)));
+    }
+  }
+  onData(chunk) {
+    this.buffer = Buffer.concat([this.buffer, chunk]);
+    for (; ; ) {
+      const sep = this.buffer.indexOf(HEADER_SEP);
+      if (sep === -1) return;
+      const header = this.buffer.subarray(0, sep).toString("ascii");
+      const match = CONTENT_LENGTH_RE.exec(header);
+      if (!match) {
+        this.buffer = this.buffer.subarray(sep + HEADER_SEP.length);
+        continue;
+      }
+      const length = Number(match[1]);
+      const start = sep + HEADER_SEP.length;
+      if (this.buffer.length < start + length) return;
+      const body = this.buffer.subarray(start, start + length).toString("utf8");
+      this.buffer = this.buffer.subarray(start + length);
+      let msg;
+      try {
+        msg = JSON.parse(body);
+      } catch {
+        continue;
+      }
+      this.dispatch(msg);
+    }
+  }
+  dispatch(msg) {
+    if (msg.method !== void 0 && msg.id !== void 0) {
+      const handler = this.requestHandlers.get(msg.method);
+      let result = null;
+      if (handler) {
+        try {
+          result = handler(msg.params);
+        } catch {
+        }
+      }
+      this.send({ jsonrpc: "2.0", id: msg.id, result: result ?? null });
+      return;
+    }
+    if (msg.id !== void 0) {
+      const entry = this.pending.get(Number(msg.id));
+      if (!entry) return;
+      this.pending.delete(Number(msg.id));
+      clearTimeout(entry.timer);
+      if (msg.error) entry.reject(new Error(msg.error.message ?? "language server error"));
+      else entry.resolve(msg.result);
+      return;
+    }
+    if (msg.method !== void 0) {
+      for (const handler of this.notificationHandlers.get(msg.method) ?? []) {
+        try {
+          handler(msg.params);
+        } catch {
+        }
+      }
+    }
+  }
+  failAll(err2) {
+    if (this.dead) return;
+    this.dead = err2;
+    for (const [, entry] of this.pending) {
+      clearTimeout(entry.timer);
+      entry.reject(err2);
+    }
+    this.pending.clear();
+  }
+};
+
+// src/localdiag/apex.ts
+var INIT_TIMEOUT_MS = 8e3;
+var PULL_TIMEOUT_MS = 5e3;
+var PULL_INTERVAL_MS = 250;
+var SEMANTIC_STABLE_MS = 4e3;
+var CLEAN_STREAK = 6;
+function severityOf(n) {
+  switch (n) {
+    case 2:
+      return "warning";
+    case 3:
+      return "info";
+    case 4:
+      return "hint";
+    default:
+      return "error";
+  }
+}
+function mapDiagnostics(items) {
+  return items.map((d) => ({
+    severity: severityOf(d.severity),
+    line: (d.range?.start?.line ?? 0) + 1,
+    column: (d.range?.start?.character ?? 0) + 1,
+    message: String(d.message ?? ""),
+    ...d.code !== void 0 && d.code !== null ? { code: String(d.code) } : {}
+  }));
+}
+function registerServerRequestAnswers(client) {
+  client.onRequest("client/registerCapability", () => null);
+  client.onRequest("client/unregisterCapability", () => null);
+  client.onRequest("workspace/configuration", (params) => {
+    const items = params?.items ?? [];
+    return items.map(() => null);
+  });
+  client.onRequest("window/workDoneProgress/create", () => null);
+  client.onRequest("workspace/diagnostic/refresh", () => null);
+}
+async function startApexServer(spawnLsp, serverScript, workspaceRoot) {
+  const child = spawnLsp(serverScript, ["--stdio"], workspaceRoot);
+  const client = new LspClient(child, "apex");
+  registerServerRequestAnswers(client);
+  await client.request(
+    "initialize",
+    {
+      processId: process.pid,
+      rootUri: pathToFileURL(workspaceRoot).toString(),
+      workspaceFolders: [
+        { uri: pathToFileURL(workspaceRoot).toString(), name: path7.basename(workspaceRoot) }
+      ],
+      capabilities: {
+        textDocument: {
+          diagnostic: { dynamicRegistration: false, relatedDocumentSupport: false },
+          publishDiagnostics: { relatedInformation: true },
+          synchronization: { didSave: true, dynamicRegistration: false }
+        },
+        workspace: {
+          workspaceFolders: true,
+          configuration: true,
+          diagnostics: { refreshSupport: true }
+        }
+      },
+      initializationOptions: {
+        apex: { environment: { serverMode: "development" }, detailLevel: "public-api" }
+      }
+    },
+    INIT_TIMEOUT_MS
+  );
+  client.notify("initialized", {});
+  return client;
+}
+function delay4(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms).unref?.());
+}
+async function checkApexOnce(client, fileUri, text, version2, deadline) {
+  client.notify("textDocument/didOpen", {
+    textDocument: { uri: fileUri, languageId: "apex", version: version2, text }
+  });
+  try {
+    let emptyStreak = 0;
+    let lastSignature = "";
+    let stableSince = Date.now();
+    for (; ; ) {
+      if (Date.now() > deadline) throw new DeadlineError();
+      let items;
+      try {
+        const result = await client.request(
+          "textDocument/diagnostic",
+          { textDocument: { uri: fileUri } },
+          Math.max(250, Math.min(PULL_TIMEOUT_MS, deadline - Date.now()))
+        );
+        items = result?.items;
+      } catch (err2) {
+        const message = err2 instanceof Error ? err2.message : String(err2);
+        if (message.includes("Unhandled method")) {
+          await delay4(PULL_INTERVAL_MS);
+          continue;
+        }
+        throw err2;
+      }
+      const list = Array.isArray(items) ? items : [];
+      if (list.length > 0 && list.some((d) => d.source === "apex-parser")) {
+        return mapDiagnostics(list);
+      }
+      const signature = JSON.stringify(list);
+      if (signature !== lastSignature) {
+        lastSignature = signature;
+        stableSince = Date.now();
+      }
+      if (list.length === 0) {
+        if (++emptyStreak >= CLEAN_STREAK) return [];
+      } else {
+        emptyStreak = 0;
+        if (Date.now() - stableSince >= SEMANTIC_STABLE_MS) return mapDiagnostics(list);
+      }
+      await delay4(PULL_INTERVAL_MS);
+    }
+  } finally {
+    try {
+      client.notify("textDocument/didClose", { textDocument: { uri: fileUri } });
+    } catch {
+    }
+  }
+}
+var DeadlineError = class extends Error {
+  constructor() {
+    super("local diagnostics check outran its budget");
+  }
+};
+
+// src/localdiag/soql.ts
+import path8 from "node:path";
+import { pathToFileURL as pathToFileURL2 } from "node:url";
+var INIT_TIMEOUT_MS2 = 5e3;
+var PUSH_TIMEOUT_MS = 5e3;
+async function startSoqlServer(spawnLsp, serverScript, workspaceRoot) {
+  const child = spawnLsp(serverScript, ["--stdio"], workspaceRoot);
+  const client = new LspClient(child, "soql");
+  await client.request(
+    "initialize",
+    {
+      processId: process.pid,
+      rootUri: pathToFileURL2(workspaceRoot).toString(),
+      workspaceFolders: [
+        { uri: pathToFileURL2(workspaceRoot).toString(), name: path8.basename(workspaceRoot) }
+      ],
+      capabilities: {
+        textDocument: {
+          synchronization: { didSave: true, dynamicRegistration: false },
+          completion: { dynamicRegistration: false }
+        }
+      }
+    },
+    INIT_TIMEOUT_MS2
+  );
+  client.notify("initialized", {});
+  return client;
+}
+async function checkSoqlOnce(client, workspaceRoot, query, version2, deadline) {
+  const uri = pathToFileURL2(path8.join(workspaceRoot, `__validate__${version2}.soql`)).toString();
+  let unsubscribe = () => void 0;
+  const push = new Promise((resolve) => {
+    unsubscribe = client.onNotification("textDocument/publishDiagnostics", (params) => {
+      const p = params;
+      if (p?.uri !== uri) return;
+      resolve(mapDiagnostics(Array.isArray(p.diagnostics) ? p.diagnostics : []));
+    });
+  });
+  client.notify("textDocument/didOpen", {
+    textDocument: { uri, languageId: "soql", version: version2, text: query }
+  });
+  try {
+    const budget = Math.max(250, Math.min(PUSH_TIMEOUT_MS, deadline - Date.now()));
+    const timeout = new Promise((_, reject) => {
+      setTimeout(() => reject(new DeadlineError()), budget).unref?.();
+    });
+    return await Promise.race([push, timeout]);
+  } finally {
+    unsubscribe();
+    try {
+      client.notify("textDocument/didClose", { textDocument: { uri } });
+    } catch {
+    }
+  }
+}
+
+// src/localdiag/runner.ts
+var SOQL_IDLE_REAP_MS = 10 * 60 * 1e3;
+var BREAKER_THRESHOLD = 3;
+var BREAKER_COOLDOWN_MS = 30 * 1e3;
+var SEED_NAME = "ContrailSeed.cls";
+var SEED_SOURCE = "public class ContrailSeed {}\n";
+var defaultSpawnLsp = (scriptPath, args, cwd) => spawn(process.execPath, [scriptPath, ...args], {
+  cwd,
+  stdio: ["pipe", "pipe", "pipe"],
+  env: process.env
+});
+function newLane() {
+  return {
+    client: null,
+    idleTimer: null,
+    failures: 0,
+    cooldownUntil: 0,
+    version: 0,
+    chain: Promise.resolve()
+  };
+}
+function unavailable(code, detail) {
+  return { checked: false, unavailable: code, detail };
+}
+function apexScratchName(source, kind) {
+  if (kind === "anonymous") return "__anon__.apex";
+  if (kind === "trigger") {
+    const m2 = /\btrigger\s+([A-Za-z_]\w*)\s+on\b/.exec(source);
+    return `${m2?.[1] ?? "ContrailCheck"}.trigger`;
+  }
+  const m = /\b(?:class|interface|enum)\s+([A-Za-z_]\w*)/.exec(source);
+  return `${m?.[1] ?? "ContrailCheck"}.cls`;
+}
+function createLocalDiagRunner(opts) {
+  const spawnLsp = opts.spawnLsp ?? defaultSpawnLsp;
+  const idleReapMs = opts.idleReapMs ?? SOQL_IDLE_REAP_MS;
+  const lanes = { apex: newLane(), soql: newLane() };
+  let apexInFlight = null;
+  const classesDir = () => path9.join(opts.workspaceRoot, "force-app", "main", "default", "classes");
+  function ensureWorkspace() {
+    const dir = classesDir();
+    fs13.mkdirSync(dir, { recursive: true });
+    for (const name of fs13.readdirSync(dir)) {
+      if (name === SEED_NAME) continue;
+      try {
+        fs13.rmSync(path9.join(dir, name), { force: true });
+      } catch {
+      }
+    }
+    fs13.writeFileSync(path9.join(dir, SEED_NAME), SEED_SOURCE, "utf8");
+  }
+  function scriptFor(lane) {
+    if (!opts.vendorDir) return null;
+    const script = lane === "apex" ? path9.join(opts.vendorDir, "apex-ls", "dist", "server.node.js") : path9.join(opts.vendorDir, "bin", "soql-lsp.bundled.js");
+    return fs13.existsSync(script) ? script : null;
+  }
+  function enqueue(name, work) {
+    const lane = lanes[name];
+    const run = lane.chain.then(work, work);
+    lane.chain = run.then(
+      () => void 0,
+      () => void 0
+    );
+    return run;
+  }
+  function gates(name) {
+    if (!opts.enabled) {
+      return unavailable("disabled", "localDiagnostics.enabled is false in config.json.");
+    }
+    const script = scriptFor(name);
+    if (!script) {
+      return unavailable(
+        "not_installed",
+        "This install carries no vendored language servers (server/vendor is absent)."
+      );
+    }
+    if (Date.now() < lanes[name].cooldownUntil) {
+      return unavailable(
+        "server_error",
+        `The ${name} language server failed repeatedly \u2014 cooling down before another attempt.`
+      );
+    }
+    return { script };
+  }
+  function classify(name, err2) {
+    registerFailure(name);
+    const detail = err2 instanceof Error ? err2.message : String(err2);
+    if (err2 instanceof DeadlineError || detail.includes("timed out")) {
+      return unavailable(
+        detail.includes("initialize") ? "spawn_timeout" : "check_timeout",
+        `The ${name} check did not finish in time: ${detail}`
+      );
+    }
+    return unavailable("server_error", `The ${name} language server misbehaved: ${detail}`);
+  }
+  function registerFailure(name) {
+    const lane = lanes[name];
+    lane.failures += 1;
+    if (lane.failures >= BREAKER_THRESHOLD) {
+      lane.cooldownUntil = Date.now() + BREAKER_COOLDOWN_MS;
+      lane.failures = 0;
+      log("warn", `${name} language server breaker tripped \u2014 cooling down`, {
+        cooldownMs: BREAKER_COOLDOWN_MS
+      });
+    }
+  }
+  function killSoql() {
+    const lane = lanes.soql;
+    if (lane.idleTimer) clearTimeout(lane.idleTimer);
+    lane.idleTimer = null;
+    lane.client?.dispose();
+    lane.client = null;
+  }
+  function scheduleSoqlReap() {
+    const lane = lanes.soql;
+    if (lane.idleTimer) clearTimeout(lane.idleTimer);
+    lane.idleTimer = setTimeout(() => {
+      log("debug", "reaping idle soql language server");
+      killSoql();
+    }, idleReapMs);
+    lane.idleTimer.unref?.();
+  }
+  return {
+    checkApex(source, kind) {
+      return enqueue("apex", async () => {
+        const gate = gates("apex");
+        if ("checked" in gate) return gate;
+        const lane = lanes.apex;
+        const deadline = Date.now() + opts.timeoutMs;
+        ensureWorkspace();
+        const filename = apexScratchName(source, kind);
+        const filePath = path9.join(classesDir(), filename);
+        fs13.writeFileSync(filePath, source, "utf8");
+        let client = null;
+        try {
+          client = await startApexServer(spawnLsp, gate.script, opts.workspaceRoot);
+          apexInFlight = client;
+          const diagnostics = await checkApexOnce(
+            client,
+            pathToFileURL3(filePath).toString(),
+            source,
+            ++lane.version,
+            deadline
+          );
+          lane.failures = 0;
+          return { checked: true, diagnostics };
+        } catch (err2) {
+          return classify("apex", err2);
+        } finally {
+          apexInFlight = null;
+          client?.dispose();
+        }
+      });
+    },
+    checkSoql(query) {
+      return enqueue("soql", async () => {
+        const gate = gates("soql");
+        if ("checked" in gate) return gate;
+        const lane = lanes.soql;
+        const deadline = Date.now() + opts.timeoutMs;
+        try {
+          if (!lane.client?.alive) {
+            killSoql();
+            fs13.mkdirSync(opts.workspaceRoot, { recursive: true });
+            lane.client = await startSoqlServer(spawnLsp, gate.script, opts.workspaceRoot);
+          }
+          const diagnostics = await checkSoqlOnce(
+            lane.client,
+            opts.workspaceRoot,
+            query,
+            ++lane.version,
+            deadline
+          );
+          lane.failures = 0;
+          scheduleSoqlReap();
+          return { checked: true, diagnostics };
+        } catch (err2) {
+          killSoql();
+          return classify("soql", err2);
+        }
+      });
+    },
+    async shutdown() {
+      apexInFlight?.dispose();
+      apexInFlight = null;
+      killSoql();
+    }
+  };
+}
+
 // src/server.ts
+import path10 from "node:path";
 var SERVER_NAME = "contrail-engine";
 var SERVER_VERSION = ENGINE_VERSION;
 function createDeps(overrides) {
@@ -34098,7 +34716,13 @@ function createDeps(overrides) {
   const store = overrides?.store ?? new SnapshotStore();
   const engine = new SnapshotEngine(db, store, tokenMgr, config2, audit);
   const deploys = new DeployEngine(db, store, tokenMgr, config2, audit, overrides?.approvals);
-  return { db, tokens, audit, config: config2, flows, tokenMgr, store, engine, deploys };
+  const localDiag = overrides?.localDiag ?? createLocalDiagRunner({
+    vendorDir: vendorDir(),
+    enabled: config2.localDiagnostics.enabled,
+    timeoutMs: config2.localDiagnostics.timeoutMs,
+    workspaceRoot: path10.join(dataDir(), "localdiag-workspace")
+  });
+  return { db, tokens, audit, config: config2, flows, tokenMgr, store, engine, deploys, localDiag };
 }
 function createServer(deps) {
   const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
@@ -34107,6 +34731,7 @@ function createServer(deps) {
   registerDiffTools(server, deps);
   registerDataTools(server, deps);
   registerDeployTools(server, deps);
+  registerLocalDiagTools(server, deps);
   return server;
 }
 
