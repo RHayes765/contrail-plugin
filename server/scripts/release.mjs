@@ -87,11 +87,17 @@ if (dryRun) {
   process.exit(0);
 }
 run('git add -A', repoRoot);
-run(
-  `git commit -m "v${version}" -m "Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"`,
-  repoRoot,
-);
-run(`git tag v${version}`, repoRoot);
+const dirty = execSync('git status --porcelain', { cwd: repoRoot }).toString().trim();
+if (dirty) {
+  run(
+    `git commit -m "v${version}" -m "Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"`,
+    repoRoot,
+  );
+} else {
+  console.error('working tree already clean — tagging the existing HEAD');
+}
+const tags = execSync('git tag -l', { cwd: repoRoot }).toString().split(/\r?\n/);
+if (!tags.includes(`v${version}`)) run(`git tag v${version}`, repoRoot);
 run('git push --follow-tags', repoRoot);
 console.error(
   `\nv${version} pushed. CI is building the GitHub release with the mcpb + zip attached:` +
