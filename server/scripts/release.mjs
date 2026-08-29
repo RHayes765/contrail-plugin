@@ -98,7 +98,11 @@ if (dirty) {
 }
 const tags = execSync('git tag -l', { cwd: repoRoot }).toString().split(/\r?\n/);
 if (!tags.includes(`v${version}`)) run(`git tag v${version}`, repoRoot);
-run('git push --follow-tags', repoRoot);
+run('git push', repoRoot);
+// Push the tag EXPLICITLY: `--follow-tags` only pushes ANNOTATED tags, and
+// `git tag` above creates a lightweight one — v0.14.0 shipped with no CI run
+// because the tag silently never left this machine.
+run(`git push origin v${version}`, repoRoot);
 console.error(
   `\nv${version} pushed. CI is building the GitHub release with the mcpb + zip attached:` +
     `\n  https://github.com/RHayes765/contrail-plugin/releases`,
