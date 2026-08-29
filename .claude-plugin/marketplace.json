@@ -1,0 +1,14 @@
+{
+  "name": "contrail",
+  "owner": {
+    "name": "Ryley Hayes"
+  },
+  "plugins": [
+    {
+      "name": "contrail",
+      "source": "./",
+      "description": "Contrail — AI harness engine for Salesforce work: org connections with human-set grants, metadata engine, safe deploys, standalone Apex test runs, and the Contrail skill pack.",
+      "version": "0.13.0"
+    }
+  ]
+}

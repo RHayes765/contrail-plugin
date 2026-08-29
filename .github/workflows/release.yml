@@ -1,0 +1,42 @@
+# Build and publish a GitHub release when a v* tag lands. The tag is cut by
+# server/scripts/release.mjs, which has already synced versions and run the
+# gates locally — this workflow re-runs the gates anyway (trust nothing),
+# rebuilds the artifacts on a clean runner, and attaches them.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run lint:skills
+      - run: npm run build
+      - run: npx vitest run
+      - run: npm run bundle
+      - run: npm run mcpb
+      - run: node scripts/zip.mjs
+      - name: Create release
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" \
+            "server/dist-mcpb/contrail-${VERSION}.mcpb" \
+            "server/dist-mcpb/contrail-plugin-${VERSION}.zip" \
+            --title "Contrail $GITHUB_REF_NAME" \
+            --generate-notes

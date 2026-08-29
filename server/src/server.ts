@@ -15,8 +15,10 @@ import { registerDiffTools } from './tools/diff.js';
 import { registerDataTools } from './tools/data.js';
 import { registerDeployTools } from './tools/deploy.js';
 
+import { ENGINE_VERSION } from './core/version.js';
+
 export const SERVER_NAME = 'contrail-engine';
-export const SERVER_VERSION = '0.7.0';
+export const SERVER_VERSION = ENGINE_VERSION;
 
 export function createDeps(overrides?: {
   db?: ContrailDb;

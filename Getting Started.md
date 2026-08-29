@@ -11,13 +11,14 @@ Installing it is now a one-click affair: Contrail ships as a Claude Desktop
 
 - **Claude Desktop**, reasonably up to date (Settings must have an **Extensions**
   page — if yours doesn't, update the app first).
-- The **`contrail-<version>.mcpb`** file from the Google Drive folder.
+- The **`contrail-<version>.mcpb`** file from the latest release:
+  **https://github.com/RHayes765/contrail-plugin/releases/latest**
 
 That's the whole list.
 
 ## Step 1 — Install the extension
 
-1. Download `contrail-<version>.mcpb` from Google Drive.
+1. Download `contrail-<version>.mcpb` from the releases page above.
 2. In Claude Desktop, open **Settings → Extensions → Advanced settings →
    "Install Extension…"** and pick the downloaded file.
    (On some machines simply double-clicking the `.mcpb` file works too — but the
@@ -82,9 +83,12 @@ Ask in plain language. A few things it's good at:
   only — never in files it shares — and every org action is attributed to you.
 - **Changing an org's grants later:** ask Claude to *"manage the <alias> connection"*
   — it reopens the grants page for you to adjust.
-- **Updating Contrail:** install the newer `.mcpb` the same way; your connections
-  and grants are kept (they live in your local Contrail data folder, not in the
-  extension).
+- **Staying current:** Contrail checks once a day (a single anonymous request to
+  GitHub) whether a newer release exists, and **Claude will tell you** at the start
+  of a session when you're behind, with the download link. Updating is installing
+  the newer `.mcpb` the same way as Step 1; your connections and grants are kept
+  (they live in your local Contrail data folder, not in the extension). To disable
+  the check, set `updates.checkEnabled` to `false` in your Contrail `config.json`.
 
 ## Troubleshooting
 
@@ -93,8 +97,13 @@ Ask in plain language. A few things it's good at:
 - **The install window closes silently with no error:** a known Claude Desktop bug
   on a few Windows builds. Update Claude Desktop and retry; if it persists, use the
   fallback below.
-- **Fallback (no Extensions page, or install keeps failing):** the Drive folder also
-  has `contrail-plugin.zip` — a manual install driven by your own Claude. Unzip it
-  somewhere permanent, then tell Claude Code (or a Cowork session with the folder
-  connected): *"Follow the INSTALL_FOR_CLAUDE.md in this folder."* That path needs
-  Node.js 22+ installed, which Claude will check for you.
+- **Claude Code users — the marketplace route (recommended there):** in Claude
+  Code, run `/plugin marketplace add RHayes765/contrail-plugin`, then
+  `/plugin install contrail@contrail`. Updates arrive with
+  `/plugin marketplace update contrail` (or enable that marketplace's
+  auto-update in `/plugin`). Needs Node.js 22+ on the machine.
+- **Fallback (no Extensions page, or install keeps failing):** the releases page
+  also has `contrail-plugin-<version>.zip` — a manual install driven by your own
+  Claude. Unzip it somewhere permanent, then tell Claude Code (or a Cowork session
+  with the folder connected): *"Follow the INSTALL_FOR_CLAUDE.md in this folder."*
+  That path needs Node.js 22+ installed, which Claude will check for you.

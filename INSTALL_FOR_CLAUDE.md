@@ -32,20 +32,19 @@ their personal preferences. **Merge, never overwrite**, and back it up first.
    binaries that are not tied to a specific Node version, so do **not** downgrade
    Node if something fails; diagnose instead.
 
-## Step 1 — Build the engine
+## Step 1 — Install the runtime dependencies (no build)
 
-From `CONTRAIL_ROOT/server`, run:
+The server ships prebuilt at `server/dist-plugin/index.mjs` — confirm that file
+exists. From `CONTRAIL_ROOT` (the repo/zip ROOT, not server/), run:
 
 ```bash
-npm install
+npm ci --ignore-scripts
 ```
 
-This installs dependencies and builds `dist/` automatically (via the `prepare`
-script). Both native modules (`better-sqlite3`, `@napi-rs/keyring`) arrive as
-prebuilt binaries — no compiler is ever needed on Windows/macOS; if you see
+This installs only the two native modules (`better-sqlite3`, `@napi-rs/keyring`),
+which arrive as prebuilt binaries — no compiler, no build step, ever; if you see
 node-gyp output at all, something is wrong (check the Node version is ≥ 22 and
-retry). When it finishes, confirm `server/dist/index.js` exists. If `npm install`
-reports an error, run `npm run build` and report the output.
+retry). There is nothing to compile: the bundle is committed.
 
 ## Step 2 — Register the plugin in Claude Desktop
 
@@ -70,7 +69,7 @@ Then:
    ```json
    "contrail-engine": {
      "command": "node",
-     "args": ["<CONTRAIL_ROOT>/server/dist/index.js"]
+     "args": ["<CONTRAIL_ROOT>/server/dist-plugin/index.mjs"]
    }
    ```
 
@@ -95,17 +94,27 @@ engine is running. The human can now connect orgs (see their getting-started gui
 
 ## Alternative: Claude Code (instead of Claude Desktop)
 
-If the human runs Contrail in Claude Code rather than Desktop, skip step 2's config
-file and instead add the server to the project/user MCP config (e.g. a `.mcp.json`
-with the same `contrail-engine` entry, absolute path to `server/dist/index.js`), or
-add `CONTRAIL_ROOT` as a local plugin directory. The build step (step 1) is the same.
+In Claude Code, prefer the marketplace — it handles installs AND updates:
+
+```
+/plugin marketplace add RHayes765/contrail-plugin
+/plugin install contrail@contrail
+```
+
+Later updates: `/plugin marketplace update contrail` (or enable that
+marketplace's auto-update in `/plugin`). No manual config, no zip.
+
+Manual fallback: skip step 2's config file and add the server to the
+project/user MCP config instead (e.g. a `.mcp.json` with the same
+`contrail-engine` entry, absolute path to `server/dist-plugin/index.mjs`), or add
+`CONTRAIL_ROOT` as a local plugin directory. Step 1 is the same.
 
 ## Gotchas we already learned (don't rediscover them)
 
 - **The config file is shared** with the human's Claude Desktop preferences — merge
   the `mcpServers` key, never overwrite the file, and back it up first.
 - **Forward slashes in the path.** Backslashes in JSON string values get mangled;
-  `C:/Users/.../server/dist/index.js` works fine in a Node arg on Windows.
+  `C:/Users/.../server/dist-plugin/index.mjs` works fine in a Node arg on Windows.
 - **Windows Store (MSIX) installs of Claude Desktop can read a *virtualized* config**
   at `%LOCALAPPDATA%\Packages\Claude_<id>\LocalCache\Roaming\Claude\claude_desktop_config.json`
   instead of the `%APPDATA%` one. If your edit verifiably parses but the server never

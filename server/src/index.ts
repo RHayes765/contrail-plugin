@@ -5,6 +5,9 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { createDeps, createServer, SERVER_NAME, SERVER_VERSION } from './server.js';
+import { refreshUpdateCache } from './core/updateCheck.js';
+
+const UPDATE_CHECK_REPO = 'RHayes765/contrail-plugin';
 import { log } from './core/log.js';
 
 /**
@@ -21,6 +24,7 @@ async function main(): Promise<void> {
     const server = createServer(deps);
     await server.connect(new StdioServerTransport());
     log('info', `${SERVER_NAME} ${SERVER_VERSION} listening on stdio`);
+    if (deps.config.updates.checkEnabled) void refreshUpdateCache(UPDATE_CHECK_REPO);
     return;
   }
 

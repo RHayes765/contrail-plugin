@@ -4,7 +4,7 @@ The Contrail engine shipped as a Claude plugin: a local stdio MCP server (the
 **Contrail Engine**) plus a skill carrying the house rules. Spec:
 `contrail-phase0-spec.md`.
 
-**Status: v0.7.0 — one-click packaging (MCPB)** on top of the completed
+**Status: v0.13.0 — one-click packaging (MCPB)** on top of the completed
 P0.1–P0.6 Phase 0 surface. `npm run mcpb` builds `contrail-<version>.mcpb`, a
 single MCP Bundle that installs into Claude Desktop via Settings → Extensions
 (no Node install, no npm, no config editing on the target machine) and covers
@@ -80,8 +80,11 @@ installs it via Claude Desktop **Settings → Extensions → Advanced settings �
 Install Extension…** — Claude Desktop runs it on its own bundled Node, so the
 target machine needs nothing installed. See `Getting Started.md`.
 
-**As a Claude Code / Cowork plugin:** add this directory as a local plugin
-(marketplace entry or `--plugin-dir`). The manifest starts the server over stdio
+**As a Claude Code / Cowork plugin:** `/plugin marketplace add
+RHayes765/contrail-plugin`, then `/plugin install contrail@contrail` — this repo
+is its own marketplace, and `/plugin marketplace update contrail` pulls new
+releases. (A local checkout also works via `--plugin-dir`.) The manifest starts
+the server over stdio
 from `server/dist/index.js` (build first: `cd server && npm install`).
 
 **Packaging reality:** two dependencies are native addons, both N-API (ABI-stable

@@ -12,7 +12,12 @@ import type { SnapshotEngine } from '../snapshot/engine.js';
 import type { DeployEngine } from '../deploy/engine.js';
 import { ContrailError } from '../core/errors.js';
 import { grantedList, notGrantedList } from '../core/grants.js';
+import { getUpdateNotice } from '../core/updateCheck.js';
+import { ENGINE_VERSION } from '../core/version.js';
 import { log } from '../core/log.js';
+
+/** Release feed for the in-band update notice. */
+const UPDATE_REPO = 'RHayes765/contrail-plugin';
 
 export interface ToolDeps {
   db: ContrailDb;
@@ -206,7 +211,26 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     async () =>
       guarded(() => {
         const list = db.listConnections().map(connectionSummary);
-        return ok({ connections: list, count: list.length });
+        // Cached-only read (never the network): when a newer release exists,
+        // say so on the session-start tool so the human hears about it.
+        const update = getUpdateNotice(
+          ENGINE_VERSION,
+          UPDATE_REPO,
+          deps.config.updates.checkEnabled,
+        );
+        return ok({
+          connections: list,
+          count: list.length,
+          ...(update
+            ? {
+                update_available: update,
+                update_note:
+                  `Contrail ${update.latest} is available (you are on ${update.installed}). ` +
+                  `Tell the human: download it at ${update.download_url} — a Claude Desktop ` +
+                  `extension updates by installing the new .mcpb over the old one.`,
+              }
+            : {}),
+        });
       }),
   );
 

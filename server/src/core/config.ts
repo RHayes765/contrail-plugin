@@ -46,6 +46,14 @@ export interface ContrailConfig {
     /** Inline wait before refresh_snapshot returns an in-progress result. */
     toolWaitMs: number;
   };
+  updates: {
+    /**
+     * Once a day, ask the GitHub Releases API whether a newer Contrail exists
+     * (one anonymous GET — the product's only phone-home). Set false to
+     * disable entirely; the check never blocks or delays any tool call.
+     */
+    checkEnabled: boolean;
+  };
   deploy: {
     /** checkDeployStatus poll interval. */
     pollIntervalMs: number;
@@ -105,6 +113,9 @@ export const DEFAULT_CONFIG: ContrailConfig = {
     retrieveTimeoutMs: 10 * 60 * 1000,
     toolWaitMs: 25 * 1000,
   },
+  updates: {
+    checkEnabled: true,
+  },
   deploy: {
     pollIntervalMs: 2000,
     deployTimeoutMs: 15 * 60 * 1000,
@@ -138,6 +149,7 @@ export function loadConfig(): ContrailConfig {
     salesforce: { ...DEFAULT_CONFIG.salesforce, ...fromDisk.salesforce },
     oauth: { ...DEFAULT_CONFIG.oauth, ...fromDisk.oauth },
     snapshot: { ...DEFAULT_CONFIG.snapshot, ...fromDisk.snapshot },
+    updates: { ...DEFAULT_CONFIG.updates, ...fromDisk.updates },
     deploy: { ...DEFAULT_CONFIG.deploy, ...fromDisk.deploy },
   };
 
