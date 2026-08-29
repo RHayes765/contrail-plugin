@@ -109,6 +109,10 @@ export const TOOL_GRANT_MAP: Readonly<Record<string, Grant | null>> = {
   // Diff tools are gated per connection — BOTH sides must hold the grant.
   diff_orgs: 'metadata_read',
   diff_artifact: 'metadata_read',
+  // Org-state investigation: drift vs the snapshot, and Setup's own audit
+  // trail — config-change history is metadata-class information.
+  get_org_changes: 'metadata_read',
+  get_setup_audit: 'metadata_read',
   soql_query: 'data_read',
   get_record: 'data_read',
   get_debug_logs: 'diagnostics_read',

@@ -32,6 +32,20 @@ const MAX_CONTENT_BYTES = 2_000_000;
 /** Ceiling across ALL names in one call (names accepts up to 10). */
 const CALL_CONTENT_BUDGET = 2_000_000;
 
+/**
+ * Types get_org_changes cannot compare directly: children are indexed off
+ * their parent file (their listMetadata dates describe the child, the index
+ * row describes the parent read), and the labels container is one file.
+ */
+const ORG_CHANGES_CHILD_TYPES = new Set([
+  'CustomField',
+  'ValidationRule',
+  'CustomLabel',
+  'CustomLabels',
+  'ListView',
+  'RecordType',
+]);
+
 /** Container file location + child tag for fragment types. */
 const CHILD_SPEC: Record<string, { parentType: string; tag: string }> = {
   CustomField: { parentType: 'CustomObject', tag: 'fields' },
@@ -458,6 +472,247 @@ export function registerMetadataTools(server: McpServer, deps: ToolDeps): void {
                 'connection to check progress or collect the result.',
             );
         }
+      }),
+  );
+
+  server.registerTool(
+    'get_org_changes',
+    {
+      title: 'Org drift report (live org vs local snapshot)',
+      description:
+        "Compare the org's LIVE metadata inventory (listMetadata) against the local " +
+        'snapshot index: what changed in the org since your snapshot — modified, ' +
+        'new-in-org, gone-from-org — grouped by who changed it. The consultant\'s "what ' +
+        'changed under me". Coverage is the snapshot\'s: only indexed top-level types are ' +
+        'compared (child types like CustomField ride their object), and items from managed ' +
+        'packages are skipped. Baseline is per artifact (its indexed lastModifiedDate, ' +
+        'else its retrieval time) unless `since` overrides it. Drill in with ' +
+        'retrieve_metadata / diff_artifact; re-baseline with refresh_snapshot.',
+      inputSchema: {
+        connection: z.string().describe('Connection alias (or id).'),
+        since: z
+          .string()
+          .optional()
+          .describe(
+            'ISO date/datetime: report org changes after this moment instead of since the snapshot.',
+          ),
+        types: z
+          .array(z.string())
+          .max(20)
+          .optional()
+          .describe('Restrict to these metadata types (default: every indexed top-level type).'),
+      },
+    },
+    async (args: { connection: string; since?: string; types?: string[] }) =>
+      guarded(async () => {
+        const conn = requireConnection(args.connection, 'get_org_changes');
+        let sinceMs: number | null = null;
+        if (args.since !== undefined) {
+          sinceMs = Date.parse(args.since);
+          if (Number.isNaN(sinceMs)) return fail('since must be an ISO date or datetime.');
+        }
+        if (args.types?.some((t) => !TYPE_RE.test(t))) return fail('invalid metadata type');
+
+        const counts = db.countArtifactsByType(conn.id);
+        const indexedTopLevel = Object.keys(counts).filter((t) => !ORG_CHANGES_CHILD_TYPES.has(t));
+        if (indexedTopLevel.length === 0) {
+          return fail('No snapshot index for this connection — run refresh_snapshot first.');
+        }
+        const requested = args.types ?? indexedTopLevel;
+        const types = requested.filter((t) => indexedTopLevel.includes(t));
+        const skipped = requested.filter((t) => !indexedTopLevel.includes(t));
+        if (types.length === 0) {
+          return fail(
+            `None of the requested types are indexed for "${conn.alias}" — indexed types: ` +
+              `${indexedTopLevel.join(', ')}. Run refresh_snapshot to widen coverage.`,
+          );
+        }
+
+        const soap = new MetadataSoapClient(tokenMgr, conn, config.salesforce.apiVersion);
+        const props = await soap.listMetadata(types);
+        let managedSkipped = 0;
+        const orgByType = new Map<string, Map<string, (typeof props)[number]>>();
+        for (const p of props) {
+          if (p.manageableState === 'installed') {
+            managedSkipped += 1;
+            continue;
+          }
+          const m = orgByType.get(p.type) ?? new Map<string, (typeof props)[number]>();
+          m.set(p.fullName.toLowerCase(), p);
+          orgByType.set(p.type, m);
+        }
+
+        interface ChangeEntry {
+          type: string;
+          api_name: string;
+          last_modified: string | null;
+          last_modified_by: string | null;
+          baseline?: string;
+        }
+        const modified: ChangeEntry[] = [];
+        const newInOrg: ChangeEntry[] = [];
+        const gone: Array<{ type: string; api_name: string }> = [];
+
+        for (const t of types) {
+          const orgMap = orgByType.get(t) ?? new Map<string, (typeof props)[number]>();
+          for (const row of db.listArtifacts(conn.id, t)) {
+            const key = row.apiName.toLowerCase();
+            const org = orgMap.get(key);
+            if (!org) {
+              gone.push({ type: t, api_name: row.apiName });
+              continue;
+            }
+            orgMap.delete(key);
+            // Per-artifact baseline: the indexed lastModifiedDate when the org
+            // reported one at snapshot time, else the retrieval moment.
+            const baselineIso =
+              sinceMs !== null ? (args.since as string) : (row.lastModifiedDate ?? row.retrievedAt);
+            const baseMs = sinceMs !== null ? sinceMs : Date.parse(baselineIso);
+            const orgMs = Date.parse(org.lastModifiedDate ?? '');
+            if (!Number.isNaN(orgMs) && !Number.isNaN(baseMs) && orgMs > baseMs) {
+              modified.push({
+                type: t,
+                api_name: org.fullName,
+                last_modified: org.lastModifiedDate ?? null,
+                last_modified_by: org.lastModifiedByName ?? null,
+                baseline: baselineIso,
+              });
+            }
+          }
+          for (const p of orgMap.values()) {
+            if (sinceMs !== null) {
+              const ms = Date.parse(p.lastModifiedDate ?? '');
+              if (!Number.isNaN(ms) && ms <= sinceMs) continue;
+            }
+            newInOrg.push({
+              type: t,
+              api_name: p.fullName,
+              last_modified: p.lastModifiedDate ?? null,
+              last_modified_by: p.lastModifiedByName ?? null,
+            });
+          }
+        }
+
+        const byDateDesc = (a: ChangeEntry, b: ChangeEntry) =>
+          (b.last_modified ?? '').localeCompare(a.last_modified ?? '');
+        modified.sort(byDateDesc);
+        newInOrg.sort(byDateDesc);
+        const byUser: Record<string, { modified: number; new_in_org: number }> = {};
+        for (const e of modified) {
+          const who = e.last_modified_by ?? '(unknown)';
+          (byUser[who] ??= { modified: 0, new_in_org: 0 }).modified += 1;
+        }
+        for (const e of newInOrg) {
+          const who = e.last_modified_by ?? '(unknown)';
+          (byUser[who] ??= { modified: 0, new_in_org: 0 }).new_in_org += 1;
+        }
+
+        const CAP = 150;
+        return ok({
+          connection: conn.alias,
+          compared_types: types,
+          ...(skipped.length
+            ? { skipped_types: skipped, skipped_note: 'not in the local index (child types ride their parent object)' }
+            : {}),
+          since: args.since ?? null,
+          totals: {
+            modified: modified.length,
+            new_in_org: newInOrg.length,
+            gone_from_org: gone.length,
+            managed_package_items_skipped: managedSkipped,
+          },
+          by_user: byUser,
+          modified: modified.slice(0, CAP),
+          new_in_org: newInOrg.slice(0, CAP),
+          gone_from_org: gone.slice(0, CAP),
+          ...(modified.length > CAP || newInOrg.length > CAP || gone.length > CAP
+            ? { truncated: true, truncated_note: `entry lists capped at ${CAP} — totals are exact` }
+            : {}),
+          note:
+            args.since != null
+              ? `Org changes after ${args.since} (gone_from_org is always relative to the snapshot).`
+              : 'Baseline is the local snapshot — each modified entry names the baseline it beat. ' +
+                'Totals count org-side drift, not local edits.',
+        });
+      }),
+  );
+
+  server.registerTool(
+    'get_setup_audit',
+    {
+      title: 'Setup audit trail (config changes)',
+      description:
+        "Read the org's SetupAuditTrail — the configuration changes that never surface as " +
+        'metadata: profile edits made in Setup, user activations, permission assignments, ' +
+        'email deliverability, login-as sessions, and the rest. Grouped by section and by ' +
+        'admin. Salesforce retains about 180 days; entries are what the org recorded, ' +
+        'verbatim.',
+      inputSchema: {
+        connection: z.string().describe('Connection alias (or id).'),
+        days: z
+          .number()
+          .int()
+          .min(1)
+          .max(90)
+          .optional()
+          .describe('Look-back window in days (default 7).'),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(500)
+          .optional()
+          .describe('Max entries to return (default 200) — the org-side total is always reported.'),
+      },
+    },
+    async (args: { connection: string; days?: number; limit?: number }) =>
+      guarded(async () => {
+        const conn = requireConnection(args.connection, 'get_setup_audit');
+        const days = args.days ?? 7;
+        const cap = args.limit ?? 200;
+        const rest = new RestClient(tokenMgr, conn, config.salesforce.apiVersion);
+        const { records, totalSize } = await rest.queryWithCount<{
+          Action: string | null;
+          Section: string | null;
+          Display: string | null;
+          CreatedDate: string;
+          CreatedBy: { Name: string | null; Username: string | null } | null;
+          DelegateUser: string | null;
+        }>(
+          `SELECT Action, Section, Display, CreatedDate, CreatedBy.Name, CreatedBy.Username, ` +
+            `DelegateUser FROM SetupAuditTrail WHERE CreatedDate = LAST_N_DAYS:${days} ` +
+            `ORDER BY CreatedDate DESC`,
+          cap,
+        );
+        const bySection: Record<string, number> = {};
+        const byUser: Record<string, number> = {};
+        const events = records.map((r) => {
+          const section = r.Section ?? '(none)';
+          const who = r.CreatedBy?.Name ?? r.CreatedBy?.Username ?? '(system)';
+          bySection[section] = (bySection[section] ?? 0) + 1;
+          byUser[who] = (byUser[who] ?? 0) + 1;
+          return {
+            at: r.CreatedDate,
+            by: who,
+            section,
+            action: r.Action,
+            display: r.Display,
+            ...(r.DelegateUser ? { as_delegate_of: r.DelegateUser } : {}),
+          };
+        });
+        return ok({
+          connection: conn.alias,
+          days,
+          total_size: totalSize,
+          returned: events.length,
+          truncated: totalSize !== null && totalSize > events.length,
+          by_section: bySection,
+          by_user: byUser,
+          events,
+          ...(totalSize !== null && totalSize > events.length
+            ? { note: `Showing the newest ${events.length} of ${totalSize} — raise limit or narrow days.` }
+            : {}),
+        });
       }),
   );
 }

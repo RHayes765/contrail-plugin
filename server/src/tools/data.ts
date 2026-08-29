@@ -24,6 +24,9 @@ const GRANT_GATED_SOBJECTS: Readonly<Record<string, Grant>> = {
   flowdefinitionview: 'metadata_read',
   apexlog: 'diagnostics_read',
   flowinterview: 'diagnostics_read',
+  // Config-change history is metadata-class (get_setup_audit's grant) — a
+  // data_read-only connection must not read it through raw SOQL either.
+  setupaudittrail: 'metadata_read',
 };
 
 /**

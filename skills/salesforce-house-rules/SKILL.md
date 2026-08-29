@@ -198,3 +198,10 @@ conversation.
   without the user asking.
 - The local audit log (`get_audit_log`) records connections, refusals, and writes —
   offer it when the user asks "what happened" or needs a client-facing change record.
+- **"What changed in the org?" has dedicated tools** — don't reconstruct drift by
+  hand. `get_org_changes` compares the live org against the local snapshot
+  (modified / new / gone, grouped by who); `get_setup_audit` reads SetupAuditTrail
+  for the config changes that never surface as metadata (profile edits in Setup,
+  user changes, login-as). Name the baseline in your summary (the snapshot date or
+  the `since` you passed), and drill into specifics with `retrieve_metadata` /
+  `diff_artifact` before claiming what a change did.
