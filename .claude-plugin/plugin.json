@@ -1,7 +1,7 @@
 {
   "name": "contrail",
   "description": "Contrail — AI harness engine for Salesforce work: org connections with human-set grants, metadata engine, safe deploys. Phase 0: engine-as-plugin.",
-  "version": "0.14.0",
+  "version": "0.16.0",
   "author": {
     "name": "Ryley Hayes"
   },

@@ -25457,6 +25457,10 @@ var TOOL_GRANT_MAP = {
   // Diff tools are gated per connection — BOTH sides must hold the grant.
   diff_orgs: "metadata_read",
   diff_artifact: "metadata_read",
+  // Org-state investigation: drift vs the snapshot, and Setup's own audit
+  // trail — config-change history is metadata-class information.
+  get_org_changes: "metadata_read",
+  get_setup_audit: "metadata_read",
   soql_query: "data_read",
   get_record: "data_read",
   get_debug_logs: "diagnostics_read",
@@ -31758,7 +31762,7 @@ function getUpdateNotice(installedVersion, repo, enabled) {
 }
 
 // src/core/version.ts
-var ENGINE_VERSION = "0.14.0";
+var ENGINE_VERSION = "0.16.0";
 
 // src/tools/register.ts
 var UPDATE_REPO = "RHayes765/contrail-plugin";
@@ -31999,6 +32003,14 @@ var TYPE_RE = /^[A-Za-z]+$/;
 var DEFAULT_CONTENT_BYTES = 25e4;
 var MAX_CONTENT_BYTES = 2e6;
 var CALL_CONTENT_BUDGET = 2e6;
+var ORG_CHANGES_CHILD_TYPES = /* @__PURE__ */ new Set([
+  "CustomField",
+  "ValidationRule",
+  "CustomLabel",
+  "CustomLabels",
+  "ListView",
+  "RecordType"
+]);
 var CHILD_SPEC = {
   CustomField: { parentType: "CustomObject", tag: "fields" },
   ValidationRule: { parentType: "CustomObject", tag: "validationRules" },
@@ -32302,6 +32314,174 @@ function registerMetadataTools(server, deps) {
             "Refresh is still running. Call refresh_snapshot again with the same connection to check progress or collect the result."
           );
       }
+    })
+  );
+  server.registerTool(
+    "get_org_changes",
+    {
+      title: "Org drift report (live org vs local snapshot)",
+      description: "Compare the org's LIVE metadata inventory (listMetadata) against the local snapshot index: what changed in the org since your snapshot \u2014 modified, new-in-org, gone-from-org \u2014 grouped by who changed it. The consultant's \"what changed under me\". Coverage is the snapshot's: only indexed top-level types are compared (child types like CustomField ride their object), and items from managed packages are skipped. Baseline is per artifact (its indexed lastModifiedDate, else its retrieval time) unless `since` overrides it. Drill in with retrieve_metadata / diff_artifact; re-baseline with refresh_snapshot.",
+      inputSchema: {
+        connection: external_exports.string().describe("Connection alias (or id)."),
+        since: external_exports.string().optional().describe(
+          "ISO date/datetime: report org changes after this moment instead of since the snapshot."
+        ),
+        types: external_exports.array(external_exports.string()).max(20).optional().describe("Restrict to these metadata types (default: every indexed top-level type).")
+      }
+    },
+    async (args) => guarded(async () => {
+      const conn = requireConnection(args.connection, "get_org_changes");
+      let sinceMs = null;
+      if (args.since !== void 0) {
+        sinceMs = Date.parse(args.since);
+        if (Number.isNaN(sinceMs)) return fail("since must be an ISO date or datetime.");
+      }
+      if (args.types?.some((t) => !TYPE_RE.test(t))) return fail("invalid metadata type");
+      const counts = db.countArtifactsByType(conn.id);
+      const indexedTopLevel = Object.keys(counts).filter((t) => !ORG_CHANGES_CHILD_TYPES.has(t));
+      if (indexedTopLevel.length === 0) {
+        return fail("No snapshot index for this connection \u2014 run refresh_snapshot first.");
+      }
+      const requested = args.types ?? indexedTopLevel;
+      const types = requested.filter((t) => indexedTopLevel.includes(t));
+      const skipped = requested.filter((t) => !indexedTopLevel.includes(t));
+      if (types.length === 0) {
+        return fail(
+          `None of the requested types are indexed for "${conn.alias}" \u2014 indexed types: ${indexedTopLevel.join(", ")}. Run refresh_snapshot to widen coverage.`
+        );
+      }
+      const soap = new MetadataSoapClient(tokenMgr, conn, config2.salesforce.apiVersion);
+      const props = await soap.listMetadata(types);
+      let managedSkipped = 0;
+      const orgByType = /* @__PURE__ */ new Map();
+      for (const p of props) {
+        if (p.manageableState === "installed") {
+          managedSkipped += 1;
+          continue;
+        }
+        const m = orgByType.get(p.type) ?? /* @__PURE__ */ new Map();
+        m.set(p.fullName.toLowerCase(), p);
+        orgByType.set(p.type, m);
+      }
+      const modified = [];
+      const newInOrg = [];
+      const gone = [];
+      for (const t of types) {
+        const orgMap = orgByType.get(t) ?? /* @__PURE__ */ new Map();
+        for (const row of db.listArtifacts(conn.id, t)) {
+          const key2 = row.apiName.toLowerCase();
+          const org = orgMap.get(key2);
+          if (!org) {
+            gone.push({ type: t, api_name: row.apiName });
+            continue;
+          }
+          orgMap.delete(key2);
+          const baselineIso = sinceMs !== null ? args.since : row.lastModifiedDate ?? row.retrievedAt;
+          const baseMs = sinceMs !== null ? sinceMs : Date.parse(baselineIso);
+          const orgMs = Date.parse(org.lastModifiedDate ?? "");
+          if (!Number.isNaN(orgMs) && !Number.isNaN(baseMs) && orgMs > baseMs) {
+            modified.push({
+              type: t,
+              api_name: org.fullName,
+              last_modified: org.lastModifiedDate ?? null,
+              last_modified_by: org.lastModifiedByName ?? null,
+              baseline: baselineIso
+            });
+          }
+        }
+        for (const p of orgMap.values()) {
+          if (sinceMs !== null) {
+            const ms = Date.parse(p.lastModifiedDate ?? "");
+            if (!Number.isNaN(ms) && ms <= sinceMs) continue;
+          }
+          newInOrg.push({
+            type: t,
+            api_name: p.fullName,
+            last_modified: p.lastModifiedDate ?? null,
+            last_modified_by: p.lastModifiedByName ?? null
+          });
+        }
+      }
+      const byDateDesc = (a, b) => (b.last_modified ?? "").localeCompare(a.last_modified ?? "");
+      modified.sort(byDateDesc);
+      newInOrg.sort(byDateDesc);
+      const byUser = {};
+      for (const e of modified) {
+        const who = e.last_modified_by ?? "(unknown)";
+        (byUser[who] ??= { modified: 0, new_in_org: 0 }).modified += 1;
+      }
+      for (const e of newInOrg) {
+        const who = e.last_modified_by ?? "(unknown)";
+        (byUser[who] ??= { modified: 0, new_in_org: 0 }).new_in_org += 1;
+      }
+      const CAP = 150;
+      return ok({
+        connection: conn.alias,
+        compared_types: types,
+        ...skipped.length ? { skipped_types: skipped, skipped_note: "not in the local index (child types ride their parent object)" } : {},
+        since: args.since ?? null,
+        totals: {
+          modified: modified.length,
+          new_in_org: newInOrg.length,
+          gone_from_org: gone.length,
+          managed_package_items_skipped: managedSkipped
+        },
+        by_user: byUser,
+        modified: modified.slice(0, CAP),
+        new_in_org: newInOrg.slice(0, CAP),
+        gone_from_org: gone.slice(0, CAP),
+        ...modified.length > CAP || newInOrg.length > CAP || gone.length > CAP ? { truncated: true, truncated_note: `entry lists capped at ${CAP} \u2014 totals are exact` } : {},
+        note: args.since != null ? `Org changes after ${args.since} (gone_from_org is always relative to the snapshot).` : "Baseline is the local snapshot \u2014 each modified entry names the baseline it beat. Totals count org-side drift, not local edits."
+      });
+    })
+  );
+  server.registerTool(
+    "get_setup_audit",
+    {
+      title: "Setup audit trail (config changes)",
+      description: "Read the org's SetupAuditTrail \u2014 the configuration changes that never surface as metadata: profile edits made in Setup, user activations, permission assignments, email deliverability, login-as sessions, and the rest. Grouped by section and by admin. Salesforce retains about 180 days; entries are what the org recorded, verbatim.",
+      inputSchema: {
+        connection: external_exports.string().describe("Connection alias (or id)."),
+        days: external_exports.number().int().min(1).max(90).optional().describe("Look-back window in days (default 7)."),
+        limit: external_exports.number().int().min(1).max(500).optional().describe("Max entries to return (default 200) \u2014 the org-side total is always reported.")
+      }
+    },
+    async (args) => guarded(async () => {
+      const conn = requireConnection(args.connection, "get_setup_audit");
+      const days = args.days ?? 7;
+      const cap = args.limit ?? 200;
+      const rest = new RestClient(tokenMgr, conn, config2.salesforce.apiVersion);
+      const { records, totalSize } = await rest.queryWithCount(
+        `SELECT Action, Section, Display, CreatedDate, CreatedBy.Name, CreatedBy.Username, DelegateUser FROM SetupAuditTrail WHERE CreatedDate = LAST_N_DAYS:${days} ORDER BY CreatedDate DESC`,
+        cap
+      );
+      const bySection = {};
+      const byUser = {};
+      const events = records.map((r) => {
+        const section = r.Section ?? "(none)";
+        const who = r.CreatedBy?.Name ?? r.CreatedBy?.Username ?? "(system)";
+        bySection[section] = (bySection[section] ?? 0) + 1;
+        byUser[who] = (byUser[who] ?? 0) + 1;
+        return {
+          at: r.CreatedDate,
+          by: who,
+          section,
+          action: r.Action,
+          display: r.Display,
+          ...r.DelegateUser ? { as_delegate_of: r.DelegateUser } : {}
+        };
+      });
+      return ok({
+        connection: conn.alias,
+        days,
+        total_size: totalSize,
+        returned: events.length,
+        truncated: totalSize !== null && totalSize > events.length,
+        by_section: bySection,
+        by_user: byUser,
+        events,
+        ...totalSize !== null && totalSize > events.length ? { note: `Showing the newest ${events.length} of ${totalSize} \u2014 raise limit or narrow days.` } : {}
+      });
     })
   );
 }
@@ -32891,7 +33071,10 @@ var GRANT_GATED_SOBJECTS = {
   staticresource: "metadata_read",
   flowdefinitionview: "metadata_read",
   apexlog: "diagnostics_read",
-  flowinterview: "diagnostics_read"
+  flowinterview: "diagnostics_read",
+  // Config-change history is metadata-class (get_setup_audit's grant) — a
+  // data_read-only connection must not read it through raw SOQL either.
+  setupaudittrail: "metadata_read"
 };
 var DEFAULT_ROWS = 500;
 var MAX_ROWS = 2e3;
