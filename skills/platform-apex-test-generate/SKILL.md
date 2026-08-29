@@ -25,8 +25,10 @@ or the standalone `run_apex_tests` runner (for tests already deployed).
 
 ## How tests run in Contrail — read this first
 
-Contrail has **no anonymous Apex**, and Apex tests execute on two paths — pick by
-where the code lives:
+Apex tests execute on two paths — pick by where the code lives. (Anonymous Apex
+exists in Contrail, but ONLY behind the full `apex_propose` → human code →
+`apex_execute` ritual, and its DML **commits** — it is never a test runner or a
+free execution loop. Tests are the rollback-safe way to exercise code.)
 
 - **Code you are authoring or changing** runs only inside `validate_deploy`
   (checkOnly), driven by `test_level` and `run_tests` — the org compiles the new

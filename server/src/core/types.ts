@@ -57,12 +57,18 @@ export interface DependencyEdge {
   source: 'org' | 'extractor';
 }
 
-/** A validated write awaiting (or past) human approval — deploys and DML share the table. */
+/**
+ * What a deploy_requests row proposes. The claim machinery (supersede,
+ * single-use, expiry, lockout) is kind-agnostic — new kinds ride it for free.
+ */
+export type DeployRequestKind = 'deploy' | 'dml' | 'apex';
+
+/** A validated write awaiting (or past) human approval — deploys, DML, and anonymous Apex share the table. */
 export interface DeployRequestRecord {
   id: string;
   workspaceId: string;
   connectionId: string;
-  kind: 'deploy' | 'dml';
+  kind: DeployRequestKind;
   confirmationCode: string;
   status:
     | 'validated'

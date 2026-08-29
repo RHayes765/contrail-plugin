@@ -529,4 +529,67 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
         return ok(result);
       }),
   );
+
+  server.registerTool(
+    'apex_propose',
+    {
+      title: 'Propose an anonymous Apex script (two-step)',
+      description:
+        'Stage an anonymous Apex script for human approval. This is the ONLY path to ' +
+        'executeAnonymous: nothing runs until the human reads the confirmation code from ' +
+        'the approval page (which shows the script verbatim) and you pass it to ' +
+        "apex_execute. The script runs with the HUMAN's permissions and can touch anything " +
+        'their user can; DML it performs COMMITS on success, and an uncaught exception ' +
+        'rolls the whole script back. There is no dry-run — the org compiles and executes ' +
+        'in one shot at execute, and a compile error spends the code like any failed ' +
+        'write. Max 32,000 chars (executeAnonymous is a URL-encoded GET); split longer ' +
+        'work into multiple proposals. The script returns no output — write System.debug ' +
+        'and set a trace flag first (set_trace_flag) if you need to see the log.',
+      inputSchema: {
+        connection: z
+          .string()
+          .describe('Target connection alias (or id) — name it unmissably to the human.'),
+        code: z
+          .string()
+          .min(1)
+          .max(32_000)
+          .describe('The anonymous Apex source, verbatim (this is the script, NOT a confirmation code).'),
+      },
+    },
+    async (args: { connection: string; code: string }) =>
+      guarded(async () => {
+        const conn = requireConnection(args.connection, 'apex_propose');
+        if (args.code.trim().length === 0) return fail('The script is empty.');
+        const preview = await deploys.proposeApex(conn, args.code);
+        return ok(
+          preview,
+          `Proposed — nothing executed. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`,
+        );
+      }),
+  );
+
+  server.registerTool(
+    'apex_execute',
+    {
+      title: 'Execute a proposed anonymous Apex script',
+      description:
+        'Execute the anonymous Apex that the given confirmation code approves. The code ' +
+        "exists only on the human's approval page — only pass a code the human just gave " +
+        'you. Single-use, ~1h expiry, invalidated by a new apex_propose on the same ' +
+        'connection. On success the script\'s DML is committed; compile and runtime ' +
+        'errors are returned honestly and spend the code.',
+      inputSchema: {
+        connection: z.string().describe('Target connection alias (or id).'),
+        confirmation_code: z
+          .string()
+          .describe('The code the human read from the approval page (format XXXX-XXXX).'),
+      },
+    },
+    async (args: { connection: string; confirmation_code: string }) =>
+      guarded(async () => {
+        const conn = requireConnection(args.connection, 'apex_execute');
+        const result = await deploys.executeApex(conn, args.confirmation_code);
+        return ok(result);
+      }),
+  );
 }

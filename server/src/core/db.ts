@@ -72,6 +72,7 @@ import type {
   AuditEvent,
   ConnectionRecord,
   DependencyEdge,
+  DeployRequestKind,
   DeployRequestRecord,
   OrgType,
 } from './types.js';
@@ -550,7 +551,7 @@ export class ContrailDb {
 
   insertDeployRequest(input: {
     connectionId: string;
-    kind: 'deploy' | 'dml';
+    kind: DeployRequestKind;
     confirmationCode: string;
     expiresAt: string;
     payloadPath?: string | null;
@@ -600,7 +601,7 @@ export class ContrailDb {
   }
 
   /** A new validation on the same target invalidates every earlier pending code (spec §5). */
-  supersedePendingRequests(connectionId: string, kind: 'deploy' | 'dml'): number {
+  supersedePendingRequests(connectionId: string, kind: DeployRequestKind): number {
     const result = this.db
       .prepare(
         `UPDATE deploy_requests SET status = 'superseded'
@@ -613,7 +614,7 @@ export class ContrailDb {
   /** Lookup by code regardless of status; the caller branches on request.status. */
   findRequestByCode(
     connectionId: string,
-    kind: 'deploy' | 'dml',
+    kind: DeployRequestKind,
     code: string,
   ): DeployRequestRecord | null {
     const row = this.db
@@ -685,7 +686,7 @@ export class ContrailDb {
    */
   registerFailedAttempt(
     connectionId: string,
-    kind: 'deploy' | 'dml',
+    kind: DeployRequestKind,
     maxAttempts: number,
   ): { pendingExisted: boolean; locked: boolean; attemptsRemaining: number; requestId?: string; payloadPath?: string | null } {
     const row = this.db
@@ -724,7 +725,7 @@ export class ContrailDb {
   }
 
   /** Payload zips of superseded requests, so the caller can delete them. */
-  takeSupersededPayloadPaths(connectionId: string, kind: 'deploy' | 'dml'): string[] {
+  takeSupersededPayloadPaths(connectionId: string, kind: DeployRequestKind): string[] {
     const rows = this.db
       .prepare(
         `SELECT payload_path FROM deploy_requests

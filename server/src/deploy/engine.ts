@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { ContrailDb } from '../core/db.js';
 import type { AuditLog } from '../core/audit.js';
 import type { ContrailConfig } from '../core/config.js';
-import type { ConnectionRecord, DeployRequestRecord } from '../core/types.js';
+import type { ConnectionRecord, DeployRequestKind, DeployRequestRecord } from '../core/types.js';
 import type { AccessTokenManager } from '../salesforce/tokens.js';
 import type { SnapshotStore } from '../snapshot/store.js';
 import { MetadataSoapClient, type DeployResult, type TestLevel } from '../salesforce/metadataSoap.js';
@@ -894,6 +894,233 @@ export class DeployEngine {
     return payload;
   }
 
+  // ── anonymous apex ─────────────────────────────────────────────────────
+
+  /**
+   * Stage an anonymous Apex script behind the same two-step ritual as deploys
+   * and DML (kind 'apex'). There is no checkOnly for executeAnonymous — the
+   * org compiles AND runs the script in one shot at execute — so the approval
+   * page carries the script verbatim plus the sharpest warning in the product,
+   * and a compile error at execute spends the code exactly like a failed DML.
+   */
+  async proposeApex(conn: ConnectionRecord, script: string): Promise<Record<string, unknown>> {
+    const superseded = this.db.supersedePendingRequests(conn.id, 'apex');
+    if (superseded > 0) {
+      this.audit.record('apex.superseded', {
+        connectionId: conn.id,
+        tool: 'apex_propose',
+        detail: { count: superseded },
+      });
+    }
+    const lines = script.split(/\r?\n/).length;
+    const code = generateConfirmationCode();
+    const expiresAt = new Date(Date.now() + this.config.deploy.codeTtlMs).toISOString();
+    const request = this.db.insertDeployRequest({
+      connectionId: conn.id,
+      kind: 'apex',
+      confirmationCode: code,
+      expiresAt,
+      payloadJson: JSON.stringify({ apex: true, code: script }),
+      summaryJson: JSON.stringify({ lines, chars: script.length }),
+    });
+
+    const approval = await this.approvals.present(
+      renderApprovalPage({
+        kind: 'apex',
+        code,
+        expiresAt,
+        org: {
+          alias: conn.alias,
+          orgName: conn.orgName,
+          orgType: conn.orgType,
+          instanceUrl: conn.instanceUrl,
+        },
+        changes: [
+          {
+            label: `Execute anonymous Apex (${lines} line${lines === 1 ? '' : 's'}, ${script.length} chars)`,
+            warnings: [],
+            // The full script, verbatim — the human is approving these exact
+            // bytes, so nothing may be elided (.chg-detail renders pre-wrap).
+            detail: script,
+          },
+        ],
+        destructive: [],
+        results: [
+          {
+            label: 'Validation',
+            value: 'none — the org compiles and runs the script only when you approve',
+          },
+          { label: 'Runs as', value: conn.username ?? 'the connected user' },
+        ],
+        blast: [],
+        warnings: [
+          'ANONYMOUS APEX — this script runs with YOUR permissions and can read or write ' +
+            'anything your user can. DML it performs COMMITS on success (nothing rolls back ' +
+            'unless the script throws). Read every line below before approving.',
+        ],
+      }),
+      this.requestStatusCheck(request.id),
+      this.config.deploy.codeTtlMs + 60_000,
+    );
+
+    this.audit.record('apex.proposed', {
+      connectionId: conn.id,
+      tool: 'apex_propose',
+      detail: { requestId: request.id, lines, chars: script.length },
+    });
+    return {
+      connection: conn.alias,
+      org_type: conn.orgType,
+      request_id: request.id,
+      lines,
+      chars: script.length,
+      expires_at: expiresAt,
+      approval_page: approvalForAgent('apex', approval),
+    };
+  }
+
+  async executeApex(conn: ConnectionRecord, code: string): Promise<Record<string, unknown>> {
+    const claim = this.claimCode(conn, 'apex', code, 'apex_execute');
+    if (claim.kind === 'terminal') return claim.result;
+    if (claim.kind === 'running') {
+      return {
+        connection: conn.alias,
+        executed: false,
+        note: 'This script is already being executed by a concurrent call — not re-run.',
+      };
+    }
+    const request = claim.request;
+    const payload = JSON.parse(request.payloadJson ?? '{}') as { apex?: boolean; code?: string };
+    const script = typeof payload.code === 'string' ? payload.code : '';
+    if (payload.apex !== true || script.length === 0) {
+      const result = {
+        connection: conn.alias,
+        executed: false,
+        error_message: 'The approved script is missing from the request payload.',
+        note: 'Propose again for a fresh code.',
+      };
+      this.db.finishDeployRequest(request.id, 'execution_failed', JSON.stringify(result));
+      this.audit.record('apex.execution_failed', {
+        connectionId: conn.id,
+        tool: 'apex_execute',
+        outcome: 'error',
+        detail: { requestId: request.id, reason: 'payload_missing' },
+      });
+      return result;
+    }
+
+    const rest = new RestClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
+    // executeAnonymous is a GET with the script URL-encoded into the query
+    // string (the Tooling API quirk that motivates the propose-time size cap).
+    let exec: {
+      line: number;
+      column: number;
+      compiled: boolean;
+      success: boolean;
+      compileProblem: string | null;
+      exceptionMessage: string | null;
+      exceptionStackTrace: string | null;
+    };
+    try {
+      const res = await rest.request(
+        `/services/data/${this.config.salesforce.apiVersion}/tooling/executeAnonymous/` +
+          `?anonymousBody=${encodeURIComponent(script)}`,
+      );
+      exec = (await res.json()) as typeof exec;
+    } catch (err) {
+      const message = String(err instanceof Error ? err.message : err);
+      const result = {
+        connection: conn.alias,
+        executed: false,
+        error_message: message,
+        note:
+          'The request did not complete cleanly — the script may or may not have run. The ' +
+          'confirmation code is spent; check the org (debug logs, affected records) before ' +
+          'proposing it again.',
+      };
+      this.db.finishDeployRequest(request.id, 'execution_failed', JSON.stringify(result));
+      this.audit.record('apex.execution_failed', {
+        connectionId: conn.id,
+        tool: 'apex_execute',
+        outcome: 'error',
+        detail: { requestId: request.id, error: message },
+      });
+      return result;
+    }
+
+    const status = !exec.compiled ? 'compile_error' : exec.success ? 'executed' : 'runtime_error';
+
+    // Best-effort: tell the agent when a debug log of this run exists. Never
+    // let this probe sink the honest execution result.
+    let debugLogNote: string | null = null;
+    if (exec.compiled && conn.userId) {
+      try {
+        const nowLiteral = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+        const flags = await rest.toolingQuery<{ Id: string }>(
+          `SELECT Id FROM TraceFlag WHERE TracedEntityId = '${conn.userId}' ` +
+            `AND ExpirationDate > ${nowLiteral} LIMIT 1`,
+          1,
+        );
+        if (flags.length > 0) {
+          debugLogNote =
+            'A trace flag was active for your user — a debug log of this run exists (get_debug_logs).';
+        }
+      } catch {
+        // The log hint is a courtesy; the execution result stands on its own.
+      }
+    }
+
+    const result: Record<string, unknown> = {
+      connection: conn.alias,
+      executed: status === 'executed',
+      status,
+      ...(status === 'compile_error'
+        ? {
+            compile_error: {
+              line: exec.line,
+              column: exec.column,
+              problem: exec.compileProblem,
+            },
+            note:
+              'The script did not compile — nothing ran and nothing changed in the org. The ' +
+              'code is spent; fix the script and propose again.',
+          }
+        : {}),
+      ...(status === 'runtime_error'
+        ? {
+            runtime_error: {
+              exception_message: exec.exceptionMessage,
+              stack_trace: exec.exceptionStackTrace,
+            },
+            note:
+              'The script threw an uncaught exception — the whole transaction rolled back, so ' +
+              'its DML was NOT committed. The code is spent; propose again after fixing.',
+          }
+        : {}),
+      ...(status === 'executed'
+        ? {
+            note:
+              'Executed — any DML the script performed is COMMITTED. executeAnonymous returns ' +
+              'no output; System.debug lines are visible only in a debug log (set_trace_flag ' +
+              'before the run next time if you need one).',
+          }
+        : {}),
+      ...(debugLogNote ? { debug_log: debugLogNote } : {}),
+    };
+    this.db.finishDeployRequest(
+      request.id,
+      status === 'executed' ? 'executed' : 'execution_failed',
+      JSON.stringify(result),
+    );
+    this.audit.record(status === 'executed' ? 'apex.executed' : 'apex.execution_failed', {
+      connectionId: conn.id,
+      tool: 'apex_execute',
+      outcome: status === 'executed' ? 'success' : 'error',
+      detail: { requestId: request.id, status },
+    });
+    return result;
+  }
+
   // ── shared internals ───────────────────────────────────────────────────
 
   /**
@@ -904,7 +1131,7 @@ export class DeployEngine {
    */
   private claimCode(
     conn: ConnectionRecord,
-    kind: 'deploy' | 'dml',
+    kind: DeployRequestKind,
     code: string,
     tool: string,
   ):
@@ -933,15 +1160,14 @@ export class DeployEngine {
       if (attempt.locked) {
         if (attempt.payloadPath) safeUnlink(attempt.payloadPath);
         throw new ContrailError(
-          `Too many incorrect codes — the pending ${
-            kind === 'deploy' ? 'deploy' : 'change'
-          } on "${conn.alias}" has been locked and its code invalidated. Re-validate to get a ` +
+          `Too many incorrect codes — the pending ${kindNoun(kind)} on "${conn.alias}" has ` +
+            `been locked and its code invalidated. Re-validate to get a ` +
             `fresh code. (This is the brute-force guard.)`,
           'code_locked',
         );
       }
       throw new ContrailError(
-        `No ${kind === 'deploy' ? 'deploy' : 'change'} on "${conn.alias}" matches that code.` +
+        `No ${kindNoun(kind)} on "${conn.alias}" matches that code.` +
           (attempt.pendingExisted
             ? ` ${attempt.attemptsRemaining} attempt(s) remain before the pending code is locked.`
             : '') +
@@ -1327,7 +1553,7 @@ export class DeployEngine {
  * defeating the whole invariant.
  */
 function approvalForAgent(
-  kind: 'deploy' | 'dml',
+  kind: DeployRequestKind,
   approval: { opened: boolean; url: string },
 ): Record<string, unknown> {
   if (approval.opened) return { opened: true };
@@ -1343,6 +1569,11 @@ function approvalForAgent(
       'Contrail server log (stderr) for the human to open — it is deliberately NOT provided ' +
       'to you. Ask the human to open the Contrail log, visit the page, and read the code back.',
   };
+}
+
+/** The human-facing noun for a pending request of each kind. */
+function kindNoun(kind: DeployRequestKind): string {
+  return kind === 'deploy' ? 'deploy' : kind === 'apex' ? 'Apex script' : 'change';
 }
 
 function safeUnlink(filePath: string): void {

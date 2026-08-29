@@ -66,6 +66,8 @@ describe('MCP surface', () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
+      'apex_execute',
+      'apex_propose',
       'connect_org',
       'deactivate_flow',
       'describe_schema',
@@ -88,6 +90,7 @@ describe('MCP surface', () => {
       'retrieve_metadata',
       'run_apex_tests',
       'search_metadata',
+      'set_trace_flag',
       'soql_query',
       'validate_deploy',
     ]);

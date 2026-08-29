@@ -75,16 +75,21 @@ ORDER BY StartTime DESC LIMIT 20
 
 - **No live tailing.** Nothing in Contrail streams logs. The loop is: human
   reproduces → you list logs again → fetch the new log id.
-- **No trace-flag or debug-level management.** TraceFlag/DebugLevel are Tooling
-  objects and are **neither readable nor writable** through Contrail —
-  `soql_query` speaks the data API only, not Tooling, so `SELECT … FROM
-  TraceFlag` fails with INVALID_TYPE. **The human enables debug logging in
-  Setup** (§2); you tell them exactly what to set.
-- **No anonymous Apex** — no benchmark harness, no ad-hoc repro snippets, no
-  ad-hoc `Limits.get*()` probes run outside a real transaction (instrumenting a
-  deployed class with `Limits.get*()` guards is fine — see
-  `assets/cpu-heap-optimization.cls`). Evidence comes from logs of real
-  transactions (or test runs inside `validate_deploy`).
+- **Trace flags: only your own, only the standard level.** `set_trace_flag`
+  (`diagnostics_read`) turns on debug logging for the **connected user** for up
+  to 60 minutes — it find-or-creates a reusable `Contrail_Debug` debug level and
+  extends an existing flag rather than stacking one. Tracing a **different**
+  user, or picking custom per-goal levels, is still Setup work (§2). And
+  `soql_query` still cannot read TraceFlag/DebugLevel — they are Tooling
+  objects, so `SELECT … FROM TraceFlag` fails with INVALID_TYPE.
+- **Anonymous Apex is not a free probe.** It exists ONLY behind the full
+  `apex_propose` → human code → `apex_execute` ritual, and DML it performs
+  **commits** — so an ad-hoc repro snippet or benchmark harness costs one human
+  approval per run and can change real data. Prefer evidence from logs of real
+  transactions or test runs (which roll back); reach for ritualized anonymous
+  Apex only when the human agrees a committed, one-off script is the right
+  diagnostic (instrumenting a deployed class with `Limits.get*()` guards is
+  still fine — see `assets/cpu-heap-optimization.cls`).
 - **No query-plan tool.** Selectivity is argued from row counts in the log plus
   schema knowledge (`describe_schema` for field/relationship shape). If a definitive
   plan is needed, the human runs Query Plan in Developer Console and pastes the result.
@@ -99,15 +104,24 @@ e.g. `log-retrieval=unavailable: diagnostics_read not granted on uat` — and of
 
 ---
 
-## 2. Getting logs to exist (the human's part, in Setup)
+## 2. Getting logs to exist
 
 No rows in listing mode usually means logging is off, the trace flag expired, or
 the logs aged out — ApexLog rows are retained about 24 hours by default, so old
 failures must be reproduced fresh.
-Direct the human: **Setup → Debug Logs → New Trace Flag** on the affected user,
-with an expiration in the future, attached to a debug level. The traced user
-also needs the **API Enabled** and **Author Apex** permissions, or no logs are
-written. Suggest levels by goal:
+
+**When the activity to trace is the connected user's own** (anonymous Apex runs,
+`run_apex_tests`, flows the connected user triggers): call `set_trace_flag`
+(default 30 min, max 60) and say so — it writes a self-expiring TraceFlag plus a
+reusable `Contrail_Debug` level (ApexCode DEBUG, System DEBUG, Database/Callout/
+Validation/Workflow INFO), and the logs it produces consume the org's shared log
+allocation until it expires.
+
+**When a different user must be traced, or the goal needs custom levels** (the
+table below), direct the human: **Setup → Debug Logs → New Trace Flag** on the
+affected user, with an expiration in the future, attached to a debug level. The
+traced user also needs the **API Enabled** and **Author Apex** permissions, or
+no logs are written. Suggest levels by goal:
 
 | Goal | Debug level to set |
 |---|---|
@@ -131,8 +145,9 @@ noisier levels mean less usable evidence, not more.
    ids if known, and whether the goal is diagnosis only or diagnosis + fix.
 2. **Grants**: `get_permissions` → need `diagnostics_read` (plus `data_read` for
    SOQL narrowing; `metadata_read` to read the implicated Apex source).
-3. **Capture**: ask the human to confirm an active trace flag in Setup (§2) —
-   you cannot query TraceFlag; the only agent-visible evidence is a new row
+3. **Capture**: for the connected user's own activity, `set_trace_flag` and say
+   so; for anyone else, ask the human to set the flag in Setup (§2). You cannot
+   query TraceFlag — the agent-visible evidence a flag is live is a new row
    appearing in `get_debug_logs` listing mode. Then have the human reproduce,
    list logs, fetch the candidate body.
 4. **Analyze in this order** — earlier findings explain later ones:

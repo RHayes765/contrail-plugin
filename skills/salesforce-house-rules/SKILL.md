@@ -96,6 +96,17 @@ rather than inventing what the skill would have said.
   defaults true (any failure rolls back every step); pass `false` only when
   partial completion is genuinely acceptable — the approval page tells the human
   which mode they are approving, so say it in your summary too.
+- **Anonymous Apex rides the same ritual and commits.** `apex_propose` stages a
+  script (max 32k chars); the approval page shows it **verbatim** with the
+  warning that it runs with the human's permissions — so present the script in
+  chat too, and never pad it with "harmless" extras. `apex_execute` with the code
+  the human reads back is the only way it runs. DML it performs **COMMITS** on
+  success; an uncaught exception rolls the whole script back. There is no
+  dry-run: a compile error surfaces at execute and spends the code. For
+  exercising code, prefer Apex tests (`validate_deploy` gates or
+  `run_apex_tests` — those roll back); reserve anonymous Apex for deliberate
+  committed work: data fixes, kicking off batches, scheduled-job surgery. Call
+  `set_trace_flag` first when you will need the run's debug log.
 - If validation results change or time passes (codes expire in ~1 hour and are
   invalidated by re-validation), re-validate rather than reusing a stale code.
 - After a successful deploy, run `refresh_snapshot` so the local index and

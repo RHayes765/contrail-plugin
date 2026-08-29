@@ -28,11 +28,12 @@ export const GRANT_DESCRIPTIONS: Readonly<Record<Grant, string>> = {
   metadata_write:
     'Validate and execute metadata deploys. Requires metadata_read. Every deploy requires explicit human confirmation.',
   diagnostics_read:
-    'Read debug logs and flow error details, and run Apex tests (test transactions always ' +
-    'roll back). May expose incidental record data present in logs.',
+    'Read debug logs and flow error details, run Apex tests (test transactions always ' +
+    'roll back), and set trace flags. May expose incidental record data present in logs.',
   data_read: 'Run SOQL queries and read records (row-capped).',
   data_write:
-    'Propose and execute DML. Requires data_read. Every write requires explicit human confirmation.',
+    'Propose and execute DML and anonymous Apex scripts. Requires data_read. Every write ' +
+    'requires explicit human confirmation.',
 };
 
 export function emptyGrantSet(): GrantSet {
@@ -118,4 +119,7 @@ export const TOOL_GRANT_MAP: Readonly<Record<string, Grant | null>> = {
   deactivate_flow: 'metadata_write',
   dml_propose: 'data_write',
   dml_execute: 'data_write',
+  apex_propose: 'data_write',
+  apex_execute: 'data_write',
+  set_trace_flag: 'diagnostics_read',
 };

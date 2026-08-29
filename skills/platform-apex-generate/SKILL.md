@@ -31,11 +31,16 @@ invocable methods, and triggers; and for evidence-based review of existing `.cls
   analyzer. The first — and only — compile feedback on authored Apex is the **org's
   compiler**, reached through `validate_deploy` (checkOnly). Never describe Apex as
   valid, compiling, or deploy-ready before that gate has run and passed.
-- **No anonymous Apex, ever.** There is no ad-hoc execution or smoke-test path. The
-  only way generated code executes is through Apex tests: inside `validate_deploy`
-  (`test_level` + `run_tests`) while the code is landing, or — once deployed — via
-  `run_apex_tests` (standalone Tooling API runner; test transactions roll back, no
-  approval, `diagnostics_read`-gated).
+- **Anonymous Apex exists ONLY behind the full ritual.** `apex_propose` stages a
+  script (max 32k chars) and puts it — verbatim — on the human's approval page;
+  `apex_execute` runs it only after the human reads the code back. DML it performs
+  **COMMITS** (an uncaught exception rolls the whole script back), and there is no
+  dry-run: the org compiles at execute, and a compile error spends the code. Prefer
+  Apex tests for exercising generated code — inside `validate_deploy` (`test_level` +
+  `run_tests`) while it lands, or via `run_apex_tests` once deployed (test
+  transactions roll back, no approval) — and reserve anonymous Apex for what tests
+  cannot do: one-off data fixes, kicking off batches, diagnostics with committed
+  side effects the human has approved line-by-line.
 - **Never author `-meta.xml` files or a manifest.** Contrail generates the meta XML
   from its configured apiVersion; when modifying an existing class, the snapshot's
   existing meta wins. You do not choose the API version — when a rule below depends

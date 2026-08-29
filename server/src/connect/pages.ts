@@ -64,7 +64,8 @@ const STYLE = `
   .chg-label { font-family: ui-monospace, Consolas, monospace; font-size: 0.88rem; }
   .chg-warn { font-size: 0.82rem; color: light-dark(#a32c2c, #e88c7c); margin-top: 0.15rem; }
   .chg-detail { font-family: ui-monospace, Consolas, monospace; font-size: 0.74rem;
-    color: light-dark(#5a6570, #8b949e); margin-top: 0.15rem; word-break: break-all; }
+    color: light-dark(#5a6570, #8b949e); margin-top: 0.15rem; word-break: break-all;
+    white-space: pre-wrap; }
   .chg.danger { background: #8a1a1a15; }
   .danger-card { border-color: #8a1a1a88; }
   .danger-card h2 { color: light-dark(#a32c2c, #e88c7c); }
@@ -188,14 +189,14 @@ export function renderSuccessPage(opts: {
 }
 
 export interface ApprovalPageOptions {
-  kind: 'deploy' | 'dml';
+  kind: 'deploy' | 'dml' | 'apex';
   code: string;
   expiresAt: string;
   org: { alias: string; orgName: string | null; orgType: string; instanceUrl: string };
-  /** Non-destructive changes, one row each. */
-  changes: Array<{ label: string; warnings: string[] }>;
+  /** Non-destructive changes, one row each. `detail` renders monospace, pre-wrap (multiline-safe). */
+  changes: Array<{ label: string; warnings: string[]; detail?: string }>;
   /** Destructive changes — rendered first, in red. */
-  destructive: Array<{ label: string; warnings: string[] }>;
+  destructive: Array<{ label: string; warnings: string[]; detail?: string }>;
   /** Validation/test result lines. */
   results: Array<{ label: string; value: string; bad?: boolean }>;
   /** Blast radius lines. */
@@ -212,7 +213,12 @@ export interface ApprovalPageOptions {
 export function renderApprovalPage(opts: ApprovalPageOptions): string {
   const isProd = opts.org.orgType === 'production';
   const badgeClass = isProd ? 'production' : opts.org.orgType === 'sandbox' ? 'sandbox' : 'other';
-  const title = opts.kind === 'deploy' ? 'Approve this deploy' : 'Approve this data change';
+  const title =
+    opts.kind === 'deploy'
+      ? 'Approve this deploy'
+      : opts.kind === 'apex'
+        ? 'Approve this anonymous Apex script'
+        : 'Approve this data change';
 
   // `detail` carries file provenance for components read from disk. The human
   // is approving bytes they did not type, so the page has to say which file

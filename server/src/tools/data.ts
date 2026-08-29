@@ -305,6 +305,127 @@ export function registerDataTools(server: McpServer, deps: ToolDeps): void {
   );
 
   server.registerTool(
+    'set_trace_flag',
+    {
+      title: 'Turn on debug logging (trace flag)',
+      description:
+        'Turn on debug logging for the connected user for a bounded window (default 30 ' +
+        'minutes, max 60), so anonymous Apex, test runs, and flows executed by that user ' +
+        'produce logs readable via get_debug_logs. Side effects, honestly: writes a ' +
+        'self-expiring TraceFlag row and (first use) a reusable "Contrail_Debug" DebugLevel ' +
+        "to the org, and generated logs consume the org's shared debug-log allocation until " +
+        'the flag expires. If the user already has a trace flag, its expiry is extended ' +
+        'rather than stacking a second one.',
+      inputSchema: {
+        connection: z.string().describe('Connection alias (or id).'),
+        minutes: z
+          .number()
+          .int()
+          .min(1)
+          .max(60)
+          .optional()
+          .describe('How long logging stays on (default 30).'),
+      },
+    },
+    async (args: { connection: string; minutes?: number }) =>
+      guarded(async () => {
+        const conn = requireConnection(args.connection, 'set_trace_flag');
+        const client = rest(conn);
+        const version = config.salesforce.apiVersion;
+        const minutes = args.minutes ?? 30;
+        const expiresAt = new Date(Date.now() + minutes * 60_000).toISOString();
+
+        // Whose activity gets traced: the stored user id, else a lookup by the
+        // stored username. A connection with neither has lost its identity.
+        let userId = conn.userId && SF_ID_RE.test(conn.userId) ? conn.userId : null;
+        if (!userId && conn.username) {
+          const users = await client.query<{ Id: string }>(
+            `SELECT Id FROM User WHERE Username = '${conn.username.replace(/'/g, "\\'")}' LIMIT 1`,
+            1,
+          );
+          userId = users[0]?.Id ?? null;
+        }
+        if (!userId) {
+          return fail(
+            `Cannot determine which user to trace on "${conn.alias}" — the stored connection ` +
+              'has no user id or username. Re-connect the org (connect_org) to refresh it.',
+          );
+        }
+
+        const existing = await client.toolingQuery<{ Id: string; ExpirationDate: string | null }>(
+          `SELECT Id, ExpirationDate FROM TraceFlag WHERE TracedEntityId = '${userId}' ` +
+            `AND LogType = 'USER_DEBUG' ORDER BY ExpirationDate DESC LIMIT 1`,
+          1,
+        );
+
+        let action: 'created' | 'extended';
+        let debugLevel: string;
+        if (existing.length > 0) {
+          // Extending beats stacking: orgs cap concurrent trace flags per
+          // entity, and the human may have configured their own debug level —
+          // which stays in force (only the expiry moves).
+          await client.request(
+            `/services/data/${version}/tooling/sobjects/TraceFlag/${existing[0]!.Id}`,
+            { method: 'PATCH', body: JSON.stringify({ ExpirationDate: expiresAt }) },
+          );
+          action = 'extended';
+          debugLevel = "the existing flag's own debug level";
+        } else {
+          const levels = await client.toolingQuery<{ Id: string }>(
+            `SELECT Id FROM DebugLevel WHERE DeveloperName = 'Contrail_Debug' LIMIT 1`,
+            1,
+          );
+          let levelId = levels[0]?.Id ?? null;
+          if (!levelId) {
+            const res = await client.request(
+              `/services/data/${version}/tooling/sobjects/DebugLevel`,
+              {
+                method: 'POST',
+                body: JSON.stringify({
+                  DeveloperName: 'Contrail_Debug',
+                  MasterLabel: 'Contrail_Debug',
+                  ApexCode: 'DEBUG',
+                  ApexProfiling: 'INFO',
+                  Callout: 'INFO',
+                  Database: 'INFO',
+                  System: 'DEBUG',
+                  Validation: 'INFO',
+                  Visualforce: 'INFO',
+                  Workflow: 'INFO',
+                }),
+              },
+            );
+            levelId = ((await res.json()) as { id: string }).id;
+          }
+          await client.request(`/services/data/${version}/tooling/sobjects/TraceFlag`, {
+            method: 'POST',
+            body: JSON.stringify({
+              TracedEntityId: userId,
+              LogType: 'USER_DEBUG',
+              DebugLevelId: levelId,
+              ExpirationDate: expiresAt,
+            }),
+          });
+          action = 'created';
+          debugLevel = 'Contrail_Debug';
+        }
+
+        return ok({
+          connection: conn.alias,
+          traced_user: conn.username ?? userId,
+          action,
+          minutes,
+          expires_at: expiresAt,
+          debug_level: debugLevel,
+          note:
+            `Debug logging is on until ${expiresAt} — activity by this user now writes debug ` +
+            "logs (consuming the org's shared log allocation until the flag expires). Read " +
+            'them with get_debug_logs.',
+        });
+      }),
+  );
+
+  server.registerTool(
     'get_flow_errors',
     {
       title: 'List flow interview problems',
