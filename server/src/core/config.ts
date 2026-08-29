@@ -54,6 +54,17 @@ export interface ContrailConfig {
      */
     checkEnabled: boolean;
   };
+  localDiagnostics: {
+    /**
+     * check_apex / check_soql: local static diagnostics via the vendored
+     * Salesforce language servers (server/vendor/ — fully offline, no org
+     * traffic). Set false to disable both tools; they then report themselves
+     * unavailable rather than pretending to have checked anything.
+     */
+    enabled: boolean;
+    /** Hard budget for one check, including a cold server spawn. */
+    timeoutMs: number;
+  };
   deploy: {
     /** checkDeployStatus poll interval. */
     pollIntervalMs: number;
@@ -116,6 +127,10 @@ export const DEFAULT_CONFIG: ContrailConfig = {
   updates: {
     checkEnabled: true,
   },
+  localDiagnostics: {
+    enabled: true,
+    timeoutMs: 30 * 1000,
+  },
   deploy: {
     pollIntervalMs: 2000,
     deployTimeoutMs: 15 * 60 * 1000,
@@ -150,6 +165,7 @@ export function loadConfig(): ContrailConfig {
     oauth: { ...DEFAULT_CONFIG.oauth, ...fromDisk.oauth },
     snapshot: { ...DEFAULT_CONFIG.snapshot, ...fromDisk.snapshot },
     updates: { ...DEFAULT_CONFIG.updates, ...fromDisk.updates },
+    localDiagnostics: { ...DEFAULT_CONFIG.localDiagnostics, ...fromDisk.localDiagnostics },
     deploy: { ...DEFAULT_CONFIG.deploy, ...fromDisk.deploy },
   };
 

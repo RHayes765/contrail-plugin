@@ -1,0 +1,6 @@
+{
+  "name": "@salesforce/soql-lsp-vendored",
+  "private": true,
+  "type": "commonjs",
+  "description": "Vendored SOQL language-server bundle (CommonJS). The type field is LOAD-BEARING: without it, Node walks up to server/package.json's \"type\": \"module\" and crashes the bundle at startup by parsing it as ESM."
+}

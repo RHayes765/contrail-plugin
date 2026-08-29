@@ -10,6 +10,7 @@ import type { AccessTokenManager } from '../salesforce/tokens.js';
 import type { SnapshotStore } from '../snapshot/store.js';
 import type { SnapshotEngine } from '../snapshot/engine.js';
 import type { DeployEngine } from '../deploy/engine.js';
+import type { LocalDiagRunner } from '../localdiag/types.js';
 import { ContrailError } from '../core/errors.js';
 import { grantedList, notGrantedList } from '../core/grants.js';
 import { getUpdateNotice } from '../core/updateCheck.js';
@@ -29,6 +30,7 @@ export interface ToolDeps {
   store: SnapshotStore;
   engine: SnapshotEngine;
   deploys: DeployEngine;
+  localDiag: LocalDiagRunner;
 }
 
 const PERMISSION_NOTES = [

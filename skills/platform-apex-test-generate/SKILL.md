@@ -53,7 +53,7 @@ What `validate_deploy` returns — this is everything you can honestly claim abo
 
 | Result field | Appears on | Meaning |
 |---|---|---|
-| `component_failures` | Failed runs | Compile/package errors (first 25) — your first compile feedback; Contrail has no local compiler, analyzer, or LSP |
+| `component_failures` | Failed runs | Compile/package errors (first 25) — the org compiler's verdict. Pre-screen locally with `check_apex` first (free, offline; syntax definitive, org-specific symbols invisible) so validate rounds are spent on real problems |
 | `tests_run` / `test_failures` | Both | Counts of test methods executed and failed |
 | `test_failure_detail` | Both | Failing class/method names, assertion messages, stack traces (first 25) — **grant-gated**, see below |
 | `code_coverage_warnings` | Passed runs only | The org's coverage warning strings, capped at 10 — if 10 come back, assume there may be more and re-validate after fixing |

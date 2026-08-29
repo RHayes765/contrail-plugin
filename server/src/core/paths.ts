@@ -1,6 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 
 /**
@@ -148,6 +149,33 @@ export function snapshotsDir(): string {
  */
 export function stagingDir(): string {
   return ensureDir(path.join(dataDir(), 'staging'));
+}
+
+/**
+ * The vendored language-server bundles (server/vendor/ — see its
+ * PROVENANCE.md), resolved relative to the RUNNING CODE, not the data dir:
+ * they ship with the install, in every channel. The candidate walk covers
+ * every layout this code runs from — the committed dist-plugin bundle and
+ * the mcpb staging entry sit one level under the root that carries vendor/
+ * (`../vendor`), the tsc dist/ tree and vitest's src/ imports sit two levels
+ * under it (`../../vendor`). Returns null when no candidate holds the apex-ls
+ * server — callers report "not installed" honestly rather than guessing.
+ *
+ * Override with CONTRAIL_VENDOR_DIR (tests and portable setups), mirroring
+ * CONTRAIL_DATA_DIR.
+ */
+export function vendorDir(): string | null {
+  const override = process.env.CONTRAIL_VENDOR_DIR;
+  if (override) return override;
+  // fileURLToPath, not URL.pathname: this repo's own path has spaces, which
+  // pathname would leave percent-encoded.
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  for (const candidate of [path.join(here, '..', 'vendor'), path.join(here, '..', '..', 'vendor')]) {
+    if (fs.existsSync(path.join(candidate, 'apex-ls', 'dist', 'server.node.js'))) {
+      return path.resolve(candidate);
+    }
+  }
+  return null;
 }
 
 function ensureDir(dir: string): string {

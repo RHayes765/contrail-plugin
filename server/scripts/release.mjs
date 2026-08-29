@@ -71,6 +71,24 @@ run('npm run build');
 run('npx vitest run');
 
 // ── 3. Artifacts ──
+// Vendor-presence gate: the repo's unanchored `dist/` gitignore once nearly
+// swallowed these silently — `git add -A` skips ignored files without a
+// word, and CI's clean checkout would ship check_apex permanently broken.
+// `--error-unmatch` fails loudly if any of them is untracked.
+run(
+  'git ls-files --error-unmatch ' +
+    [
+      'server/vendor/apex-ls/dist/server.node.js',
+      'server/vendor/apex-ls/dist/worker.platform.js',
+      'server/vendor/apex-ls/package.json',
+      'server/vendor/apex-ls/VERSION',
+      'server/vendor/bin/soql-lsp.bundled.js',
+      'server/vendor/bin/package.json',
+    ]
+      .map((f) => `"${f}"`)
+      .join(' '),
+  repoRoot,
+);
 run('npm run bundle');
 fs.mkdirSync(path.join(serverRoot, 'dist-plugin'), { recursive: true });
 fs.copyFileSync(

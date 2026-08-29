@@ -8,7 +8,15 @@ The Contrail engine shipped as a Claude plugin: a local stdio MCP server (the
 P0.1–P0.6 Phase 0 surface. `npm run mcpb` builds `contrail-<version>.mcpb`, a
 single MCP Bundle that installs into Claude Desktop via Settings → Extensions
 (no Node install, no npm, no config editing on the target machine) and covers
-Windows x64/ARM and macOS Intel/Apple Silicon from one file. 23 tools.
+Windows x64/ARM and macOS Intel/Apple Silicon from one file. 32 tools.
+
+**Local diagnostics (S26).** `check_apex` / `check_soql` run Salesforce's own
+prebuilt language servers, vendored under `server/vendor/` (Apache-2.0 — see
+NOTICE and the vendor `PROVENANCE.md`): free, offline static checks before a
+deploy round trip. Syntax findings are definitive; org-specific symbols are
+invisible to them, so `validate_deploy` stays the authority. The bundles add
+~20MB to the repo and ~7MB to the packed mcpb — a deliberate trade for checks
+that work with no network and no setup.
 
 **P0.6 — flow deactivation.** A `deactivate_flow` tool turns off a flow without
 deleting it, through the same two-step human approval (native `FlowDefinition`

@@ -1,0 +1,5 @@
+# Vendored language-server bundles (server/vendor/): byte-exact artifacts.
+# -text prevents CRLF normalization from corrupting the 9MB JS bundles on
+# Windows checkouts; -diff keeps them out of git log -p and PR views.
+server/vendor/** -text
+server/vendor/**/*.js -diff

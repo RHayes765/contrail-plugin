@@ -347,6 +347,7 @@ beforeEach(async () => {
   };
 
   const config: ContrailConfig = {
+    ...DEFAULT_CONFIG,
     salesforce: { ...DEFAULT_CONFIG.salesforce },
     oauth: { ...DEFAULT_CONFIG.oauth },
     snapshot: { ...DEFAULT_CONFIG.snapshot },
@@ -815,6 +816,7 @@ describe('approval URL is never handed to the agent', () => {
     });
     tokens2.setRefreshToken(conn2.id, 'RT');
     const config: ContrailConfig = {
+    ...DEFAULT_CONFIG,
       salesforce: { ...DEFAULT_CONFIG.salesforce },
       oauth: { ...DEFAULT_CONFIG.oauth },
       snapshot: { ...DEFAULT_CONFIG.snapshot },

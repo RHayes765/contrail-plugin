@@ -138,6 +138,7 @@ beforeEach(() => {
   db = new ContrailDb(path.join(tmp, 'test.db'));
   const tokens = new MemoryTokenStore();
   const config: ContrailConfig = {
+    ...DEFAULT_CONFIG,
     salesforce: { ...DEFAULT_CONFIG.salesforce },
     oauth: { ...DEFAULT_CONFIG.oauth },
     snapshot: { ...DEFAULT_CONFIG.snapshot, pollIntervalMs: 10, toolWaitMs: 10_000 },

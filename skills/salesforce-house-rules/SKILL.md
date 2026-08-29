@@ -58,6 +58,14 @@ rather than inventing what the skill would have said.
 - Deploy discipline: `validate_deploy` (checkOnly) first, always. Present its result
   to the human before anything else: the **target connection** first and unmissable,
   the component change list, test results, and blast radius.
+- **The free local pre-check comes before the org round trip.** Run `check_apex` on
+  authored Apex and `check_soql` on novel or generated SOQL — both are offline,
+  cost nothing, and need no approval. Their honest scope: syntax findings are
+  definitive; org-specific custom types and fields are invisible to them (silently
+  tolerated, never flagged), so a clean local check never substitutes for
+  `validate_deploy` or the org's own SOQL parser. If a check reports itself
+  unavailable, record it fail-closed — `check_apex=unavailable: <reason>` — and
+  proceed to the org gate; an unavailable check is NEVER a pass.
 - **Destructive changes are summarized prominently** — deletions, field type changes,
   and anything that can lose data lead the summary, never buried in a list.
   Deletions are accepted for **any** metadata type, including types Contrail cannot

@@ -111,7 +111,31 @@ for (const triple of KEYRING_TRIPLES) {
 }
 fs.rmSync(tmp, { recursive: true, force: true });
 
-// 7. Validate + pack.
+// 7. Vendored language servers (check_apex / check_soql) + attribution.
+//    Staged at the extension ROOT so the bundle at server/index.mjs finds
+//    them at ../vendor — the same relative layout every other channel has.
+const vendorSrc = path.join(serverRoot, 'vendor');
+const VENDOR_REQUIRED = [
+  'apex-ls/dist/server.node.js',
+  'apex-ls/dist/worker.platform.js',
+  'apex-ls/package.json',
+  'apex-ls/VERSION',
+  'bin/soql-lsp.bundled.js',
+  'bin/package.json',
+];
+for (const rel of VENDOR_REQUIRED) {
+  if (!fs.existsSync(path.join(vendorSrc, rel))) {
+    throw new Error(`vendored language-server file missing: server/vendor/${rel} (gitignore ate it?)`);
+  }
+}
+fs.cpSync(vendorSrc, path.join(staging, 'vendor'), { recursive: true });
+const repoRoot = path.resolve(serverRoot, '..');
+for (const lic of ['NOTICE', 'LICENSE-APACHE-2.0', 'LICENSE-MIT', 'LICENSE-BSD-3-CLAUSE']) {
+  const src = path.join(repoRoot, lic);
+  if (fs.existsSync(src)) fs.copyFileSync(src, path.join(staging, lic));
+}
+
+// 8. Validate + pack.
 run(`npx --yes @anthropic-ai/mcpb validate "${path.join(staging, 'manifest.json')}"`);
 const outFile = path.join(outRoot, `contrail-${pkg.version}.mcpb`);
 run(`npx --yes @anthropic-ai/mcpb pack "${staging}" "${outFile}"`);

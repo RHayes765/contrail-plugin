@@ -14,6 +14,11 @@ import { registerMetadataTools } from './tools/metadata.js';
 import { registerDiffTools } from './tools/diff.js';
 import { registerDataTools } from './tools/data.js';
 import { registerDeployTools } from './tools/deploy.js';
+import { registerLocalDiagTools } from './tools/localdiag.js';
+import { createLocalDiagRunner } from './localdiag/runner.js';
+import type { LocalDiagRunner } from './localdiag/types.js';
+import { dataDir, vendorDir } from './core/paths.js';
+import path from 'node:path';
 
 import { ENGINE_VERSION } from './core/version.js';
 
@@ -27,6 +32,7 @@ export function createDeps(overrides?: {
   flowOps?: FlowOps;
   store?: SnapshotStore;
   approvals?: ApprovalPageServer;
+  localDiag?: LocalDiagRunner;
 }): ToolDeps {
   const db = overrides?.db ?? new ContrailDb();
   const tokens = overrides?.tokens ?? new KeychainTokenStore();
@@ -37,7 +43,15 @@ export function createDeps(overrides?: {
   const store = overrides?.store ?? new SnapshotStore();
   const engine = new SnapshotEngine(db, store, tokenMgr, config, audit);
   const deploys = new DeployEngine(db, store, tokenMgr, config, audit, overrides?.approvals);
-  return { db, tokens, audit, config, flows, tokenMgr, store, engine, deploys };
+  const localDiag =
+    overrides?.localDiag ??
+    createLocalDiagRunner({
+      vendorDir: vendorDir(),
+      enabled: config.localDiagnostics.enabled,
+      timeoutMs: config.localDiagnostics.timeoutMs,
+      workspaceRoot: path.join(dataDir(), 'localdiag-workspace'),
+    });
+  return { db, tokens, audit, config, flows, tokenMgr, store, engine, deploys, localDiag };
 }
 
 /**
@@ -51,5 +65,6 @@ export function createServer(deps: ToolDeps): McpServer {
   registerDiffTools(server, deps);
   registerDataTools(server, deps);
   registerDeployTools(server, deps);
+  registerLocalDiagTools(server, deps);
   return server;
 }

@@ -1,5 +1,9 @@
 node_modules/
 dist/
+# The unanchored dist/ above matches ANY depth — without this negation it
+# silently eats the vendored apex-ls bundles (from git add, the teammate zip,
+# and CI's clean checkout), shipping every release broken with zero errors.
+!server/vendor/apex-ls/dist/
 dist-bundle/
 dist-mcpb/
 *.log

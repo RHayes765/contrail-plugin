@@ -27,10 +27,18 @@ invocable methods, and triggers; and for evidence-based review of existing `.cls
 
 ## Operating context (Contrail)
 
-- **Org-first.** There is no local project, no local compiler, no LSP, and no static
-  analyzer. The first — and only — compile feedback on authored Apex is the **org's
-  compiler**, reached through `validate_deploy` (checkOnly). Never describe Apex as
-  valid, compiling, or deploy-ready before that gate has run and passed.
+- **Org-first, with one local assistant.** `check_apex` gives free, offline static
+  diagnostics from a vendored Salesforce language server — run it on every authored
+  class, trigger, or anonymous block BEFORE `validate_deploy` spends an org round
+  trip. Syntax errors it reports are definitive; fix them before validating. Its
+  limits are hard: it sees NO org metadata, so references to org-specific custom
+  types and fields are silently tolerated (a typo'd `Custom_Field__c` passes), and
+  semantic findings are judged against the Apex standard library only. The **org's
+  compiler** — `validate_deploy` (checkOnly) — remains the ONLY authority: never
+  describe Apex as valid, compiling, or deploy-ready before that gate has run and
+  passed. If `check_apex` reports itself unavailable, record it fail-closed
+  (`check_apex=unavailable: <reason>`) and go straight to `validate_deploy` — an
+  unavailable check is never a pass.
 - **Anonymous Apex exists ONLY behind the full ritual.** `apex_propose` stages a
   script (max 32k chars) and puts it — verbatim — on the human's approval page;
   `apex_execute` runs it only after the human reads the code back. DML it performs
