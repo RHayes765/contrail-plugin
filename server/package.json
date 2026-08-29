@@ -1,6 +1,6 @@
 {
   "name": "@contrail/engine",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "Contrail Engine — Salesforce metadata engine and connection manager, shipped as a local MCP server",
   "license": "UNLICENSED",
   "private": true,

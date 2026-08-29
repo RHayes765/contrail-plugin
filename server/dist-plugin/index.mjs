@@ -25402,9 +25402,9 @@ var GRANT_DEPENDENCIES = {
 var GRANT_DESCRIPTIONS = {
   metadata_read: "Read metadata: retrieve flows, Apex, objects/fields; search, diff, and dependency analysis.",
   metadata_write: "Validate and execute metadata deploys. Requires metadata_read. Every deploy requires explicit human confirmation.",
-  diagnostics_read: "Read debug logs and flow error details, and run Apex tests (test transactions always roll back). May expose incidental record data present in logs.",
+  diagnostics_read: "Read debug logs and flow error details, run Apex tests (test transactions always roll back), and set trace flags. May expose incidental record data present in logs.",
   data_read: "Run SOQL queries and read records (row-capped).",
-  data_write: "Propose and execute DML. Requires data_read. Every write requires explicit human confirmation."
+  data_write: "Propose and execute DML and anonymous Apex scripts. Requires data_read. Every write requires explicit human confirmation."
 };
 function emptyGrantSet() {
   return {
@@ -25466,7 +25466,10 @@ var TOOL_GRANT_MAP = {
   execute_deploy: "metadata_write",
   deactivate_flow: "metadata_write",
   dml_propose: "data_write",
-  dml_execute: "data_write"
+  dml_execute: "data_write",
+  apex_propose: "data_write",
+  apex_execute: "data_write",
+  set_trace_flag: "diagnostics_read"
 };
 
 // src/core/db.ts
@@ -27044,7 +27047,8 @@ var STYLE = `
   .chg-label { font-family: ui-monospace, Consolas, monospace; font-size: 0.88rem; }
   .chg-warn { font-size: 0.82rem; color: light-dark(#a32c2c, #e88c7c); margin-top: 0.15rem; }
   .chg-detail { font-family: ui-monospace, Consolas, monospace; font-size: 0.74rem;
-    color: light-dark(#5a6570, #8b949e); margin-top: 0.15rem; word-break: break-all; }
+    color: light-dark(#5a6570, #8b949e); margin-top: 0.15rem; word-break: break-all;
+    white-space: pre-wrap; }
   .chg.danger { background: #8a1a1a15; }
   .danger-card { border-color: #8a1a1a88; }
   .danger-card h2 { color: light-dark(#a32c2c, #e88c7c); }
@@ -27135,7 +27139,7 @@ function renderSuccessPage(opts) {
 function renderApprovalPage(opts) {
   const isProd = opts.org.orgType === "production";
   const badgeClass = isProd ? "production" : opts.org.orgType === "sandbox" ? "sandbox" : "other";
-  const title = opts.kind === "deploy" ? "Approve this deploy" : "Approve this data change";
+  const title = opts.kind === "deploy" ? "Approve this deploy" : opts.kind === "apex" ? "Approve this anonymous Apex script" : "Approve this data change";
   const row = (c, danger) => `
     <div class="chg${danger ? " danger" : ""}">
       <div class="chg-label">${esc2(c.label)}</div>
@@ -31129,6 +31133,190 @@ var DeployEngine = class {
     });
     return payload;
   }
+  // ── anonymous apex ─────────────────────────────────────────────────────
+  /**
+   * Stage an anonymous Apex script behind the same two-step ritual as deploys
+   * and DML (kind 'apex'). There is no checkOnly for executeAnonymous — the
+   * org compiles AND runs the script in one shot at execute — so the approval
+   * page carries the script verbatim plus the sharpest warning in the product,
+   * and a compile error at execute spends the code exactly like a failed DML.
+   */
+  async proposeApex(conn, script) {
+    const superseded = this.db.supersedePendingRequests(conn.id, "apex");
+    if (superseded > 0) {
+      this.audit.record("apex.superseded", {
+        connectionId: conn.id,
+        tool: "apex_propose",
+        detail: { count: superseded }
+      });
+    }
+    const lines = script.split(/\r?\n/).length;
+    const code = generateConfirmationCode();
+    const expiresAt = new Date(Date.now() + this.config.deploy.codeTtlMs).toISOString();
+    const request = this.db.insertDeployRequest({
+      connectionId: conn.id,
+      kind: "apex",
+      confirmationCode: code,
+      expiresAt,
+      payloadJson: JSON.stringify({ apex: true, code: script }),
+      summaryJson: JSON.stringify({ lines, chars: script.length })
+    });
+    const approval = await this.approvals.present(
+      renderApprovalPage({
+        kind: "apex",
+        code,
+        expiresAt,
+        org: {
+          alias: conn.alias,
+          orgName: conn.orgName,
+          orgType: conn.orgType,
+          instanceUrl: conn.instanceUrl
+        },
+        changes: [
+          {
+            label: `Execute anonymous Apex (${lines} line${lines === 1 ? "" : "s"}, ${script.length} chars)`,
+            warnings: [],
+            // The full script, verbatim — the human is approving these exact
+            // bytes, so nothing may be elided (.chg-detail renders pre-wrap).
+            detail: script
+          }
+        ],
+        destructive: [],
+        results: [
+          {
+            label: "Validation",
+            value: "none \u2014 the org compiles and runs the script only when you approve"
+          },
+          { label: "Runs as", value: conn.username ?? "the connected user" }
+        ],
+        blast: [],
+        warnings: [
+          "ANONYMOUS APEX \u2014 this script runs with YOUR permissions and can read or write anything your user can. DML it performs COMMITS on success (nothing rolls back unless the script throws). Read every line below before approving."
+        ]
+      }),
+      this.requestStatusCheck(request.id),
+      this.config.deploy.codeTtlMs + 6e4
+    );
+    this.audit.record("apex.proposed", {
+      connectionId: conn.id,
+      tool: "apex_propose",
+      detail: { requestId: request.id, lines, chars: script.length }
+    });
+    return {
+      connection: conn.alias,
+      org_type: conn.orgType,
+      request_id: request.id,
+      lines,
+      chars: script.length,
+      expires_at: expiresAt,
+      approval_page: approvalForAgent("apex", approval)
+    };
+  }
+  async executeApex(conn, code) {
+    const claim = this.claimCode(conn, "apex", code, "apex_execute");
+    if (claim.kind === "terminal") return claim.result;
+    if (claim.kind === "running") {
+      return {
+        connection: conn.alias,
+        executed: false,
+        note: "This script is already being executed by a concurrent call \u2014 not re-run."
+      };
+    }
+    const request = claim.request;
+    const payload = JSON.parse(request.payloadJson ?? "{}");
+    const script = typeof payload.code === "string" ? payload.code : "";
+    if (payload.apex !== true || script.length === 0) {
+      const result2 = {
+        connection: conn.alias,
+        executed: false,
+        error_message: "The approved script is missing from the request payload.",
+        note: "Propose again for a fresh code."
+      };
+      this.db.finishDeployRequest(request.id, "execution_failed", JSON.stringify(result2));
+      this.audit.record("apex.execution_failed", {
+        connectionId: conn.id,
+        tool: "apex_execute",
+        outcome: "error",
+        detail: { requestId: request.id, reason: "payload_missing" }
+      });
+      return result2;
+    }
+    const rest = new RestClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
+    let exec;
+    try {
+      const res = await rest.request(
+        `/services/data/${this.config.salesforce.apiVersion}/tooling/executeAnonymous/?anonymousBody=${encodeURIComponent(script)}`
+      );
+      exec = await res.json();
+    } catch (err2) {
+      const message = String(err2 instanceof Error ? err2.message : err2);
+      const result2 = {
+        connection: conn.alias,
+        executed: false,
+        error_message: message,
+        note: "The request did not complete cleanly \u2014 the script may or may not have run. The confirmation code is spent; check the org (debug logs, affected records) before proposing it again."
+      };
+      this.db.finishDeployRequest(request.id, "execution_failed", JSON.stringify(result2));
+      this.audit.record("apex.execution_failed", {
+        connectionId: conn.id,
+        tool: "apex_execute",
+        outcome: "error",
+        detail: { requestId: request.id, error: message }
+      });
+      return result2;
+    }
+    const status = !exec.compiled ? "compile_error" : exec.success ? "executed" : "runtime_error";
+    let debugLogNote = null;
+    if (exec.compiled && conn.userId) {
+      try {
+        const nowLiteral = (/* @__PURE__ */ new Date()).toISOString().replace(/\.\d{3}Z$/, "Z");
+        const flags = await rest.toolingQuery(
+          `SELECT Id FROM TraceFlag WHERE TracedEntityId = '${conn.userId}' AND ExpirationDate > ${nowLiteral} LIMIT 1`,
+          1
+        );
+        if (flags.length > 0) {
+          debugLogNote = "A trace flag was active for your user \u2014 a debug log of this run exists (get_debug_logs).";
+        }
+      } catch {
+      }
+    }
+    const result = {
+      connection: conn.alias,
+      executed: status === "executed",
+      status,
+      ...status === "compile_error" ? {
+        compile_error: {
+          line: exec.line,
+          column: exec.column,
+          problem: exec.compileProblem
+        },
+        note: "The script did not compile \u2014 nothing ran and nothing changed in the org. The code is spent; fix the script and propose again."
+      } : {},
+      ...status === "runtime_error" ? {
+        runtime_error: {
+          exception_message: exec.exceptionMessage,
+          stack_trace: exec.exceptionStackTrace
+        },
+        note: "The script threw an uncaught exception \u2014 the whole transaction rolled back, so its DML was NOT committed. The code is spent; propose again after fixing."
+      } : {},
+      ...status === "executed" ? {
+        note: "Executed \u2014 any DML the script performed is COMMITTED. executeAnonymous returns no output; System.debug lines are visible only in a debug log (set_trace_flag before the run next time if you need one)."
+      } : {},
+      ...debugLogNote ? { debug_log: debugLogNote } : {}
+    };
+    this.db.finishDeployRequest(
+      request.id,
+      status === "executed" ? "executed" : "execution_failed",
+      JSON.stringify(result)
+    );
+    this.audit.record(status === "executed" ? "apex.executed" : "apex.execution_failed", {
+      connectionId: conn.id,
+      tool: "apex_execute",
+      outcome: status === "executed" ? "success" : "error",
+      detail: { requestId: request.id, status }
+    });
+    return result;
+  }
   // ── shared internals ───────────────────────────────────────────────────
   /**
    * Resolve a human-supplied code to an execution claim. Atomically flips
@@ -31157,12 +31345,12 @@ var DeployEngine = class {
       if (attempt.locked) {
         if (attempt.payloadPath) safeUnlink(attempt.payloadPath);
         throw new ContrailError(
-          `Too many incorrect codes \u2014 the pending ${kind === "deploy" ? "deploy" : "change"} on "${conn.alias}" has been locked and its code invalidated. Re-validate to get a fresh code. (This is the brute-force guard.)`,
+          `Too many incorrect codes \u2014 the pending ${kindNoun(kind)} on "${conn.alias}" has been locked and its code invalidated. Re-validate to get a fresh code. (This is the brute-force guard.)`,
           "code_locked"
         );
       }
       throw new ContrailError(
-        `No ${kind === "deploy" ? "deploy" : "change"} on "${conn.alias}" matches that code.` + (attempt.pendingExisted ? ` ${attempt.attemptsRemaining} attempt(s) remain before the pending code is locked.` : "") + ` Codes are single-use, expire after ~1 hour, and are replaced by re-validation \u2014 ask the human to re-read the code from the approval page, or validate again.`,
+        `No ${kindNoun(kind)} on "${conn.alias}" matches that code.` + (attempt.pendingExisted ? ` ${attempt.attemptsRemaining} attempt(s) remain before the pending code is locked.` : "") + ` Codes are single-use, expire after ~1 hour, and are replaced by re-validation \u2014 ask the human to re-read the code from the approval page, or validate again.`,
         "bad_confirmation_code"
       );
     }
@@ -31464,6 +31652,9 @@ function approvalForAgent(kind, approval) {
     note: "The approval page could not be opened automatically. Its URL was written to the Contrail server log (stderr) for the human to open \u2014 it is deliberately NOT provided to you. Ask the human to open the Contrail log, visit the page, and read the code back."
   };
 }
+function kindNoun(kind) {
+  return kind === "deploy" ? "deploy" : kind === "apex" ? "Apex script" : "change";
+}
 function safeUnlink(filePath) {
   try {
     fs10.rmSync(filePath, { force: true });
@@ -31567,7 +31758,7 @@ function getUpdateNotice(installedVersion, repo, enabled) {
 }
 
 // src/core/version.ts
-var ENGINE_VERSION = "0.13.0";
+var ENGINE_VERSION = "0.14.0";
 
 // src/tools/register.ts
 var UPDATE_REPO = "RHayes765/contrail-plugin";
@@ -32899,6 +33090,98 @@ function registerDataTools(server, deps) {
     })
   );
   server.registerTool(
+    "set_trace_flag",
+    {
+      title: "Turn on debug logging (trace flag)",
+      description: `Turn on debug logging for the connected user for a bounded window (default 30 minutes, max 60), so anonymous Apex, test runs, and flows executed by that user produce logs readable via get_debug_logs. Side effects, honestly: writes a self-expiring TraceFlag row and (first use) a reusable "Contrail_Debug" DebugLevel to the org, and generated logs consume the org's shared debug-log allocation until the flag expires. If the user already has a trace flag, its expiry is extended rather than stacking a second one.`,
+      inputSchema: {
+        connection: external_exports.string().describe("Connection alias (or id)."),
+        minutes: external_exports.number().int().min(1).max(60).optional().describe("How long logging stays on (default 30).")
+      }
+    },
+    async (args) => guarded(async () => {
+      const conn = requireConnection(args.connection, "set_trace_flag");
+      const client = rest(conn);
+      const version2 = config2.salesforce.apiVersion;
+      const minutes = args.minutes ?? 30;
+      const expiresAt = new Date(Date.now() + minutes * 6e4).toISOString();
+      let userId = conn.userId && SF_ID_RE.test(conn.userId) ? conn.userId : null;
+      if (!userId && conn.username) {
+        const users = await client.query(
+          `SELECT Id FROM User WHERE Username = '${conn.username.replace(/'/g, "\\'")}' LIMIT 1`,
+          1
+        );
+        userId = users[0]?.Id ?? null;
+      }
+      if (!userId) {
+        return fail(
+          `Cannot determine which user to trace on "${conn.alias}" \u2014 the stored connection has no user id or username. Re-connect the org (connect_org) to refresh it.`
+        );
+      }
+      const existing = await client.toolingQuery(
+        `SELECT Id, ExpirationDate FROM TraceFlag WHERE TracedEntityId = '${userId}' AND LogType = 'USER_DEBUG' ORDER BY ExpirationDate DESC LIMIT 1`,
+        1
+      );
+      let action;
+      let debugLevel;
+      if (existing.length > 0) {
+        await client.request(
+          `/services/data/${version2}/tooling/sobjects/TraceFlag/${existing[0].Id}`,
+          { method: "PATCH", body: JSON.stringify({ ExpirationDate: expiresAt }) }
+        );
+        action = "extended";
+        debugLevel = "the existing flag's own debug level";
+      } else {
+        const levels = await client.toolingQuery(
+          `SELECT Id FROM DebugLevel WHERE DeveloperName = 'Contrail_Debug' LIMIT 1`,
+          1
+        );
+        let levelId = levels[0]?.Id ?? null;
+        if (!levelId) {
+          const res = await client.request(
+            `/services/data/${version2}/tooling/sobjects/DebugLevel`,
+            {
+              method: "POST",
+              body: JSON.stringify({
+                DeveloperName: "Contrail_Debug",
+                MasterLabel: "Contrail_Debug",
+                ApexCode: "DEBUG",
+                ApexProfiling: "INFO",
+                Callout: "INFO",
+                Database: "INFO",
+                System: "DEBUG",
+                Validation: "INFO",
+                Visualforce: "INFO",
+                Workflow: "INFO"
+              })
+            }
+          );
+          levelId = (await res.json()).id;
+        }
+        await client.request(`/services/data/${version2}/tooling/sobjects/TraceFlag`, {
+          method: "POST",
+          body: JSON.stringify({
+            TracedEntityId: userId,
+            LogType: "USER_DEBUG",
+            DebugLevelId: levelId,
+            ExpirationDate: expiresAt
+          })
+        });
+        action = "created";
+        debugLevel = "Contrail_Debug";
+      }
+      return ok({
+        connection: conn.alias,
+        traced_user: conn.username ?? userId,
+        action,
+        minutes,
+        expires_at: expiresAt,
+        debug_level: debugLevel,
+        note: `Debug logging is on until ${expiresAt} \u2014 activity by this user now writes debug logs (consuming the org's shared log allocation until the flag expires). Read them with get_debug_logs.`
+      });
+    })
+  );
+  server.registerTool(
     "get_flow_errors",
     {
       title: "List flow interview problems",
@@ -33450,6 +33733,42 @@ function registerDeployTools(server, deps) {
     async (args) => guarded(async () => {
       const conn = requireConnection(args.connection, "dml_execute");
       const result = await deploys.executeDml(conn, args.confirmation_code);
+      return ok(result);
+    })
+  );
+  server.registerTool(
+    "apex_propose",
+    {
+      title: "Propose an anonymous Apex script (two-step)",
+      description: "Stage an anonymous Apex script for human approval. This is the ONLY path to executeAnonymous: nothing runs until the human reads the confirmation code from the approval page (which shows the script verbatim) and you pass it to apex_execute. The script runs with the HUMAN's permissions and can touch anything their user can; DML it performs COMMITS on success, and an uncaught exception rolls the whole script back. There is no dry-run \u2014 the org compiles and executes in one shot at execute, and a compile error spends the code like any failed write. Max 32,000 chars (executeAnonymous is a URL-encoded GET); split longer work into multiple proposals. The script returns no output \u2014 write System.debug and set a trace flag first (set_trace_flag) if you need to see the log.",
+      inputSchema: {
+        connection: external_exports.string().describe("Target connection alias (or id) \u2014 name it unmissably to the human."),
+        code: external_exports.string().min(1).max(32e3).describe("The anonymous Apex source, verbatim (this is the script, NOT a confirmation code).")
+      }
+    },
+    async (args) => guarded(async () => {
+      const conn = requireConnection(args.connection, "apex_propose");
+      if (args.code.trim().length === 0) return fail("The script is empty.");
+      const preview = await deploys.proposeApex(conn, args.code);
+      return ok(
+        preview,
+        `Proposed \u2014 nothing executed. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`
+      );
+    })
+  );
+  server.registerTool(
+    "apex_execute",
+    {
+      title: "Execute a proposed anonymous Apex script",
+      description: "Execute the anonymous Apex that the given confirmation code approves. The code exists only on the human's approval page \u2014 only pass a code the human just gave you. Single-use, ~1h expiry, invalidated by a new apex_propose on the same connection. On success the script's DML is committed; compile and runtime errors are returned honestly and spend the code.",
+      inputSchema: {
+        connection: external_exports.string().describe("Target connection alias (or id)."),
+        confirmation_code: external_exports.string().describe("The code the human read from the approval page (format XXXX-XXXX).")
+      }
+    },
+    async (args) => guarded(async () => {
+      const conn = requireConnection(args.connection, "apex_execute");
+      const result = await deploys.executeApex(conn, args.confirmation_code);
       return ok(result);
     })
   );
