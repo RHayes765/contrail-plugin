@@ -77,6 +77,7 @@ describe('MCP surface', () => {
       'dml_execute',
       'dml_propose',
       'execute_deploy',
+      'explain_access',
       'get_audit_log',
       'get_debug_logs',
       'get_dependencies',

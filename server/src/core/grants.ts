@@ -115,6 +115,9 @@ export const TOOL_GRANT_MAP: Readonly<Record<string, Grant | null>> = {
   get_setup_audit: 'metadata_read',
   soql_query: 'data_read',
   get_record: 'data_read',
+  // Resolved entirely from permission sobjects the data API already exposes
+  // to data_read — the tool adds interpretation, not new reach.
+  explain_access: 'data_read',
   get_debug_logs: 'diagnostics_read',
   run_apex_tests: 'diagnostics_read',
   get_flow_errors: 'diagnostics_read',

@@ -299,5 +299,13 @@ it grants (never a separate permissions-only follow-up for new components):
 `soql_query` after deploy) via `dml_propose`, and it takes the same human
 approval through `dml_execute`.
 
+**Diagnosing access ("why can't this user see X?") starts with `explain_access`**
+`{user, object, field?}` — it rolls up effective CRUD/FLS across the user's
+profile and permission sets, names which assignment grants each bit, and counts
+who else holds each granting set. CRUD/FLS only: record-level sharing is not
+evaluated, so a granted read plus an invisible record points at sharing, not
+permissions. Fix gaps with a permission set authored per this skill, never by
+editing profiles.
+
 ---
 *Adapted for Contrail from [forcedotcom/sf-skills](https://github.com/forcedotcom/sf-skills) @ 49064f7 (Apache-2.0, © Salesforce, Inc.). Modified: retargeted from sf CLI / DX MCP tooling to the Contrail engine tools; workflow restructured for Contrail's human-approval write contract.*
