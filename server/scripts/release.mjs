@@ -64,6 +64,7 @@ syncText(
   `ENGINE_VERSION = '${version}'`,
 );
 syncText('README.md', /Status: v[\d.]+/, `Status: v${version}`);
+syncText('TOOLS.md', /Current as of \*\*v[\d.]+\*\*/, `Current as of **v${version}**`);
 
 // ── 2. Gates ──
 run('npm run lint:skills');
