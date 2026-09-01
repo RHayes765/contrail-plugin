@@ -76,6 +76,12 @@ Ask in plain language. A few things it's good at:
   only if — you approve, you read the code back to Claude, and it executes. Close the
   tab and nothing happens. This is the guardrail: no write occurs without you reading
   a code off that page.
+- **Load data at scale:** *"Load these CSVs into acme-dev — accounts first, then
+  contacts matched on the external id."* Contrail plans the migration as ordered
+  Bulk API jobs, shows every file on **one** approval page (row counts, columns,
+  file fingerprints; deletions flagged in red), and ships the rows file → org —
+  they never pass through the AI. Failed rows come back as a CSV file you can fix
+  and re-run.
 
 ## Good to know
 

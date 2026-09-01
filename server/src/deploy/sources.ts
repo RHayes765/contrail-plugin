@@ -63,16 +63,24 @@ function isInside(target: string, root: string): boolean {
 }
 
 /**
- * Read one deploy component from disk. Throws a ContrailError the agent can
- * act on — the message names the staging directory, because that is the path
- * that always works.
+ * Resolve one agent-named path to a real file inside the allowed roots, without
+ * reading it. The containment chain (absolute-only, realpath-first, root
+ * allowlist, isFile, size cap) is the security-load-bearing part; callers with
+ * different size limits or argument names (bulk CSVs vs deploy components)
+ * share it through the options.
  */
-export function resolveSourceFile(rawPath: string, configuredRoots: string[] = []): ResolvedSource {
+export function resolveSourcePath(
+  rawPath: string,
+  configuredRoots: string[] = [],
+  opts: { maxBytes?: number; noun?: string } = {},
+): { absPath: string; size: number } {
+  const noun = opts.noun ?? 'content_file';
+  const maxBytes = opts.maxBytes ?? MAX_SOURCE_FILE_BYTES;
   const given = rawPath.trim();
-  if (!given) throw new ContrailError('content_file was empty.', 'bad_source_path');
+  if (!given) throw new ContrailError(`${noun} was empty.`, 'bad_source_path');
   if (!path.isAbsolute(given)) {
     throw new ContrailError(
-      `content_file must be an absolute path (got "${given}"). Write the file under ` +
+      `${noun} must be an absolute path (got "${given}"). Write the file under ` +
         `${stagingDir()} and pass that full path.`,
       'bad_source_path',
     );
@@ -84,16 +92,16 @@ export function resolveSourceFile(rawPath: string, configuredRoots: string[] = [
   try {
     real = fs.realpathSync(given);
   } catch {
-    throw new ContrailError(`content_file does not exist: ${given}`, 'source_not_found');
+    throw new ContrailError(`${noun} does not exist: ${given}`, 'source_not_found');
   }
 
   const stat = fs.statSync(real);
   if (!stat.isFile()) {
-    throw new ContrailError(`content_file is not a regular file: ${given}`, 'bad_source_path');
+    throw new ContrailError(`${noun} is not a regular file: ${given}`, 'bad_source_path');
   }
-  if (stat.size > MAX_SOURCE_FILE_BYTES) {
+  if (stat.size > maxBytes) {
     throw new ContrailError(
-      `content_file is ${stat.size} bytes; the limit is ${MAX_SOURCE_FILE_BYTES}.`,
+      `${noun} is ${stat.size} bytes; the limit is ${maxBytes}.`,
       'source_too_large',
     );
   }
@@ -101,17 +109,27 @@ export function resolveSourceFile(rawPath: string, configuredRoots: string[] = [
   const roots = allowedSourceRoots(configuredRoots);
   if (!roots.some((root) => isInside(real, root))) {
     throw new ContrailError(
-      `content_file is outside every allowed deploy source root, so Contrail will not ` +
+      `${noun} is outside every allowed deploy source root, so Contrail will not ` +
         `deploy it. Allowed: ${roots.join(', ')}. Write the file under ${stagingDir()}, or add ` +
         `its directory to deploy.allowedSourceRoots in config.json (only you can edit that).`,
       'source_outside_roots',
     );
   }
 
-  const bytes = fs.readFileSync(real);
+  return { absPath: real, size: stat.size };
+}
+
+/**
+ * Read one deploy component from disk. Throws a ContrailError the agent can
+ * act on — the message names the staging directory, because that is the path
+ * that always works.
+ */
+export function resolveSourceFile(rawPath: string, configuredRoots: string[] = []): ResolvedSource {
+  const { absPath } = resolveSourcePath(rawPath, configuredRoots);
+  const bytes = fs.readFileSync(absPath);
   return {
     content: bytes.toString('utf8'),
-    sourcePath: real,
+    sourcePath: absPath,
     sourceSha256: crypto.createHash('sha256').update(bytes).digest('hex'),
   };
 }

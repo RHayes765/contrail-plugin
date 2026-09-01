@@ -5,7 +5,7 @@ import { ok, fail, guarded } from './register.js';
 import type { ConnectionRecord } from '../core/types.js';
 import { ConnectionNotFoundError } from '../core/errors.js';
 import { assertGrant } from '../core/gate.js';
-import { resolveSourceFile } from '../deploy/sources.js';
+import { resolveSourceFile, resolveSourcePath } from '../deploy/sources.js';
 import { stagingDir } from '../core/paths.js';
 import { flowDeactivationXml } from '../deploy/package.js';
 import type { TestLevel } from '../salesforce/metadataSoap.js';
@@ -590,6 +590,133 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
         const conn = requireConnection(args.connection, 'apex_execute');
         const result = await deploys.executeApex(conn, args.confirmation_code);
         return ok(result);
+      }),
+  );
+
+  server.registerTool(
+    'bulk_load_propose',
+    {
+      title: 'Propose a bulk data load from CSV files (two-step)',
+      description:
+        'Stage a multi-file Bulk API 2.0 data load behind the approval ritual. Rows go ' +
+        'FILE → ORG and never through this conversation: prepare UTF-8, comma-delimited ' +
+        "CSVs under Contrail's staging directory (API-name headers; cross-object references " +
+        'as relationship-by-external-ID columns like "Account.External_Id__c", resolved ' +
+        'org-side), then name one file per step. Steps execute SEQUENTIALLY in the order ' +
+        'given — parents before children. Each file is scanned (headers, row count) and ' +
+        'FROZEN at propose; the approval page shows every step with counts and hashes, and ' +
+        'nothing touches the org until the human reads the confirmation code to ' +
+        'bulk_load_execute. Bulk steps are separate org-side jobs with NO cross-job ' +
+        'rollback; delete steps are SOFT deletes (Recycle Bin) and their CSV is a single ' +
+        'Id column. For small test-data seeding (≤200 rows) prefer dml_propose.',
+      inputSchema: {
+        connection: z
+          .string()
+          .describe('Target connection alias (or id) — name it unmissably to the human.'),
+        steps: z
+          .array(
+            z.object({
+              csv_file: z
+                .string()
+                .describe(
+                  'Absolute path to this step\'s CSV. Same containment as content_file: ' +
+                    "under Contrail's staging directory, snapshots, or a configured " +
+                    'deploy.allowedSourceRoots entry. Read and frozen at propose time.',
+                ),
+              object: z.string().describe('SObject API name, e.g. Account or Invoice__c.'),
+              operation: z.enum(['insert', 'upsert', 'delete']),
+              external_id_field: z
+                .string()
+                .optional()
+                .describe(
+                  "upsert only (required there): the match field. Pass 'Id' to update by " +
+                    'record id. Must be a column in the CSV.',
+                ),
+            }),
+          )
+          .min(1)
+          .max(config.bulkLoad.maxFilesPerPlan)
+          .describe('Ordered steps — one CSV each, executed sequentially.'),
+        stop_on_failure: z
+          .boolean()
+          .optional()
+          .describe(
+            'Default true: a step with failed rows halts the remaining steps (rows already ' +
+              'loaded STAY — bulk has no cross-job rollback). false runs every step.',
+          ),
+      },
+    },
+    async (args: {
+      connection: string;
+      steps: Array<{
+        csv_file: string;
+        object: string;
+        operation: 'insert' | 'upsert' | 'delete';
+        external_id_field?: string;
+      }>;
+      stop_on_failure?: boolean;
+    }) =>
+      guarded(async () => {
+        const conn = requireConnection(args.connection, 'bulk_load_propose');
+        const steps = args.steps.map((s) => {
+          const { absPath } = resolveSourcePath(s.csv_file, config.deploy.allowedSourceRoots, {
+            maxBytes: config.bulkLoad.maxFileBytes,
+            noun: 'csv_file',
+          });
+          return {
+            sourcePath: absPath,
+            displayName: absPath,
+            object: s.object,
+            operation: s.operation,
+            ...(s.external_id_field ? { externalIdField: s.external_id_field } : {}),
+          };
+        });
+        const preview = await deploys.proposeBulkLoad(conn, {
+          stopOnFailure: args.stop_on_failure ?? true,
+          steps,
+        });
+        return ok(
+          preview,
+          `Proposed — nothing loaded. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`,
+        );
+      }),
+  );
+
+  server.registerTool(
+    'bulk_load_execute',
+    {
+      title: 'Execute a proposed bulk data load',
+      description:
+        'Run the bulk load plan that the given confirmation code approves: sequential Bulk ' +
+        "API 2.0 ingest jobs from the CSVs frozen at propose. The code exists only on the " +
+        "human's approval page — only pass a code the human just gave you (single-use, ~1h " +
+        'expiry, invalidated by a new bulk_load_propose on the same connection). Large jobs ' +
+        'take minutes: an in-progress result means call bulk_load_execute again with the ' +
+        'SAME code to check on it. Failed and unprocessed rows come back as CSV file paths ' +
+        '(never row data); rows loaded by completed steps are never rolled back.',
+      inputSchema: {
+        connection: z.string().describe('Target connection alias (or id).'),
+        confirmation_code: z
+          .string()
+          .describe('The code the human read from the approval page (format XXXX-XXXX).'),
+      },
+    },
+    async (args: { connection: string; confirmation_code: string }) =>
+      guarded(async () => {
+        const conn = requireConnection(args.connection, 'bulk_load_execute');
+        const outcome = await deploys.executeBulkLoad(conn, args.confirmation_code);
+        switch (outcome.status) {
+          case 'in_progress':
+            return ok(
+              { progress: outcome.progress, started_at: outcome.started_at },
+              'The bulk load is still running — call bulk_load_execute again with the same ' +
+                'connection and code to check on it.',
+            );
+          case 'failed':
+            return fail(`Bulk load errored: ${outcome.error}`);
+          case 'complete':
+            return ok(outcome.result);
+        }
       }),
   );
 }

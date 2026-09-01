@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ContrailDb } from '../core/db.js';
@@ -13,6 +14,65 @@ import {
   type CompositeSubrequest,
   type CompositeSubresponse,
 } from '../salesforce/rest.js';
+import {
+  abortIngestJob,
+  closeIngestJob,
+  createIngestJob,
+  fetchFailedResults,
+  fetchUnprocessedRecords,
+  getIngestJob,
+  isTerminalIngestState,
+  uploadIngestBatch,
+  type IngestJobInfo,
+  type IngestOperation,
+} from '../salesforce/bulk.js';
+import { scanCsv, UTF8_BOM } from './csv.js';
+
+// ── bulk data loads ──────────────────────────────────────────────────────
+
+/**
+ * One step of a bulk load plan. The engine receives sourcePath already
+ * AUTHORIZED by the calling surface (plugin: resolveSourcePath containment;
+ * desktop: linked-folder resolution keyed on the session's own project) — the
+ * engine re-stats and size-caps as defense in depth, but the authorization
+ * decision belongs to whichever surface matched the path.
+ */
+export interface BulkLoadStep {
+  /** Absolute path to the CSV; read ONCE at propose and frozen. */
+  sourcePath: string;
+  /** What the human sees on the approval page (path or folder/relPath). */
+  displayName: string;
+  object: string;
+  operation: IngestOperation;
+  /** Required for upsert ('Id' spells update); forbidden for insert/delete. */
+  externalIdField?: string;
+}
+
+export interface BulkLoadInput {
+  /** true (default): a step with failed rows halts the remaining steps. */
+  stopOnFailure: boolean;
+  steps: BulkLoadStep[];
+}
+
+/** The frozen-payload manifest stored in payload_json (files relative to the payload dir). */
+interface BulkManifest {
+  bulk: true;
+  version: 1;
+  stop_on_failure: boolean;
+  steps: Array<{
+    n: number;
+    object: string;
+    operation: IngestOperation;
+    external_id_field: string | null;
+    file: string;
+    display_name: string;
+    sha256: string;
+    row_count: number;
+    headers: string[];
+    line_ending: 'LF' | 'CRLF';
+    bytes: number;
+  }>;
+}
 
 // ── multi-step DML plans ─────────────────────────────────────────────────
 
@@ -1121,6 +1181,560 @@ export class DeployEngine {
     return result;
   }
 
+  // ── bulk data loads ────────────────────────────────────────────────────
+
+  /**
+   * Stage a bulk load plan behind the ritual (kind 'bulk'): scan and FREEZE
+   * the CSVs now, show the whole plan on one approval page, and let the
+   * human's code arm executeBulkLoad. Rows never transit the model — the
+   * agent gets back counts, columns, and hashes, never data. Editing a source
+   * file after approval changes nothing: execute reads only the frozen copies
+   * and re-verifies their hashes.
+   */
+  async proposeBulkLoad(
+    conn: ConnectionRecord,
+    input: BulkLoadInput,
+  ): Promise<Record<string, unknown>> {
+    const maxSteps = this.config.bulkLoad.maxFilesPerPlan;
+    if (input.steps.length === 0) {
+      throw new ContrailError('a bulk plan needs at least one step', 'bad_bulk_plan');
+    }
+    if (input.steps.length > maxSteps) {
+      throw new ContrailError(
+        `this plan has ${input.steps.length} steps; the limit is ${maxSteps} ` +
+          `(bulkLoad.maxFilesPerPlan in config.json)`,
+        'bulk_plan_too_large',
+      );
+    }
+    for (let i = 0; i < input.steps.length; i++) {
+      const s = input.steps[i]!;
+      const where = `step ${i + 1}`;
+      if (!/^[A-Za-z0-9_]+$/.test(s.object)) {
+        throw new ContrailError(`${where}: invalid object API name`, 'bad_bulk_plan');
+      }
+      if (s.operation === 'upsert' && !s.externalIdField) {
+        throw new ContrailError(
+          `${where}: upsert requires external_id_field (pass 'Id' to update by record id)`,
+          'bad_bulk_plan',
+        );
+      }
+      if (s.operation !== 'upsert' && s.externalIdField) {
+        throw new ContrailError(
+          `${where}: external_id_field is only meaningful for upsert — ` +
+            (s.operation === 'delete'
+              ? 'delete matches on the Id column of the CSV'
+              : 'insert never matches existing rows') +
+            '; remove it',
+          'bad_bulk_plan',
+        );
+      }
+      if (s.externalIdField && !/^[A-Za-z0-9_]+$/.test(s.externalIdField)) {
+        throw new ContrailError(`${where}: invalid external_id_field`, 'bad_bulk_plan');
+      }
+    }
+
+    const superseded = this.db.supersedePendingRequests(conn.id, 'bulk');
+    if (superseded > 0) {
+      for (const p of this.db.takeSupersededPayloadPaths(conn.id, 'bulk')) safeUnlink(p);
+      this.audit.record('bulk.superseded', {
+        connectionId: conn.id,
+        tool: 'bulk_load_propose',
+        detail: { count: superseded },
+      });
+    }
+
+    // Stage-then-rename: scan/freeze into a temp dir first, so a failed scan
+    // never leaves an orphaned request row or a half-frozen payload dir.
+    const stageDir = path.join(deploysDir(), `bulk-stage-${crypto.randomUUID()}`);
+    fs.mkdirSync(stageDir, { recursive: true });
+    const manifest: BulkManifest = {
+      bulk: true,
+      version: 1,
+      stop_on_failure: input.stopOnFailure,
+      steps: [],
+    };
+    const scanWarnings: string[][] = [];
+    try {
+      for (let i = 0; i < input.steps.length; i++) {
+        const s = input.steps[i]!;
+        const n = i + 1;
+        const label = `step ${n} (${s.displayName})`;
+        let stat: fs.Stats;
+        try {
+          stat = fs.statSync(s.sourcePath);
+        } catch {
+          throw new ContrailError(`${label}: the file does not exist`, 'source_not_found');
+        }
+        if (!stat.isFile()) {
+          throw new ContrailError(`${label}: not a regular file`, 'bad_source_path');
+        }
+        if (stat.size > this.config.bulkLoad.maxFileBytes) {
+          throw new ContrailError(
+            `${label}: ${stat.size} bytes exceeds the ${this.config.bulkLoad.maxFileBytes}-byte ` +
+              `bulk file limit (bulkLoad.maxFileBytes in config.json)`,
+            'source_too_large',
+          );
+        }
+        const bytes = fs.readFileSync(s.sourcePath);
+        let scan;
+        try {
+          scan = scanCsv(bytes);
+        } catch (err) {
+          throw new ContrailError(
+            `${label}: ${err instanceof Error ? err.message : String(err)}`,
+            'bad_csv',
+          );
+        }
+        if (s.operation === 'delete') {
+          if (scan.headers.length !== 1 || scan.headers[0]!.toLowerCase() !== 'id') {
+            throw new ContrailError(
+              `${label}: a Bulk delete CSV is a single Id column — this file's header is ` +
+                `[${scan.headers.slice(0, 8).join(', ')}${scan.headers.length > 8 ? ', …' : ''}]`,
+              'bad_csv',
+            );
+          }
+        }
+        if (s.operation === 'upsert') {
+          const want = s.externalIdField!.toLowerCase();
+          if (!scan.headers.some((h) => h.toLowerCase() === want)) {
+            throw new ContrailError(
+              `${label}: the upsert match column "${s.externalIdField}" is not in this file's header`,
+              'bad_csv',
+            );
+          }
+        }
+        // Freeze — BOM stripped (Bulk 2.0 reads a BOM into the first column
+        // name), everything else byte-verbatim. The hash fingerprints the
+        // FROZEN bytes: that is the file the human approves and the org gets.
+        const frozen = scan.hadBom ? bytes.subarray(UTF8_BOM.length) : bytes;
+        const file = `step-${n}.csv`;
+        fs.writeFileSync(path.join(stageDir, file), frozen);
+        manifest.steps.push({
+          n,
+          object: s.object,
+          operation: s.operation,
+          external_id_field: s.externalIdField ?? null,
+          file,
+          display_name: s.displayName,
+          sha256: crypto.createHash('sha256').update(frozen).digest('hex'),
+          row_count: scan.rowCount,
+          headers: scan.headers,
+          line_ending: scan.lineEnding,
+          bytes: frozen.length,
+        });
+        scanWarnings.push(scan.warnings);
+      }
+    } catch (err) {
+      fs.rmSync(stageDir, { recursive: true, force: true });
+      throw err;
+    }
+
+    const totalRows = manifest.steps.reduce((sum, s) => sum + s.row_count, 0);
+    const deleteRows = manifest.steps
+      .filter((s) => s.operation === 'delete')
+      .reduce((sum, s) => sum + s.row_count, 0);
+    const rows = manifest.steps.map((m, i) => {
+      const matchNote =
+        m.operation === 'upsert'
+          ? ` (match on ${m.external_id_field}${m.external_id_field === 'Id' ? ' — update' : ''})`
+          : '';
+      const destructive = m.operation === 'delete';
+      return {
+        label:
+          `STEP ${m.n}  ${m.operation.toUpperCase()} ${m.object} — ` +
+          `${m.row_count.toLocaleString('en-US')} row${m.row_count === 1 ? '' : 's'}${matchNote}`,
+        detail:
+          `from ${m.display_name}\n` +
+          `frozen sha256 ${m.sha256.slice(0, 16)}… · ${m.bytes.toLocaleString('en-US')} bytes\n` +
+          `columns: ${columnsLabel(m.headers)}`,
+        warnings: [
+          ...(destructive
+            ? [
+                'Bulk delete is a SOFT delete — rows go to the Recycle Bin (~15 days). ' +
+                  'hardDelete is not offered.',
+              ]
+            : []),
+          ...scanWarnings[i]!,
+        ],
+        destructive,
+      };
+    });
+
+    const code = generateConfirmationCode();
+    const expiresAt = new Date(Date.now() + this.config.deploy.codeTtlMs).toISOString();
+    // The preview rows deliberately share the DML-plan row shape
+    // (label/warnings/detail/destructive) so native review surfaces render
+    // them with zero new machinery.
+    const preview = {
+      bulk: true,
+      steps: manifest.steps.length,
+      total_rows: totalRows,
+      operations: summarizeOps(manifest.steps),
+      stop_on_failure: input.stopOnFailure,
+      rows,
+    };
+    let request: DeployRequestRecord;
+    try {
+      request = this.db.insertDeployRequest({
+        connectionId: conn.id,
+        kind: 'bulk',
+        confirmationCode: code,
+        expiresAt,
+        payloadJson: JSON.stringify(manifest),
+        summaryJson: JSON.stringify(preview),
+      });
+      const payloadDir = path.join(deploysDir(), request.id);
+      fs.renameSync(stageDir, payloadDir);
+      this.db.setDeployRequestPayloadPath(request.id, payloadDir);
+    } catch (err) {
+      fs.rmSync(stageDir, { recursive: true, force: true });
+      throw err;
+    }
+
+    const approval = await this.approvals.present(
+      renderApprovalPage({
+        kind: 'bulk',
+        code,
+        expiresAt,
+        org: {
+          alias: conn.alias,
+          orgName: conn.orgName,
+          orgType: conn.orgType,
+          instanceUrl: conn.instanceUrl,
+        },
+        changes: rows.filter((r) => !r.destructive),
+        destructive: rows.filter((r) => r.destructive),
+        results: [
+          {
+            label: 'Plan',
+            value:
+              `${manifest.steps.length} step${manifest.steps.length === 1 ? '' : 's'} / ` +
+              `${totalRows.toLocaleString('en-US')} rows total`,
+          },
+          { label: 'Operations', value: summarizeOps(manifest.steps) },
+          {
+            // A PROMISE about failure behaviour — it must match what
+            // doExecuteBulk actually does.
+            label: 'Mode',
+            value: input.stopOnFailure
+              ? 'stop-on-failure (a step with failed rows halts later steps; rows already ' +
+                'loaded STAY — there is no cross-job rollback)'
+              : 'continue-on-failure (every step runs; rows already loaded STAY — no ' +
+                'cross-job rollback)',
+          },
+        ],
+        blast: [],
+        warnings: [
+          ...(deleteRows > 0
+            ? [
+                `This plan DELETES ${deleteRows.toLocaleString('en-US')} row(s) ` +
+                  '(soft delete → Recycle Bin).',
+              ]
+            : []),
+          'Bulk loads are NOT atomic. Each step is its own org-side job; rows loaded by ' +
+            'completed steps remain in the org even if a later step fails.',
+        ],
+      }),
+      this.requestStatusCheck(request.id),
+      this.config.deploy.codeTtlMs + 60_000,
+    );
+
+    this.audit.record('bulk.proposed', {
+      connectionId: conn.id,
+      tool: 'bulk_load_propose',
+      detail: {
+        requestId: request.id,
+        steps: manifest.steps.length,
+        operations: summarizeOps(manifest.steps),
+        totalRows,
+        stopOnFailure: input.stopOnFailure,
+      },
+    });
+    return {
+      connection: conn.alias,
+      org_type: conn.orgType,
+      request_id: request.id,
+      steps: manifest.steps.map((m) => ({
+        step: m.n,
+        object: m.object,
+        operation: m.operation,
+        ...(m.external_id_field ? { external_id_field: m.external_id_field } : {}),
+        rows: m.row_count,
+        columns: m.headers,
+        sha256_prefix: m.sha256.slice(0, 16),
+        source: m.display_name,
+      })),
+      total_rows: totalRows,
+      stop_on_failure: input.stopOnFailure,
+      expires_at: expiresAt,
+      approval_page: approvalForAgent('bulk', approval),
+    };
+  }
+
+  async executeBulkLoad(
+    conn: ConnectionRecord,
+    code: string,
+  ): Promise<JobOutcome<Record<string, unknown>>> {
+    // Resolve the code synchronously (better-sqlite3), before any await, so
+    // the atomic claim and job creation cannot interleave with a second call.
+    const claim = this.claimCode(conn, 'bulk', code, 'bulk_load_execute');
+    if (claim.kind === 'terminal') {
+      return { status: 'complete', result: claim.result };
+    }
+    const jobKey = `bulk-exec:${claim.request.id}`;
+    if (claim.kind === 'running' && !this.jobs.has(jobKey)) {
+      return {
+        status: 'in_progress',
+        progress: 'a bulk load for this code is already in progress',
+        started_at: claim.request.createdAt,
+      };
+    }
+    return this.runJob(
+      jobKey,
+      (job) => this.doExecuteBulk(conn, claim.request, job),
+      this.config.bulkLoad.toolWaitMs,
+    );
+  }
+
+  private async doExecuteBulk(
+    conn: ConnectionRecord,
+    request: DeployRequestRecord,
+    job?: Job<unknown>,
+  ): Promise<Record<string, unknown>> {
+    // The code is already spent (status='executing') — any failure below
+    // leaves it non-reusable.
+    const manifest = JSON.parse(request.payloadJson ?? '{}') as Partial<BulkManifest>;
+    if (
+      manifest.bulk !== true ||
+      !Array.isArray(manifest.steps) ||
+      manifest.steps.length === 0 ||
+      !request.payloadPath ||
+      !fs.existsSync(request.payloadPath)
+    ) {
+      this.audit.record('bulk.execution_failed', {
+        connectionId: conn.id,
+        tool: 'bulk_load_execute',
+        outcome: 'error',
+        detail: { requestId: request.id, reason: 'payload_missing' },
+      });
+      return this.finishExecution(conn, request, 'execution_failed', {
+        connection: conn.alias,
+        bulk: true,
+        executed: false,
+        error_message: 'The frozen CSV payload is missing from disk.',
+        note: 'Nothing was sent to the org. Re-propose to freeze the files again.',
+      });
+    }
+
+    const version = this.config.salesforce.apiVersion;
+    const rest = new RestClient(this.tokenMgr, conn, version);
+    // Results live BESIDE the payload dir, not inside it: finishExecution
+    // deletes the spent payload, and the failed-row files must survive that
+    // so the human can open them afterwards. Nothing auto-deletes results.
+    const resultsDir = path.join(deploysDir(), `${request.id}-results`);
+    let resultsDirMade = false;
+    const writeResultCsv = (name: string, csv: string): string | null => {
+      // The org's exports always carry a header line; only a file with actual
+      // rows is worth pointing the human at.
+      if (csv.trim().split('\n').length < 2) return null;
+      if (!resultsDirMade) {
+        fs.mkdirSync(resultsDir, { recursive: true });
+        resultsDirMade = true;
+      }
+      const p = path.join(resultsDir, name);
+      fs.writeFileSync(p, csv);
+      return p;
+    };
+
+    const steps = manifest.steps;
+    const total = steps.length;
+    const stopOnFailure = manifest.stop_on_failure !== false;
+    const stepResults: Array<Record<string, unknown>> = [];
+    let haltedAfterStep: number | null = null;
+    let anyFailure = false;
+    let totalProcessed = 0;
+    let totalFailed = 0;
+
+    for (const m of steps) {
+      const stepLabel = `step ${m.n}/${total}: ${m.operation.toUpperCase()} ${m.object}`;
+      if (job) job.progress = `${stepLabel} — verifying frozen file`;
+      const frozenPath = path.join(request.payloadPath, m.file);
+      let failedHard: string | null = null;
+      let info: IngestJobInfo | null = null;
+      let jobId: string | null = null;
+
+      let frozen: Buffer | null = null;
+      if (!fs.existsSync(frozenPath)) {
+        failedHard = 'the frozen CSV for this step is missing from the payload directory';
+      } else {
+        frozen = fs.readFileSync(frozenPath);
+        const sha = crypto.createHash('sha256').update(frozen).digest('hex');
+        if (sha !== m.sha256) {
+          failedHard =
+            'the frozen CSV no longer matches the hash the human approved ' +
+            '(frozen_payload_tampered) — refusing to send it';
+          frozen = null;
+        }
+      }
+
+      if (frozen) {
+        try {
+          if (job) job.progress = `${stepLabel} — creating ingest job`;
+          jobId = await createIngestJob(rest, version, {
+            object: m.object,
+            operation: m.operation,
+            ...(m.external_id_field ? { externalIdFieldName: m.external_id_field } : {}),
+            lineEnding: m.line_ending,
+          });
+          if (job) {
+            job.progress = `${stepLabel} — uploading ${m.row_count.toLocaleString('en-US')} rows`;
+          }
+          await uploadIngestBatch(rest, version, jobId, frozen);
+          await closeIngestJob(rest, version, jobId);
+          info = await this.pollBulkJob(rest, jobId, stepLabel, job);
+        } catch (err) {
+          // A thrown step (API refusal, timeout) is that STEP's failure — it
+          // must never skip finishExecution or the remaining bookkeeping.
+          failedHard = String(err instanceof Error ? err.message : err);
+        }
+      }
+
+      const processed = info?.numberRecordsProcessed ?? 0;
+      const failed = info?.numberRecordsFailed ?? 0;
+      totalProcessed += processed;
+      totalFailed += failed;
+      const stepFailed = failedHard !== null || !info || info.state !== 'JobComplete' || failed > 0;
+      if (stepFailed) anyFailure = true;
+
+      const entry: Record<string, unknown> = {
+        step: m.n,
+        object: m.object,
+        operation: m.operation,
+        ...(jobId ? { job_id: jobId } : {}),
+        state: info ? info.state : 'NotSent',
+        processed,
+        succeeded: Math.max(0, processed - failed),
+        failed,
+        ...(failedHard
+          ? { error_message: failedHard }
+          : info?.errorMessage
+            ? { error_message: info.errorMessage }
+            : {}),
+      };
+
+      if (info && jobId && stepFailed) {
+        try {
+          const p = writeResultCsv(
+            `step-${m.n}-failed.csv`,
+            await fetchFailedResults(rest, version, jobId),
+          );
+          if (p) entry.failed_rows_file = p;
+        } catch (err) {
+          entry.failed_rows_note = `could not fetch the failed-rows export: ${String(
+            err instanceof Error ? err.message : err,
+          )}`;
+        }
+        try {
+          const p = writeResultCsv(
+            `step-${m.n}-unprocessed.csv`,
+            await fetchUnprocessedRecords(rest, version, jobId),
+          );
+          if (p) entry.unprocessed_rows_file = p;
+        } catch (err) {
+          entry.unprocessed_rows_note = `could not fetch the unprocessed-rows export: ${String(
+            err instanceof Error ? err.message : err,
+          )}`;
+        }
+      }
+      stepResults.push(entry);
+
+      if (stepFailed && stopOnFailure && m.n < total) {
+        haltedAfterStep = m.n;
+        for (const rem of steps.filter((s) => s.n > m.n)) {
+          stepResults.push({
+            step: rem.n,
+            object: rem.object,
+            operation: rem.operation,
+            state: 'Skipped',
+            processed: 0,
+            succeeded: 0,
+            failed: 0,
+            reason:
+              `step ${m.n} failed and stop_on_failure is true — rows already loaded by ` +
+              'earlier steps STAY',
+          });
+        }
+        break;
+      }
+    }
+
+    const executed = !anyFailure;
+    const payload: Record<string, unknown> = {
+      connection: conn.alias,
+      bulk: true,
+      executed,
+      stop_on_failure: stopOnFailure,
+      steps: stepResults,
+      total_processed: totalProcessed,
+      total_failed: totalFailed,
+      ...(haltedAfterStep !== null ? { halted_after_step: haltedAfterStep } : {}),
+      ...(resultsDirMade ? { results_dir: resultsDir } : {}),
+      note: executed
+        ? `All ${stepResults.length} step(s) completed: ` +
+          `${totalProcessed.toLocaleString('en-US')} rows loaded. Bulk writes bypass no ` +
+          'automation — triggers and flows ran normally.'
+        : 'At least one step did not fully succeed. Rows loaded by completed steps REMAIN in ' +
+          'the org (there is no cross-job rollback). Failed and unprocessed rows were written ' +
+          'as CSV files — open them at the paths above (the trailing sf__Error column names ' +
+          'each cause), fix, and re-propose ONLY those rows. The confirmation code is spent.',
+    };
+    this.audit.record(executed ? 'bulk.executed' : 'bulk.execution_failed', {
+      connectionId: conn.id,
+      tool: 'bulk_load_execute',
+      outcome: executed ? 'success' : 'error',
+      detail: {
+        requestId: request.id,
+        steps: stepResults.length,
+        totalProcessed,
+        totalFailed,
+        ...(haltedAfterStep !== null ? { haltedAfterStep } : {}),
+        jobIds: stepResults.map((s) => s.job_id).filter(Boolean),
+      },
+    });
+    return this.finishExecution(conn, request, executed ? 'executed' : 'execution_failed', payload);
+  }
+
+  /** Poll one ingest job to a terminal state; on deadline, abort (best-effort) and throw. */
+  private async pollBulkJob(
+    rest: RestClient,
+    jobId: string,
+    stepLabel: string,
+    job?: Job<unknown>,
+  ): Promise<IngestJobInfo> {
+    const deadline = Date.now() + this.config.bulkLoad.ingestTimeoutMs;
+    let info = await getIngestJob(rest, this.config.salesforce.apiVersion, jobId);
+    while (!isTerminalIngestState(info.state)) {
+      if (Date.now() > deadline) {
+        await abortIngestJob(rest, this.config.salesforce.apiVersion, jobId);
+        throw new ContrailError(
+          `${stepLabel} did not finish within ` +
+            `${Math.round(this.config.bulkLoad.ingestTimeoutMs / 60000)} minutes ` +
+            `(state: ${info.state}); an abort was requested`,
+          'bulk_ingest_timeout',
+        );
+      }
+      if (job) {
+        job.progress =
+          `${stepLabel} — ${info.state} ` +
+          `(${info.numberRecordsProcessed.toLocaleString('en-US')} processed, ` +
+          `${info.numberRecordsFailed.toLocaleString('en-US')} failed)`;
+      }
+      await delay(this.config.bulkLoad.pollIntervalMs);
+      info = await getIngestJob(rest, this.config.salesforce.apiVersion, jobId);
+    }
+    return info;
+  }
+
   // ── shared internals ───────────────────────────────────────────────────
 
   /**
@@ -1487,7 +2101,11 @@ export class DeployEngine {
   }
 
   /** Soft-wait job wrapper mirroring SnapshotEngine: never trips MCP client timeouts. */
-  private async runJob<T>(key: string, work: (job: Job<T>) => Promise<T>): Promise<JobOutcome<T>> {
+  private async runJob<T>(
+    key: string,
+    work: (job: Job<T>) => Promise<T>,
+    waitMs = this.config.deploy.toolWaitMs,
+  ): Promise<JobOutcome<T>> {
     let job = this.jobs.get(key) as Job<T> | undefined;
     if (job?.done) {
       this.jobs.delete(key);
@@ -1525,7 +2143,7 @@ export class DeployEngine {
           error: String(err instanceof Error ? err.message : err),
         }),
       ),
-      delay(this.config.deploy.toolWaitMs).then(() => null),
+      delay(waitMs).then(() => null),
     ]);
     if (winner) {
       this.jobs.delete(key);
@@ -1573,12 +2191,20 @@ function approvalForAgent(
 
 /** The human-facing noun for a pending request of each kind. */
 function kindNoun(kind: DeployRequestKind): string {
-  return kind === 'deploy' ? 'deploy' : kind === 'apex' ? 'Apex script' : 'change';
+  return kind === 'deploy'
+    ? 'deploy'
+    : kind === 'apex'
+      ? 'Apex script'
+      : kind === 'bulk'
+        ? 'bulk data load'
+        : 'change';
 }
 
 function safeUnlink(filePath: string): void {
   try {
-    fs.rmSync(filePath, { force: true });
+    // recursive: bulk payloads are DIRECTORIES of frozen CSVs; without it,
+    // rmSync throws EISDIR (swallowed below) and every bulk payload leaks.
+    fs.rmSync(filePath, { recursive: true, force: true });
   } catch (err) {
     log('warn', 'could not delete deploy payload', { filePath, err: String(err) });
   }
@@ -1596,8 +2222,17 @@ function truncateLabel(s: string): string {
   return s.length > 300 ? `${s.slice(0, 300)}…` : s;
 }
 
+/** Column list for the approval page — wide files show the first 25 and a count. */
+function columnsLabel(headers: string[]): string {
+  const shown = headers.slice(0, 25);
+  return (
+    shown.join(', ') +
+    (headers.length > shown.length ? ` … +${headers.length - shown.length} more` : '')
+  );
+}
+
 /** "3 insert / 1 update" — the operations line for plan previews and audits. */
-function summarizeOps(steps: DmlPlanStep[]): string {
+function summarizeOps(steps: ReadonlyArray<{ operation: string }>): string {
   const counts = new Map<string, number>();
   for (const s of steps) counts.set(s.operation, (counts.get(s.operation) ?? 0) + 1);
   return [...counts.entries()].map(([op, n]) => `${n} ${op}`).join(' / ');

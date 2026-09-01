@@ -3,7 +3,12 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { MAX_SOURCE_FILE_BYTES, allowedSourceRoots, resolveSourceFile } from '../deploy/sources.js';
+import {
+  MAX_SOURCE_FILE_BYTES,
+  allowedSourceRoots,
+  resolveSourceFile,
+  resolveSourcePath,
+} from '../deploy/sources.js';
 
 /**
  * Deploy-from-file confinement.
@@ -104,6 +109,41 @@ describe('what it refuses', () => {
     const file = path.join(staging, 'huge.cls');
     fs.writeFileSync(file, 'x'.repeat(MAX_SOURCE_FILE_BYTES + 1), 'utf8');
     expect(() => resolveSourceFile(file)).toThrow(/limit is/);
+  });
+});
+
+describe('resolveSourcePath (the shared containment chain, parameterized)', () => {
+  it('resolves without reading, honoring a caller-supplied size cap', () => {
+    const file = path.join(staging, 'rows.csv');
+    fs.writeFileSync(file, 'Name\nAcme\n', 'utf8');
+    const { absPath, size } = resolveSourcePath(file, [], { maxBytes: 1_000, noun: 'csv_file' });
+    expect(absPath).toBe(fs.realpathSync(file));
+    expect(size).toBe(fs.statSync(file).size);
+    // A cap smaller than the file refuses — the bulk cap is not the deploy cap.
+    expect(() => resolveSourcePath(file, [], { maxBytes: 3 })).toThrow(/limit is 3/);
+  });
+
+  it('names the caller-facing argument in every refusal, not "content_file"', () => {
+    expect(() => resolveSourcePath('rel/x.csv', [], { noun: 'csv_file' })).toThrow(
+      /csv_file must be an absolute path/,
+    );
+    expect(() =>
+      resolveSourcePath(path.join(staging, 'nope.csv'), [], { noun: 'csv_file' }),
+    ).toThrow(/csv_file does not exist/);
+    const secret = path.join(outside, 'id_rsa');
+    fs.writeFileSync(secret, 'PRIVATE KEY', 'utf8');
+    expect(() => resolveSourcePath(secret, [], { noun: 'csv_file' })).toThrow(
+      /csv_file is outside every allowed deploy source root/,
+    );
+  });
+
+  it('keeps resolveSourceFile behaviour identical after the extraction', () => {
+    const file = path.join(staging, 'Thing.cls');
+    fs.writeFileSync(file, 'public class Thing {}', 'utf8');
+    const src = resolveSourceFile(file);
+    expect(src.content).toBe('public class Thing {}');
+    expect(src.sourcePath).toBe(fs.realpathSync(file));
+    expect(() => resolveSourceFile('rel/x.cls')).toThrow(/content_file must be an absolute path/);
   });
 });
 

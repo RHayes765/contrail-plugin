@@ -27,6 +27,7 @@ deploy fails:
 | Permission sets — FLS, object, Apex, page, app, tab access | `platform-permission-set-generate` |
 | Validation rules and their formulas | `platform-validation-rule-generate` |
 | Debug logs, governor limits, stack traces | `platform-apex-logs-debug` |
+| Bulk CSV data loads, multi-object migrations, failed-row triage | `salesforce-data-migration` |
 
 Not every environment has every skill installed. One that will not load simply
 does not exist here — say so plainly and proceed on these house rules alone,
@@ -104,6 +105,15 @@ rather than inventing what the skill would have said.
   defaults true (any failure rolls back every step); pass `false` only when
   partial completion is genuinely acceptable — the approval page tells the human
   which mode they are approving, so say it in your summary too.
+- **Migration-scale data moves by FILE, never through chat.** For real volumes
+  (or any multi-object CSV migration), `bulk_load_propose` stages the whole
+  ordered plan — the approval page shows every step with row counts, columns,
+  and frozen file hashes — and `bulk_load_execute` with the human's code drives
+  the org's Bulk API directly. Rows go file → org; results return counts and
+  failed-row file PATHS, and neither direction belongs in the conversation.
+  Bulk steps are separate org-side jobs with **no cross-job rollback** (loaded
+  steps stay), and bulk deletes are SOFT (Recycle Bin). Load the
+  `salesforce-data-migration` skill before planning one.
 - **Anonymous Apex rides the same ritual and commits.** `apex_propose` stages a
   script (max 32k chars); the approval page shows it **verbatim** with the
   warning that it runs with the human's permissions — so present the script in

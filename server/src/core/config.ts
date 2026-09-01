@@ -84,6 +84,18 @@ export interface ContrailConfig {
      */
     allowedSourceRoots: string[];
   };
+  bulkLoad: {
+    /** Ingest job status poll interval (jobs are minutes-scale). */
+    pollIntervalMs: number;
+    /** Hard limit for ONE ingest job to reach a terminal state. */
+    ingestTimeoutMs: number;
+    /** Per-CSV size cap (Salesforce's own raw ceiling is ~100 MB per job). */
+    maxFileBytes: number;
+    /** Maximum steps (files) in one bulk plan. */
+    maxFilesPerPlan: number;
+    /** Inline wait before bulk_load_execute returns an in-progress result. */
+    toolWaitMs: number;
+  };
 }
 
 export const DEFAULT_CONFIG: ContrailConfig = {
@@ -141,6 +153,13 @@ export const DEFAULT_CONFIG: ContrailConfig = {
     // anything wider is an explicit decision the human writes down.
     allowedSourceRoots: [],
   },
+  bulkLoad: {
+    pollIntervalMs: 5000,
+    ingestTimeoutMs: 30 * 60 * 1000,
+    maxFileBytes: 100_000_000,
+    maxFilesPerPlan: 20,
+    toolWaitMs: 25 * 1000,
+  },
 };
 
 export function loadConfig(): ContrailConfig {
@@ -167,6 +186,7 @@ export function loadConfig(): ContrailConfig {
     updates: { ...DEFAULT_CONFIG.updates, ...fromDisk.updates },
     localDiagnostics: { ...DEFAULT_CONFIG.localDiagnostics, ...fromDisk.localDiagnostics },
     deploy: { ...DEFAULT_CONFIG.deploy, ...fromDisk.deploy },
+    bulkLoad: { ...DEFAULT_CONFIG.bulkLoad, ...fromDisk.bulkLoad },
   };
 
   if (process.env.CONTRAIL_SF_CLIENT_ID) {

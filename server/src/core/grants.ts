@@ -128,6 +128,8 @@ export const TOOL_GRANT_MAP: Readonly<Record<string, Grant | null>> = {
   dml_execute: 'data_write',
   apex_propose: 'data_write',
   apex_execute: 'data_write',
+  bulk_load_propose: 'data_write',
+  bulk_load_execute: 'data_write',
   set_trace_flag: 'diagnostics_read',
   // Local static diagnostics (vendored language servers): no org, no grant —
   // zero-cost local reads, the same class as list_connections.

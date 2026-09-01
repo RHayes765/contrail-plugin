@@ -25488,6 +25488,8 @@ var TOOL_GRANT_MAP = {
   dml_execute: "data_write",
   apex_propose: "data_write",
   apex_execute: "data_write",
+  bulk_load_propose: "data_write",
+  bulk_load_execute: "data_write",
   set_trace_flag: "diagnostics_read",
   // Local static diagnostics (vendored language servers): no org, no grant —
   // zero-cost local reads, the same class as list_connections.
@@ -26291,6 +26293,13 @@ var DEFAULT_CONFIG = {
     // Empty by default: staging/ and snapshots/ are always allowed, and
     // anything wider is an explicit decision the human writes down.
     allowedSourceRoots: []
+  },
+  bulkLoad: {
+    pollIntervalMs: 5e3,
+    ingestTimeoutMs: 30 * 60 * 1e3,
+    maxFileBytes: 1e8,
+    maxFilesPerPlan: 20,
+    toolWaitMs: 25 * 1e3
   }
 };
 function loadConfig() {
@@ -26315,7 +26324,8 @@ function loadConfig() {
     snapshot: { ...DEFAULT_CONFIG.snapshot, ...fromDisk.snapshot },
     updates: { ...DEFAULT_CONFIG.updates, ...fromDisk.updates },
     localDiagnostics: { ...DEFAULT_CONFIG.localDiagnostics, ...fromDisk.localDiagnostics },
-    deploy: { ...DEFAULT_CONFIG.deploy, ...fromDisk.deploy }
+    deploy: { ...DEFAULT_CONFIG.deploy, ...fromDisk.deploy },
+    bulkLoad: { ...DEFAULT_CONFIG.bulkLoad, ...fromDisk.bulkLoad }
   };
   if (process.env.CONTRAIL_SF_CLIENT_ID) {
     merged.salesforce.clientId = process.env.CONTRAIL_SF_CLIENT_ID;
@@ -27167,7 +27177,7 @@ function renderSuccessPage(opts) {
 function renderApprovalPage(opts) {
   const isProd = opts.org.orgType === "production";
   const badgeClass = isProd ? "production" : opts.org.orgType === "sandbox" ? "sandbox" : "other";
-  const title = opts.kind === "deploy" ? "Approve this deploy" : opts.kind === "apex" ? "Approve this anonymous Apex script" : "Approve this data change";
+  const title = opts.kind === "deploy" ? "Approve this deploy" : opts.kind === "apex" ? "Approve this anonymous Apex script" : opts.kind === "bulk" ? "Approve this bulk data load" : "Approve this data change";
   const row = (c, danger) => `
     <div class="chg${danger ? " danger" : ""}">
       <div class="chg-label">${esc2(c.label)}</div>
@@ -29327,9 +29337,9 @@ var RestClient = class {
     return fetch(url, {
       ...init,
       headers: {
+        "Content-Type": "application/json",
         ...init?.headers ?? {},
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json"
+        Authorization: `Bearer ${accessToken}`
       }
     });
   }
@@ -30017,8 +30027,243 @@ function publicState(job) {
 }
 
 // src/deploy/engine.ts
+import crypto2 from "node:crypto";
 import fs10 from "node:fs";
 import path4 from "node:path";
+
+// src/salesforce/bulk.ts
+var TERMINAL_STATES = /* @__PURE__ */ new Set(["JobComplete", "Failed", "Aborted"]);
+function isTerminalIngestState(state) {
+  return TERMINAL_STATES.has(state);
+}
+function jobsBase(apiVersion) {
+  return `/services/data/${apiVersion}/jobs/ingest`;
+}
+async function createIngestJob(rest, apiVersion, opts) {
+  const res = await rest.request(jobsBase(apiVersion), {
+    method: "POST",
+    body: JSON.stringify({
+      object: opts.object,
+      operation: opts.operation,
+      ...opts.externalIdFieldName ? { externalIdFieldName: opts.externalIdFieldName } : {},
+      contentType: "CSV",
+      columnDelimiter: "COMMA",
+      lineEnding: opts.lineEnding
+    })
+  });
+  const body = await res.json();
+  if (!body.id) throw new Error("Salesforce did not return an ingest job id");
+  return body.id;
+}
+async function uploadIngestBatch(rest, apiVersion, jobId, csv) {
+  await rest.request(`${jobsBase(apiVersion)}/${jobId}/batches`, {
+    method: "PUT",
+    headers: { "Content-Type": "text/csv; charset=UTF-8" },
+    body: csv
+  });
+}
+async function closeIngestJob(rest, apiVersion, jobId) {
+  await rest.request(`${jobsBase(apiVersion)}/${jobId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ state: "UploadComplete" })
+  });
+}
+async function getIngestJob(rest, apiVersion, jobId) {
+  const res = await rest.request(`${jobsBase(apiVersion)}/${jobId}`);
+  const body = await res.json();
+  return {
+    id: body.id ?? jobId,
+    state: body.state ?? "InProgress",
+    numberRecordsProcessed: body.numberRecordsProcessed ?? 0,
+    numberRecordsFailed: body.numberRecordsFailed ?? 0,
+    errorMessage: body.errorMessage ?? null
+  };
+}
+async function abortIngestJob(rest, apiVersion, jobId) {
+  try {
+    await rest.request(`${jobsBase(apiVersion)}/${jobId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ state: "Aborted" })
+    });
+  } catch {
+  }
+}
+async function fetchFailedResults(rest, apiVersion, jobId) {
+  const res = await rest.request(`${jobsBase(apiVersion)}/${jobId}/failedResults/`, {
+    headers: { Accept: "text/csv" }
+  });
+  return res.text();
+}
+async function fetchUnprocessedRecords(rest, apiVersion, jobId) {
+  const res = await rest.request(`${jobsBase(apiVersion)}/${jobId}/unprocessedrecords/`, {
+    headers: { Accept: "text/csv" }
+  });
+  return res.text();
+}
+
+// src/deploy/csv.ts
+var UTF8_BOM = Buffer.from([239, 187, 191]);
+function scanCsv(bytes) {
+  const hadBom = bytes.length >= 3 && bytes.subarray(0, 3).equals(UTF8_BOM);
+  const text = (hadBom ? bytes.subarray(3) : bytes).toString("utf8");
+  if (text.trim().length === 0) throw new ContrailError("the CSV file is empty", "bad_csv");
+  const warnings = [];
+  const warnOnce = (msg) => {
+    if (!warnings.includes(msg)) warnings.push(msg);
+  };
+  let headers = null;
+  let headerFieldCount = 0;
+  let rowCount = 0;
+  let lineEnding = null;
+  let inQuotes = false;
+  let field = "";
+  let fieldHasContent = false;
+  let fieldsInRecord = 1;
+  let recordHasContent = false;
+  let recordStartLine = 1;
+  let line = 1;
+  const headerFields = [];
+  const finishHeader = () => {
+    headerFields.push(field);
+    headers = headerFields.map((h) => h.trim());
+    headerFieldCount = headers.length;
+    const empty = headers.findIndex((h) => h.length === 0);
+    if (empty >= 0) {
+      throw new ContrailError(
+        `empty column name in the header (column ${empty + 1}) \u2014 usually a stray trailing comma`,
+        "bad_csv"
+      );
+    }
+    const lower = headers.map((h) => h.toLowerCase());
+    const dupe = lower.find((h, i) => lower.indexOf(h) !== i);
+    if (dupe !== void 0) {
+      throw new ContrailError(`duplicate column name in the header: ${dupe}`, "bad_csv");
+    }
+    if (headers.length === 1 && /[;\t]/.test(headers[0])) {
+      warnOnce(
+        'the header parsed as a single column containing ";" or tabs \u2014 Bulk API 2.0 loads are comma-delimited; if this file is semicolon- or tab-delimited, re-export it with commas'
+      );
+    }
+  };
+  const endRecord = (atEof) => {
+    if (!recordHasContent && fieldsInRecord === 1) {
+      if (atEof) return;
+      throw new ContrailError(
+        `blank line at line ${recordStartLine} \u2014 remove it (Bulk rejects empty records)`,
+        "bad_csv"
+      );
+    }
+    if (headers === null) {
+      finishHeader();
+    } else {
+      rowCount += 1;
+      if (fieldsInRecord !== headerFieldCount) {
+        throw new ContrailError(
+          `row ${rowCount} (line ${recordStartLine}) has ${fieldsInRecord} field(s) but the header has ${headerFieldCount} \u2014 Bulk would fail this row; fix the file first`,
+          "bad_csv"
+        );
+      }
+    }
+    field = "";
+    fieldHasContent = false;
+    fieldsInRecord = 1;
+    recordHasContent = false;
+    recordStartLine = line;
+  };
+  const noteLineEnding = (kind) => {
+    if (lineEnding === null) lineEnding = kind;
+    else if (lineEnding !== kind) {
+      throw new ContrailError(
+        `mixed line endings (both LF and CRLF record delimiters, first conflict at line ${line}) \u2014 a Bulk job declares ONE line ending; normalize the file`,
+        "bad_csv"
+      );
+    }
+  };
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          if (headers === null) field += '"';
+          i += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        if (ch === "\n") line += 1;
+        if (headers === null) field += ch;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      if (!fieldHasContent) {
+        inQuotes = true;
+        fieldHasContent = true;
+        recordHasContent = true;
+      } else {
+        warnOnce(`stray double-quote inside a field (first at line ${line}) \u2014 check the file's quoting`);
+        if (headers === null) field += '"';
+      }
+      continue;
+    }
+    if (ch === ",") {
+      if (headers === null) {
+        headerFields.push(field);
+        field = "";
+      }
+      fieldsInRecord += 1;
+      fieldHasContent = false;
+      recordHasContent = true;
+      continue;
+    }
+    if (ch === "\r") {
+      if (text[i + 1] !== "\n") {
+        throw new ContrailError(
+          `bare CR record delimiter at line ${line} \u2014 only LF or CRLF endings are supported`,
+          "bad_csv"
+        );
+      }
+      noteLineEnding("CRLF");
+      line += 1;
+      endRecord(i + 2 >= text.length);
+      i += 1;
+      continue;
+    }
+    if (ch === "\n") {
+      noteLineEnding("LF");
+      line += 1;
+      endRecord(i + 1 >= text.length);
+      continue;
+    }
+    if (headers === null) field += ch;
+    fieldHasContent = true;
+    recordHasContent = true;
+  }
+  if (inQuotes) {
+    throw new ContrailError(
+      `unbalanced quote \u2014 a quoted field opened near line ${recordStartLine} never closes`,
+      "bad_csv"
+    );
+  }
+  if (recordHasContent || fieldsInRecord > 1) endRecord(false);
+  if (headers === null) throw new ContrailError("the CSV file has no header row", "bad_csv");
+  if (rowCount === 0) {
+    throw new ContrailError("the CSV has a header but zero data rows \u2014 nothing to load", "bad_csv");
+  }
+  if (hadBom) {
+    warnings.push(
+      "a UTF-8 BOM was detected and removed in the frozen copy (Bulk would corrupt the first column name)"
+    );
+  }
+  return {
+    headers,
+    rowCount,
+    // A single final record with no newline at all defaults to LF for the job.
+    lineEnding: lineEnding ?? "LF",
+    hadBom,
+    warnings
+  };
+}
 
 // src/deps/graph.ts
 var MAX_NODES = 200;
@@ -31345,6 +31590,451 @@ var DeployEngine = class {
     });
     return result;
   }
+  // ── bulk data loads ────────────────────────────────────────────────────
+  /**
+   * Stage a bulk load plan behind the ritual (kind 'bulk'): scan and FREEZE
+   * the CSVs now, show the whole plan on one approval page, and let the
+   * human's code arm executeBulkLoad. Rows never transit the model — the
+   * agent gets back counts, columns, and hashes, never data. Editing a source
+   * file after approval changes nothing: execute reads only the frozen copies
+   * and re-verifies their hashes.
+   */
+  async proposeBulkLoad(conn, input) {
+    const maxSteps = this.config.bulkLoad.maxFilesPerPlan;
+    if (input.steps.length === 0) {
+      throw new ContrailError("a bulk plan needs at least one step", "bad_bulk_plan");
+    }
+    if (input.steps.length > maxSteps) {
+      throw new ContrailError(
+        `this plan has ${input.steps.length} steps; the limit is ${maxSteps} (bulkLoad.maxFilesPerPlan in config.json)`,
+        "bulk_plan_too_large"
+      );
+    }
+    for (let i = 0; i < input.steps.length; i++) {
+      const s = input.steps[i];
+      const where = `step ${i + 1}`;
+      if (!/^[A-Za-z0-9_]+$/.test(s.object)) {
+        throw new ContrailError(`${where}: invalid object API name`, "bad_bulk_plan");
+      }
+      if (s.operation === "upsert" && !s.externalIdField) {
+        throw new ContrailError(
+          `${where}: upsert requires external_id_field (pass 'Id' to update by record id)`,
+          "bad_bulk_plan"
+        );
+      }
+      if (s.operation !== "upsert" && s.externalIdField) {
+        throw new ContrailError(
+          `${where}: external_id_field is only meaningful for upsert \u2014 ` + (s.operation === "delete" ? "delete matches on the Id column of the CSV" : "insert never matches existing rows") + "; remove it",
+          "bad_bulk_plan"
+        );
+      }
+      if (s.externalIdField && !/^[A-Za-z0-9_]+$/.test(s.externalIdField)) {
+        throw new ContrailError(`${where}: invalid external_id_field`, "bad_bulk_plan");
+      }
+    }
+    const superseded = this.db.supersedePendingRequests(conn.id, "bulk");
+    if (superseded > 0) {
+      for (const p of this.db.takeSupersededPayloadPaths(conn.id, "bulk")) safeUnlink(p);
+      this.audit.record("bulk.superseded", {
+        connectionId: conn.id,
+        tool: "bulk_load_propose",
+        detail: { count: superseded }
+      });
+    }
+    const stageDir = path4.join(deploysDir(), `bulk-stage-${crypto2.randomUUID()}`);
+    fs10.mkdirSync(stageDir, { recursive: true });
+    const manifest = {
+      bulk: true,
+      version: 1,
+      stop_on_failure: input.stopOnFailure,
+      steps: []
+    };
+    const scanWarnings = [];
+    try {
+      for (let i = 0; i < input.steps.length; i++) {
+        const s = input.steps[i];
+        const n = i + 1;
+        const label = `step ${n} (${s.displayName})`;
+        let stat;
+        try {
+          stat = fs10.statSync(s.sourcePath);
+        } catch {
+          throw new ContrailError(`${label}: the file does not exist`, "source_not_found");
+        }
+        if (!stat.isFile()) {
+          throw new ContrailError(`${label}: not a regular file`, "bad_source_path");
+        }
+        if (stat.size > this.config.bulkLoad.maxFileBytes) {
+          throw new ContrailError(
+            `${label}: ${stat.size} bytes exceeds the ${this.config.bulkLoad.maxFileBytes}-byte bulk file limit (bulkLoad.maxFileBytes in config.json)`,
+            "source_too_large"
+          );
+        }
+        const bytes = fs10.readFileSync(s.sourcePath);
+        let scan;
+        try {
+          scan = scanCsv(bytes);
+        } catch (err2) {
+          throw new ContrailError(
+            `${label}: ${err2 instanceof Error ? err2.message : String(err2)}`,
+            "bad_csv"
+          );
+        }
+        if (s.operation === "delete") {
+          if (scan.headers.length !== 1 || scan.headers[0].toLowerCase() !== "id") {
+            throw new ContrailError(
+              `${label}: a Bulk delete CSV is a single Id column \u2014 this file's header is [${scan.headers.slice(0, 8).join(", ")}${scan.headers.length > 8 ? ", \u2026" : ""}]`,
+              "bad_csv"
+            );
+          }
+        }
+        if (s.operation === "upsert") {
+          const want = s.externalIdField.toLowerCase();
+          if (!scan.headers.some((h) => h.toLowerCase() === want)) {
+            throw new ContrailError(
+              `${label}: the upsert match column "${s.externalIdField}" is not in this file's header`,
+              "bad_csv"
+            );
+          }
+        }
+        const frozen = scan.hadBom ? bytes.subarray(UTF8_BOM.length) : bytes;
+        const file = `step-${n}.csv`;
+        fs10.writeFileSync(path4.join(stageDir, file), frozen);
+        manifest.steps.push({
+          n,
+          object: s.object,
+          operation: s.operation,
+          external_id_field: s.externalIdField ?? null,
+          file,
+          display_name: s.displayName,
+          sha256: crypto2.createHash("sha256").update(frozen).digest("hex"),
+          row_count: scan.rowCount,
+          headers: scan.headers,
+          line_ending: scan.lineEnding,
+          bytes: frozen.length
+        });
+        scanWarnings.push(scan.warnings);
+      }
+    } catch (err2) {
+      fs10.rmSync(stageDir, { recursive: true, force: true });
+      throw err2;
+    }
+    const totalRows = manifest.steps.reduce((sum, s) => sum + s.row_count, 0);
+    const deleteRows = manifest.steps.filter((s) => s.operation === "delete").reduce((sum, s) => sum + s.row_count, 0);
+    const rows = manifest.steps.map((m, i) => {
+      const matchNote = m.operation === "upsert" ? ` (match on ${m.external_id_field}${m.external_id_field === "Id" ? " \u2014 update" : ""})` : "";
+      const destructive = m.operation === "delete";
+      return {
+        label: `STEP ${m.n}  ${m.operation.toUpperCase()} ${m.object} \u2014 ${m.row_count.toLocaleString("en-US")} row${m.row_count === 1 ? "" : "s"}${matchNote}`,
+        detail: `from ${m.display_name}
+frozen sha256 ${m.sha256.slice(0, 16)}\u2026 \xB7 ${m.bytes.toLocaleString("en-US")} bytes
+columns: ${columnsLabel(m.headers)}`,
+        warnings: [
+          ...destructive ? [
+            "Bulk delete is a SOFT delete \u2014 rows go to the Recycle Bin (~15 days). hardDelete is not offered."
+          ] : [],
+          ...scanWarnings[i]
+        ],
+        destructive
+      };
+    });
+    const code = generateConfirmationCode();
+    const expiresAt = new Date(Date.now() + this.config.deploy.codeTtlMs).toISOString();
+    const preview = {
+      bulk: true,
+      steps: manifest.steps.length,
+      total_rows: totalRows,
+      operations: summarizeOps(manifest.steps),
+      stop_on_failure: input.stopOnFailure,
+      rows
+    };
+    let request;
+    try {
+      request = this.db.insertDeployRequest({
+        connectionId: conn.id,
+        kind: "bulk",
+        confirmationCode: code,
+        expiresAt,
+        payloadJson: JSON.stringify(manifest),
+        summaryJson: JSON.stringify(preview)
+      });
+      const payloadDir = path4.join(deploysDir(), request.id);
+      fs10.renameSync(stageDir, payloadDir);
+      this.db.setDeployRequestPayloadPath(request.id, payloadDir);
+    } catch (err2) {
+      fs10.rmSync(stageDir, { recursive: true, force: true });
+      throw err2;
+    }
+    const approval = await this.approvals.present(
+      renderApprovalPage({
+        kind: "bulk",
+        code,
+        expiresAt,
+        org: {
+          alias: conn.alias,
+          orgName: conn.orgName,
+          orgType: conn.orgType,
+          instanceUrl: conn.instanceUrl
+        },
+        changes: rows.filter((r) => !r.destructive),
+        destructive: rows.filter((r) => r.destructive),
+        results: [
+          {
+            label: "Plan",
+            value: `${manifest.steps.length} step${manifest.steps.length === 1 ? "" : "s"} / ${totalRows.toLocaleString("en-US")} rows total`
+          },
+          { label: "Operations", value: summarizeOps(manifest.steps) },
+          {
+            // A PROMISE about failure behaviour — it must match what
+            // doExecuteBulk actually does.
+            label: "Mode",
+            value: input.stopOnFailure ? "stop-on-failure (a step with failed rows halts later steps; rows already loaded STAY \u2014 there is no cross-job rollback)" : "continue-on-failure (every step runs; rows already loaded STAY \u2014 no cross-job rollback)"
+          }
+        ],
+        blast: [],
+        warnings: [
+          ...deleteRows > 0 ? [
+            `This plan DELETES ${deleteRows.toLocaleString("en-US")} row(s) (soft delete \u2192 Recycle Bin).`
+          ] : [],
+          "Bulk loads are NOT atomic. Each step is its own org-side job; rows loaded by completed steps remain in the org even if a later step fails."
+        ]
+      }),
+      this.requestStatusCheck(request.id),
+      this.config.deploy.codeTtlMs + 6e4
+    );
+    this.audit.record("bulk.proposed", {
+      connectionId: conn.id,
+      tool: "bulk_load_propose",
+      detail: {
+        requestId: request.id,
+        steps: manifest.steps.length,
+        operations: summarizeOps(manifest.steps),
+        totalRows,
+        stopOnFailure: input.stopOnFailure
+      }
+    });
+    return {
+      connection: conn.alias,
+      org_type: conn.orgType,
+      request_id: request.id,
+      steps: manifest.steps.map((m) => ({
+        step: m.n,
+        object: m.object,
+        operation: m.operation,
+        ...m.external_id_field ? { external_id_field: m.external_id_field } : {},
+        rows: m.row_count,
+        columns: m.headers,
+        sha256_prefix: m.sha256.slice(0, 16),
+        source: m.display_name
+      })),
+      total_rows: totalRows,
+      stop_on_failure: input.stopOnFailure,
+      expires_at: expiresAt,
+      approval_page: approvalForAgent("bulk", approval)
+    };
+  }
+  async executeBulkLoad(conn, code) {
+    const claim = this.claimCode(conn, "bulk", code, "bulk_load_execute");
+    if (claim.kind === "terminal") {
+      return { status: "complete", result: claim.result };
+    }
+    const jobKey = `bulk-exec:${claim.request.id}`;
+    if (claim.kind === "running" && !this.jobs.has(jobKey)) {
+      return {
+        status: "in_progress",
+        progress: "a bulk load for this code is already in progress",
+        started_at: claim.request.createdAt
+      };
+    }
+    return this.runJob(
+      jobKey,
+      (job) => this.doExecuteBulk(conn, claim.request, job),
+      this.config.bulkLoad.toolWaitMs
+    );
+  }
+  async doExecuteBulk(conn, request, job) {
+    const manifest = JSON.parse(request.payloadJson ?? "{}");
+    if (manifest.bulk !== true || !Array.isArray(manifest.steps) || manifest.steps.length === 0 || !request.payloadPath || !fs10.existsSync(request.payloadPath)) {
+      this.audit.record("bulk.execution_failed", {
+        connectionId: conn.id,
+        tool: "bulk_load_execute",
+        outcome: "error",
+        detail: { requestId: request.id, reason: "payload_missing" }
+      });
+      return this.finishExecution(conn, request, "execution_failed", {
+        connection: conn.alias,
+        bulk: true,
+        executed: false,
+        error_message: "The frozen CSV payload is missing from disk.",
+        note: "Nothing was sent to the org. Re-propose to freeze the files again."
+      });
+    }
+    const version2 = this.config.salesforce.apiVersion;
+    const rest = new RestClient(this.tokenMgr, conn, version2);
+    const resultsDir = path4.join(deploysDir(), `${request.id}-results`);
+    let resultsDirMade = false;
+    const writeResultCsv = (name, csv) => {
+      if (csv.trim().split("\n").length < 2) return null;
+      if (!resultsDirMade) {
+        fs10.mkdirSync(resultsDir, { recursive: true });
+        resultsDirMade = true;
+      }
+      const p = path4.join(resultsDir, name);
+      fs10.writeFileSync(p, csv);
+      return p;
+    };
+    const steps = manifest.steps;
+    const total = steps.length;
+    const stopOnFailure = manifest.stop_on_failure !== false;
+    const stepResults = [];
+    let haltedAfterStep = null;
+    let anyFailure = false;
+    let totalProcessed = 0;
+    let totalFailed = 0;
+    for (const m of steps) {
+      const stepLabel = `step ${m.n}/${total}: ${m.operation.toUpperCase()} ${m.object}`;
+      if (job) job.progress = `${stepLabel} \u2014 verifying frozen file`;
+      const frozenPath = path4.join(request.payloadPath, m.file);
+      let failedHard = null;
+      let info = null;
+      let jobId = null;
+      let frozen = null;
+      if (!fs10.existsSync(frozenPath)) {
+        failedHard = "the frozen CSV for this step is missing from the payload directory";
+      } else {
+        frozen = fs10.readFileSync(frozenPath);
+        const sha = crypto2.createHash("sha256").update(frozen).digest("hex");
+        if (sha !== m.sha256) {
+          failedHard = "the frozen CSV no longer matches the hash the human approved (frozen_payload_tampered) \u2014 refusing to send it";
+          frozen = null;
+        }
+      }
+      if (frozen) {
+        try {
+          if (job) job.progress = `${stepLabel} \u2014 creating ingest job`;
+          jobId = await createIngestJob(rest, version2, {
+            object: m.object,
+            operation: m.operation,
+            ...m.external_id_field ? { externalIdFieldName: m.external_id_field } : {},
+            lineEnding: m.line_ending
+          });
+          if (job) {
+            job.progress = `${stepLabel} \u2014 uploading ${m.row_count.toLocaleString("en-US")} rows`;
+          }
+          await uploadIngestBatch(rest, version2, jobId, frozen);
+          await closeIngestJob(rest, version2, jobId);
+          info = await this.pollBulkJob(rest, jobId, stepLabel, job);
+        } catch (err2) {
+          failedHard = String(err2 instanceof Error ? err2.message : err2);
+        }
+      }
+      const processed = info?.numberRecordsProcessed ?? 0;
+      const failed = info?.numberRecordsFailed ?? 0;
+      totalProcessed += processed;
+      totalFailed += failed;
+      const stepFailed = failedHard !== null || !info || info.state !== "JobComplete" || failed > 0;
+      if (stepFailed) anyFailure = true;
+      const entry = {
+        step: m.n,
+        object: m.object,
+        operation: m.operation,
+        ...jobId ? { job_id: jobId } : {},
+        state: info ? info.state : "NotSent",
+        processed,
+        succeeded: Math.max(0, processed - failed),
+        failed,
+        ...failedHard ? { error_message: failedHard } : info?.errorMessage ? { error_message: info.errorMessage } : {}
+      };
+      if (info && jobId && stepFailed) {
+        try {
+          const p = writeResultCsv(
+            `step-${m.n}-failed.csv`,
+            await fetchFailedResults(rest, version2, jobId)
+          );
+          if (p) entry.failed_rows_file = p;
+        } catch (err2) {
+          entry.failed_rows_note = `could not fetch the failed-rows export: ${String(
+            err2 instanceof Error ? err2.message : err2
+          )}`;
+        }
+        try {
+          const p = writeResultCsv(
+            `step-${m.n}-unprocessed.csv`,
+            await fetchUnprocessedRecords(rest, version2, jobId)
+          );
+          if (p) entry.unprocessed_rows_file = p;
+        } catch (err2) {
+          entry.unprocessed_rows_note = `could not fetch the unprocessed-rows export: ${String(
+            err2 instanceof Error ? err2.message : err2
+          )}`;
+        }
+      }
+      stepResults.push(entry);
+      if (stepFailed && stopOnFailure && m.n < total) {
+        haltedAfterStep = m.n;
+        for (const rem of steps.filter((s) => s.n > m.n)) {
+          stepResults.push({
+            step: rem.n,
+            object: rem.object,
+            operation: rem.operation,
+            state: "Skipped",
+            processed: 0,
+            succeeded: 0,
+            failed: 0,
+            reason: `step ${m.n} failed and stop_on_failure is true \u2014 rows already loaded by earlier steps STAY`
+          });
+        }
+        break;
+      }
+    }
+    const executed = !anyFailure;
+    const payload = {
+      connection: conn.alias,
+      bulk: true,
+      executed,
+      stop_on_failure: stopOnFailure,
+      steps: stepResults,
+      total_processed: totalProcessed,
+      total_failed: totalFailed,
+      ...haltedAfterStep !== null ? { halted_after_step: haltedAfterStep } : {},
+      ...resultsDirMade ? { results_dir: resultsDir } : {},
+      note: executed ? `All ${stepResults.length} step(s) completed: ${totalProcessed.toLocaleString("en-US")} rows loaded. Bulk writes bypass no automation \u2014 triggers and flows ran normally.` : "At least one step did not fully succeed. Rows loaded by completed steps REMAIN in the org (there is no cross-job rollback). Failed and unprocessed rows were written as CSV files \u2014 open them at the paths above (the trailing sf__Error column names each cause), fix, and re-propose ONLY those rows. The confirmation code is spent."
+    };
+    this.audit.record(executed ? "bulk.executed" : "bulk.execution_failed", {
+      connectionId: conn.id,
+      tool: "bulk_load_execute",
+      outcome: executed ? "success" : "error",
+      detail: {
+        requestId: request.id,
+        steps: stepResults.length,
+        totalProcessed,
+        totalFailed,
+        ...haltedAfterStep !== null ? { haltedAfterStep } : {},
+        jobIds: stepResults.map((s) => s.job_id).filter(Boolean)
+      }
+    });
+    return this.finishExecution(conn, request, executed ? "executed" : "execution_failed", payload);
+  }
+  /** Poll one ingest job to a terminal state; on deadline, abort (best-effort) and throw. */
+  async pollBulkJob(rest, jobId, stepLabel, job) {
+    const deadline = Date.now() + this.config.bulkLoad.ingestTimeoutMs;
+    let info = await getIngestJob(rest, this.config.salesforce.apiVersion, jobId);
+    while (!isTerminalIngestState(info.state)) {
+      if (Date.now() > deadline) {
+        await abortIngestJob(rest, this.config.salesforce.apiVersion, jobId);
+        throw new ContrailError(
+          `${stepLabel} did not finish within ${Math.round(this.config.bulkLoad.ingestTimeoutMs / 6e4)} minutes (state: ${info.state}); an abort was requested`,
+          "bulk_ingest_timeout"
+        );
+      }
+      if (job) {
+        job.progress = `${stepLabel} \u2014 ${info.state} (${info.numberRecordsProcessed.toLocaleString("en-US")} processed, ${info.numberRecordsFailed.toLocaleString("en-US")} failed)`;
+      }
+      await delay3(this.config.bulkLoad.pollIntervalMs);
+      info = await getIngestJob(rest, this.config.salesforce.apiVersion, jobId);
+    }
+    return info;
+  }
   // ── shared internals ───────────────────────────────────────────────────
   /**
    * Resolve a human-supplied code to an execution claim. Atomically flips
@@ -31613,7 +32303,7 @@ var DeployEngine = class {
     return result;
   }
   /** Soft-wait job wrapper mirroring SnapshotEngine: never trips MCP client timeouts. */
-  async runJob(key2, work) {
+  async runJob(key2, work, waitMs = this.config.deploy.toolWaitMs) {
     let job = this.jobs.get(key2);
     if (job?.done) {
       this.jobs.delete(key2);
@@ -31650,7 +32340,7 @@ var DeployEngine = class {
           error: String(err2 instanceof Error ? err2.message : err2)
         })
       ),
-      delay3(this.config.deploy.toolWaitMs).then(() => null)
+      delay3(waitMs).then(() => null)
     ]);
     if (winner) {
       this.jobs.delete(key2);
@@ -31681,11 +32371,11 @@ function approvalForAgent(kind, approval) {
   };
 }
 function kindNoun(kind) {
-  return kind === "deploy" ? "deploy" : kind === "apex" ? "Apex script" : "change";
+  return kind === "deploy" ? "deploy" : kind === "apex" ? "Apex script" : kind === "bulk" ? "bulk data load" : "change";
 }
 function safeUnlink(filePath) {
   try {
-    fs10.rmSync(filePath, { force: true });
+    fs10.rmSync(filePath, { recursive: true, force: true });
   } catch (err2) {
     log("warn", "could not delete deploy payload", { filePath, err: String(err2) });
   }
@@ -31697,6 +32387,10 @@ function previewFields(record2) {
 }
 function truncateLabel(s) {
   return s.length > 300 ? `${s.slice(0, 300)}\u2026` : s;
+}
+function columnsLabel(headers) {
+  const shown = headers.slice(0, 25);
+  return shown.join(", ") + (headers.length > shown.length ? ` \u2026 +${headers.length - shown.length} more` : "");
 }
 function summarizeOps(steps) {
   const counts = /* @__PURE__ */ new Map();
@@ -31786,7 +32480,7 @@ function getUpdateNotice(installedVersion, repo, enabled) {
 }
 
 // src/core/version.ts
-var ENGINE_VERSION = "0.18.0";
+var ENGINE_VERSION = "0.19.0";
 
 // src/tools/register.ts
 var UPDATE_REPO = "RHayes765/contrail-plugin";
@@ -33689,7 +34383,7 @@ async function pollApexTestRun(client, alias, runId) {
 }
 
 // src/deploy/sources.ts
-import crypto2 from "node:crypto";
+import crypto3 from "node:crypto";
 import fs12 from "node:fs";
 import path6 from "node:path";
 var MAX_SOURCE_FILE_BYTES = 5e6;
@@ -33708,12 +34402,14 @@ function allowedSourceRoots(configured = []) {
 function isInside(target, root) {
   return target === root || target.startsWith(root + path6.sep);
 }
-function resolveSourceFile(rawPath, configuredRoots = []) {
+function resolveSourcePath(rawPath, configuredRoots = [], opts = {}) {
+  const noun = opts.noun ?? "content_file";
+  const maxBytes = opts.maxBytes ?? MAX_SOURCE_FILE_BYTES;
   const given = rawPath.trim();
-  if (!given) throw new ContrailError("content_file was empty.", "bad_source_path");
+  if (!given) throw new ContrailError(`${noun} was empty.`, "bad_source_path");
   if (!path6.isAbsolute(given)) {
     throw new ContrailError(
-      `content_file must be an absolute path (got "${given}"). Write the file under ${stagingDir()} and pass that full path.`,
+      `${noun} must be an absolute path (got "${given}"). Write the file under ${stagingDir()} and pass that full path.`,
       "bad_source_path"
     );
   }
@@ -33721,30 +34417,34 @@ function resolveSourceFile(rawPath, configuredRoots = []) {
   try {
     real = fs12.realpathSync(given);
   } catch {
-    throw new ContrailError(`content_file does not exist: ${given}`, "source_not_found");
+    throw new ContrailError(`${noun} does not exist: ${given}`, "source_not_found");
   }
   const stat = fs12.statSync(real);
   if (!stat.isFile()) {
-    throw new ContrailError(`content_file is not a regular file: ${given}`, "bad_source_path");
+    throw new ContrailError(`${noun} is not a regular file: ${given}`, "bad_source_path");
   }
-  if (stat.size > MAX_SOURCE_FILE_BYTES) {
+  if (stat.size > maxBytes) {
     throw new ContrailError(
-      `content_file is ${stat.size} bytes; the limit is ${MAX_SOURCE_FILE_BYTES}.`,
+      `${noun} is ${stat.size} bytes; the limit is ${maxBytes}.`,
       "source_too_large"
     );
   }
   const roots = allowedSourceRoots(configuredRoots);
   if (!roots.some((root) => isInside(real, root))) {
     throw new ContrailError(
-      `content_file is outside every allowed deploy source root, so Contrail will not deploy it. Allowed: ${roots.join(", ")}. Write the file under ${stagingDir()}, or add its directory to deploy.allowedSourceRoots in config.json (only you can edit that).`,
+      `${noun} is outside every allowed deploy source root, so Contrail will not deploy it. Allowed: ${roots.join(", ")}. Write the file under ${stagingDir()}, or add its directory to deploy.allowedSourceRoots in config.json (only you can edit that).`,
       "source_outside_roots"
     );
   }
-  const bytes = fs12.readFileSync(real);
+  return { absPath: real, size: stat.size };
+}
+function resolveSourceFile(rawPath, configuredRoots = []) {
+  const { absPath } = resolveSourcePath(rawPath, configuredRoots);
+  const bytes = fs12.readFileSync(absPath);
   return {
     content: bytes.toString("utf8"),
-    sourcePath: real,
-    sourceSha256: crypto2.createHash("sha256").update(bytes).digest("hex")
+    sourcePath: absPath,
+    sourceSha256: crypto3.createHash("sha256").update(bytes).digest("hex")
   };
 }
 
@@ -34102,6 +34802,81 @@ function registerDeployTools(server, deps) {
       const conn = requireConnection(args.connection, "apex_execute");
       const result = await deploys.executeApex(conn, args.confirmation_code);
       return ok(result);
+    })
+  );
+  server.registerTool(
+    "bulk_load_propose",
+    {
+      title: "Propose a bulk data load from CSV files (two-step)",
+      description: `Stage a multi-file Bulk API 2.0 data load behind the approval ritual. Rows go FILE \u2192 ORG and never through this conversation: prepare UTF-8, comma-delimited CSVs under Contrail's staging directory (API-name headers; cross-object references as relationship-by-external-ID columns like "Account.External_Id__c", resolved org-side), then name one file per step. Steps execute SEQUENTIALLY in the order given \u2014 parents before children. Each file is scanned (headers, row count) and FROZEN at propose; the approval page shows every step with counts and hashes, and nothing touches the org until the human reads the confirmation code to bulk_load_execute. Bulk steps are separate org-side jobs with NO cross-job rollback; delete steps are SOFT deletes (Recycle Bin) and their CSV is a single Id column. For small test-data seeding (\u2264200 rows) prefer dml_propose.`,
+      inputSchema: {
+        connection: external_exports.string().describe("Target connection alias (or id) \u2014 name it unmissably to the human."),
+        steps: external_exports.array(
+          external_exports.object({
+            csv_file: external_exports.string().describe(
+              "Absolute path to this step's CSV. Same containment as content_file: under Contrail's staging directory, snapshots, or a configured deploy.allowedSourceRoots entry. Read and frozen at propose time."
+            ),
+            object: external_exports.string().describe("SObject API name, e.g. Account or Invoice__c."),
+            operation: external_exports.enum(["insert", "upsert", "delete"]),
+            external_id_field: external_exports.string().optional().describe(
+              "upsert only (required there): the match field. Pass 'Id' to update by record id. Must be a column in the CSV."
+            )
+          })
+        ).min(1).max(config2.bulkLoad.maxFilesPerPlan).describe("Ordered steps \u2014 one CSV each, executed sequentially."),
+        stop_on_failure: external_exports.boolean().optional().describe(
+          "Default true: a step with failed rows halts the remaining steps (rows already loaded STAY \u2014 bulk has no cross-job rollback). false runs every step."
+        )
+      }
+    },
+    async (args) => guarded(async () => {
+      const conn = requireConnection(args.connection, "bulk_load_propose");
+      const steps = args.steps.map((s) => {
+        const { absPath } = resolveSourcePath(s.csv_file, config2.deploy.allowedSourceRoots, {
+          maxBytes: config2.bulkLoad.maxFileBytes,
+          noun: "csv_file"
+        });
+        return {
+          sourcePath: absPath,
+          displayName: absPath,
+          object: s.object,
+          operation: s.operation,
+          ...s.external_id_field ? { externalIdField: s.external_id_field } : {}
+        };
+      });
+      const preview = await deploys.proposeBulkLoad(conn, {
+        stopOnFailure: args.stop_on_failure ?? true,
+        steps
+      });
+      return ok(
+        preview,
+        `Proposed \u2014 nothing loaded. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`
+      );
+    })
+  );
+  server.registerTool(
+    "bulk_load_execute",
+    {
+      title: "Execute a proposed bulk data load",
+      description: "Run the bulk load plan that the given confirmation code approves: sequential Bulk API 2.0 ingest jobs from the CSVs frozen at propose. The code exists only on the human's approval page \u2014 only pass a code the human just gave you (single-use, ~1h expiry, invalidated by a new bulk_load_propose on the same connection). Large jobs take minutes: an in-progress result means call bulk_load_execute again with the SAME code to check on it. Failed and unprocessed rows come back as CSV file paths (never row data); rows loaded by completed steps are never rolled back.",
+      inputSchema: {
+        connection: external_exports.string().describe("Target connection alias (or id)."),
+        confirmation_code: external_exports.string().describe("The code the human read from the approval page (format XXXX-XXXX).")
+      }
+    },
+    async (args) => guarded(async () => {
+      const conn = requireConnection(args.connection, "bulk_load_execute");
+      const outcome = await deploys.executeBulkLoad(conn, args.confirmation_code);
+      switch (outcome.status) {
+        case "in_progress":
+          return ok(
+            { progress: outcome.progress, started_at: outcome.started_at },
+            "The bulk load is still running \u2014 call bulk_load_execute again with the same connection and code to check on it."
+          );
+        case "failed":
+          return fail(`Bulk load errored: ${outcome.error}`);
+        case "complete":
+          return ok(outcome.result);
+      }
     })
   );
 }

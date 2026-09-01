@@ -68,6 +68,8 @@ describe('MCP surface', () => {
     expect(names).toEqual([
       'apex_execute',
       'apex_propose',
+      'bulk_load_execute',
+      'bulk_load_propose',
       'check_apex',
       'check_soql',
       'connect_org',

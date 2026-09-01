@@ -128,12 +128,17 @@ export class RestClient {
   private async rawRequest(path: string, init?: RequestInit): Promise<Response> {
     const accessToken = await this.tokenMgr.getAccessToken(this.conn);
     const url = path.startsWith('http') ? path : new URL(path, this.conn.instanceUrl).toString();
+    // Callers may override Content-Type/Accept (the Bulk API speaks text/csv),
+    // but Authorization is pinned last and stays non-overridable. Caller headers
+    // must be plain objects (spreading a Headers instance yields nothing), and
+    // bodies must be string/Buffer, never streams — the 401 retry in request()
+    // replays init verbatim, and a consumed stream would replay empty.
     return fetch(url, {
       ...init,
       headers: {
+        'Content-Type': 'application/json',
         ...(init?.headers ?? {}),
         Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
       },
     });
   }

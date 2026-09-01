@@ -82,6 +82,10 @@ Phase 0 is a working engine, dogfooded end-to-end against a real development org
   diff artifacts and whole orgs, query records, and read logs and flow errors.
 - **Change, safely** — validate and deploy metadata, and create/update/delete data,
   each gated behind the human confirmation flow above.
+- **Migrate data at scale** — load ordered CSV files (accounts, then the contacts
+  that reference them) straight into an org through Salesforce's Bulk API, with the
+  whole plan on one approval page and the rows travelling file → org, never through
+  the assistant. Failed rows come back as files to fix and re-run.
 - **Guide the work** — bundled skills encode hard-won Salesforce judgment, like
   "permissions have to ship alongside the components that need them" and the quirks of
   how flows deploy, so the assistant builds things the way a careful practitioner

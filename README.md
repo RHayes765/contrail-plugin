@@ -4,11 +4,23 @@ The Contrail engine shipped as a Claude plugin: a local stdio MCP server (the
 **Contrail Engine**) plus a skill carrying the house rules. Spec:
 `contrail-phase0-spec.md`.
 
-**Status: v0.18.0 — one-click packaging (MCPB)** on top of the completed
+**Status: v0.19.0 — one-click packaging (MCPB)** on top of the completed
 P0.1–P0.6 Phase 0 surface. `npm run mcpb` builds `contrail-<version>.mcpb`, a
 single MCP Bundle that installs into Claude Desktop via Settings → Extensions
 (no Node install, no npm, no config editing on the target machine) and covers
-Windows x64/ARM and macOS Intel/Apple Silicon from one file. 32 tools.
+Windows x64/ARM and macOS Intel/Apple Silicon from one file. 34 tools.
+
+**Bulk data loading (S27).** `bulk_load_propose` / `bulk_load_execute` move
+real data volumes file → org through the Bulk API 2.0, behind the same
+two-step human approval as every write. CSVs are scanned (headers, row
+counts) and frozen at propose; one approval page shows the whole ordered
+plan (delete steps on the destructive card — soft delete, Recycle Bin);
+execution drives sequential ingest jobs and returns per-step counts plus
+failed/unprocessed rows as CSV **file paths** — rows never transit the model
+in either direction. No cross-job rollback, and the page says so. A
+`salesforce-data-migration` skill carries the method: load order from the
+relationship graph, cross-object references via external-ID columns,
+failed-row triage.
 
 **Local diagnostics (S26).** `check_apex` / `check_soql` run Salesforce's own
 prebuilt language servers, vendored under `server/vendor/` (Apache-2.0 — see
