@@ -4,6 +4,10 @@ The Contrail engine shipped as a Claude plugin: a local stdio MCP server (the
 **Contrail Engine**) plus a skill carrying the house rules. Spec:
 `contrail-phase0-spec.md`.
 
+**📖 Full reference — every tool, feature, and config knob: [TOOLS.md](TOOLS.md).**
+For the narrative overview see [CONTRAIL_OVERVIEW.md](CONTRAIL_OVERVIEW.md); to
+install, see [Getting Started](Getting%20Started.md).
+
 **Status: v0.19.0 — one-click packaging (MCPB)** on top of the completed
 P0.1–P0.6 Phase 0 surface. `npm run mcpb` builds `contrail-<version>.mcpb`, a
 single MCP Bundle that installs into Claude Desktop via Settings → Extensions
