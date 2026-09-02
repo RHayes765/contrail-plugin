@@ -151,7 +151,8 @@ export interface DeployValidationSummary {
   org_type: string;
   request_id: string;
   validation_id: string;
-  test_level: TestLevel;
+  /** null = unspecified — the org applied its own default test behavior. */
+  test_level: TestLevel | null;
   changes: ComponentChange[];
   destructive: ComponentChange[];
   components_total: number;
@@ -239,7 +240,8 @@ export class DeployEngine {
     input: {
       components: ProposedComponent[];
       destructive: ProposedDeletion[];
-      testLevel: TestLevel;
+      /** Omitted = the ORG's default behavior (prod refuses an explicit NoTestRun). */
+      testLevel?: TestLevel;
       runTests: string[];
     },
   ): Promise<
@@ -258,7 +260,7 @@ export class DeployEngine {
     input: {
       components: ProposedComponent[];
       destructive: ProposedDeletion[];
-      testLevel: TestLevel;
+      testLevel?: TestLevel;
       runTests: string[];
     },
     job?: Job<unknown>,
@@ -382,7 +384,7 @@ export class DeployEngine {
       org_type: conn.orgType,
       request_id: request.id,
       validation_id: validationId,
-      test_level: input.testLevel,
+      test_level: input.testLevel ?? null,
       changes,
       destructive,
       components_total: result.numberComponentsTotal,
@@ -426,7 +428,7 @@ export class DeployEngine {
             value:
               result.numberTestsTotal > 0
                 ? `${result.numberTestsTotal} run, ${result.numberTestErrors} failed`
-                : `none run (${input.testLevel})`,
+                : `none run (${input.testLevel ?? 'org default'})`,
             bad: result.numberTestErrors > 0,
           },
         ],
@@ -517,10 +519,17 @@ export class DeployEngine {
     // nothing between validation and execution can substitute a package.
     // NoTestRun validations are not eligible; any org-side refusal falls back
     // to the classic full deploy of the stored zip.
+    // With an EXPLICIT level, eligibility is knowable locally. With the level
+    // omitted, the org chose: production defaults to running local tests when
+    // the package carries Apex (quick-deployable), sandboxes to none. Try the
+    // quick path for production and let the org's refusal fall back — the
+    // catch below already handles exactly that.
     const quickEligible =
       typeof request.validationId === 'string' &&
       request.validationId.length > 0 &&
-      (options.testLevel ?? 'NoTestRun') !== 'NoTestRun';
+      (options.testLevel !== undefined
+        ? options.testLevel !== 'NoTestRun'
+        : conn.orgType === 'production');
     let quickDeploy = false;
     let quickFallbackReason: string | null = null;
 
@@ -535,14 +544,14 @@ export class DeployEngine {
           quickFallbackReason = String(err instanceof Error ? err.message : err).slice(0, 300);
           deployId = await soap.deploy(zip, {
             checkOnly: false,
-            testLevel: options.testLevel ?? 'NoTestRun',
+            testLevel: options.testLevel,
             runTests: options.runTests ?? [],
           });
         }
       } else {
         deployId = await soap.deploy(zip, {
           checkOnly: false,
-          testLevel: options.testLevel ?? 'NoTestRun',
+          testLevel: options.testLevel,
           runTests: options.runTests ?? [],
         });
       }

@@ -1,6 +1,6 @@
 # Contrail Reference — tools, features, configuration
 
-Everything Contrail can do, in one place. Current as of **v0.19.0** (34 tools).
+Everything Contrail can do, in one place. Current as of **v0.19.1** (34 tools).
 The same tool surface is available in all three installs — the Claude Desktop
 extension (`.mcpb`), the Claude Code plugin, and the Contrail desktop app —
 with a few desktop-app differences [noted at the end](#the-desktop-app).

@@ -29130,7 +29130,7 @@ var MetadataSoapClient = class {
    */
   async deploy(zip, options) {
     const runTestsXml = options.runTests.map((t) => `<met:runTests>${escapeXml(t)}</met:runTests>`).join("");
-    const body = `<met:deploy><met:ZipFile>${zip.toString("base64")}</met:ZipFile><met:DeployOptions><met:checkOnly>${options.checkOnly}</met:checkOnly><met:rollbackOnError>true</met:rollbackOnError>` + runTestsXml + `<met:singlePackage>true</met:singlePackage><met:testLevel>${escapeXml(options.testLevel)}</met:testLevel></met:DeployOptions></met:deploy>`;
+    const body = `<met:deploy><met:ZipFile>${zip.toString("base64")}</met:ZipFile><met:DeployOptions><met:checkOnly>${options.checkOnly}</met:checkOnly><met:rollbackOnError>true</met:rollbackOnError>` + runTestsXml + `<met:singlePackage>true</met:singlePackage>` + (options.testLevel ? `<met:testLevel>${escapeXml(options.testLevel)}</met:testLevel>` : "") + `</met:DeployOptions></met:deploy>`;
     const parsed = await this.call(body);
     const id = xmlDig(parsed, "Envelope", "Body", "deployResponse", "result", "id");
     if (typeof id !== "string" || !id) {
@@ -30828,6 +30828,29 @@ var DeployEngine = class {
     this.approvals = approvals;
   }
   jobs = /* @__PURE__ */ new Map();
+  executionObserver = null;
+  /**
+   * Register the (single) execution observer. A setter rather than a ctor
+   * argument because the observing service is constructed after the engine
+   * in every bootstrap.
+   */
+  setExecutionObserver(obs) {
+    this.executionObserver = obs;
+  }
+  /** Best-effort observer dispatch — never allowed to touch the outcome. */
+  notifyExecuted(request, payload) {
+    if (!this.executionObserver) return;
+    try {
+      this.executionObserver({ request, payload, payloadPath: request.payloadPath ?? null });
+    } catch (err2) {
+      this.audit.record("deploy.observer_failed", {
+        connectionId: request.connectionId,
+        tool: "execution_observer",
+        outcome: "error",
+        detail: { requestId: request.id, error: String(err2).slice(0, 500) }
+      });
+    }
+  }
   // ── deploys ────────────────────────────────────────────────────────────
   async validateDeploy(conn, input) {
     return this.runJob(`${conn.id}:deploy-validate`, () => this.doValidate(conn, input));
@@ -30927,7 +30950,7 @@ var DeployEngine = class {
       org_type: conn.orgType,
       request_id: request.id,
       validation_id: validationId,
-      test_level: input.testLevel,
+      test_level: input.testLevel ?? null,
       changes,
       destructive,
       components_total: result.numberComponentsTotal,
@@ -30965,7 +30988,7 @@ var DeployEngine = class {
           { label: "Components", value: String(result.numberComponentsTotal) },
           {
             label: "Tests",
-            value: result.numberTestsTotal > 0 ? `${result.numberTestsTotal} run, ${result.numberTestErrors} failed` : `none run (${input.testLevel})`,
+            value: result.numberTestsTotal > 0 ? `${result.numberTestsTotal} run, ${result.numberTestErrors} failed` : `none run (${input.testLevel ?? "org default"})`,
             bad: result.numberTestErrors > 0
           }
         ],
@@ -31027,7 +31050,7 @@ var DeployEngine = class {
     const zip = fs10.readFileSync(request.payloadPath);
     const options = JSON.parse(request.payloadJson ?? "{}");
     if (job) job.progress = "deploying (checkOnly=false)";
-    const quickEligible = typeof request.validationId === "string" && request.validationId.length > 0 && (options.testLevel ?? "NoTestRun") !== "NoTestRun";
+    const quickEligible = typeof request.validationId === "string" && request.validationId.length > 0 && (options.testLevel !== void 0 ? options.testLevel !== "NoTestRun" : conn.orgType === "production");
     let quickDeploy = false;
     let quickFallbackReason = null;
     let deployId;
@@ -31041,14 +31064,14 @@ var DeployEngine = class {
           quickFallbackReason = String(err2 instanceof Error ? err2.message : err2).slice(0, 300);
           deployId = await soap.deploy(zip, {
             checkOnly: false,
-            testLevel: options.testLevel ?? "NoTestRun",
+            testLevel: options.testLevel,
             runTests: options.runTests ?? []
           });
         }
       } else {
         deployId = await soap.deploy(zip, {
           checkOnly: false,
-          testLevel: options.testLevel ?? "NoTestRun",
+          testLevel: options.testLevel,
           runTests: options.runTests ?? []
         });
       }
@@ -31118,6 +31141,7 @@ var DeployEngine = class {
   /** Persist the terminal outcome, clean up the zip, and return the payload. */
   finishExecution(conn, request, status, payload) {
     this.db.finishDeployRequest(request.id, status, JSON.stringify(payload));
+    if (status === "executed") this.notifyExecuted(request, payload);
     if (request.payloadPath) safeUnlink(request.payloadPath);
     return payload;
   }
@@ -31285,6 +31309,7 @@ var DeployEngine = class {
       ...succeeded ? {} : { note: "all-or-none: every row was rolled back because at least one failed." }
     };
     this.db.finishDeployRequest(request.id, succeeded ? "executed" : "execution_failed", JSON.stringify(payload));
+    if (succeeded) this.notifyExecuted(request, payload);
     this.audit.record(succeeded ? "dml.executed" : "dml.execution_failed", {
       connectionId: conn.id,
       tool: "dml_execute",
@@ -31392,6 +31417,7 @@ var DeployEngine = class {
       }
     };
     this.db.finishDeployRequest(request.id, terminalStatus, JSON.stringify(payload));
+    if (terminalStatus === "executed") this.notifyExecuted(request, payload);
     this.audit.record(executed ? "dml.executed" : "dml.execution_failed", {
       connectionId: conn.id,
       tool: "dml_execute",
@@ -31582,6 +31608,7 @@ var DeployEngine = class {
       status === "executed" ? "executed" : "execution_failed",
       JSON.stringify(result)
     );
+    if (status === "executed") this.notifyExecuted(request, result);
     this.audit.record(status === "executed" ? "apex.executed" : "apex.execution_failed", {
       connectionId: conn.id,
       tool: "apex_execute",
@@ -32480,7 +32507,7 @@ function getUpdateNotice(installedVersion, repo, enabled) {
 }
 
 // src/core/version.ts
-var ENGINE_VERSION = "0.19.0";
+var ENGINE_VERSION = "0.19.1";
 
 // src/tools/register.ts
 var UPDATE_REPO = "RHayes765/contrail-plugin";
@@ -34520,7 +34547,7 @@ function registerDeployTools(server, deps) {
     "validate_deploy",
     {
       title: "Validate a metadata deploy (checkOnly)",
-      description: "Build a deploy package and validate it against the org with checkOnly=true \u2014 nothing is committed. Returns the change summary (destructive changes flagged), validation/test results, and blast radius; puts a confirmation code on the human-only approval page. For production targets prefer test_level RunLocalTests. An in-progress result means call validate_deploy again to check on it. For anything large \u2014 flows especially \u2014 write the source to a file and pass content_file instead of content: retyping tens of KB of XML risks a silent one-character corruption, and a file is read byte-exactly.",
+      description: "Build a deploy package and validate it against the org with checkOnly=true \u2014 nothing is committed. Returns the change summary (destructive changes flagged), validation/test results, and blast radius; puts a confirmation code on the human-only approval page. Normally OMIT test_level \u2014 the org then applies its own default (production runs local tests for Apex packages automatically and refuses an explicit NoTestRun). An in-progress result means call validate_deploy again to check on it. For anything large \u2014 flows especially \u2014 write the source to a file and pass content_file instead of content: retyping tens of KB of XML risks a silent one-character corruption, and a file is read byte-exactly.",
       inputSchema: {
         connection: external_exports.string().describe("Target connection alias (or id) \u2014 name it unmissably to the human."),
         components: external_exports.array(
@@ -34538,7 +34565,9 @@ function registerDeployTools(server, deps) {
           })
         ).max(50).optional().describe("Components to create or update."),
         destructive: external_exports.array(external_exports.object({ type: external_exports.string(), api_name: external_exports.string() })).max(50).optional().describe("Components to DELETE. Deletions are destructive and flagged prominently."),
-        test_level: external_exports.enum(["NoTestRun", "RunLocalTests", "RunSpecifiedTests", "RunAllTestsInOrg"]).optional().describe("Default NoTestRun. Production deploys of Apex require tests."),
+        test_level: external_exports.enum(["NoTestRun", "RunLocalTests", "RunSpecifiedTests", "RunAllTestsInOrg"]).optional().describe(
+          "OMIT unless you have a reason: the org then applies its own default \u2014 sandboxes run no tests; production runs local tests when the package carries Apex and none otherwise. Production REFUSES an explicit NoTestRun, so never send it there (a no-Apex prod deploy just omits this). RunSpecifiedTests needs run_tests."
+        ),
         run_tests: external_exports.array(external_exports.string()).max(50).optional().describe("Test classes for RunSpecifiedTests.")
       }
     },
@@ -34578,7 +34607,10 @@ function registerDeployTools(server, deps) {
       const outcome = await deploys.validateDeploy(conn, {
         components,
         destructive,
-        testLevel: args.test_level ?? "NoTestRun",
+        // Unspecified stays unspecified all the way to the SOAP call — the
+        // org's default behavior is the only choice production accepts for
+        // a no-Apex package (it rejects an explicit NoTestRun).
+        testLevel: args.test_level,
         runTests: args.run_tests ?? []
       });
       switch (outcome.status) {
@@ -34620,7 +34652,9 @@ function registerDeployTools(server, deps) {
           { type: "FlowDefinition", api_name: args.flow, content: flowDeactivationXml() }
         ],
         destructive: [],
-        testLevel: "NoTestRun",
+        // No test level: an explicit NoTestRun would make production refuse
+        // to deactivate a flow at all; omitted, the org waves a no-Apex
+        // package through everywhere.
         runTests: []
       });
       switch (outcome.status) {

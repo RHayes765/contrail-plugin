@@ -202,7 +202,7 @@ shape, `content` strings instead of `content_file`):
 |---|---|
 | Authoring/fixing specific classes + their tests (default here) | `RunSpecifiedTests` + `run_tests` listing every test class touching the package |
 | Final validation before a production deploy | `RunLocalTests` — the org enforces 75% aggregate coverage there |
-| Metadata-only package with no Apex | `NoTestRun` (the tool default) |
+| Metadata-only package with no Apex | OMIT `test_level` — the org's default runs no tests where none are needed, in every environment. Never send an explicit `NoTestRun` to production: the org REFUSES it outright (and the answer is omission, not escalating to RunAllTestsInOrg) |
 | Whole-org regression the human asked for | `RunAllTestsInOrg` — slow on real orgs; confirm with the human first |
 
 An `in_progress` result means call `validate_deploy` again to check on it.

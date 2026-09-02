@@ -629,8 +629,9 @@ Every field-generation deliverable ends with this list — nothing ships alone:
 
 Then ONE consolidated `validate_deploy` with all components (`content` for
 small hand-authored blocks; `content_file` from staging for anything large,
-e.g. the full-object route in §7). Field-only packages need no `test_level`;
-`validate_deploy` itself recommends `RunLocalTests` for production targets. Lead the summary
+e.g. the full-object route in §7). Field-only packages OMIT `test_level`
+entirely — the org's default handles no-Apex packages in every environment,
+and production REFUSES an explicit `NoTestRun`. Lead the summary
 with the target org, any `permission_warning`, and anything destructive; the
 human reads the confirmation code from the approval page, you pass it to
 `execute_deploy`, then `refresh_snapshot` — the full ritual is

@@ -171,7 +171,7 @@ export class MetadataSoapClient {
    */
   async deploy(
     zip: Buffer,
-    options: { checkOnly: boolean; testLevel: TestLevel; runTests: string[] },
+    options: { checkOnly: boolean; testLevel?: TestLevel; runTests: string[] },
   ): Promise<string> {
     const runTestsXml = options.runTests
       .map((t) => `<met:runTests>${escapeXml(t)}</met:runTests>`)
@@ -179,6 +179,13 @@ export class MetadataSoapClient {
     // DeployOptions elements must follow the WSDL sequence order —
     // checkOnly, rollbackOnError, runTests, singlePackage, testLevel — or
     // Salesforce rejects/misparses the request (runTests before singlePackage).
+    //
+    // An UNSPECIFIED testLevel is OMITTED, never defaulted: production orgs
+    // reject an explicit NoTestRun outright, while an omitted element gets
+    // the org's own default behavior — no tests for a package without Apex,
+    // RunLocalTests when Apex is present. Sending "NoTestRun" for a no-Apex
+    // production deploy was a hard failure the org itself would have waved
+    // through with the element absent.
     const body =
       `<met:deploy><met:ZipFile>${zip.toString('base64')}</met:ZipFile>` +
       `<met:DeployOptions>` +
@@ -186,7 +193,9 @@ export class MetadataSoapClient {
       `<met:rollbackOnError>true</met:rollbackOnError>` +
       runTestsXml +
       `<met:singlePackage>true</met:singlePackage>` +
-      `<met:testLevel>${escapeXml(options.testLevel)}</met:testLevel>` +
+      (options.testLevel
+        ? `<met:testLevel>${escapeXml(options.testLevel)}</met:testLevel>`
+        : '') +
       `</met:DeployOptions></met:deploy>`;
     const parsed = await this.call(body);
     const id = xmlDig(parsed, 'Envelope', 'Body', 'deployResponse', 'result', 'id');

@@ -1523,3 +1523,37 @@ describe('multi-step dml plans', () => {
     expect(textOf(exec)).toContain('001NEW00000000');
   });
 });
+
+describe('test level: unspecified means OMITTED, never defaulted (prod NoTestRun trap)', () => {
+  it('an omitted test_level sends NO <met:testLevel> element, at validate AND execute', async () => {
+    const res = await validate();
+    expect(textOf(res)).toContain('"test_level": null');
+    expect(lastDeployBody).not.toContain('<met:testLevel>');
+
+    const code = codeFromPage(presentedPages[0]!);
+    await client.callTool({
+      name: 'execute_deploy',
+      arguments: { connection: 'deploy-org', confirmation_code: code },
+    });
+    // The execute replayed the same unspecified level — still no element.
+    expect(lastDeployBody).not.toContain('<met:testLevel>');
+    expect(deployCounter.realDeploys).toBe(1);
+  });
+
+  it('an explicit test_level still travels verbatim', async () => {
+    const res = await validate({ test_level: 'RunLocalTests' });
+    expect(res.isError ?? false).toBe(false);
+    expect(lastDeployBody).toContain('<met:testLevel>RunLocalTests</met:testLevel>');
+    expect(textOf(res)).toContain('"test_level": "RunLocalTests"');
+  });
+
+  it('deactivate_flow omits the level too — an explicit NoTestRun would brick prod deactivation', async () => {
+    const res = await client.callTool({
+      name: 'deactivate_flow',
+      arguments: { connection: 'deploy-org', flow: 'Old_Flow' },
+    });
+    expect(res.isError ?? false).toBe(false);
+    expect(lastDeployBody).not.toContain('<met:testLevel>');
+    expect(lastDeployBody).toContain('<met:checkOnly>true</met:checkOnly>');
+  });
+});

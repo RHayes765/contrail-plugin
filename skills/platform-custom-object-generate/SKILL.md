@@ -224,7 +224,7 @@ A Metadata API deploy grants no permissions: a deployed object is unreachable an
 ## 7. Deploy workflow
 
 1. Author the package (Sections 1–6). In Claude Code: files under `staging/`, `content_file`; in Desktop chat: inline `content`.
-2. One consolidated `validate_deploy` (checkOnly) with all components + any `destructive` entries. Objects alone need no tests; if the package also carries Apex to a production target, use `test_level: "RunLocalTests"` (or `RunSpecifiedTests` + `run_tests`).
+2. One consolidated `validate_deploy` (checkOnly) with all components + any `destructive` entries. Objects alone need no tests — OMIT `test_level` (production refuses an explicit `NoTestRun`; omitted, the org's default waves a no-Apex package through everywhere). If the package also carries Apex to a production target, use `test_level: "RunLocalTests"` (or `RunSpecifiedTests` + `run_tests`).
 3. Verification = the validation result. There is no local linter or analyzer; failures come back as component errors — fix the XML from the message and re-validate. If validation cannot run at all, record it fail-closed (e.g. `validate=unavailable: <reason>`) after attempting — never claim a package "should deploy."
 4. Present the result — target org first and unmissable, destructive changes and `permission_warning` leading — then follow the approval ritual by reference: the human reads the confirmation code from the approval page, you pass it to `execute_deploy`, then `refresh_snapshot`. See **salesforce-house-rules §3**.
 
