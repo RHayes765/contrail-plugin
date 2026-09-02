@@ -171,6 +171,21 @@ type JobOutcome<T> =
   | { status: 'failed'; error: string }
   | { status: 'in_progress'; progress: string; started_at: string };
 
+/**
+ * Fired once per SUCCESSFULLY executed request, after the terminal row is
+ * written and — critically — BEFORE the frozen payload is deleted, so an
+ * observer can still read the exact deployed bytes (a zip for deploys, a
+ * directory of CSVs for bulk loads; null for dml/apex, whose payload is the
+ * row itself). The desktop app hooks this to build the project manifest; the
+ * plugin leaves it unset. Observers are best-effort: a throw is swallowed
+ * and audited, and can never alter the execution result.
+ */
+export type ExecutionObserver = (info: {
+  request: DeployRequestRecord;
+  payload: Record<string, unknown>;
+  payloadPath: string | null;
+}) => void;
+
 interface Job<T> {
   promise: Promise<T>;
   progress: string;
@@ -182,6 +197,31 @@ interface Job<T> {
 
 export class DeployEngine {
   private readonly jobs = new Map<string, Job<unknown>>();
+  private executionObserver: ExecutionObserver | null = null;
+
+  /**
+   * Register the (single) execution observer. A setter rather than a ctor
+   * argument because the observing service is constructed after the engine
+   * in every bootstrap.
+   */
+  setExecutionObserver(obs: ExecutionObserver): void {
+    this.executionObserver = obs;
+  }
+
+  /** Best-effort observer dispatch — never allowed to touch the outcome. */
+  private notifyExecuted(request: DeployRequestRecord, payload: Record<string, unknown>): void {
+    if (!this.executionObserver) return;
+    try {
+      this.executionObserver({ request, payload, payloadPath: request.payloadPath ?? null });
+    } catch (err) {
+      this.audit.record('deploy.observer_failed', {
+        connectionId: request.connectionId,
+        tool: 'execution_observer',
+        outcome: 'error',
+        detail: { requestId: request.id, error: String(err).slice(0, 500) },
+      });
+    }
+  }
 
   constructor(
     private readonly db: ContrailDb,
@@ -586,6 +626,9 @@ export class DeployEngine {
     payload: Record<string, unknown>,
   ): Record<string, unknown> {
     this.db.finishDeployRequest(request.id, status, JSON.stringify(payload));
+    // Observer runs BEFORE the unlink: it is the last moment the frozen
+    // payload (the exact deployed bytes) still exists on disk.
+    if (status === 'executed') this.notifyExecuted(request, payload);
     if (request.payloadPath) safeUnlink(request.payloadPath);
     return payload;
   }
@@ -792,6 +835,7 @@ export class DeployEngine {
         : { note: 'all-or-none: every row was rolled back because at least one failed.' }),
     };
     this.db.finishDeployRequest(request.id, succeeded ? 'executed' : 'execution_failed', JSON.stringify(payload));
+    if (succeeded) this.notifyExecuted(request, payload);
     this.audit.record(succeeded ? 'dml.executed' : 'dml.execution_failed', {
       connectionId: conn.id,
       tool: 'dml_execute',
@@ -939,6 +983,7 @@ export class DeployEngine {
           }),
     };
     this.db.finishDeployRequest(request.id, terminalStatus, JSON.stringify(payload));
+    if (terminalStatus === 'executed') this.notifyExecuted(request, payload);
     this.audit.record(executed ? 'dml.executed' : 'dml.execution_failed', {
       connectionId: conn.id,
       tool: 'dml_execute',
@@ -1172,6 +1217,7 @@ export class DeployEngine {
       status === 'executed' ? 'executed' : 'execution_failed',
       JSON.stringify(result),
     );
+    if (status === 'executed') this.notifyExecuted(request, result);
     this.audit.record(status === 'executed' ? 'apex.executed' : 'apex.execution_failed', {
       connectionId: conn.id,
       tool: 'apex_execute',

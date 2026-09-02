@@ -305,12 +305,43 @@ function manifestXml(
  * package.xml <members> keeps the literal fullName — that pairing is how the
  * Metadata API matches a member to its file.
  */
-function fileSafeName(name: string): string {
+export function fileSafeName(name: string): string {
   return name.replace(/[^A-Za-z0-9 _.\-]/g, (ch) =>
     Array.from(new TextEncoder().encode(ch))
       .map((b) => '%' + b.toString(16).toUpperCase().padStart(2, '0'))
       .join(''),
   );
+}
+
+/**
+ * Where a component's content lives inside a deploy zip built by
+ * buildDeployZip — the ONE place that knows the naming (S28 manifest capture
+ * reads deployed bytes back out of the frozen zip through this, so a
+ * reimplementation drifting from the builder would silently capture nothing).
+ * Child types have no entry of their own: they return the PARENT document's
+ * path plus the tag/name coordinates for a findChildBlock-style extraction.
+ */
+export function deployZipEntryPath(
+  type: string,
+  apiName: string,
+):
+  | { path: string; child: false }
+  | { path: string; child: true; childTag: string; childName: string }
+  | null {
+  const childSpec = CHILD_TYPES[type];
+  if (childSpec) {
+    const parent = childSpec.parentFromName(apiName);
+    if (!parent) return null;
+    return {
+      path: `${childSpec.dir}/${fileSafeName(parent)}${childSpec.ext}`,
+      child: true,
+      childTag: childSpec.tag,
+      childName: apiName.includes('.') ? apiName.slice(apiName.indexOf('.') + 1) : apiName,
+    };
+  }
+  const spec = FILE_TYPES[type];
+  if (!spec) return null;
+  return { path: `${spec.dir}/${fileSafeName(apiName)}${spec.ext}`, child: false };
 }
 
 function validateTypeAndName(type: string, name: string): void {
