@@ -456,9 +456,13 @@ validation issues **no** code.
   the page. Deletions are accepted for **any** metadata type, including
   types Contrail cannot author — cleanup is a feature; the guard is the
   human approval, not a type gate.
-- `test_level` *(optional)* — `NoTestRun` (default) | `RunLocalTests` |
+- `test_level` *(optional)* — `NoTestRun` | `RunLocalTests` |
   `RunSpecifiedTests` | `RunAllTestsInOrg`; `run_tests` for
-  `RunSpecifiedTests`.
+  `RunSpecifiedTests`. **Omitted means omitted**: the org applies its own
+  default (sandboxes: no tests; production: local tests when the package
+  carries Apex, none otherwise). Production *refuses* an explicit
+  `NoTestRun`, so a no-Apex production deploy simply leaves this out —
+  which is exactly what Contrail sends when the agent doesn't specify one.
 
 `content_file` reads a file byte-exactly (mandatory habit for large flows —
 retyping tens of KB of XML risks silent corruption), confined to Contrail's
