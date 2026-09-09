@@ -28,6 +28,9 @@ deploy fails:
 | Validation rules and their formulas | `platform-validation-rule-generate` |
 | Debug logs, governor limits, stack traces | `platform-apex-logs-debug` |
 | Bulk CSV data loads, multi-object migrations, failed-row triage | `salesforce-data-migration` |
+| Reports — formats, columns, filters, groupings, folders | `platform-report-generate` |
+| Custom report types — base objects, joins, field sections | `platform-custom-report-type-generate` |
+| Dashboards — components, running user, filters, folders | `platform-dashboard-generate` |
 
 Not every environment has every skill installed. One that will not load simply
 does not exist here — say so plainly and proceed on these house rules alone,
@@ -186,9 +189,13 @@ was cut. The layout, if you need to find a file yourself:
   `~/.local/share/contrail` (overridden by `CONTRAIL_DATA_DIR` if set).
 - **`<connection-id>` is the UUID `id` from `list_connections`, not the alias.**
   Look it up; do not guess or use the alias as a folder name.
-- **Layout is standard Salesforce source format**: `objects/Account.object`,
-  `flows/My_Flow.flow`, `classes/MyClass.cls`, `layouts/…`. If unsure of the exact
-  filename, list or glob the folder rather than guessing at a name.
+- **Layout is standard Salesforce metadata format**: `objects/Account.object`,
+  `flows/My_Flow.flow`, `classes/MyClass.cls`, `layouts/…`. Folder-based
+  analytics types nest ONE level deeper — a report lives at
+  `reports/<FolderDevName>/<Name>.report` (dashboards likewise under
+  `dashboards/`), and the folder's own definition is the sibling
+  `reports/<FolderDevName>-meta.xml`. If unsure of the exact filename, list or
+  glob the folder rather than guessing at a name.
 
 Preconditions and honesty:
 

@@ -1,6 +1,6 @@
 # Contrail Reference — tools, features, configuration
 
-Everything Contrail can do, in one place. Current as of **v0.19.1** (34 tools).
+Everything Contrail can do, in one place. Current as of **v0.19.1** (35 tools).
 The same tool surface is available in all three installs — the Claude Desktop
 extension (`.mcpb`), the Claude Code plugin, and the Contrail desktop app —
 with a few desktop-app differences [noted at the end](#the-desktop-app).
@@ -36,6 +36,7 @@ with a few desktop-app differences [noted at the end](#the-desktop-app).
 | [`soql_query`](#soql_query) | data_read | Read-only SOQL, row-capped, truncation-honest |
 | [`get_record`](#get_record) | data_read | One record by id |
 | [`explain_access`](#explain_access) | data_read | Why a user can/can't see an object or field (CRUD + FLS) |
+| [`get_report_data`](#get_report_data) | data_read | Run a saved report and read its results (sync Analytics API) |
 | [`get_debug_logs`](#get_debug_logs) | diagnostics_read | List or read Apex debug logs |
 | [`run_apex_tests`](#run_apex_tests) | diagnostics_read | Run deployed Apex tests standalone (submit + poll) |
 | [`get_flow_errors`](#get_flow_errors) | diagnostics_read | Persisted flow interview problems |
@@ -340,6 +341,25 @@ inactive users; explains fields that legitimately carry no FLS rows
 
 - `connection`, `user`, `object`; `field` *(optional)*.
 
+### `get_report_data`
+
+Runs a **saved report** as it stands through the synchronous Analytics REST
+API and returns its results: report metadata (format, report type), detail
+columns, grouping label paths with numeric aggregate values, grand totals,
+and detail rows as display-formatted labels. The report runs as the
+**connected user** — folder sharing and record sharing shape what comes back.
+Accepts a report id (`00O…`), a DeveloperName, or the metadata-side
+`Folder/DeveloperName` (the leaf resolves via the Report sobject; the folder
+disambiguates duplicates). Three truncation signals, never conflated:
+`all_data:false` (the synchronous run's org-side 2,000-detail-row cap — the
+report has more), rows dropped to the caller's cap, and rows dropped to the
+response byte budget. Not-found and folder-not-shared are indistinguishable
+org-side and the error says so; Joined-format and very large reports cannot
+run synchronously.
+
+- `connection`, `report`; `limit` *(optional, 1–2000, default 200)*;
+  `details` *(optional — `false` returns aggregates/groupings only)*.
+
 ---
 
 ## Diagnostics
@@ -450,7 +470,11 @@ validation issues **no** code.
   `CustomApplication`, `ReportType`, `GlobalValueSet`, `ConnectedApp`,
   `NamedCredential`, `ExternalCredential`, `PlatformEventChannel(Member)`,
   `ManagedEventSubscription`, `Layout`, `CustomMetadata` (records, dotted
-  `Type.Record` names), and child types `CustomField` / `ValidationRule` /
+  `Type.Record` names), `Report` / `Dashboard` (folder-qualified
+  `Folder/Name` api_names; access is FOLDER sharing, and the approval page
+  says so), `ReportFolder` / `DashboardFolder` (the folder definition itself,
+  carrying the `folderShares` — deploy it with a report headed for a new
+  folder), and child types `CustomField` / `ValidationRule` /
   `CustomLabel` / `ListView` / `RecordType` (dotted API names).
 - `destructive` *(≤50)* — `{type, api_name}` to DELETE; led prominently on
   the page. Deletions are accepted for **any** metadata type, including
@@ -581,7 +605,7 @@ cause) — row data never enters the conversation in either direction.
 
 ## The skill pack
 
-Ten skills ship with Contrail (in `skills/`), encoding the judgment layer —
+Thirteen skills ship with Contrail (in `skills/`), encoding the judgment layer —
 the difference between an agent that has tools and one that uses them the
 way a careful practitioner would. In Claude Code they load automatically
 with the plugin; in Claude Desktop they are added once via the Skills UI; in
@@ -599,6 +623,9 @@ the desktop app they are bundled and selectable per project.
 | `platform-permission-set-generate` | What goes inside PermissionSet XML — every generator delegates its permission step here. |
 | `platform-validation-rule-generate` | Validation rules and their formulas, including deploy-failure triage. |
 | `salesforce-data-migration` | Bulk loads: dml-vs-bulk choice, load order from the relationship graph, external-ID reference columns, failed-row (`sf__Error`) triage. |
+| `platform-report-generate` | Report metadata: format taxonomy (tabular/summary/matrix/joined), columns, filters, charts, buckets, cross-filters, folder pairing. |
+| `platform-custom-report-type-generate` | Custom report types: base objects, up to 3 join levels, field sections. |
+| `platform-dashboard-generate` | Dashboards: components and their report references, the running-user doctrine, filters, grid layouts, folder sharing. |
 
 ---
 
@@ -615,7 +642,7 @@ sections' defaults automatically.
 | | `scopes` | `refresh_token, api, web` | OAuth scopes requested. |
 | `oauth` | `callbackPort` / `callbackPath` | `1717` / `/OauthRedirect` | Must match the connected app's registered callback. |
 | | `flowTimeoutMs` | 10 min | Browser-flow hard limit. |
-| `snapshot` | `types` | 14 types | The default retrieve manifest (ApexClass, ApexTrigger, Flow, CustomObject, CustomLabels, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, ApexPage, GlobalValueSet, Layout, CustomMetadata). |
+| `snapshot` | `types` | 14 types | The default retrieve manifest (ApexClass, ApexTrigger, Flow, CustomObject, CustomLabels, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, ApexPage, GlobalValueSet, Layout, CustomMetadata). Report/Dashboard (+ their folders) are deployable and indexable but deliberately OUT of the default — `refresh_snapshot types:["Report"]` pulls them explicitly (every folder costs a listMetadata query, and report-heavy orgs have thousands). |
 | | `pollIntervalMs` / `retrieveTimeoutMs` | 2 s / 10 min | Retrieve polling. |
 | `updates` | `checkEnabled` | `true` | Daily anonymous release check — the only phone-home; `false` disables it entirely. |
 | `localDiagnostics` | `enabled` | `true` | `check_apex`/`check_soql`; `false` makes them report honestly unavailable. |
@@ -638,7 +665,7 @@ Env overrides: `CONTRAIL_SF_CLIENT_ID`, `CONTRAIL_SF_API_VERSION`,
 ## The desktop app
 
 The [Contrail desktop app](https://github.com/RHayes765/contrail-desktop)
-runs the same engine and the same 34 capabilities under an embedded agent
+runs the same engine and the same 35 capabilities under an embedded agent
 runtime, and adds:
 
 - **Projects as context silos.** Each project binds its own org connections

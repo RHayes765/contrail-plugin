@@ -12,7 +12,19 @@ install, see [Getting Started](Getting%20Started.md).
 P0.1–P0.6 Phase 0 surface. `npm run mcpb` builds `contrail-<version>.mcpb`, a
 single MCP Bundle that installs into Claude Desktop via Settings → Extensions
 (no Node install, no npm, no config editing on the target machine) and covers
-Windows x64/ARM and macOS Intel/Apple Silicon from one file. 34 tools.
+Windows x64/ARM and macOS Intel/Apple Silicon from one file. 35 tools.
+
+**Reports & Dashboards (S29).** `Report` and `Dashboard` are deployable,
+retrievable, diffable, and indexable — Contrail's first folder-based types
+(api_names are `FolderDevName/Name`; the folder itself deploys as a
+`ReportFolder`/`DashboardFolder` component whose `folderShares` govern who
+sees the contents — the approval page says so, because no permission set
+can). Explicit-refresh-only in snapshots (`refresh_snapshot
+types:["Report"]`) since report-heavy orgs carry thousands. A new
+`get_report_data` tool runs a saved report through the synchronous Analytics
+API (data_read) so a deployed report is verifiable in-conversation. Three
+new skills carry the authoring doctrine: `platform-report-generate`,
+`platform-custom-report-type-generate`, `platform-dashboard-generate`.
 
 **Bulk data loading (S27).** `bulk_load_propose` / `bulk_load_execute` move
 real data volumes file → org through the Bulk API 2.0, behind the same

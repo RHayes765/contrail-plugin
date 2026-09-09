@@ -34,6 +34,15 @@ you (`permission_warning`), but the right habit is to not need the warning:
 Present the permission set alongside the components when you propose the deploy, so
 the human approves one coherent, usable change.
 
+**The one exception: Reports and Dashboards.** Their access mechanism is **folder
+sharing** (`folderShares` on the `ReportFolder`/`DashboardFolder` component), not
+any permission set — no `fieldPermissions`-style grant exists for them, and
+`permission_warning` stays silent on them by design. The cardinal rule still
+holds in spirit: a report deployed into an unshared folder is exactly as useless
+as a field without FLS. Ship the folder component (with its `folderShares`)
+alongside a report headed for a new folder, the same way you ship a permission
+set alongside a new field.
+
 ## Editing existing metadata: read the whole thing first
 
 When you modify an existing flow or object rather than authoring a new one, work
@@ -120,10 +129,23 @@ Instead, write the edited source to a file and give `validate_deploy` the path:
   Deploying a layout **replaces the whole document** and **assigns nothing**:
   which profiles see it is `layoutAssignments` in Profile metadata (or Setup).
   Prefer retrieve → edit → deploy over authoring a layout from scratch.
+- **Reports and dashboards are folder-based.** Their api_names are
+  folder-qualified — `Ops_Reports/Weekly_Pipeline`, `unfiled$public/Quick_Check` —
+  and the folder itself is a **separate component** (`ReportFolder` /
+  `DashboardFolder`, content = the whole `<ReportFolder>` document with
+  `folderShares`) that must already exist in the org or ship in the same
+  package. Folder **sharing** governs who sees them (see the cardinal-rule
+  exception above). Dashboards reference reports by folder-qualified name
+  (`<report>Ops_Reports/Weekly_Pipeline</report>`) — deploy the reports first or
+  together, or the dashboard renders empty. Modifies are whole-document
+  replaces. These types are explicit-refresh-only: `refresh_snapshot
+  types:["Report"]` pulls them into the snapshot (the folder type rides along).
 - **Namespaces** can contain single underscores (`sales_channel__Foo`), so split a
   qualified API name at the **first** `__`, never with a greedy pattern.
 - **Names**: components deploy under `type/Name.ext`; the tools reject names with
-  path separators or `..`. Child components are dotted (`Account.MyField__c`).
+  path separators or `..` — **except** the single `/` folder qualifier in
+  Report/Dashboard names, where `Folder/Name` IS the API name. Child components
+  are dotted (`Account.MyField__c`).
 
 ## Deploy discipline
 

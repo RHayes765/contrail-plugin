@@ -49,7 +49,7 @@ You log in **as yourself** in the browser. Then a small **Contrail page** opens 
 - `metadata_read` — read flows, Apex, objects/fields; search; dependencies; diff
 - `metadata_write` — validate and deploy metadata (every deploy still needs your approval)
 - `diagnostics_read` — debug logs, flow errors
-- `data_read` — run SOQL, read records
+- `data_read` — run SOQL, read records, run reports
 - `data_write` — insert/update/delete records (every change still needs your approval)
 
 Tick what you want this connection to allow, and save. **Claude never sets these —
