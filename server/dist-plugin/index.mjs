@@ -25415,7 +25415,7 @@ var GRANT_DESCRIPTIONS = {
   metadata_read: "Read metadata: retrieve flows, Apex, objects/fields; search, diff, and dependency analysis.",
   metadata_write: "Validate and execute metadata deploys. Requires metadata_read. Every deploy requires explicit human confirmation.",
   diagnostics_read: "Read debug logs and flow error details, run Apex tests (test transactions always roll back), and set trace flags. May expose incidental record data present in logs.",
-  data_read: "Run SOQL queries and read records (row-capped).",
+  data_read: "Run SOQL queries, read records, and run reports for their data (row-capped).",
   data_write: "Propose and execute DML and anonymous Apex scripts. Requires data_read. Every write requires explicit human confirmation."
 };
 function emptyGrantSet() {
@@ -25478,6 +25478,9 @@ var TOOL_GRANT_MAP = {
   // Resolved entirely from permission sobjects the data API already exposes
   // to data_read — the tool adds interpretation, not new reach.
   explain_access: "data_read",
+  // S29: runs a saved report through the synchronous Analytics REST API —
+  // report OUTPUT is record data, the same class soql_query reaches.
+  get_report_data: "data_read",
   get_debug_logs: "diagnostics_read",
   run_apex_tests: "diagnostics_read",
   get_flow_errors: "diagnostics_read",
@@ -26256,7 +26259,11 @@ var DEFAULT_CONFIG = {
     // ExternalCredential, PlatformEventChannel[Member],
     // ManagedEventSubscription) are deployable and indexable but kept OUT of
     // the default manifest — retrieve them explicitly via refresh_snapshot
-    // types, or add them here.
+    // types, or add them here. S29: analytics types (Report, Dashboard and
+    // their folders) are likewise explicit-refresh-only — big orgs carry
+    // thousands of reports and every folder costs a listMetadata query;
+    // refresh_snapshot types:['Report'] pulls ReportFolder along
+    // automatically (they share a snapshot directory).
     types: [
       "ApexClass",
       "ApexTrigger",
@@ -29051,6 +29058,15 @@ function xmlDig(node, ...path11) {
 }
 
 // src/salesforce/metadataSoap.ts
+var FOLDERED_TYPES = {
+  // unfiled$public is a system pseudo-folder that folder enumeration does not
+  // return; queried explicitly. Dashboards have no unfiled equivalent.
+  Report: { folderType: "ReportFolder", unfiledFolder: "unfiled$public" },
+  Dashboard: { folderType: "DashboardFolder" }
+};
+var FOLDER_TYPES = Object.fromEntries(
+  Object.entries(FOLDERED_TYPES).map(([content, cfg]) => [cfg.folderType, content])
+);
 var MetadataSoapClient = class {
   constructor(tokenMgr, conn, apiVersion) {
     this.tokenMgr = tokenMgr;
@@ -29059,20 +29075,84 @@ var MetadataSoapClient = class {
   }
   /** Metadata API version number, e.g. "63.0" (no leading v). */
   versionNumber;
-  /** listMetadata accepts at most 3 type queries per call; chunk transparently. */
+  /**
+   * List metadata inventory. Foldered types (FOLDERED_TYPES) expand
+   * transparently: pass 1 lists the flat types plus each foldered type's
+   * folder-enumeration type, pass 2 issues one {type, folder} query per
+   * discovered folder (plus unfiled$public for reports). The union comes
+   * back: folder props typed ReportFolder/DashboardFolder, content props
+   * typed Report/Dashboard with folder-qualified 'Folder/Name' fullNames
+   * (normalized here if the org returns them bare). Cost for an org with N
+   * folders is ceil(N/3) extra round trips — acceptable for
+   * explicit-refresh-only types; never silently skipped.
+   */
   async listMetadata(types) {
+    const flat = [];
+    const foldered = [];
+    const seen = /* @__PURE__ */ new Set();
+    const wantFlat = (t) => {
+      if (!seen.has(t)) {
+        seen.add(t);
+        flat.push({ type: t });
+      }
+    };
+    for (const t of types) {
+      if (FOLDERED_TYPES[t]) {
+        foldered.push(t);
+        wantFlat(FOLDERED_TYPES[t].folderType);
+      } else {
+        wantFlat(t);
+      }
+    }
+    const all = await this.listQueries(flat);
+    if (foldered.length > 0) {
+      const folderQueries = [];
+      for (const t of foldered) {
+        const cfg = FOLDERED_TYPES[t];
+        if (!cfg) continue;
+        const folders = all.filter((p) => p.type === cfg.folderType).map((p) => p.fullName);
+        if (cfg.unfiledFolder && !folders.includes(cfg.unfiledFolder)) {
+          folders.push(cfg.unfiledFolder);
+        }
+        for (const f of folders) folderQueries.push({ type: t, folder: f });
+      }
+      if (folderQueries.length > 0) {
+        log("info", "listing foldered metadata per folder", { queries: folderQueries.length });
+        for (const p of await this.listQueries(folderQueries)) {
+          all.push(p);
+        }
+      }
+    }
+    return all;
+  }
+  /** listMetadata accepts at most 3 queries per call; chunk transparently. */
+  async listQueries(queries) {
     const all = [];
-    for (let i = 0; i < types.length; i += 3) {
-      const chunk = types.slice(i, i + 3);
-      const queries = chunk.map((t) => `<met:queries><met:type>${escapeXml(t)}</met:type></met:queries>`).join("");
-      const body = `<met:listMetadata>${queries}<met:asOfVersion>${this.versionNumber}</met:asOfVersion></met:listMetadata>`;
+    for (let i = 0; i < queries.length; i += 3) {
+      const chunk = queries.slice(i, i + 3);
+      const queriesXml = chunk.map(
+        (q) => `<met:queries>${// WSDL sequence order: folder BEFORE type.
+        q.folder ? `<met:folder>${escapeXml(q.folder)}</met:folder>` : ""}<met:type>${escapeXml(q.type)}</met:type></met:queries>`
+      ).join("");
+      const body = `<met:listMetadata>${queriesXml}<met:asOfVersion>${this.versionNumber}</met:asOfVersion></met:listMetadata>`;
       const parsed = await this.call(body);
       const result = xmlDig(parsed, "Envelope", "Body", "listMetadataResponse", "result");
+      const foldersByType = /* @__PURE__ */ new Map();
+      for (const q of chunk) {
+        if (q.folder) {
+          const set = foldersByType.get(q.type) ?? /* @__PURE__ */ new Set();
+          set.add(q.folder);
+          foldersByType.set(q.type, set);
+        }
+      }
       for (const item of asArray(result)) {
         if (item && typeof item === "object" && item.fullName && item.type) {
+          const folderSet = foldersByType.get(item.type);
+          const folder = folderSet?.size === 1 ? [...folderSet][0] : void 0;
+          const fullName = folder && !item.fullName.includes("/") ? `${folder}/${item.fullName}` : item.fullName;
           all.push({
             type: item.type,
-            fullName: item.fullName,
+            fullName,
             fileName: item.fileName ?? "",
             id: item.id ?? "",
             lastModifiedDate: item.lastModifiedDate ?? "",
@@ -29144,7 +29224,8 @@ var MetadataSoapClient = class {
    * reuses the validation's results — and the bytes deployed are, by the
    * org's own guarantee, exactly the validated ones. Only available when the
    * validation ran tests and is recent (~10 days); the org refuses otherwise,
-   * and the caller falls back to a full deploy.
+   * and the caller falls back to a full deploy. The result IS the new
+   * deploy's async id.
    */
   async deployRecentValidation(validationId) {
     const body = `<met:deployRecentValidation><met:validationId>${escapeXml(validationId)}</met:validationId></met:deployRecentValidation>`;
@@ -29390,6 +29471,10 @@ var SIMPLE_DIR_TYPES = [
   { dir: "layouts", ext: ".layout", type: "Layout" },
   { dir: "customMetadata", ext: ".md", type: "CustomMetadata" }
 ];
+var FOLDERED_DIR_TYPES = [
+  { dir: "reports", ext: ".report", type: "Report", folderType: "ReportFolder" },
+  { dir: "dashboards", ext: ".dashboard", type: "Dashboard", folderType: "DashboardFolder" }
+];
 function indexSnapshotFiles(files, fileProps, retrievedAt) {
   const props = /* @__PURE__ */ new Map();
   for (const p of fileProps) props.set(`${p.type}:${p.fullName.toLowerCase()}`, p);
@@ -29408,7 +29493,31 @@ function indexSnapshotFiles(files, fileProps, retrievedAt) {
     });
   };
   for (const [relPath, bytes] of files) {
-    if (relPath === "package.xml" || relPath.endsWith("-meta.xml")) continue;
+    if (relPath === "package.xml") continue;
+    const foldered = FOLDERED_DIR_TYPES.find((f) => relPath.startsWith(`${f.dir}/`));
+    if (foldered) {
+      const inner = relPath.slice(foldered.dir.length + 1);
+      if (inner.endsWith("-meta.xml")) {
+        const name2 = inner.slice(0, -"-meta.xml".length);
+        if (!name2.endsWith(foldered.ext)) {
+          push(
+            foldered.folderType,
+            name2.split("/").map(decodeSegment).join("/"),
+            relPath,
+            Buffer.from(bytes).toString("utf8")
+          );
+        }
+        continue;
+      }
+      if (inner.endsWith(foldered.ext)) {
+        const apiName = inner.slice(0, -foldered.ext.length).split("/").map(decodeSegment).join("/");
+        push(foldered.type, apiName, relPath, Buffer.from(bytes).toString("utf8"));
+        continue;
+      }
+      log("debug", "snapshot file not indexed (unmapped type)", { relPath });
+      continue;
+    }
+    if (relPath.endsWith("-meta.xml")) continue;
     const content = Buffer.from(bytes).toString("utf8");
     const name = fileBaseName(relPath);
     if (relPath.startsWith("objects/") && relPath.endsWith(".object")) {
@@ -29462,7 +29571,9 @@ function blockFullName(block) {
 }
 function fileBaseName(relPath) {
   const base = relPath.split("/").at(-1) ?? relPath;
-  const stripped = base.replace(/\.[^.]+$/, "");
+  return decodeSegment(base.replace(/\.[^.]+$/, ""));
+}
+function decodeSegment(stripped) {
   try {
     return decodeURIComponent(stripped);
   } catch {
@@ -29620,6 +29731,19 @@ function extractPermissionSetRefs(xml) {
   }
   return refs.list();
 }
+function extractReportRefs(xml) {
+  const refs = new RefSet();
+  const m = xml.match(/<reportType>([^<]+)<\/reportType>/);
+  if (m?.[1]) refs.add("ReportType", m[1]);
+  return refs.list();
+}
+function extractDashboardRefs(xml) {
+  const refs = new RefSet();
+  for (const m of xml.matchAll(/<report>([^<]+)<\/report>/g)) {
+    refs.add("Report", m[1]);
+  }
+  return refs.list();
+}
 function buildKnownArtifacts(artifacts) {
   const known = {
     classes: /* @__PURE__ */ new Map(),
@@ -29668,6 +29792,10 @@ function extractAllEdges(connectionId, artifacts, known = buildKnownArtifacts(ar
       add(a.type, a.apiName, extractObjectXmlRefs(a.content, objectName, known));
     } else if (a.type === "PermissionSet") {
       add(a.type, a.apiName, extractPermissionSetRefs(a.content));
+    } else if (a.type === "Report") {
+      add(a.type, a.apiName, extractReportRefs(a.content));
+    } else if (a.type === "Dashboard") {
+      add(a.type, a.apiName, extractDashboardRefs(a.content));
     }
   }
   return edges;
@@ -29733,6 +29861,20 @@ var CHILD_TYPES = {
   CustomObject: ["CustomField", "ValidationRule", "ListView", "RecordType"],
   CustomLabels: ["CustomLabel"]
 };
+var COUPLED_TYPES = {
+  Report: "ReportFolder",
+  ReportFolder: "Report",
+  Dashboard: "DashboardFolder",
+  DashboardFolder: "Dashboard"
+};
+function normalizeRefreshTypes(types) {
+  const all = new Set(types);
+  for (const t of types) {
+    const coupled = COUPLED_TYPES[t];
+    if (coupled) all.add(coupled);
+  }
+  return [...all];
+}
 var SnapshotEngine = class {
   constructor(db, store, tokenMgr, config2, audit) {
     this.db = db;
@@ -29755,7 +29897,7 @@ var SnapshotEngine = class {
       job = void 0;
     }
     if (!job) {
-      job = this.startJob(conn, types ?? this.config.snapshot.types);
+      job = this.startJob(conn, normalizeRefreshTypes(types ?? this.config.snapshot.types));
       this.jobs.set(conn.id, job);
     }
     const winner = await Promise.race([
@@ -29811,7 +29953,14 @@ var SnapshotEngine = class {
       warnings.push(`listMetadata failed (${String(err2 instanceof Error ? err2.message : err2)}); staleness data will be limited`);
     }
     job.progress = "starting retrieve";
-    const retrieveId = await soap.retrieve(buildRetrieveMembers(types, listedProps, warnings));
+    const retrieveMembers = buildRetrieveMembers(types, listedProps, warnings);
+    if (Object.keys(retrieveMembers).length === 0) {
+      throw new ContrailError(
+        `nothing retrievable for the requested types (${types.join(", ")}): ${warnings.join(" ")}`,
+        "retrieve_failed"
+      );
+    }
+    const retrieveId = await soap.retrieve(retrieveMembers);
     const deadline = Date.now() + this.config.snapshot.retrieveTimeoutMs;
     let status = await soap.checkRetrieveStatus(retrieveId, true);
     let poll = 0;
@@ -29901,7 +30050,7 @@ var SnapshotEngine = class {
   }
   /** Compare org-side lastModifiedDate against the index (on-demand staleness check, spec §4). */
   async checkStaleness(conn, types) {
-    const checkTypes = types ?? this.config.snapshot.types;
+    const checkTypes = normalizeRefreshTypes(types ?? this.config.snapshot.types);
     const soap = new MetadataSoapClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
     const props = await soap.listMetadata(checkTypes);
     const stale = [];
@@ -29931,8 +30080,12 @@ var SnapshotEngine = class {
   }
 };
 function buildRetrieveMembers(types, listedProps, warnings) {
-  const members = Object.fromEntries(types.map((t) => [t, ["*"]]));
-  if (types.includes("CustomObject")) {
+  const members = {};
+  for (const t of types) {
+    if (Object.hasOwn(FOLDER_TYPES, t)) continue;
+    members[t] = ["*"];
+  }
+  if ("CustomObject" in members) {
     const objectNames = listedProps.filter((p) => p.type === "CustomObject" && !isManaged(p)).map((p) => p.fullName);
     if (objectNames.length > 0) {
       members.CustomObject = objectNames;
@@ -29944,6 +30097,25 @@ function buildRetrieveMembers(types, listedProps, warnings) {
     } else {
       warnings.push(
         "listMetadata returned no CustomObject inventory; falling back to the * wildcard, which misses standard objects."
+      );
+    }
+  }
+  for (const [content, cfg] of Object.entries(FOLDERED_TYPES)) {
+    if (!(content in members)) continue;
+    const named = (type) => listedProps.filter((p) => p.type === type && !isManaged(p)).map((p) => p.fullName);
+    const folders = named(cfg.folderType);
+    const items = named(content);
+    if (folders.length + items.length > 0) {
+      members[content] = [...folders, ...items];
+      if (items.length > 2e3) {
+        warnings.push(
+          `${content} inventory is large (${items.length}); the retrieve may be slow or hit platform size limits.`
+        );
+      }
+    } else {
+      delete members[content];
+      warnings.push(
+        `listMetadata returned no ${content} inventory; ${content} skipped in this retrieve (wildcard retrieval is unsupported for folder-based types).`
       );
     }
   }
@@ -29977,7 +30149,15 @@ var TYPE_DIRS = {
   PlatformEventChannelMember: "platformEventChannelMembers",
   ManagedEventSubscription: "managedEventSubscriptions",
   Layout: "layouts",
-  CustomMetadata: "customMetadata"
+  CustomMetadata: "customMetadata",
+  // S29: the first shared-dir case — content and folder types own ONE
+  // directory. Sound only because normalizeRefreshTypes couples them into
+  // every refresh/staleness check (a lone 'Report' request would otherwise
+  // clear the folder files while leaving ReportFolder index rows behind).
+  Report: "reports",
+  ReportFolder: "reports",
+  Dashboard: "dashboards",
+  DashboardFolder: "dashboards"
 };
 function ownedDirsForTypes(types) {
   const dirs = /* @__PURE__ */ new Set();
@@ -30478,7 +30658,17 @@ var FILE_TYPES = {
   // the type and its records together). fullName is dotted "Type.Record"
   // with the type name WITHOUT the __mdt suffix; metadata format uses the
   // bare .md extension.
-  CustomMetadata: { dir: "customMetadata", ext: ".md" }
+  CustomMetadata: { dir: "customMetadata", ext: ".md" },
+  // S29: analytics types (folder-based). EXPLICIT-REFRESH-ONLY — absent from
+  // the default snapshot manifest (S17 precedent; big orgs carry thousands of
+  // reports). api_name is 'FolderDevName/Name' ('unfiled$public/Name' for
+  // unfiled reports). Folders deploy as members of the CONTENT type in
+  // package.xml (manifestType), their file being the -meta.xml itself; a
+  // report deployed into a NEW folder needs that folder in the same package.
+  Report: { dir: "reports", ext: ".report", foldered: true },
+  Dashboard: { dir: "dashboards", ext: ".dashboard", foldered: true },
+  ReportFolder: { dir: "reports", ext: "", metaOnly: true, manifestType: "Report" },
+  DashboardFolder: { dir: "dashboards", ext: "", metaOnly: true, manifestType: "Dashboard" }
 };
 var XMLNS_META = "http://soap.sforce.com/2006/04/metadata";
 function flowDeactivationXml() {
@@ -30526,6 +30716,7 @@ var CHILD_TYPES2 = {
   }
 };
 var NAME_RE = /^[A-Za-z0-9_.\- ()'&]+$/;
+var FOLDER_SEGMENT_RE = /^[A-Za-z0-9_$]+$/;
 var XMLNS = "http://soap.sforce.com/2006/04/metadata";
 function buildDeployZip(components, deletions, apiVersionNumber, metaXmlLookup) {
   const files = /* @__PURE__ */ new Map();
@@ -30540,8 +30731,7 @@ function buildDeployZip(components, deletions, apiVersionNumber, metaXmlLookup) 
     validateTypeAndName(c.type, c.api_name);
     const fileSpec = FILE_TYPES[c.type];
     if (fileSpec) {
-      const short = c.api_name;
-      const path11 = `${fileSpec.dir}/${fileSafeName(short)}${fileSpec.ext}`;
+      const path11 = zipPathFor(fileSpec, c.api_name);
       files.set(path11, strToU8(c.content));
       if (fileSpec.metaRoot) {
         const meta = metaXmlLookup(c.type, c.api_name) ?? fileSpec.metaXml?.(apiVersionNumber, c.api_name) ?? `<?xml version="1.0" encoding="UTF-8"?>
@@ -30552,7 +30742,7 @@ function buildDeployZip(components, deletions, apiVersionNumber, metaXmlLookup) 
 `;
         files.set(`${path11}-meta.xml`, strToU8(meta));
       }
-      addMember(c.type, c.api_name);
+      addMember(fileSpec.manifestType ?? c.type, c.api_name);
       continue;
     }
     const childSpec = CHILD_TYPES2[c.type];
@@ -30600,9 +30790,10 @@ function buildDeployZip(components, deletions, apiVersionNumber, metaXmlLookup) 
   if (deletions.length > 0) {
     const delMembers = /* @__PURE__ */ new Map();
     for (const d of deletions) {
-      const list = delMembers.get(d.type) ?? [];
+      const manifestType = FILE_TYPES[d.type]?.manifestType ?? d.type;
+      const list = delMembers.get(manifestType) ?? [];
       list.push(d.api_name);
-      delMembers.set(d.type, list);
+      delMembers.set(manifestType, list);
     }
     destructiveXml = manifestXml(delMembers, apiVersionNumber, "Package");
     files.set("destructiveChangesPost.xml", strToU8(destructiveXml));
@@ -30634,9 +30825,43 @@ function fileSafeName(name) {
     (ch) => Array.from(new TextEncoder().encode(ch)).map((b) => "%" + b.toString(16).toUpperCase().padStart(2, "0")).join("")
   );
 }
+function fileSafeSegment(s) {
+  return s.replace(
+    /[^A-Za-z0-9 _.\-$]/g,
+    (ch) => Array.from(new TextEncoder().encode(ch)).map((b) => "%" + b.toString(16).toUpperCase().padStart(2, "0")).join("")
+  );
+}
+function zipPathFor(spec, apiName) {
+  if (spec.metaOnly) return `${spec.dir}/${fileSafeSegment(apiName)}-meta.xml`;
+  const name = spec.foldered ? apiName.split("/").map(fileSafeSegment).join("/") : fileSafeName(apiName);
+  return `${spec.dir}/${name}${spec.ext}`;
+}
 function validateTypeAndName(type, name) {
   if (!/^[A-Za-z]+$/.test(type)) throw new ContrailError(`invalid type "${type}"`, "bad_component");
-  if (!NAME_RE.test(name) || name.includes("/") || name.includes("\\") || name.includes("..")) {
+  if (name.includes("\\") || name.includes("..")) {
+    throw new ContrailError(`invalid component name "${name}"`, "bad_component");
+  }
+  const spec = FILE_TYPES[type];
+  if (spec?.foldered) {
+    const segs = name.split("/");
+    if (segs.length !== 2 || segs.some((s) => !FOLDER_SEGMENT_RE.test(s))) {
+      throw new ContrailError(
+        `invalid ${type} name "${name}" \u2014 expected "FolderDevName/Name" (letters, digits, underscores)`,
+        "bad_component"
+      );
+    }
+    return;
+  }
+  if (spec?.metaOnly) {
+    if (!FOLDER_SEGMENT_RE.test(name)) {
+      throw new ContrailError(
+        `invalid ${type} name "${name}" \u2014 a folder dev name (letters, digits, underscores)`,
+        "bad_component"
+      );
+    }
+    return;
+  }
+  if (!NAME_RE.test(name) || name.includes("/")) {
     throw new ContrailError(`invalid component name "${name}"`, "bad_component");
   }
 }
@@ -30670,9 +30895,14 @@ function analyzeChanges(db, store, conn, components, deletions) {
           );
         }
       }
-      if ((c.type === "FlexiPage" || c.type === "CustomApplication" || c.type === "Layout") && change === "modify") {
+      if ((c.type === "FlexiPage" || c.type === "CustomApplication" || c.type === "Layout" || c.type === "Report" || c.type === "Dashboard") && change === "modify") {
         warnings.push(
           `WHOLE-DOCUMENT REPLACE \u2014 this deploy fully replaces the org's ${c.type}; anything not present in the proposed content is removed.`
+        );
+      }
+      if ((c.type === "ReportFolder" || c.type === "DashboardFolder") && change === "modify") {
+        warnings.push(
+          `FOLDER REPLACE \u2014 the folderShares in this content fully replace the folder's sharing; shares omitted here are revoked.`
         );
       }
       if (c.type === "CustomMetadata" && change === "modify") {
@@ -30684,6 +30914,11 @@ function analyzeChanges(db, store, conn, components, deletions) {
     if (c.type === "Layout" && change === "add") {
       warnings.push(
         `NEW LAYOUT IS NOT ASSIGNED by this deploy \u2014 profiles keep their current layout until layoutAssignments change (Profile metadata or Setup).`
+      );
+    }
+    if ((c.type === "Report" || c.type === "Dashboard") && change === "add") {
+      warnings.push(
+        `NEW ${c.type.toUpperCase()} visibility is governed by its FOLDER's sharing (folderShares on the folder component), not by permission sets \u2014 this deploy grants nobody new access by itself.`
       );
     }
     changes.push({ type: c.type, api_name: c.api_name, change, warnings, ...sourceOf(c) });
@@ -32507,7 +32742,7 @@ function getUpdateNotice(installedVersion, repo, enabled) {
 }
 
 // src/core/version.ts
-var ENGINE_VERSION = "0.19.1";
+var ENGINE_VERSION = "0.20.0";
 
 // src/tools/register.ts
 var UPDATE_REPO = "RHayes765/contrail-plugin";
@@ -32743,7 +32978,8 @@ function assertGrant(connection, tool, audit) {
 }
 
 // src/tools/metadata.ts
-var NAME_RE2 = /^[A-Za-z0-9_.\- ]+$/;
+var NAME_RE2 = /^[A-Za-z0-9_.\- ()'&$]+(\/[A-Za-z0-9_.\- ()'&$]+)?$/;
+var nameOk = (name) => NAME_RE2.test(name) && !name.includes("..") && !name.includes("\\");
 var TYPE_RE = /^[A-Za-z]+$/;
 var DEFAULT_CONTENT_BYTES = 25e4;
 var MAX_CONTENT_BYTES = 2e6;
@@ -32887,7 +33123,7 @@ function registerMetadataTools(server, deps) {
       let budgetLeft = CALL_CONTENT_BUDGET;
       const results = [];
       for (const name of args.names) {
-        if (!NAME_RE2.test(name)) {
+        if (!nameOk(name)) {
           results.push({ api_name: name, error: "invalid artifact name" });
           continue;
         }
@@ -33676,7 +33912,8 @@ function lcsOps(a, b) {
 
 // src/tools/diff.ts
 var TYPE_RE2 = /^[A-Za-z]+$/;
-var NAME_RE3 = /^[A-Za-z0-9_.\- ]+$/;
+var NAME_RE3 = /^[A-Za-z0-9_.\- ()'&$]+(\/[A-Za-z0-9_.\- ()'&$]+)?$/;
+var nameOk2 = (name) => NAME_RE3.test(name) && !name.includes("..") && !name.includes("\\");
 var BUCKET_LIST_CAP = 50;
 function registerDiffTools(server, deps) {
   const { db, audit } = deps;
@@ -33778,7 +34015,7 @@ function registerDiffTools(server, deps) {
     },
     async (args) => guarded(() => {
       if (!TYPE_RE2.test(args.type)) return fail("invalid metadata type");
-      if (!NAME_RE3.test(args.name)) return fail("invalid artifact name");
+      if (!nameOk2(args.name)) return fail("invalid artifact name");
       const [a, b] = requireBoth(args.connection_a, args.connection_b, "diff_artifact");
       const aContent = readArtifactFromSnapshot(deps, a, args.type, args.name);
       const bContent = readArtifactFromSnapshot(deps, b, args.type, args.name);
@@ -34036,6 +34273,79 @@ function registerDataTools(server, deps) {
     })
   );
   server.registerTool(
+    "get_report_data",
+    {
+      title: "Run a report and read its results",
+      description: "Run a saved report as it stands (synchronous Analytics REST API) and return its results: columns, groupings with aggregate values, grand totals, and detail rows (capped \u2014 default 200 rows, and the synchronous run itself never returns more than 2,000 org-side; all_data says whether the report has more). The report runs as the CONNECTED USER: what they can see through folder sharing and record sharing is what comes back. Joined-format and very large reports cannot run synchronously.",
+      inputSchema: {
+        connection: external_exports.string().describe("Connection alias (or id)."),
+        report: external_exports.string().min(1).max(300).describe(
+          'Report id (00O\u2026), DeveloperName, or the metadata-side "Folder/DeveloperName" \u2014 the leaf resolves via the Report sobject and the folder disambiguates duplicates.'
+        ),
+        limit: external_exports.number().int().min(1).max(MAX_ROWS).optional().describe("Detail-row cap (default 200)."),
+        details: external_exports.boolean().optional().describe("false = aggregates and groupings only, no detail rows. Default true.")
+      }
+    },
+    async (args) => guarded(async () => {
+      const conn = requireConnection(args.connection, "get_report_data");
+      const client = rest(conn);
+      const esc3 = (s) => s.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+      const ref = args.report.trim();
+      let reportId;
+      if (/^00O[a-zA-Z0-9]{12}([a-zA-Z0-9]{3})?$/.test(ref)) {
+        reportId = ref;
+      } else {
+        const slash = ref.lastIndexOf("/");
+        const folderToken = slash >= 0 ? ref.slice(0, slash) : null;
+        const leaf = slash >= 0 ? ref.slice(slash + 1) : ref;
+        if (!/^[A-Za-z0-9_]+$/.test(leaf)) return fail("invalid report DeveloperName");
+        const rows = await client.query(
+          `SELECT Id, Name, DeveloperName, FolderName FROM Report WHERE DeveloperName = '${esc3(leaf)}' LIMIT 5`,
+          5
+        );
+        if (rows.length === 0) {
+          return fail(
+            `No report "${leaf}" is visible on ${conn.alias}. Either it does not exist or its folder is not shared with the connected user \u2014 Analytics visibility is folder sharing, so those two cases look identical from here.`
+          );
+        }
+        let candidates = rows;
+        if (rows.length > 1 && folderToken) {
+          const norm = (s) => s.toLowerCase().replace(/ /g, "_");
+          const filtered = rows.filter(
+            (r) => r.FolderName !== null && norm(r.FolderName) === norm(folderToken)
+          );
+          if (filtered.length === 1) candidates = filtered;
+        }
+        if (candidates.length > 1) {
+          return fail(
+            `${candidates.length} reports share the DeveloperName "${leaf}" \u2014 pass the report id instead: ` + candidates.map((r) => `${r.Name} [${r.FolderName ?? "no folder"}] = ${r.Id}`).join(", ")
+          );
+        }
+        reportId = candidates[0].Id;
+      }
+      const includeDetails = args.details !== false;
+      let run;
+      try {
+        const res = await client.request(
+          `/services/data/${config2.salesforce.apiVersion}/analytics/reports/${reportId}?includeDetails=${includeDetails}`
+        );
+        run = await res.json();
+      } catch (err2) {
+        const msg = err2 instanceof Error ? err2.message : String(err2);
+        if (!/Salesforce API error/.test(msg)) throw err2;
+        if (/error 404 /.test(msg) || /NOT_FOUND/i.test(msg)) {
+          return fail(
+            `The org has no runnable report ${reportId} for the connected user \u2014 it may have been deleted, or its folder is not shared with them. (${msg})`
+          );
+        }
+        return fail(
+          `The report could not run synchronously: ${msg} Joined-format and very large/long-running reports are not supported by the synchronous Analytics API.`
+        );
+      }
+      return ok(shapeReportRun(conn.alias, run, args.limit ?? DEFAULT_REPORT_ROWS));
+    })
+  );
+  server.registerTool(
     "get_debug_logs",
     {
       title: "List or read Apex debug logs",
@@ -34269,6 +34579,98 @@ function registerDataTools(server, deps) {
       });
     })
   );
+}
+var DEFAULT_REPORT_ROWS = 200;
+var MAX_REPORT_GROUPS = 200;
+function flattenGroupings(nodes, prefix) {
+  const map = /* @__PURE__ */ new Map();
+  for (const n of nodes ?? []) {
+    if (typeof n.key !== "string") continue;
+    const path11 = [...prefix, n.label ?? ""];
+    map.set(n.key, path11);
+    for (const [k, v] of flattenGroupings(n.groupings, path11)) map.set(k, v);
+  }
+  return map;
+}
+function shapeReportRun(connection, run, rowCap) {
+  const meta = run.reportMetadata ?? {};
+  const ext = run.reportExtendedMetadata ?? {};
+  const columns = (meta.detailColumns ?? []).map((name) => ({
+    name,
+    label: ext.detailColumnInfo?.[name]?.label ?? name
+  }));
+  const aggDefs = (meta.aggregates ?? []).map((name) => ({
+    name,
+    label: ext.aggregateColumnInfo?.[name]?.label ?? name
+  }));
+  const aggsOf = (bucket) => Object.fromEntries(
+    (bucket.aggregates ?? []).map((a, i) => [
+      aggDefs[i]?.label ?? `agg_${i}`,
+      a.value ?? a.label ?? null
+    ])
+  );
+  const factMap = run.factMap ?? {};
+  const downMap = flattenGroupings(run.groupingsDown?.groupings, []);
+  const acrossMap = flattenGroupings(run.groupingsAcross?.groupings, []);
+  const groups = [];
+  let groupsTruncated = false;
+  for (const [key2, bucket] of Object.entries(factMap)) {
+    if (key2 === "T!T") continue;
+    const [downKey = "T", acrossKey = "T"] = key2.split("!");
+    const down = downKey === "T" ? [] : downMap.get(downKey);
+    const across = acrossKey === "T" ? [] : acrossMap.get(acrossKey);
+    if (!down || !across) continue;
+    if (groups.length >= MAX_REPORT_GROUPS) {
+      groupsTruncated = true;
+      break;
+    }
+    groups.push({
+      ...down.length > 0 ? { down } : {},
+      ...across.length > 0 ? { across } : {},
+      aggregates: aggsOf(bucket)
+    });
+  }
+  const allRows = [];
+  for (const bucket of Object.values(factMap)) {
+    for (const row of bucket.rows ?? []) {
+      allRows.push((row.dataCells ?? []).map((c) => truncateDeep(c.label ?? c.value ?? null)));
+    }
+  }
+  const capDropped = Math.max(0, allRows.length - rowCap);
+  const { kept, dropped: budgetDropped } = fitToBudget(allRows.slice(0, rowCap), MAX_RESPONSE_CHARS);
+  const notes = [
+    "Detail cells are display-formatted labels; aggregate values are raw numbers."
+  ];
+  if (run.allData === false) {
+    notes.push(
+      "all_data=false: the synchronous run caps at 2,000 detail rows org-side and this report has more."
+    );
+  }
+  if (capDropped > 0) notes.push(`${capDropped} detail rows dropped to the row cap.`);
+  if (budgetDropped > 0) {
+    notes.push(`${budgetDropped} more rows omitted to keep the response under the size budget.`);
+  }
+  if (groupsTruncated) notes.push(`Groupings truncated at ${MAX_REPORT_GROUPS}.`);
+  const grand = factMap["T!T"];
+  return {
+    connection,
+    report: {
+      id: meta.id ?? null,
+      name: meta.name ?? null,
+      developer_name: meta.developerName ?? null,
+      format: meta.reportFormat ?? null,
+      report_type: meta.reportType?.label ?? meta.reportType?.type ?? null
+    },
+    columns,
+    ...grand ? { grand_totals: aggsOf(grand) } : {},
+    ...groups.length > 0 ? { groups } : {},
+    detail_rows: kept,
+    detail_rows_returned: kept.length,
+    row_cap: rowCap,
+    all_data: run.allData ?? null,
+    truncated: capDropped > 0 || budgetDropped > 0 || run.allData === false,
+    note: notes.join(" ")
+  };
 }
 function fitToBudget(records, budget) {
   let total = 0;
@@ -34553,7 +34955,7 @@ function registerDeployTools(server, deps) {
         components: external_exports.array(
           external_exports.object({
             type: external_exports.string().describe(
-              "ApexClass, ApexTrigger, ApexPage, Flow, CustomObject, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, GlobalValueSet, ConnectedApp, NamedCredential, ExternalCredential, PlatformEventChannel(Member), ManagedEventSubscription, Layout, CustomMetadata (records, dotted Type.Record names), or child types CustomField / ValidationRule / CustomLabel / ListView / RecordType."
+              'ApexClass, ApexTrigger, ApexPage, Flow, CustomObject, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, GlobalValueSet, ConnectedApp, NamedCredential, ExternalCredential, PlatformEventChannel(Member), ManagedEventSubscription, Layout, CustomMetadata (records, dotted Type.Record names), Report / Dashboard (folder-qualified "FolderDevName/Name" api_names; deploy the ReportFolder/DashboardFolder component first or in the same package for a new folder), ReportFolder / DashboardFolder (content = the whole <ReportFolder> doc with folderShares \u2014 folder sharing is what makes reports visible), or child types CustomField / ValidationRule / CustomLabel / ListView / RecordType.'
             ),
             api_name: external_exports.string().describe("Full API name; children dotted (Account.MyField__c)."),
             content: external_exports.string().optional().describe(
