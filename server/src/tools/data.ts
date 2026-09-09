@@ -366,6 +366,124 @@ export function registerDataTools(server: McpServer, deps: ToolDeps): void {
   );
 
   server.registerTool(
+    'get_report_data',
+    {
+      title: 'Run a report and read its results',
+      description:
+        'Run a saved report as it stands (synchronous Analytics REST API) and return its ' +
+        'results: columns, groupings with aggregate values, grand totals, and detail rows ' +
+        '(capped — default 200 rows, and the synchronous run itself never returns more than ' +
+        '2,000 org-side; all_data says whether the report has more). The report runs as the ' +
+        'CONNECTED USER: what they can see through folder sharing and record sharing is what ' +
+        'comes back. Joined-format and very large reports cannot run synchronously.',
+      inputSchema: {
+        connection: z.string().describe('Connection alias (or id).'),
+        report: z
+          .string()
+          .min(1)
+          .max(300)
+          .describe(
+            'Report id (00O…), DeveloperName, or the metadata-side "Folder/DeveloperName" — ' +
+              'the leaf resolves via the Report sobject and the folder disambiguates duplicates.',
+          ),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(MAX_ROWS)
+          .optional()
+          .describe('Detail-row cap (default 200).'),
+        details: z
+          .boolean()
+          .optional()
+          .describe('false = aggregates and groupings only, no detail rows. Default true.'),
+      },
+    },
+    async (args: { connection: string; report: string; limit?: number; details?: boolean }) =>
+      guarded(async () => {
+        const conn = requireConnection(args.connection, 'get_report_data');
+        const client = rest(conn);
+        const esc = (s: string) => s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+
+        // Resolve the report id: a literal id wins; otherwise the leaf of a
+        // (possibly folder-qualified) DeveloperName resolves via SOQL.
+        const ref = args.report.trim();
+        let reportId: string;
+        if (/^00O[a-zA-Z0-9]{12}([a-zA-Z0-9]{3})?$/.test(ref)) {
+          reportId = ref;
+        } else {
+          const slash = ref.lastIndexOf('/');
+          const folderToken = slash >= 0 ? ref.slice(0, slash) : null;
+          const leaf = slash >= 0 ? ref.slice(slash + 1) : ref;
+          if (!/^[A-Za-z0-9_]+$/.test(leaf)) return fail('invalid report DeveloperName');
+          const rows = await client.query<{
+            Id: string;
+            Name: string;
+            DeveloperName: string;
+            FolderName: string | null;
+          }>(
+            `SELECT Id, Name, DeveloperName, FolderName FROM Report ` +
+              `WHERE DeveloperName = '${esc(leaf)}' LIMIT 5`,
+            5,
+          );
+          if (rows.length === 0) {
+            return fail(
+              `No report "${leaf}" is visible on ${conn.alias}. Either it does not exist or ` +
+                `its folder is not shared with the connected user — Analytics visibility is ` +
+                `folder sharing, so those two cases look identical from here.`,
+            );
+          }
+          let candidates = rows;
+          if (rows.length > 1 && folderToken) {
+            // FolderName on the Report sobject is the folder LABEL; the
+            // metadata path segment is the folder DeveloperName. Compare
+            // loosely (case-insensitive, spaces ≈ underscores) and keep the
+            // strict failure when that still doesn't single one out.
+            const norm = (s: string) => s.toLowerCase().replace(/ /g, '_');
+            const filtered = rows.filter(
+              (r) => r.FolderName !== null && norm(r.FolderName) === norm(folderToken),
+            );
+            if (filtered.length === 1) candidates = filtered;
+          }
+          if (candidates.length > 1) {
+            return fail(
+              `${candidates.length} reports share the DeveloperName "${leaf}" — pass the ` +
+                `report id instead: ` +
+                candidates.map((r) => `${r.Name} [${r.FolderName ?? 'no folder'}] = ${r.Id}`).join(', '),
+            );
+          }
+          reportId = candidates[0]!.Id;
+        }
+
+        const includeDetails = args.details !== false;
+        let run: AnalyticsReportRun;
+        try {
+          const res = await client.request(
+            `/services/data/${config.salesforce.apiVersion}/analytics/reports/${reportId}` +
+              `?includeDetails=${includeDetails}`,
+          );
+          run = (await res.json()) as AnalyticsReportRun;
+        } catch (err) {
+          // RestClient.request throws on non-2xx with the API's error body in
+          // the message — reframe the two hallmark Analytics failures.
+          const msg = err instanceof Error ? err.message : String(err);
+          if (!/Salesforce API error/.test(msg)) throw err;
+          if (/error 404 /.test(msg) || /NOT_FOUND/i.test(msg)) {
+            return fail(
+              `The org has no runnable report ${reportId} for the connected user — it may ` +
+                `have been deleted, or its folder is not shared with them. (${msg})`,
+            );
+          }
+          return fail(
+            `The report could not run synchronously: ${msg} Joined-format and very ` +
+              `large/long-running reports are not supported by the synchronous Analytics API.`,
+          );
+        }
+        return ok(shapeReportRun(conn.alias, run, args.limit ?? DEFAULT_REPORT_ROWS));
+      }),
+  );
+
+  server.registerTool(
     'get_debug_logs',
     {
       title: 'List or read Apex debug logs',
@@ -688,6 +806,154 @@ export function registerDataTools(server: McpServer, deps: ToolDeps): void {
         });
       }),
   );
+}
+
+const DEFAULT_REPORT_ROWS = 200;
+const MAX_REPORT_GROUPS = 200;
+
+interface AnalyticsGrouping {
+  label?: string;
+  key?: string;
+  groupings?: AnalyticsGrouping[];
+}
+
+interface AnalyticsBucket {
+  aggregates?: Array<{ label?: string; value?: unknown }>;
+  rows?: Array<{ dataCells?: Array<{ label?: string; value?: unknown }> }>;
+}
+
+interface AnalyticsReportRun {
+  allData?: boolean;
+  factMap?: Record<string, AnalyticsBucket>;
+  groupingsDown?: { groupings?: AnalyticsGrouping[] };
+  groupingsAcross?: { groupings?: AnalyticsGrouping[] };
+  reportMetadata?: {
+    id?: string;
+    name?: string;
+    developerName?: string;
+    reportFormat?: string;
+    reportType?: { type?: string; label?: string };
+    detailColumns?: string[];
+    aggregates?: string[];
+  };
+  reportExtendedMetadata?: {
+    detailColumnInfo?: Record<string, { label?: string }>;
+    aggregateColumnInfo?: Record<string, { label?: string }>;
+  };
+}
+
+/** factMap grouping key ('0', '0_1', …) → the grouping's label path, all depths. */
+function flattenGroupings(
+  nodes: AnalyticsGrouping[] | undefined,
+  prefix: string[],
+): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  for (const n of nodes ?? []) {
+    if (typeof n.key !== 'string') continue;
+    const path = [...prefix, n.label ?? ''];
+    map.set(n.key, path);
+    for (const [k, v] of flattenGroupings(n.groupings, path)) map.set(k, v);
+  }
+  return map;
+}
+
+/**
+ * Shape a synchronous Analytics run into a compact, truncation-honest result.
+ * Detail cells carry the display-formatted LABEL (half the tokens of per-cell
+ * objects — noted in the payload); aggregates carry numeric VALUES so callers
+ * can do arithmetic. Three distinct truncation signals, never conflated:
+ * all_data=false (the org-side 2,000-row synchronous cap), rows dropped to the
+ * caller's row cap, and rows dropped to the response byte budget.
+ */
+function shapeReportRun(
+  connection: string,
+  run: AnalyticsReportRun,
+  rowCap: number,
+): Record<string, unknown> {
+  const meta = run.reportMetadata ?? {};
+  const ext = run.reportExtendedMetadata ?? {};
+  const columns = (meta.detailColumns ?? []).map((name) => ({
+    name,
+    label: ext.detailColumnInfo?.[name]?.label ?? name,
+  }));
+  const aggDefs = (meta.aggregates ?? []).map((name) => ({
+    name,
+    label: ext.aggregateColumnInfo?.[name]?.label ?? name,
+  }));
+  const aggsOf = (bucket: AnalyticsBucket): Record<string, unknown> =>
+    Object.fromEntries(
+      (bucket.aggregates ?? []).map((a, i) => [
+        aggDefs[i]?.label ?? `agg_${i}`,
+        a.value ?? a.label ?? null,
+      ]),
+    );
+
+  const factMap = run.factMap ?? {};
+  const downMap = flattenGroupings(run.groupingsDown?.groupings, []);
+  const acrossMap = flattenGroupings(run.groupingsAcross?.groupings, []);
+
+  const groups: Array<Record<string, unknown>> = [];
+  let groupsTruncated = false;
+  for (const [key, bucket] of Object.entries(factMap)) {
+    if (key === 'T!T') continue;
+    const [downKey = 'T', acrossKey = 'T'] = key.split('!');
+    const down = downKey === 'T' ? [] : downMap.get(downKey);
+    const across = acrossKey === 'T' ? [] : acrossMap.get(acrossKey);
+    if (!down || !across) continue; // a key the grouping trees don't describe
+    if (groups.length >= MAX_REPORT_GROUPS) {
+      groupsTruncated = true;
+      break;
+    }
+    groups.push({
+      ...(down.length > 0 ? { down } : {}),
+      ...(across.length > 0 ? { across } : {}),
+      aggregates: aggsOf(bucket),
+    });
+  }
+
+  const allRows: unknown[] = [];
+  for (const bucket of Object.values(factMap)) {
+    for (const row of bucket.rows ?? []) {
+      allRows.push((row.dataCells ?? []).map((c) => truncateDeep(c.label ?? c.value ?? null)));
+    }
+  }
+  const capDropped = Math.max(0, allRows.length - rowCap);
+  const { kept, dropped: budgetDropped } = fitToBudget(allRows.slice(0, rowCap), MAX_RESPONSE_CHARS);
+
+  const notes: string[] = [
+    'Detail cells are display-formatted labels; aggregate values are raw numbers.',
+  ];
+  if (run.allData === false) {
+    notes.push(
+      'all_data=false: the synchronous run caps at 2,000 detail rows org-side and this report has more.',
+    );
+  }
+  if (capDropped > 0) notes.push(`${capDropped} detail rows dropped to the row cap.`);
+  if (budgetDropped > 0) {
+    notes.push(`${budgetDropped} more rows omitted to keep the response under the size budget.`);
+  }
+  if (groupsTruncated) notes.push(`Groupings truncated at ${MAX_REPORT_GROUPS}.`);
+
+  const grand = factMap['T!T'];
+  return {
+    connection,
+    report: {
+      id: meta.id ?? null,
+      name: meta.name ?? null,
+      developer_name: meta.developerName ?? null,
+      format: meta.reportFormat ?? null,
+      report_type: meta.reportType?.label ?? meta.reportType?.type ?? null,
+    },
+    columns,
+    ...(grand ? { grand_totals: aggsOf(grand) } : {}),
+    ...(groups.length > 0 ? { groups } : {}),
+    detail_rows: kept,
+    detail_rows_returned: kept.length,
+    row_cap: rowCap,
+    all_data: run.allData ?? null,
+    truncated: capDropped > 0 || budgetDropped > 0 || run.allData === false,
+    note: notes.join(' '),
+  };
 }
 
 function fitToBudget(records: unknown[], budget: number): { kept: unknown[]; dropped: number } {

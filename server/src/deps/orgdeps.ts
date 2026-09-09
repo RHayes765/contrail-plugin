@@ -39,6 +39,10 @@ export async function fetchOrgDependencyEdges(
       );
       for (const r of rows) {
         if (!r.MetadataComponentName || !r.RefMetadataComponentName) continue;
+        // S29 known gap: MetadataComponentDependency returns UNFOLDERED
+        // report/dashboard names ('Weekly', not 'Ops/Weekly'), so org-source
+        // edges for those types won't join the folder-qualified index keys.
+        // Accepted for v1 — the extractor edges carry the joinable graph.
         edges.push({
           connectionId,
           fromType: r.MetadataComponentType,

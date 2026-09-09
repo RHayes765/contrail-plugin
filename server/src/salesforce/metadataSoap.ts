@@ -67,6 +67,30 @@ export interface DeployResult {
 
 export type TestLevel = 'NoTestRun' | 'RunLocalTests' | 'RunSpecifiedTests' | 'RunAllTestsInOrg';
 
+/**
+ * S29: folder-based content types → their listMetadata folder-enumeration
+ * type. listMetadata for these REQUIRES a per-folder query; a bare
+ * {type:'Report'} query returns nothing (silently). The folder types
+ * themselves exist only for listMetadata — in package.xml manifests folders
+ * address as members of the content type (see FILE_TYPES.manifestType).
+ */
+export const FOLDERED_TYPES: Record<string, { folderType: string; unfiledFolder?: string }> = {
+  // unfiled$public is a system pseudo-folder that folder enumeration does not
+  // return; queried explicitly. Dashboards have no unfiled equivalent.
+  Report: { folderType: 'ReportFolder', unfiledFolder: 'unfiled$public' },
+  Dashboard: { folderType: 'DashboardFolder' },
+};
+
+/** Inverse of FOLDERED_TYPES: folder-enumeration type → its content type. */
+export const FOLDER_TYPES: Record<string, string> = Object.fromEntries(
+  Object.entries(FOLDERED_TYPES).map(([content, cfg]) => [cfg.folderType, content]),
+);
+
+interface ListQuery {
+  type: string;
+  folder?: string;
+}
+
 export class MetadataSoapClient {
   /** Metadata API version number, e.g. "63.0" (no leading v). */
   private readonly versionNumber: string;
@@ -79,22 +103,99 @@ export class MetadataSoapClient {
     this.versionNumber = apiVersion.replace(/^v/, '');
   }
 
-  /** listMetadata accepts at most 3 type queries per call; chunk transparently. */
+  /**
+   * List metadata inventory. Foldered types (FOLDERED_TYPES) expand
+   * transparently: pass 1 lists the flat types plus each foldered type's
+   * folder-enumeration type, pass 2 issues one {type, folder} query per
+   * discovered folder (plus unfiled$public for reports). The union comes
+   * back: folder props typed ReportFolder/DashboardFolder, content props
+   * typed Report/Dashboard with folder-qualified 'Folder/Name' fullNames
+   * (normalized here if the org returns them bare). Cost for an org with N
+   * folders is ceil(N/3) extra round trips — acceptable for
+   * explicit-refresh-only types; never silently skipped.
+   */
   async listMetadata(types: string[]): Promise<FileProperties[]> {
+    const flat: ListQuery[] = [];
+    const foldered: string[] = [];
+    const seen = new Set<string>();
+    const wantFlat = (t: string) => {
+      if (!seen.has(t)) {
+        seen.add(t);
+        flat.push({ type: t });
+      }
+    };
+    for (const t of types) {
+      if (FOLDERED_TYPES[t]) {
+        foldered.push(t);
+        wantFlat(FOLDERED_TYPES[t].folderType);
+      } else {
+        // Includes folder types asked for on their own — they enumerate flat.
+        wantFlat(t);
+      }
+    }
+
+    const all = await this.listQueries(flat);
+
+    if (foldered.length > 0) {
+      const folderQueries: ListQuery[] = [];
+      for (const t of foldered) {
+        const cfg = FOLDERED_TYPES[t];
+        if (!cfg) continue;
+        const folders = all
+          .filter((p) => p.type === cfg.folderType)
+          .map((p) => p.fullName);
+        if (cfg.unfiledFolder && !folders.includes(cfg.unfiledFolder)) {
+          folders.push(cfg.unfiledFolder);
+        }
+        for (const f of folders) folderQueries.push({ type: t, folder: f });
+      }
+      if (folderQueries.length > 0) {
+        log('info', 'listing foldered metadata per folder', { queries: folderQueries.length });
+        for (const p of await this.listQueries(folderQueries)) {
+          all.push(p);
+        }
+      }
+    }
+    return all;
+  }
+
+  /** listMetadata accepts at most 3 queries per call; chunk transparently. */
+  private async listQueries(queries: ListQuery[]): Promise<FileProperties[]> {
     const all: FileProperties[] = [];
-    for (let i = 0; i < types.length; i += 3) {
-      const chunk = types.slice(i, i + 3);
-      const queries = chunk
-        .map((t) => `<met:queries><met:type>${escapeXml(t)}</met:type></met:queries>`)
+    for (let i = 0; i < queries.length; i += 3) {
+      const chunk = queries.slice(i, i + 3);
+      const queriesXml = chunk
+        .map(
+          (q) =>
+            `<met:queries>${
+              // WSDL sequence order: folder BEFORE type.
+              q.folder ? `<met:folder>${escapeXml(q.folder)}</met:folder>` : ''
+            }<met:type>${escapeXml(q.type)}</met:type></met:queries>`,
+        )
         .join('');
-      const body = `<met:listMetadata>${queries}<met:asOfVersion>${this.versionNumber}</met:asOfVersion></met:listMetadata>`;
+      const body = `<met:listMetadata>${queriesXml}<met:asOfVersion>${this.versionNumber}</met:asOfVersion></met:listMetadata>`;
       const parsed = await this.call(body);
       const result = xmlDig(parsed, 'Envelope', 'Body', 'listMetadataResponse', 'result');
+      // Defensive normalization: per-folder results are expected to come back
+      // folder-qualified already; prefix bare names ONLY when the chunk holds
+      // exactly one folder for that type (ambiguous chunks trust the org).
+      const foldersByType = new Map<string, Set<string>>();
+      for (const q of chunk) {
+        if (q.folder) {
+          const set = foldersByType.get(q.type) ?? new Set<string>();
+          set.add(q.folder);
+          foldersByType.set(q.type, set);
+        }
+      }
       for (const item of asArray(result as Record<string, string> | Record<string, string>[])) {
         if (item && typeof item === 'object' && item.fullName && item.type) {
+          const folderSet = foldersByType.get(item.type);
+          const folder = folderSet?.size === 1 ? [...folderSet][0] : undefined;
+          const fullName =
+            folder && !item.fullName.includes('/') ? `${folder}/${item.fullName}` : item.fullName;
           all.push({
             type: item.type,
-            fullName: item.fullName,
+            fullName,
             fileName: item.fileName ?? '',
             id: item.id ?? '',
             lastModifiedDate: item.lastModifiedDate ?? '',
@@ -211,7 +312,8 @@ export class MetadataSoapClient {
    * reuses the validation's results — and the bytes deployed are, by the
    * org's own guarantee, exactly the validated ones. Only available when the
    * validation ran tests and is recent (~10 days); the org refuses otherwise,
-   * and the caller falls back to a full deploy.
+   * and the caller falls back to a full deploy. The result IS the new
+   * deploy's async id.
    */
   async deployRecentValidation(validationId: string): Promise<string> {
     const body =

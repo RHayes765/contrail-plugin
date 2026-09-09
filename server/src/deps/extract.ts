@@ -188,6 +188,29 @@ export function extractPermissionSetRefs(xml: string): Ref[] {
   return refs.list();
 }
 
+/**
+ * S29: Report → its report type. Standard report type names pass through
+ * as-is (recall over precision — the graph joins only what the index holds).
+ */
+export function extractReportRefs(xml: string): Ref[] {
+  const refs = new RefSet();
+  const m = xml.match(/<reportType>([^<]+)<\/reportType>/);
+  if (m?.[1]) refs.add('ReportType', m[1]);
+  return refs.list();
+}
+
+/**
+ * S29: Dashboard → the reports its components chart. <report> values are
+ * folder-qualified ('Folder/Name'), which is exactly the index key shape.
+ */
+export function extractDashboardRefs(xml: string): Ref[] {
+  const refs = new RefSet();
+  for (const m of xml.matchAll(/<report>([^<]+)<\/report>/g)) {
+    refs.add('Report', m[1]!);
+  }
+  return refs.list();
+}
+
 /** Case-insensitive lookup maps from the freshly indexed artifact set. */
 export interface KnownArtifacts {
   classes: Map<string, string>;
@@ -260,6 +283,10 @@ export function extractAllEdges(
       add(a.type, a.apiName, extractObjectXmlRefs(a.content, objectName, known));
     } else if (a.type === 'PermissionSet') {
       add(a.type, a.apiName, extractPermissionSetRefs(a.content));
+    } else if (a.type === 'Report') {
+      add(a.type, a.apiName, extractReportRefs(a.content));
+    } else if (a.type === 'Dashboard') {
+      add(a.type, a.apiName, extractDashboardRefs(a.content));
     }
   }
   return edges;

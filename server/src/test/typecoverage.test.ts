@@ -123,25 +123,26 @@ describe('S17 deployable types', () => {
   });
 
   it('PIN: deletions are NOT gated by the deployable-type allowlist', () => {
-    // Dashboard is not deployable through Contrail; deleting one must still build.
+    // EmailTemplate is not deployable through Contrail; deleting one must
+    // still build. (This pin used Dashboard until S29 made that deployable.)
     const built = buildDeployZip(
       [],
       [
-        { type: 'Dashboard', api_name: 'Ops-Weekly Dashboard' },
+        { type: 'EmailTemplate', api_name: 'Old_Welcome_Template' },
         { type: 'ManagedEventSubscription', api_name: 'Old_Sub' },
       ],
       V,
       noMeta,
     );
     expect(built.files).toContain('destructiveChangesPost.xml');
-    expect(built.destructiveXml).toContain('<name>Dashboard</name>');
+    expect(built.destructiveXml).toContain('<name>EmailTemplate</name>');
     expect(built.destructiveXml).toContain('<members>Old_Sub</members>');
   });
 
   it('an undeployable type still fails loudly on the additive path', () => {
-    expect(() => buildDeployZip([comp('Dashboard', 'X-Y', '<Dashboard/>')], [], V, noMeta)).toThrow(
-      /not deployable through Contrail/,
-    );
+    expect(() =>
+      buildDeployZip([comp('EmailTemplate', 'X-Y', '<EmailTemplate/>')], [], V, noMeta),
+    ).toThrow(/not deployable through Contrail/);
   });
 });
 
@@ -240,7 +241,9 @@ describe('S17 snapshot indexing', () => {
         'globalValueSets/Region.globalValueSet': strToU8('<GlobalValueSet/>'),
         'connectedApps/Contrail.connectedApp': strToU8('<ConnectedApp/>'),
         'managedEventSubscriptions/Sub.managedEventSubscription': strToU8('<ManagedEventSubscription/>'),
-        'dashboards/Ops.dashboard': strToU8('<Dashboard/>'), // still unmapped
+        // S29: nested foldered content indexes folder-qualified (was pinned
+        // unmapped before Dashboard became deployable).
+        'dashboards/Ops/Weekly.dashboard': strToU8('<Dashboard/>'),
       }),
     );
     const artifacts = indexSnapshotFiles(files, [], '2026-08-26T00:00:00.000Z');
@@ -257,7 +260,8 @@ describe('S17 snapshot indexing', () => {
     expect(keys.has('ListView:Invoice__c.All_Open')).toBe(true);
     expect(keys.has('RecordType:Invoice__c.Standard')).toBe(true);
     expect(keys.has('CustomField:Invoice__c.Amount__c')).toBe(true); // unchanged behavior
-    expect([...keys].some((k) => k.startsWith('Dashboard:') || k.includes('meta'))).toBe(false);
+    expect(keys.has('Dashboard:Ops/Weekly')).toBe(true);
+    expect([...keys].some((k) => k.includes('meta'))).toBe(false);
 
     // Child fragments carry their own block, not the whole container.
     const lv = artifacts.find((a) => a.type === 'ListView')!;
@@ -390,5 +394,232 @@ describe('S19: Layout and CustomMetadata', () => {
     );
     const artifacts = indexSnapshotFiles(files, [], '2026-08-27T00:00:00.000Z');
     expect(artifacts[0]!.apiName).toBe('Odd-100% Done Layout');
+  });
+});
+
+describe('S29: Report & Dashboard (foldered types)', () => {
+  const conn = { id: 'conn-1', alias: 'dev' } as ConnectionRecord;
+
+  it('places foldered content with the / preserved and the member literal', () => {
+    const built = buildDeployZip(
+      [
+        comp('Report', 'Ops_Reports/Weekly_Pipeline', '<Report/>'),
+        comp('Dashboard', 'Exec/Pipeline_Overview', '<Dashboard/>'),
+      ],
+      [],
+      V,
+      noMeta,
+    );
+    expect(built.files).toContain('reports/Ops_Reports/Weekly_Pipeline.report');
+    expect(built.files).toContain('dashboards/Exec/Pipeline_Overview.dashboard');
+    expect(built.packageXml).toContain('<name>Report</name>');
+    expect(built.packageXml).toContain('<members>Ops_Reports/Weekly_Pipeline</members>');
+    expect(built.packageXml).toContain('<name>Dashboard</name>');
+    expect(built.packageXml).toContain('<members>Exec/Pipeline_Overview</members>');
+  });
+
+  it('a folder component IS its -meta.xml and manifests as the CONTENT type', () => {
+    const folderDoc =
+      '<?xml version="1.0" encoding="UTF-8"?>\n<ReportFolder xmlns="http://soap.sforce.com/2006/04/metadata">\n' +
+      '  <name>Ops Reports</name>\n' +
+      '  <folderShares><accessLevel>View</accessLevel><sharedTo>AllInternalUsers</sharedTo>' +
+      '<sharedToType>Organization</sharedToType></folderShares>\n</ReportFolder>\n';
+    const built = buildDeployZip([comp('ReportFolder', 'Ops_Reports', folderDoc)], [], V, noMeta);
+    expect(built.files).toContain('reports/Ops_Reports-meta.xml');
+    // No separate content file, no ReportFolder types block in the manifest.
+    expect(built.files.filter((f) => f.startsWith('reports/'))).toEqual([
+      'reports/Ops_Reports-meta.xml',
+    ]);
+    expect(built.packageXml).toContain('<name>Report</name>');
+    expect(built.packageXml).toContain('<members>Ops_Reports</members>');
+    expect(built.packageXml).not.toContain('<name>ReportFolder</name>');
+    expect(zipText(built.zip, 'reports/Ops_Reports-meta.xml')).toContain('<folderShares>');
+  });
+
+  it('folder + report ship in ONE types block of one package', () => {
+    const built = buildDeployZip(
+      [
+        comp('ReportFolder', 'Ops_Reports', '<ReportFolder/>'),
+        comp('Report', 'Ops_Reports/Weekly_Pipeline', '<Report/>'),
+      ],
+      [],
+      V,
+      noMeta,
+    );
+    expect(built.files).toContain('reports/Ops_Reports-meta.xml');
+    expect(built.files).toContain('reports/Ops_Reports/Weekly_Pipeline.report');
+    const reportBlocks = built.packageXml.match(/<name>Report<\/name>/g) ?? [];
+    expect(reportBlocks).toHaveLength(1);
+    expect(built.packageXml).toContain('<members>Ops_Reports</members>');
+    expect(built.packageXml).toContain('<members>Ops_Reports/Weekly_Pipeline</members>');
+  });
+
+  it('unfiled$public names validate and keep the $ literal in the zip path', () => {
+    const built = buildDeployZip(
+      [comp('Report', 'unfiled$public/Quick_Check', '<Report/>')],
+      [],
+      V,
+      noMeta,
+    );
+    expect(built.files).toContain('reports/unfiled$public/Quick_Check.report');
+    expect(built.packageXml).toContain('<members>unfiled$public/Quick_Check</members>');
+  });
+
+  it('rejects every malformed foldered name; flat types still reject any slash', () => {
+    const bad = [
+      'Ops/../evil',
+      'a/b/c',
+      '/Ops',
+      'Ops/',
+      'Ops//x',
+      'Ops\\x',
+      'Ops/We ekly',
+      'Ops/(Weekly)',
+      'Weekly', // foldered types REQUIRE the folder qualifier
+    ];
+    for (const name of bad) {
+      expect(
+        () => buildDeployZip([comp('Report', name, '<Report/>')], [], V, noMeta),
+        `Report "${name}" must be rejected`,
+      ).toThrow(/invalid/);
+    }
+    // Folder components: single segment only.
+    expect(() =>
+      buildDeployZip([comp('ReportFolder', 'Ops/Nested', '<ReportFolder/>')], [], V, noMeta),
+    ).toThrow(/invalid/);
+    // Flat types keep the hard no-slash rule.
+    expect(() =>
+      buildDeployZip([comp('ApexClass', 'a/b', 'class a {}')], [], V, noMeta),
+    ).toThrow(/invalid component name/);
+    // Deletions run the same grammar for registered foldered types.
+    expect(() => buildDeployZip([], [{ type: 'Report', api_name: 'Ops/../evil' }], V, noMeta)).toThrow(
+      /invalid/,
+    );
+  });
+
+  it('deployZipEntryPath matches the builder for foldered and folder components', async () => {
+    const { deployZipEntryPath } = await import('../deploy/package.js');
+    const report = deployZipEntryPath('Report', 'Ops_Reports/Weekly_Pipeline');
+    expect(report).toEqual({ path: 'reports/Ops_Reports/Weekly_Pipeline.report', child: false });
+    const folder = deployZipEntryPath('ReportFolder', 'Ops_Reports');
+    expect(folder).toEqual({ path: 'reports/Ops_Reports-meta.xml', child: false });
+    const built = buildDeployZip(
+      [
+        comp('Report', 'Ops_Reports/Weekly_Pipeline', '<Report/>'),
+        comp('ReportFolder', 'Ops_Reports', '<ReportFolder/>'),
+      ],
+      [],
+      V,
+      noMeta,
+    );
+    expect(built.files).toContain((report as { path: string }).path);
+    expect(built.files).toContain((folder as { path: string }).path);
+  });
+
+  it('deleting foldered content and folders remaps to the content type manifest', () => {
+    const built = buildDeployZip(
+      [],
+      [
+        { type: 'Report', api_name: 'Ops_Reports/Old_Report' },
+        { type: 'ReportFolder', api_name: 'Dead_Folder' },
+      ],
+      V,
+      noMeta,
+    );
+    expect(built.destructiveXml).toContain('<name>Report</name>');
+    expect(built.destructiveXml).toContain('<members>Ops_Reports/Old_Report</members>');
+    expect(built.destructiveXml).toContain('<members>Dead_Folder</members>');
+    expect(built.destructiveXml).not.toContain('<name>ReportFolder</name>');
+  });
+
+  it('warns honestly: modify = whole-doc replace; add = folder-sharing governs access', () => {
+    const dbMod = { getArtifact: () => ({ filePath: 'x' }) } as unknown as ContrailDb;
+    const storeOld = { readCurrentFile: () => '<old/>' } as unknown as SnapshotStore;
+    const modified = analyzeChanges(
+      dbMod,
+      storeOld,
+      conn,
+      [comp('Report', 'Ops/Weekly', '<Report>new</Report>')],
+      [],
+    );
+    expect(modified.changes[0]!.warnings.join(' ')).toMatch(/WHOLE-DOCUMENT REPLACE/);
+
+    const dbAdd = { getArtifact: () => null } as unknown as ContrailDb;
+    const storeNone = { readCurrentFile: () => null } as unknown as SnapshotStore;
+    const added = analyzeChanges(
+      dbAdd,
+      storeNone,
+      conn,
+      [comp('Dashboard', 'Exec/Overview', '<Dashboard/>')],
+      [],
+    );
+    expect(added.changes[0]!.warnings.join(' ')).toMatch(/FOLDER's sharing/);
+    expect(added.changes[0]!.warnings.join(' ')).toMatch(/grants nobody new access/);
+
+    const folderMod = analyzeChanges(
+      dbMod,
+      storeOld,
+      conn,
+      [comp('ReportFolder', 'Ops', '<ReportFolder>new</ReportFolder>')],
+      [],
+    );
+    expect(folderMod.changes[0]!.warnings.join(' ')).toMatch(/FOLDER REPLACE/);
+  });
+
+  it('permission coverage stays SILENT for reports/dashboards (folder sharing, not FLS)', () => {
+    const cov = analyzePermissionCoverage([
+      comp('Report', 'Ops/Weekly', '<Report/>'),
+      comp('Dashboard', 'Exec/Overview', '<Dashboard/>'),
+    ]);
+    expect(cov.uncovered).toEqual([]);
+    expect(cov.warning).toBeNull();
+  });
+
+  it('indexes nested content folder-qualified, folder -meta.xml as folder types', () => {
+    const files = new Map(
+      Object.entries({
+        'reports/Ops-meta.xml': strToU8('<ReportFolder><name>Ops</name></ReportFolder>'),
+        'reports/Ops/Weekly.report': strToU8('<Report>ops</Report>'),
+        'reports/Sales/Weekly.report': strToU8('<Report>sales</Report>'),
+        'reports/unfiled$public/Quick.report': strToU8('<Report/>'),
+        'dashboards/Exec-meta.xml': strToU8('<DashboardFolder/>'),
+        'dashboards/Exec/Overview.dashboard': strToU8('<Dashboard/>'),
+      }),
+    );
+    const artifacts = indexSnapshotFiles(files, [], '2026-09-08T00:00:00.000Z');
+    const keys = new Set(artifacts.map((a) => `${a.type}:${a.apiName}`));
+    expect(keys.has('Report:Ops/Weekly')).toBe(true);
+    expect(keys.has('Report:Sales/Weekly')).toBe(true); // same leaf, distinct rows
+    expect(keys.has('Report:unfiled$public/Quick')).toBe(true);
+    expect(keys.has('ReportFolder:Ops')).toBe(true);
+    expect(keys.has('Dashboard:Exec/Overview')).toBe(true);
+    expect(keys.has('DashboardFolder:Exec')).toBe(true);
+    // The two same-leaf reports carry their own content — no clobbering.
+    const ops = artifacts.find((a) => a.apiName === 'Ops/Weekly')!;
+    const sales = artifacts.find((a) => a.apiName === 'Sales/Weekly')!;
+    expect(ops.content).toContain('ops');
+    expect(sales.content).toContain('sales');
+    expect(ops.filePath).toBe('reports/Ops/Weekly.report');
+  });
+
+  it('decodes percent-escapes per segment, never the separator', () => {
+    const files = new Map(
+      Object.entries({
+        'reports/Ops/Weekly %28Q3%29.report': strToU8('<Report/>'),
+      }),
+    );
+    const artifacts = indexSnapshotFiles(files, [], '2026-09-08T00:00:00.000Z');
+    expect(artifacts[0]!.apiName).toBe('Ops/Weekly (Q3)');
+    expect(artifacts[0]!.filePath).toBe('reports/Ops/Weekly %28Q3%29.report');
+  });
+
+  it('round-trip: an indexed foldered name deploys to the same entry path, member literal', () => {
+    const files = new Map(
+      Object.entries({ 'reports/Ops/Weekly.report': strToU8('<Report/>') }),
+    );
+    const [indexed] = indexSnapshotFiles(files, [], '2026-09-08T00:00:00.000Z');
+    const built = buildDeployZip([comp('Report', indexed!.apiName, '<Report/>')], [], V, noMeta);
+    expect(built.files).toContain(indexed!.filePath);
+    expect(built.packageXml).toContain(`<members>${indexed!.apiName}</members>`);
   });
 });

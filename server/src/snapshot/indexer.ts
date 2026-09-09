@@ -49,6 +49,20 @@ const SIMPLE_DIR_TYPES: Array<{ dir: string; ext: string; type: string }> = [
   { dir: 'customMetadata', ext: '.md', type: 'CustomMetadata' },
 ];
 
+/**
+ * S29: folder-based analytics types. Content files nest one level under the
+ * type dir (reports/Ops/Weekly.report → api_name 'Ops/Weekly' — the folder
+ * segment is PART of the name; dropping it would collide same-leaf reports
+ * across folders on the index's UNIQUE key and kill the whole refresh), and
+ * the folder's own definition IS a -meta.xml directly under the dir
+ * (reports/Ops-meta.xml → ReportFolder 'Ops'), which must be caught BEFORE
+ * the generic -meta.xml skip.
+ */
+const FOLDERED_DIR_TYPES: Array<{ dir: string; ext: string; type: string; folderType: string }> = [
+  { dir: 'reports', ext: '.report', type: 'Report', folderType: 'ReportFolder' },
+  { dir: 'dashboards', ext: '.dashboard', type: 'Dashboard', folderType: 'DashboardFolder' },
+];
+
 export function indexSnapshotFiles(
   files: Map<string, Uint8Array>,
   fileProps: FileProperties[],
@@ -79,7 +93,41 @@ export function indexSnapshotFiles(
   };
 
   for (const [relPath, bytes] of files) {
-    if (relPath === 'package.xml' || relPath.endsWith('-meta.xml')) continue;
+    if (relPath === 'package.xml') continue;
+
+    // Foldered analytics dirs first — their folder definitions are -meta.xml
+    // files the generic skip below would otherwise swallow.
+    const foldered = FOLDERED_DIR_TYPES.find((f) => relPath.startsWith(`${f.dir}/`));
+    if (foldered) {
+      const inner = relPath.slice(foldered.dir.length + 1);
+      if (inner.endsWith('-meta.xml')) {
+        const name = inner.slice(0, -'-meta.xml'.length);
+        // A folder definition, unless it's a content file's meta sibling
+        // (reports never ship those, but guard anyway).
+        if (!name.endsWith(foldered.ext)) {
+          push(
+            foldered.folderType,
+            name.split('/').map(decodeSegment).join('/'),
+            relPath,
+            Buffer.from(bytes).toString('utf8'),
+          );
+        }
+        continue;
+      }
+      if (inner.endsWith(foldered.ext)) {
+        const apiName = inner
+          .slice(0, -foldered.ext.length)
+          .split('/')
+          .map(decodeSegment)
+          .join('/');
+        push(foldered.type, apiName, relPath, Buffer.from(bytes).toString('utf8'));
+        continue;
+      }
+      log('debug', 'snapshot file not indexed (unmapped type)', { relPath });
+      continue;
+    }
+
+    if (relPath.endsWith('-meta.xml')) continue;
     const content = Buffer.from(bytes).toString('utf8');
     const name = fileBaseName(relPath);
 
@@ -144,12 +192,18 @@ function blockFullName(block: string): string | null {
 
 function fileBaseName(relPath: string): string {
   const base = relPath.split('/').at(-1) ?? relPath;
-  const stripped = base.replace(/\.[^.]+$/, '');
-  // Retrieve zips percent-encode special characters in FILE names (a layout
-  // named "Account (Marketing) Layout" arrives as "Account %28Marketing%29
-  // Layout.layout") while fileProperties carry the decoded fullName. Decode
-  // so the index key matches the real API name; a literal '%' that is not an
-  // escape leaves the name as-is.
+  return decodeSegment(base.replace(/\.[^.]+$/, ''));
+}
+
+/**
+ * Decode ONE path segment. Retrieve zips percent-encode special characters in
+ * FILE names (a layout named "Account (Marketing) Layout" arrives as
+ * "Account %28Marketing%29 Layout.layout") while fileProperties carry the
+ * decoded fullName. Decode so the index key matches the real API name; a
+ * literal '%' that is not an escape leaves the name as-is. Foldered types
+ * decode per segment so the '/' separator is never touched.
+ */
+function decodeSegment(stripped: string): string {
   try {
     return decodeURIComponent(stripped);
   } catch {

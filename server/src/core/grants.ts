@@ -30,7 +30,7 @@ export const GRANT_DESCRIPTIONS: Readonly<Record<Grant, string>> = {
   diagnostics_read:
     'Read debug logs and flow error details, run Apex tests (test transactions always ' +
     'roll back), and set trace flags. May expose incidental record data present in logs.',
-  data_read: 'Run SOQL queries and read records (row-capped).',
+  data_read: 'Run SOQL queries, read records, and run reports for their data (row-capped).',
   data_write:
     'Propose and execute DML and anonymous Apex scripts. Requires data_read. Every write ' +
     'requires explicit human confirmation.',
@@ -118,6 +118,9 @@ export const TOOL_GRANT_MAP: Readonly<Record<string, Grant | null>> = {
   // Resolved entirely from permission sobjects the data API already exposes
   // to data_read — the tool adds interpretation, not new reach.
   explain_access: 'data_read',
+  // S29: runs a saved report through the synchronous Analytics REST API —
+  // report OUTPUT is record data, the same class soql_query reaches.
+  get_report_data: 'data_read',
   get_debug_logs: 'diagnostics_read',
   run_apex_tests: 'diagnostics_read',
   get_flow_errors: 'diagnostics_read',

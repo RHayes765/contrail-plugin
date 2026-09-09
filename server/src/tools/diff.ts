@@ -15,7 +15,14 @@ import { semanticDiff } from '../diff/semantic.js';
  */
 
 const TYPE_RE = /^[A-Za-z]+$/;
-const NAME_RE = /^[A-Za-z0-9_.\- ]+$/;
+// Aligned with deploy/package.ts naming: parens/apostrophe/ampersand are
+// legal in layout names, '$' exists for unfiled$public, and foldered types
+// (Report/Dashboard) carry at most ONE '/' ('Folder/Name'). Path safety:
+// snapshot reads resolve + prefix-check containment, and '..'/'\' are
+// rejected outright at the gate.
+const NAME_RE = /^[A-Za-z0-9_.\- ()'&$]+(\/[A-Za-z0-9_.\- ()'&$]+)?$/;
+const nameOk = (name: string): boolean =>
+  NAME_RE.test(name) && !name.includes('..') && !name.includes('\\');
 const BUCKET_LIST_CAP = 50;
 
 export function registerDiffTools(server: McpServer, deps: ToolDeps): void {
@@ -146,7 +153,7 @@ export function registerDiffTools(server: McpServer, deps: ToolDeps): void {
     async (args: { connection_a: string; connection_b: string; type: string; name: string }) =>
       guarded(() => {
         if (!TYPE_RE.test(args.type)) return fail('invalid metadata type');
-        if (!NAME_RE.test(args.name)) return fail('invalid artifact name');
+        if (!nameOk(args.name)) return fail('invalid artifact name');
         const [a, b] = requireBoth(args.connection_a, args.connection_b, 'diff_artifact');
 
         const aContent = readArtifactFromSnapshot(deps, a, args.type, args.name);

@@ -279,6 +279,36 @@ describe('get_org_changes', () => {
     expect((body.totals as Record<string, number>).gone_from_org).toBe(1);
   });
 
+  it('S29: foldered types compare on folder-qualified names — never falsely gone', async () => {
+    db.replaceArtifactsForTypes(
+      connId,
+      ['Report', 'ReportFolder'],
+      [
+        artifact('Report', 'Ops/Weekly', '2026-08-01T00:00:00.000Z'),
+        artifact('Report', 'Ops/Dead', '2026-08-01T00:00:00.000Z'),
+        artifact('ReportFolder', 'Ops', '2026-08-01T00:00:00.000Z'),
+      ],
+    );
+    orgInventory = [
+      { type: 'ReportFolder', fullName: 'Ops', lastModifiedDate: '2026-08-01T00:00:00.000Z', lastModifiedByName: 'Jane Admin' },
+      // The stub answers per-folder Report queries with the folder-qualified
+      // fullName, exactly as the live API does.
+      { type: 'Report', fullName: 'Ops/Weekly', lastModifiedDate: '2026-08-20T00:00:00.000Z', lastModifiedByName: 'Jane Admin' },
+      // Ops/Dead is genuinely deleted from the org (absent here).
+    ];
+    const result = await client.callTool({
+      name: 'get_org_changes',
+      arguments: { connection: 'drift-org' },
+    });
+    const body = JSON.parse(textOf(result)) as Record<string, unknown>;
+    const gone = (body.gone_from_org as Array<Record<string, unknown>>).map((g) => g.api_name);
+    // The pre-S29 failure mode was EVERY report landing here.
+    expect(gone).toEqual(['Ops/Dead']);
+    const modified = (body.modified as Array<Record<string, unknown>>).map((m) => m.api_name);
+    expect(modified).toEqual(['Ops/Weekly']);
+    expect((body.totals as Record<string, number>).gone_from_org).toBe(1);
+  });
+
   it('refuses without a snapshot, on child types, and without metadata_read', async () => {
     const noSnap = await client.callTool({
       name: 'get_org_changes',

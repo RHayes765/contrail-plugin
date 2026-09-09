@@ -74,6 +74,92 @@ describe('MetadataSoapClient', () => {
     });
   });
 
+  it('S29: foldered types expand to per-folder queries, folder BEFORE type', async () => {
+    const bodies: string[] = [];
+    vi.stubGlobal('fetch', async (_url: unknown, init?: RequestInit) => {
+      const body = String(init?.body);
+      bodies.push(body);
+      // Folder enumeration returns two report folders; per-folder calls
+      // return one folder-qualified report each.
+      if (body.includes('<met:type>ReportFolder</met:type>')) {
+        return new Response(
+          soapEnvelope(
+            `<listMetadataResponse xmlns="http://soap.sforce.com/2006/04/metadata">
+               <result><fullName>Ops</fullName><type>ReportFolder</type><fileName>reports/Ops</fileName><id>00l1</id>
+                 <lastModifiedDate>2026-09-01T00:00:00.000Z</lastModifiedDate><lastModifiedByName>Ryley</lastModifiedByName></result>
+               <result><fullName>Sales</fullName><type>ReportFolder</type><fileName>reports/Sales</fileName><id>00l2</id>
+                 <lastModifiedDate>2026-09-01T00:00:00.000Z</lastModifiedDate><lastModifiedByName>Ryley</lastModifiedByName></result>
+             </listMetadataResponse>`,
+          ),
+        );
+      }
+      // A chunked call carries up to 3 folder queries — answer each one.
+      const folders = [...body.matchAll(/<met:folder>([^<]+)<\/met:folder>/g)]
+        .map((m) => m[1]!)
+        .filter((f) => f !== 'unfiled$public');
+      if (folders.length > 0) {
+        const results = folders
+          .map(
+            (folder) =>
+              `<result><fullName>${folder}/Weekly</fullName><type>Report</type>
+                 <fileName>reports/${folder}/Weekly.report</fileName><id>00O1</id>
+                 <lastModifiedDate>2026-09-02T00:00:00.000Z</lastModifiedDate><lastModifiedByName>Ryley</lastModifiedByName></result>`,
+          )
+          .join('');
+        return new Response(
+          soapEnvelope(
+            `<listMetadataResponse xmlns="http://soap.sforce.com/2006/04/metadata">${results}</listMetadataResponse>`,
+          ),
+        );
+      }
+      return new Response(
+        soapEnvelope(
+          `<listMetadataResponse xmlns="http://soap.sforce.com/2006/04/metadata"></listMetadataResponse>`,
+        ),
+      );
+    });
+    const client = new MetadataSoapClient(fakeTokenMgr(['AT']), CONN, 'v63.0');
+    const props = await client.listMetadata(['Report']);
+
+    // Pass 1: one flat call querying the folder-enumeration type, no folder element.
+    expect(bodies[0]).toContain('<met:type>ReportFolder</met:type>');
+    expect(bodies[0]).not.toContain('<met:folder>');
+    // Pass 2: 3 folder queries (Ops, Sales, unfiled$public) → one chunked call,
+    // with <met:folder> BEFORE <met:type> (WSDL sequence order).
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toMatch(
+      /<met:queries><met:folder>Ops<\/met:folder><met:type>Report<\/met:type><\/met:queries>/,
+    );
+    expect(bodies[1]).toContain('<met:folder>Sales</met:folder>');
+    expect(bodies[1]).toContain('<met:folder>unfiled$public</met:folder>');
+
+    const byName = new Map(props.map((p) => [`${p.type}:${p.fullName}`, p]));
+    expect(byName.has('ReportFolder:Ops')).toBe(true);
+    expect(byName.has('ReportFolder:Sales')).toBe(true);
+    expect(byName.has('Report:Ops/Weekly')).toBe(true);
+    expect(byName.has('Report:Sales/Weekly')).toBe(true);
+  });
+
+  it('S29: asking for Report and ReportFolder together enumerates folders once', async () => {
+    const bodies: string[] = [];
+    vi.stubGlobal('fetch', async (_url: unknown, init?: RequestInit) => {
+      bodies.push(String(init?.body));
+      return new Response(
+        soapEnvelope(
+          `<listMetadataResponse xmlns="http://soap.sforce.com/2006/04/metadata"></listMetadataResponse>`,
+        ),
+      );
+    });
+    const client = new MetadataSoapClient(fakeTokenMgr(['AT']), CONN, 'v63.0');
+    await client.listMetadata(['Report', 'ReportFolder']);
+    const folderTypeQueries = bodies
+      .join('')
+      .match(/<met:type>ReportFolder<\/met:type>/g);
+    expect(folderTypeQueries).toHaveLength(1);
+    // No folders found → only the unfiled$public content query follows.
+    expect(bodies[1]).toContain('<met:folder>unfiled$public</met:folder>');
+  });
+
   it('escapes member names in retrieve requests', async () => {
     let body = '';
     vi.stubGlobal('fetch', async (_url: unknown, init?: RequestInit) => {

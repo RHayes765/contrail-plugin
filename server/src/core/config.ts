@@ -115,7 +115,11 @@ export const DEFAULT_CONFIG: ContrailConfig = {
     // ExternalCredential, PlatformEventChannel[Member],
     // ManagedEventSubscription) are deployable and indexable but kept OUT of
     // the default manifest — retrieve them explicitly via refresh_snapshot
-    // types, or add them here.
+    // types, or add them here. S29: analytics types (Report, Dashboard and
+    // their folders) are likewise explicit-refresh-only — big orgs carry
+    // thousands of reports and every folder costs a listMetadata query;
+    // refresh_snapshot types:['Report'] pulls ReportFolder along
+    // automatically (they share a snapshot directory).
     types: [
       'ApexClass',
       'ApexTrigger',

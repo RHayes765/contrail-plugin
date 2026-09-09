@@ -154,7 +154,12 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
                     'CustomTab, FlexiPage, CustomApplication, ReportType, GlobalValueSet, ' +
                     'ConnectedApp, NamedCredential, ExternalCredential, PlatformEventChannel(Member), ' +
                     'ManagedEventSubscription, Layout, CustomMetadata (records, dotted ' +
-                    'Type.Record names), or child types CustomField / ValidationRule / ' +
+                    'Type.Record names), Report / Dashboard (folder-qualified ' +
+                    '"FolderDevName/Name" api_names; deploy the ReportFolder/DashboardFolder ' +
+                    'component first or in the same package for a new folder), ' +
+                    'ReportFolder / DashboardFolder (content = the whole <ReportFolder> doc ' +
+                    'with folderShares — folder sharing is what makes reports visible), ' +
+                    'or child types CustomField / ValidationRule / ' +
                     'CustomLabel / ListView / RecordType.',
                 ),
               api_name: z.string().describe('Full API name; children dotted (Account.MyField__c).'),

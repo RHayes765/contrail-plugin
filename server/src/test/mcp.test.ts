@@ -89,6 +89,7 @@ describe('MCP surface', () => {
       'get_org_changes',
       'get_permissions',
       'get_record',
+      'get_report_data',
       'get_setup_audit',
       'list_connections',
       'list_metadata',

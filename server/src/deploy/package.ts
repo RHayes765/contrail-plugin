@@ -38,16 +38,36 @@ export interface ComponentChange {
 }
 
 /** File placement per deployable type (metadata format). */
-const FILE_TYPES: Record<
-  string,
-  {
-    dir: string;
-    ext: string;
-    metaRoot?: string;
-    /** Default -meta.xml when the snapshot has none (types whose meta needs more than apiVersion+status). */
-    metaXml?: (apiVersion: string, apiName: string) => string;
-  }
-> = {
+interface FileSpec {
+  dir: string;
+  ext: string;
+  metaRoot?: string;
+  /** Default -meta.xml when the snapshot has none (types whose meta needs more than apiVersion+status). */
+  metaXml?: (apiVersion: string, apiName: string) => string;
+  /**
+   * S29: folder-based analytics types. api_name is "FolderDevName/Name" —
+   * exactly one '/', each segment on the tight FOLDER_SEGMENT_RE grammar
+   * ('$' only for unfiled$public-style system folders). The '/' survives into
+   * the zip entry path; segments are percent-encoded independently.
+   */
+  foldered?: true;
+  /**
+   * S29: the component IS its -meta.xml (report/dashboard folder definitions):
+   * the file is `${dir}/${name}-meta.xml` and the proposed content is the
+   * whole document (root <ReportFolder>/<DashboardFolder>, carrying the
+   * folderShares that govern who can see the folder's contents).
+   */
+  metaOnly?: true;
+  /**
+   * S29: package.xml <name> when it differs from the Contrail type. Folders
+   * address as members of their CONTENT type in retrieve/deploy/destructive
+   * manifests (<members>Ops</members> under <name>Report</name>) — the
+   * ReportFolder/DashboardFolder names exist only for listMetadata.
+   */
+  manifestType?: string;
+}
+
+const FILE_TYPES: Record<string, FileSpec> = {
   ApexClass: { dir: 'classes', ext: '.cls', metaRoot: 'ApexClass' },
   ApexTrigger: { dir: 'triggers', ext: '.trigger', metaRoot: 'ApexTrigger' },
   Flow: { dir: 'flows', ext: '.flow' },
@@ -97,6 +117,16 @@ const FILE_TYPES: Record<
   // with the type name WITHOUT the __mdt suffix; metadata format uses the
   // bare .md extension.
   CustomMetadata: { dir: 'customMetadata', ext: '.md' },
+  // S29: analytics types (folder-based). EXPLICIT-REFRESH-ONLY — absent from
+  // the default snapshot manifest (S17 precedent; big orgs carry thousands of
+  // reports). api_name is 'FolderDevName/Name' ('unfiled$public/Name' for
+  // unfiled reports). Folders deploy as members of the CONTENT type in
+  // package.xml (manifestType), their file being the -meta.xml itself; a
+  // report deployed into a NEW folder needs that folder in the same package.
+  Report: { dir: 'reports', ext: '.report', foldered: true },
+  Dashboard: { dir: 'dashboards', ext: '.dashboard', foldered: true },
+  ReportFolder: { dir: 'reports', ext: '', metaOnly: true, manifestType: 'Report' },
+  DashboardFolder: { dir: 'dashboards', ext: '', metaOnly: true, manifestType: 'Dashboard' },
 };
 
 const XMLNS_META = 'http://soap.sforce.com/2006/04/metadata';
@@ -155,6 +185,13 @@ const CHILD_TYPES: Record<
 // object ships an "Object (Marketing) Layout"); path safety stays with the
 // explicit '/', '\', '..' guards in validateTypeAndName.
 const NAME_RE = /^[A-Za-z0-9_.\- ()'&]+$/;
+// One path segment of a foldered fullName (folder dev names and report/
+// dashboard dev names: no spaces/parens; '$' exists only for the
+// unfiled$public system folder). Deliberately tighter than NAME_RE — these
+// names become nested filesystem paths. Depth is capped at one '/' in
+// validateTypeAndName; if Lightning nested report subfolders ever surface as
+// Parent/Child fullNames (unverified), the cap is the one thing to revisit.
+const FOLDER_SEGMENT_RE = /^[A-Za-z0-9_$]+$/;
 const XMLNS = 'http://soap.sforce.com/2006/04/metadata';
 
 export interface BuiltPackage {
@@ -188,8 +225,7 @@ export function buildDeployZip(
     validateTypeAndName(c.type, c.api_name);
     const fileSpec = FILE_TYPES[c.type];
     if (fileSpec) {
-      const short = c.api_name;
-      const path = `${fileSpec.dir}/${fileSafeName(short)}${fileSpec.ext}`;
+      const path = zipPathFor(fileSpec, c.api_name);
       files.set(path, strToU8(c.content));
       if (fileSpec.metaRoot) {
         const meta =
@@ -200,7 +236,7 @@ export function buildDeployZip(
             `    <status>Active</status>\n</${fileSpec.metaRoot}>\n`;
         files.set(`${path}-meta.xml`, strToU8(meta));
       }
-      addMember(c.type, c.api_name);
+      addMember(fileSpec.manifestType ?? c.type, c.api_name);
       continue;
     }
     const childSpec = CHILD_TYPES[c.type];
@@ -260,9 +296,13 @@ export function buildDeployZip(
   if (deletions.length > 0) {
     const delMembers = new Map<string, string[]>();
     for (const d of deletions) {
-      const list = delMembers.get(d.type) ?? [];
+      // Folder components delete as members of their content type too
+      // (deleting ReportFolder:Ops emits <members>Ops</members> under
+      // <name>Report</name>); unknown types keep the ungated literal path.
+      const manifestType = FILE_TYPES[d.type]?.manifestType ?? d.type;
+      const list = delMembers.get(manifestType) ?? [];
       list.push(d.api_name);
-      delMembers.set(d.type, list);
+      delMembers.set(manifestType, list);
     }
     destructiveXml = manifestXml(delMembers, apiVersionNumber, 'Package');
     // Post-destructive: additive changes land before deletions, so a rename
@@ -314,6 +354,34 @@ export function fileSafeName(name: string): string {
 }
 
 /**
+ * S29: one segment of a foldered path. Like fileSafeName but keeps '$'
+ * literal — retrieve zips carry unfiled$public unencoded, and the pairing
+ * with package.xml members is what the Metadata API matches on.
+ */
+function fileSafeSegment(s: string): string {
+  return s.replace(/[^A-Za-z0-9 _.\-$]/g, (ch) =>
+    Array.from(new TextEncoder().encode(ch))
+      .map((b) => '%' + b.toString(16).toUpperCase().padStart(2, '0'))
+      .join(''),
+  );
+}
+
+/**
+ * Zip entry path for a FILE_TYPES component. The ONE naming authority shared
+ * by buildDeployZip and deployZipEntryPath, so the builder and the S28
+ * manifest-capture reader cannot drift. Foldered names keep their '/' with
+ * each segment encoded independently; metaOnly components (folder
+ * definitions) ARE their -meta.xml.
+ */
+function zipPathFor(spec: FileSpec, apiName: string): string {
+  if (spec.metaOnly) return `${spec.dir}/${fileSafeSegment(apiName)}-meta.xml`;
+  const name = spec.foldered
+    ? apiName.split('/').map(fileSafeSegment).join('/')
+    : fileSafeName(apiName);
+  return `${spec.dir}/${name}${spec.ext}`;
+}
+
+/**
  * Where a component's content lives inside a deploy zip built by
  * buildDeployZip — the ONE place that knows the naming (S28 manifest capture
  * reads deployed bytes back out of the frozen zip through this, so a
@@ -341,12 +409,40 @@ export function deployZipEntryPath(
   }
   const spec = FILE_TYPES[type];
   if (!spec) return null;
-  return { path: `${spec.dir}/${fileSafeName(apiName)}${spec.ext}`, child: false };
+  return { path: zipPathFor(spec, apiName), child: false };
 }
 
 function validateTypeAndName(type: string, name: string): void {
   if (!/^[A-Za-z]+$/.test(type)) throw new ContrailError(`invalid type "${type}"`, 'bad_component');
-  if (!NAME_RE.test(name) || name.includes('/') || name.includes('\\') || name.includes('..')) {
+  // Absolute rejects come FIRST for every name shape — defense in depth on
+  // values that become filesystem paths and zip entry names. Pinned by test.
+  if (name.includes('\\') || name.includes('..')) {
+    throw new ContrailError(`invalid component name "${name}"`, 'bad_component');
+  }
+  const spec = FILE_TYPES[type];
+  if (spec?.foldered) {
+    // Exactly one '/', both segments tight — leading/trailing/double slashes
+    // and traversal are unrepresentable in this grammar.
+    const segs = name.split('/');
+    if (segs.length !== 2 || segs.some((s) => !FOLDER_SEGMENT_RE.test(s))) {
+      throw new ContrailError(
+        `invalid ${type} name "${name}" — expected "FolderDevName/Name" (letters, digits, underscores)`,
+        'bad_component',
+      );
+    }
+    return;
+  }
+  if (spec?.metaOnly) {
+    // Folder components: a single folder dev-name segment, no slash.
+    if (!FOLDER_SEGMENT_RE.test(name)) {
+      throw new ContrailError(
+        `invalid ${type} name "${name}" — a folder dev name (letters, digits, underscores)`,
+        'bad_component',
+      );
+    }
+    return;
+  }
+  if (!NAME_RE.test(name) || name.includes('/')) {
     throw new ContrailError(`invalid component name "${name}"`, 'bad_component');
   }
 }
@@ -400,12 +496,24 @@ export function analyzeChanges(
       // Full-document UI types replace, never merge: an element missing from
       // the proposed content is REMOVED from the org's definition.
       if (
-        (c.type === 'FlexiPage' || c.type === 'CustomApplication' || c.type === 'Layout') &&
+        (c.type === 'FlexiPage' ||
+          c.type === 'CustomApplication' ||
+          c.type === 'Layout' ||
+          c.type === 'Report' ||
+          c.type === 'Dashboard') &&
         change === 'modify'
       ) {
         warnings.push(
           `WHOLE-DOCUMENT REPLACE — this deploy fully replaces the org's ${c.type}; ` +
             `anything not present in the proposed content is removed.`,
+        );
+      }
+      // Folder definitions replace their sharing wholesale: the folderShares
+      // in this content ARE the folder's sharing after the deploy.
+      if ((c.type === 'ReportFolder' || c.type === 'DashboardFolder') && change === 'modify') {
+        warnings.push(
+          `FOLDER REPLACE — the folderShares in this content fully replace the ` +
+            `folder's sharing; shares omitted here are revoked.`,
         );
       }
       // Custom metadata records deploy as full replacements too: a field with
@@ -424,6 +532,16 @@ export function analyzeChanges(
       warnings.push(
         `NEW LAYOUT IS NOT ASSIGNED by this deploy — profiles keep their current ` +
           `layout until layoutAssignments change (Profile metadata or Setup).`,
+      );
+    }
+    // Report/dashboard access is FOLDER sharing, not permission sets — no
+    // permission-coverage arm can exist for these (see the note in
+    // analyzePermissionCoverage), so the honesty lives here instead.
+    if ((c.type === 'Report' || c.type === 'Dashboard') && change === 'add') {
+      warnings.push(
+        `NEW ${c.type.toUpperCase()} visibility is governed by its FOLDER's sharing ` +
+          `(folderShares on the folder component), not by permission sets — this ` +
+          `deploy grants nobody new access by itself.`,
       );
     }
     changes.push({ type: c.type, api_name: c.api_name, change, warnings, ...sourceOf(c) });
@@ -535,6 +653,11 @@ function isGranted(containerText: string, need: PermissionNeed): boolean {
  * deploy, it warns so the human isn't surprised when new metadata is invisible.
  * Custom fields authored inline in a full .object file are enumerated too, and a
  * grant must be actually enabled (not merely mentioned) to count as coverage.
+ *
+ * Deliberately NO arm for Report/Dashboard: their access is folder sharing
+ * (folderShares on the folder component), which no PermissionSet grants — an
+ * arm here would flag every report deploy as uncovered with advice the human
+ * cannot act on. The folder-sharing honesty warning lives in analyzeChanges.
  */
 export function analyzePermissionCoverage(components: ProposedComponent[]): PermissionCoverage {
   const containers = components.filter((c) => c.type === 'PermissionSet' || c.type === 'Profile');

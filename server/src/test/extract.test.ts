@@ -127,3 +127,44 @@ describe('extractAllEdges', () => {
     expect(edges.every((e) => e.source === 'extractor')).toBe(true);
   });
 });
+
+describe('S29: report & dashboard extractors', () => {
+  it('Report → its ReportType; Dashboard → its folder-qualified reports', async () => {
+    const { extractReportRefs, extractDashboardRefs } = await import('../deps/extract.js');
+    const reportRefs = extractReportRefs(
+      '<Report><reportType>Invoices_with_Accounts</reportType><name>Weekly</name></Report>',
+    );
+    expect(reportRefs).toEqual([
+      { toType: 'ReportType', toName: 'Invoices_with_Accounts' },
+    ]);
+
+    const dashRefs = extractDashboardRefs(
+      '<Dashboard><leftSection><components><report>Ops/Weekly</report></components>' +
+        '<components><report>Sales/Pipeline</report></components></leftSection>' +
+        '<rightSection><components><report>Ops/Weekly</report></components></rightSection></Dashboard>',
+    );
+    expect(dashRefs).toEqual([
+      { toType: 'Report', toName: 'Ops/Weekly' },
+      { toType: 'Report', toName: 'Sales/Pipeline' },
+    ]);
+  });
+
+  it('indexed foldered artifacts produce joinable edges through extractAllEdges', () => {
+    const files = new Map(
+      Object.entries({
+        'reports/Ops/Weekly.report': strToU8(
+          '<Report><reportType>Invoices_with_Accounts</reportType></Report>',
+        ),
+        'dashboards/Exec/Overview.dashboard': strToU8(
+          '<Dashboard><components><report>Ops/Weekly</report></components></Dashboard>',
+        ),
+      }),
+    );
+    const artifacts = indexSnapshotFiles(files, [], '2026-09-08T00:00:00.000Z');
+    const edges = extractAllEdges('conn1', artifacts);
+    const keys = edges.map((e) => `${e.fromType}:${e.fromName}>${e.toType}:${e.toName}`);
+    expect(keys).toContain('Report:Ops/Weekly>ReportType:Invoices_with_Accounts');
+    // The dashboard edge's toName is the folder-qualified index key — joinable.
+    expect(keys).toContain('Dashboard:Exec/Overview>Report:Ops/Weekly');
+  });
+});
