@@ -65,6 +65,20 @@ interface FileSpec {
    * ReportFolder/DashboardFolder names exist only for listMetadata.
    */
   manifestType?: string;
+  /**
+   * S30: bundle types — ONE component is a DIRECTORY of files. `content` is
+   * a Contrail bundle envelope: JSON `{"contrail_bundle":1, "files":
+   * {"<relative path>": "<body>", …}}` whose files land under
+   * `dir/<apiName>/`. package.xml gets ONE member (the bundle name).
+   */
+  envelope?: true;
+  /**
+   * The main file's name suffix inside the bundle dir (live-confirmed:
+   * GenAiFunction's main XML retrieves as `<n>.genAiFunction-meta.xml`,
+   * GenAiPlannerBundle's as bare `<n>.genAiPlannerBundle`). The envelope
+   * MUST contain `<apiName><envelopeMainSuffix>`.
+   */
+  envelopeMainSuffix?: string;
 }
 
 const FILE_TYPES: Record<string, FileSpec> = {
@@ -127,16 +141,27 @@ const FILE_TYPES: Record<string, FileSpec> = {
   Dashboard: { dir: 'dashboards', ext: '.dashboard', foldered: true },
   ReportFolder: { dir: 'reports', ext: '', metaOnly: true, manifestType: 'Report' },
   DashboardFolder: { dir: 'dashboards', ext: '', metaOnly: true, manifestType: 'Dashboard' },
-  // S30: Agentforce single-file types (v66+ — see the config apiVersion
-  // note). The Bot document carries its versions INLINE (<botVersions>) in
-  // metadata format — BotVersion deploys as a dotted-name child (see
-  // CHILD_TYPES). The bundle types (GenAiFunction, GenAiPlannerBundle,
-  // AiAuthoringBundle — one component = a directory of files) are
-  // deliberately NOT here yet: read/index/diff works, deploy waits for the
-  // bundle machinery; AiAuthoringBundle stays read-only regardless, because
+  // S30: Agentforce types (v66+ — see the config apiVersion note). The Bot
+  // document carries its versions INLINE (<botVersions>) in metadata format
+  // — BotVersion deploys as a dotted-name child (see CHILD_TYPES). The two
+  // deployable bundle types carry a Contrail bundle ENVELOPE as content
+  // (see FileSpec.envelope). AiAuthoringBundle stays read-only permanently:
   // a plain Metadata API deploy of Agent Script silently does not apply
-  // reasoning actions (only Salesforce's publish pipeline compiles them).
+  // reasoning actions (only Salesforce's publish pipeline compiles them) —
+  // a deploy that validates and then lies is not a deploy Contrail offers.
   Bot: { dir: 'bots', ext: '.bot' },
+  GenAiFunction: {
+    dir: 'genAiFunctions',
+    ext: '.genAiFunction',
+    envelope: true,
+    envelopeMainSuffix: '.genAiFunction-meta.xml',
+  },
+  GenAiPlannerBundle: {
+    dir: 'genAiPlannerBundles',
+    ext: '.genAiPlannerBundle',
+    envelope: true,
+    envelopeMainSuffix: '.genAiPlannerBundle',
+  },
   GenAiPlugin: { dir: 'genAiPlugins', ext: '.genAiPlugin' },
   GenAiPromptTemplate: { dir: 'genAiPromptTemplates', ext: '.genAiPromptTemplate' },
   GenAiPromptTemplateActv: {
@@ -221,6 +246,86 @@ const NAME_RE = /^[A-Za-z0-9_.\- ()'&]+$/;
 // validateTypeAndName; if Lightning nested report subfolders ever surface as
 // Parent/Child fullNames (unverified), the cap is the one thing to revisit.
 const FOLDER_SEGMENT_RE = /^[A-Za-z0-9_$]+$/;
+// S30: one segment of a bundle-envelope relative path. Dots for extensions,
+// no leading dot (traversal is also rejected outright before this runs).
+const BUNDLE_REL_SEGMENT_RE = /^[A-Za-z0-9_$][A-Za-z0-9_$.\-]*$/;
+const BUNDLE_MAX_FILES = 100;
+const BUNDLE_MAX_DEPTH = 8;
+
+/**
+ * S30: parse and validate a Contrail bundle envelope. Security posture
+ * mirrors validateTypeAndName: absolute rejects ('\\', '..') come first for
+ * every path, then the tight per-segment grammar — these strings become zip
+ * entry names and snapshot paths.
+ */
+export function parseBundleEnvelope(
+  type: string,
+  apiName: string,
+  content: string,
+  mainFile: string,
+): Record<string, string> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    throw new ContrailError(
+      `${type} ${apiName}: content must be a Contrail bundle envelope — JSON of the shape ` +
+        `{"contrail_bundle":1, "files": {"${mainFile}": "<xml>", "input/schema.json": "…"}}. ` +
+        `Bundle types are directories of files; retrieve_metadata's bundle_files listing ` +
+        `shows the real file set to carry over.`,
+      'bad_component',
+    );
+  }
+  const env = parsed as { contrail_bundle?: unknown; files?: unknown };
+  if (env.contrail_bundle !== 1 || typeof env.files !== 'object' || env.files === null) {
+    throw new ContrailError(
+      `${type} ${apiName}: envelope must carry contrail_bundle: 1 and a files object.`,
+      'bad_component',
+    );
+  }
+  const files = env.files as Record<string, unknown>;
+  const entries = Object.entries(files);
+  if (entries.length === 0 || entries.length > BUNDLE_MAX_FILES) {
+    throw new ContrailError(
+      `${type} ${apiName}: envelope carries ${entries.length} files (1–${BUNDLE_MAX_FILES} allowed).`,
+      'bad_component',
+    );
+  }
+  const out: Record<string, string> = {};
+  for (const [rel, body] of entries) {
+    if (rel.includes('\\') || rel.includes('..')) {
+      throw new ContrailError(
+        `${type} ${apiName}: invalid envelope path "${rel}"`,
+        'bad_component',
+      );
+    }
+    const segs = rel.split('/');
+    if (
+      segs.length === 0 ||
+      segs.length > BUNDLE_MAX_DEPTH ||
+      segs.some((s) => !BUNDLE_REL_SEGMENT_RE.test(s))
+    ) {
+      throw new ContrailError(
+        `${type} ${apiName}: invalid envelope path "${rel}"`,
+        'bad_component',
+      );
+    }
+    if (typeof body !== 'string') {
+      throw new ContrailError(
+        `${type} ${apiName}: envelope file "${rel}" must be a string body.`,
+        'bad_component',
+      );
+    }
+    out[rel] = body;
+  }
+  if (!(mainFile in out)) {
+    throw new ContrailError(
+      `${type} ${apiName}: envelope is missing its main file "${mainFile}".`,
+      'bad_component',
+    );
+  }
+  return out;
+}
 const XMLNS = 'http://soap.sforce.com/2006/04/metadata';
 
 export interface BuiltPackage {
@@ -253,7 +358,26 @@ export function buildDeployZip(
   for (const c of components) {
     validateTypeAndName(c.type, c.api_name);
     const fileSpec = FILE_TYPES[c.type];
+    if (fileSpec?.envelope) {
+      const mainFile = `${c.api_name}${fileSpec.envelopeMainSuffix ?? fileSpec.ext}`;
+      const bundleFiles = parseBundleEnvelope(c.type, c.api_name, c.content, mainFile);
+      const dirPrefix = `${fileSpec.dir}/${fileSafeSegment(c.api_name)}/`;
+      for (const [rel, body] of Object.entries(bundleFiles)) {
+        files.set(`${dirPrefix}${rel}`, strToU8(body));
+      }
+      addMember(fileSpec.manifestType ?? c.type, c.api_name);
+      continue;
+    }
     if (fileSpec) {
+      // A stray envelope aimed at a non-envelope type would deploy the JSON
+      // verbatim as the component body — fail locally with the honest error.
+      if (/^\s*\{\s*"contrail_bundle"/.test(c.content)) {
+        throw new ContrailError(
+          `${c.type} ${c.api_name}: a Contrail bundle envelope was passed but ${c.type} is a ` +
+            `single-file type — pass the document itself as content.`,
+          'bad_component',
+        );
+      }
       const path = zipPathFor(fileSpec, c.api_name);
       files.set(path, strToU8(c.content));
       if (fileSpec.metaRoot) {
@@ -422,7 +546,7 @@ export function deployZipEntryPath(
   type: string,
   apiName: string,
 ):
-  | { path: string; child: false }
+  | { path: string; child: false; bundleDir?: string }
   | { path: string; child: true; childTag: string; childName: string }
   | null {
   const childSpec = CHILD_TYPES[type];
@@ -438,6 +562,16 @@ export function deployZipEntryPath(
   }
   const spec = FILE_TYPES[type];
   if (!spec) return null;
+  if (spec.envelope) {
+    // S30 bundle: path = the main file; bundleDir = the whole component's
+    // prefix, so the S28 capture reader can gather EVERY entry.
+    const dirPrefix = `${spec.dir}/${fileSafeSegment(apiName)}/`;
+    return {
+      path: `${dirPrefix}${apiName}${spec.envelopeMainSuffix ?? spec.ext}`,
+      child: false,
+      bundleDir: dirPrefix,
+    };
+  }
   return { path: zipPathFor(spec, apiName), child: false };
 }
 
@@ -501,6 +635,57 @@ export function analyzeChanges(
       });
       continue;
     }
+    // S30 envelope bundles classify file-by-file against the snapshot
+    // directory — the proposed content is an envelope, not a document.
+    const envSpec = FILE_TYPES[c.type];
+    if (envSpec?.envelope) {
+      const mainFile = `${c.api_name}${envSpec.envelopeMainSuffix ?? envSpec.ext}`;
+      const proposed = parseBundleEnvelope(c.type, c.api_name, c.content, mainFile);
+      const existingBundle = db.getArtifact(conn.id, c.type, c.api_name);
+      const warnings: string[] = [];
+      let change: ComponentChange['change'];
+      if (!existingBundle) {
+        change = 'add';
+      } else {
+        const old = readBundleFiles(store, conn, envSpec.dir, c.api_name);
+        const added = Object.keys(proposed).filter((k) => !(k in old));
+        const removed = Object.keys(old).filter((k) => !(k in proposed));
+        const changed = Object.keys(proposed).filter(
+          (k) => k in old && old[k]!.trim() !== proposed[k]!.trim(),
+        );
+        change =
+          added.length + removed.length + changed.length === 0 ? 'unchanged_content' : 'modify';
+        if (change === 'modify') {
+          const describe = (label: string, list: string[]) =>
+            list.length > 0 ? `${label} ${list.slice(0, 8).join(', ')}${list.length > 8 ? '…' : ''}` : '';
+          const delta = [
+            describe('changed:', changed),
+            describe('added:', added),
+            describe('removed:', removed),
+          ]
+            .filter(Boolean)
+            .join('; ');
+          warnings.push(
+            `BUNDLE REPLACE — this deploy replaces the org's whole ${c.type} directory ` +
+              `(${Object.keys(proposed).length} files; ${delta}).`,
+          );
+        }
+      }
+      if (c.type === 'GenAiPlannerBundle' && change === 'modify') {
+        warnings.push(
+          `AGENT MUST BE DEACTIVATED FIRST — deploying GenAiPlannerBundle changes for an ` +
+            `ACTIVE agent version fails, and version-suffixed bundles are PUBLISHED ` +
+            `SNAPSHOTS: a modified deploy of one fails org-side even deactivated ` +
+            `(unmodified re-deploys "succeed" as no-ops). Deactivate in Agent Builder, ` +
+            `deploy, then reactivate (Contrail cannot do those steps; verify with ` +
+            `BotVersion.Status). On Agent-Script agents the next publish overwrites ` +
+            `hand-edits.`,
+        );
+      }
+      changes.push({ type: c.type, api_name: c.api_name, change, warnings, ...sourceOf(c) });
+      continue;
+    }
+
     const existing = db.getArtifact(conn.id, c.type, c.api_name);
     const warnings: string[] = [];
     let change: ComponentChange['change'];
@@ -611,11 +796,10 @@ export function analyzeChanges(
     // ACTIVE agent version fail org-side — the human deactivates in Agent
     // Builder first, then reactivates after the deploy. Contrail has no
     // activate/deactivate path (that lifecycle is org-side, not Metadata
-    // API); check state with soql_query on BotVersion.Status.
-    if (
-      (c.type === 'GenAiPlannerBundle' || c.type === 'GenAiPlugin') &&
-      change === 'modify'
-    ) {
+    // API); check state with soql_query on BotVersion.Status. (The
+    // GenAiPlannerBundle flavor of this warning lives in the envelope
+    // branch above.)
+    if (c.type === 'GenAiPlugin' && change === 'modify') {
       warnings.push(
         `AGENT MUST BE DEACTIVATED FIRST — deploying ${c.type} changes for an ACTIVE ` +
           `agent version fails. Deactivate the agent in Agent Builder, deploy, then ` +
@@ -657,7 +841,7 @@ interface PermissionNeed {
   type: string;
   api_name: string;
   permission: string;
-  kind: 'field' | 'object' | 'class' | 'tab' | 'page' | 'application';
+  kind: 'field' | 'object' | 'class' | 'tab' | 'page' | 'application' | 'agent';
 }
 
 /** Custom entities (need explicit object permissions); standard objects don't. */
@@ -711,6 +895,12 @@ function isGranted(containerText: string, need: PermissionNeed): boolean {
       return permissionBlocks(containerText, 'applicationVisibilities').some(
         (b) => named(b, 'application', need.api_name) && flagOn(b, 'visible'),
       );
+    case 'agent':
+      // S30: agent access is a REAL PermissionSet block (contrast the
+      // Report/Dashboard folder-sharing absence below).
+      return permissionBlocks(containerText, 'agentAccesses').some(
+        (b) => named(b, 'agentName', need.api_name) && flagOn(b, 'enabled'),
+      );
     case 'tab': {
       const blocks = [
         ...permissionBlocks(containerText, 'tabVisibilities'),
@@ -757,6 +947,9 @@ export function analyzePermissionCoverage(components: ProposedComponent[]): Perm
       needs.push({ type: 'ApexPage', api_name: c.api_name, permission: 'Visualforce page access', kind: 'page' });
     } else if (c.type === 'CustomApplication') {
       needs.push({ type: 'CustomApplication', api_name: c.api_name, permission: 'app visibility', kind: 'application' });
+    } else if (c.type === 'Bot') {
+      // S30: users reach an agent through agentAccesses on a permission set.
+      needs.push({ type: 'Bot', api_name: c.api_name, permission: 'agent access (agentAccesses)', kind: 'agent' });
     } else if (c.type === 'CustomObject') {
       if (isCustomEntity(c.api_name)) {
         needs.push({ type: 'CustomObject', api_name: c.api_name, permission: 'object permissions', kind: 'object' });
@@ -796,6 +989,26 @@ export function analyzePermissionCoverage(components: ProposedComponent[]): Perm
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * S30: the snapshot's view of a bundle, keyed by path RELATIVE to the bundle
+ * directory — the same key shape a Contrail bundle envelope uses, so the
+ * change classifier compares like with like.
+ */
+function readBundleFiles(
+  store: SnapshotStore,
+  conn: ConnectionRecord,
+  dir: string,
+  apiName: string,
+): Record<string, string> {
+  const prefix = `${dir}/${fileSafeSegment(apiName)}/`;
+  const out: Record<string, string> = {};
+  for (const rel of store.listCurrentFiles(conn.id, prefix)) {
+    const body = store.readCurrentFile(conn.id, rel);
+    if (body !== null) out[rel.slice(prefix.length)] = body;
+  }
+  return out;
 }
 
 function readOldContent(

@@ -486,11 +486,15 @@ validation issues **no** code.
   warns on hand-typed/altered tokens), `GenAiPromptTemplateActv`,
   `AiEvaluationDefinition`, `BotTemplate`, `BotBlock`, and child types
   `CustomField` / `ValidationRule` / `CustomLabel` / `ListView` /
-  `RecordType` / `BotVersion` (dotted API names — `MyBot.v1`).
-  **Read/diff-only for now**: `GenAiFunction`, `GenAiPlannerBundle`,
-  `AiAuthoringBundle` (bundle types — one component is a directory of
-  files); and agent **publish / activate / deactivate / preview / eval
-  runs** are org-side human steps Contrail cannot perform (the
+  `RecordType` / `BotVersion` (dotted API names — `MyBot.v1`). Bundle types
+  `GenAiFunction` / `GenAiPlannerBundle` (one component = a directory of
+  files) deploy via a **Contrail bundle envelope** — content is JSON
+  `{"contrail_bundle":1, "files": {"<relative path>": "<body>", …}}`
+  carrying the whole file set (main file included); the approval page
+  classifies file-by-file. **Read/diff-only**: `AiAuthoringBundle` (a
+  Metadata API deploy of Agent Script silently skips reasoning actions);
+  and agent **publish / activate / deactivate / preview / eval runs** are
+  org-side human steps Contrail cannot perform (the
   `agentforce-metadata-generate` skill carries the full boundary).
 - `destructive` *(≤50)* — `{type, api_name}` to DELETE; led prominently on
   the page. Deletions are accepted for **any** metadata type, including

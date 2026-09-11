@@ -15,11 +15,14 @@ single MCP Bundle that installs into Claude Desktop via Settings → Extensions
 Windows x64/ARM and macOS Intel/Apple Silicon from one file. 35 tools.
 
 **Agentforce metadata (S30).** The agent stack is readable, diffable, and
-(largely) deployable: `Bot`/`BotVersion`, topics (`GenAiPlugin`), prompt
-templates, Testing Center definitions (`AiEvaluationDefinition`),
-`BotTemplate`/`BotBlock` deploy through the ritual; the bundle types
-(`GenAiFunction`, `GenAiPlannerBundle`, `AiAuthoringBundle` — one component
-= a directory of files) index and diff read-only for now. Contrail is the
+deployable: `Bot`/`BotVersion`, topics (`GenAiPlugin`), prompt templates,
+Testing Center definitions (`AiEvaluationDefinition`),
+`BotTemplate`/`BotBlock` deploy through the ritual, and the bundle types
+(`GenAiFunction`, `GenAiPlannerBundle` — one component = a directory of
+files) deploy via a Contrail bundle envelope with file-by-file change
+classification on the approval page (`AiAuthoringBundle` stays read-only: a
+Metadata API deploy of Agent Script silently skips reasoning actions, and a
+deploy that lies is not one Contrail offers). Contrail is the
 first tool in this ecosystem to author the runtime GenAI XML directly — with
 the honesty to match: the approval page warns about the deactivate-first
 gate, org-generated prompt-template version tokens, and Bot version deletes,

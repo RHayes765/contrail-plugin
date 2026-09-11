@@ -690,13 +690,10 @@ describe('S30: Agentforce types', () => {
     ).toThrow(/pick one form/);
   });
 
-  it('PIN: bundle types are NOT deployable until the bundle machinery lands', () => {
-    for (const type of ['GenAiFunction', 'GenAiPlannerBundle', 'AiAuthoringBundle']) {
-      expect(
-        () => buildDeployZip([comp(type, 'X', '<X/>')], [], V, noMeta),
-        `${type} must be refused`,
-      ).toThrow(/not deployable through Contrail/);
-    }
+  it('PIN: AiAuthoringBundle stays read-only — an Agent Script deploy would lie', () => {
+    expect(() =>
+      buildDeployZip([comp('AiAuthoringBundle', 'X', 'agent script')], [], V, noMeta),
+    ).toThrow(/not deployable through Contrail/);
   });
 
   it('warns honestly on the prompt-template identifier, both change kinds', () => {
@@ -868,5 +865,218 @@ describe('S30: Agentforce types', () => {
     expect(a.content).not.toContain('"b":2');
     expect(b.content).toContain('"b":2');
     expect(a.contentHash).not.toBe(b.contentHash);
+  });
+});
+
+describe('S30 Stage 2: bundle envelope deploys', () => {
+  const conn = { id: 'conn-1', alias: 'dev' } as ConnectionRecord;
+
+  function envelope(files: Record<string, string>): string {
+    return JSON.stringify({ contrail_bundle: 1, files });
+  }
+
+  const FN_ENVELOPE = envelope({
+    'Dog_Facts.genAiFunction-meta.xml': '<GenAiFunction><masterLabel>Dog Facts</masterLabel></GenAiFunction>',
+    'input/schema.json': '{"properties":{}}',
+    'output/schema.json': '{"properties":{"promptResponse":{"copilotAction:isUsedByPlanner":true}}}',
+  });
+
+  it('an envelope expands to N zip entries under the bundle dir with ONE member', () => {
+    const built = buildDeployZip([comp('GenAiFunction', 'Dog_Facts', FN_ENVELOPE)], [], V, noMeta);
+    expect(built.files).toContain('genAiFunctions/Dog_Facts/Dog_Facts.genAiFunction-meta.xml');
+    expect(built.files).toContain('genAiFunctions/Dog_Facts/input/schema.json');
+    expect(built.files).toContain('genAiFunctions/Dog_Facts/output/schema.json');
+    expect(zipText(built.zip, 'genAiFunctions/Dog_Facts/input/schema.json')).toBe(
+      '{"properties":{}}',
+    );
+    const members = built.packageXml.match(/<members>Dog_Facts<\/members>/g) ?? [];
+    expect(members).toHaveLength(1);
+    expect(built.packageXml).toContain('<name>GenAiFunction</name>');
+    // The envelope itself never reaches the zip or the manifest.
+    expect(built.packageXml).not.toContain('contrail_bundle');
+    expect(built.files.some((f) => f.endsWith('.json') && f.includes('contrail'))).toBe(false);
+  });
+
+  it('GenAiPlannerBundle uses the bare main-file suffix', () => {
+    const built = buildDeployZip(
+      [
+        comp(
+          'GenAiPlannerBundle',
+          'Agent_v1',
+          envelope({
+            'Agent_v1.genAiPlannerBundle': '<GenAiPlannerBundle/>',
+            'agentGraph/Agent_v1_graph.json': '{}',
+          }),
+        ),
+      ],
+      [],
+      V,
+      noMeta,
+    );
+    expect(built.files).toContain('genAiPlannerBundles/Agent_v1/Agent_v1.genAiPlannerBundle');
+    expect(built.files).toContain('genAiPlannerBundles/Agent_v1/agentGraph/Agent_v1_graph.json');
+  });
+
+  it('rejects every malformed envelope, each with the honest error', () => {
+    const cases: Array<[string, string | RegExp]> = [
+      ['not json at all', /bundle envelope/],
+      [JSON.stringify({ files: {} }), /contrail_bundle: 1/],
+      [envelope({}), /1–100/],
+      [envelope({ '../evil': 'x', 'Dog_Facts.genAiFunction-meta.xml': 'y' }), /invalid envelope path/],
+      [envelope({ 'a\\b': 'x', 'Dog_Facts.genAiFunction-meta.xml': 'y' }), /invalid envelope path/],
+      [
+        envelope({ 'a/b/c/d/e/f/g/h/i.json': 'x', 'Dog_Facts.genAiFunction-meta.xml': 'y' }),
+        /invalid envelope path/,
+      ],
+      [envelope({ '.hidden': 'x', 'Dog_Facts.genAiFunction-meta.xml': 'y' }), /invalid envelope path/],
+      [envelope({ 'input/schema.json': 'x' }), /missing its main file/],
+      [
+        JSON.stringify({
+          contrail_bundle: 1,
+          files: { 'Dog_Facts.genAiFunction-meta.xml': 42 },
+        }),
+        /string body/,
+      ],
+    ];
+    for (const [content, err] of cases) {
+      expect(
+        () => buildDeployZip([comp('GenAiFunction', 'Dog_Facts', content)], [], V, noMeta),
+        `must reject: ${content.slice(0, 60)}`,
+      ).toThrow(err);
+    }
+  });
+
+  it('a stray envelope aimed at a single-file type fails locally and honestly', () => {
+    expect(() =>
+      buildDeployZip([comp('GenAiPlugin', 'Topic', FN_ENVELOPE)], [], V, noMeta),
+    ).toThrow(/single-file type/);
+  });
+
+  it('deployZipEntryPath returns the main path plus bundleDir for envelope types', async () => {
+    const { deployZipEntryPath } = await import('../deploy/package.js');
+    expect(deployZipEntryPath('GenAiFunction', 'Dog_Facts')).toEqual({
+      path: 'genAiFunctions/Dog_Facts/Dog_Facts.genAiFunction-meta.xml',
+      child: false,
+      bundleDir: 'genAiFunctions/Dog_Facts/',
+    });
+    expect(deployZipEntryPath('GenAiPlannerBundle', 'Agent_v1')).toEqual({
+      path: 'genAiPlannerBundles/Agent_v1/Agent_v1.genAiPlannerBundle',
+      child: false,
+      bundleDir: 'genAiPlannerBundles/Agent_v1/',
+    });
+  });
+
+  it('classifies envelope changes file-by-file against the snapshot bundle', () => {
+    const snapshot: Record<string, string> = {
+      'genAiFunctions/Dog_Facts/Dog_Facts.genAiFunction-meta.xml':
+        '<GenAiFunction><masterLabel>Dog Facts</masterLabel></GenAiFunction>',
+      'genAiFunctions/Dog_Facts/input/schema.json': '{"properties":{}}',
+      'genAiFunctions/Dog_Facts/output/schema.json': '{"old":true}',
+    };
+    const db = {
+      getArtifact: () => ({ filePath: 'genAiFunctions/Dog_Facts/Dog_Facts.genAiFunction-meta.xml' }),
+    } as unknown as ContrailDb;
+    const store = {
+      readCurrentFile: (_c: string, rel: string) => snapshot[rel] ?? null,
+      listCurrentFiles: (_c: string, prefix: string) =>
+        Object.keys(snapshot).filter((k) => k.startsWith(prefix)),
+    } as unknown as SnapshotStore;
+
+    // Sibling-only change (output schema differs) classifies as modify with
+    // the per-file delta named — the altitude test.
+    const { changes } = analyzeChanges(
+      db,
+      store,
+      conn,
+      [comp('GenAiFunction', 'Dog_Facts', FN_ENVELOPE)],
+      [],
+    );
+    expect(changes[0]!.change).toBe('modify');
+    expect(changes[0]!.warnings.join(' ')).toMatch(/BUNDLE REPLACE/);
+    expect(changes[0]!.warnings.join(' ')).toMatch(/output\/schema\.json/);
+
+    // An envelope matching the snapshot exactly is unchanged_content.
+    const same = analyzeChanges(
+      db,
+      store,
+      conn,
+      [
+        comp(
+          'GenAiFunction',
+          'Dog_Facts',
+          envelope({
+            'Dog_Facts.genAiFunction-meta.xml':
+              '<GenAiFunction><masterLabel>Dog Facts</masterLabel></GenAiFunction>',
+            'input/schema.json': '{"properties":{}}',
+            'output/schema.json': '{"old":true}',
+          }),
+        ),
+      ],
+      [],
+    );
+    expect(same.changes[0]!.change).toBe('unchanged_content');
+    expect(same.changes[0]!.warnings).toHaveLength(0);
+
+    // No snapshot row → add.
+    const dbNone = { getArtifact: () => null } as unknown as ContrailDb;
+    const added = analyzeChanges(
+      dbNone,
+      store,
+      conn,
+      [comp('GenAiFunction', 'Dog_Facts', FN_ENVELOPE)],
+      [],
+    );
+    expect(added.changes[0]!.change).toBe('add');
+  });
+
+  it('planner-bundle modifies carry the deactivate + published-snapshot warning', () => {
+    const snapshot: Record<string, string> = {
+      'genAiPlannerBundles/Agent_v1/Agent_v1.genAiPlannerBundle': '<GenAiPlannerBundle>old</GenAiPlannerBundle>',
+    };
+    const db = {
+      getArtifact: () => ({ filePath: 'genAiPlannerBundles/Agent_v1/Agent_v1.genAiPlannerBundle' }),
+    } as unknown as ContrailDb;
+    const store = {
+      readCurrentFile: (_c: string, rel: string) => snapshot[rel] ?? null,
+      listCurrentFiles: (_c: string, prefix: string) =>
+        Object.keys(snapshot).filter((k) => k.startsWith(prefix)),
+    } as unknown as SnapshotStore;
+    const { changes } = analyzeChanges(
+      db,
+      store,
+      conn,
+      [
+        comp(
+          'GenAiPlannerBundle',
+          'Agent_v1',
+          envelope({ 'Agent_v1.genAiPlannerBundle': '<GenAiPlannerBundle>new</GenAiPlannerBundle>' }),
+        ),
+      ],
+      [],
+    );
+    expect(changes[0]!.warnings.join(' ')).toMatch(/DEACTIVATED FIRST/);
+    expect(changes[0]!.warnings.join(' ')).toMatch(/PUBLISHED\s+SNAPSHOTS/);
+  });
+
+  it('Bot components get the agentAccesses coverage arm; grants must be enabled', () => {
+    const bot = comp('Bot', 'Support_Agent', '<Bot/>');
+    const uncovered = analyzePermissionCoverage([bot]);
+    expect(uncovered.uncovered).toEqual([
+      { type: 'Bot', api_name: 'Support_Agent', permission: 'agent access (agentAccesses)' },
+    ]);
+
+    const granted = comp(
+      'PermissionSet',
+      'Agent_Access',
+      '<PermissionSet><agentAccesses><agentName>Support_Agent</agentName><enabled>true</enabled></agentAccesses></PermissionSet>',
+    );
+    expect(analyzePermissionCoverage([bot, granted]).uncovered).toHaveLength(0);
+
+    const mentionedOff = comp(
+      'PermissionSet',
+      'Agent_Access',
+      '<PermissionSet><agentAccesses><agentName>Support_Agent</agentName><enabled>false</enabled></agentAccesses></PermissionSet>',
+    );
+    expect(analyzePermissionCoverage([bot, mentionedOff]).uncovered).toHaveLength(1);
   });
 });

@@ -88,12 +88,12 @@ What Contrail can deploy today, and the shapes live-verified in a real org:
 |---|---|---|
 | `Bot` | **Deploy** (single file) | Flat: `Support_Agent` — one `.bot` document, versions inline |
 | `BotVersion` | **Deploy** (child of Bot) | Dotted: `Support_Agent.v1` |
-| `GenAiPlugin` | **Deploy** (single file) | Flat: `Order_Management`; instruction child names are machine-mangled (`therearemu0`) |
+| `GenAiPlugin` | **Deploy** (single file) | Flat: `Order_Management`; instruction child names are org-generated (`instruction_0_<timestamp>` — see §6) |
 | `GenAiPromptTemplate` (+`Actv`) | **Deploy** — author via platform-prompt-template-generate | Flat; carries live `activeVersionIdentifier` tokens |
 | `AiEvaluationDefinition` | **Deploy** — author via agentforce-eval-generate | Flat |
 | `BotTemplate`, `BotBlock` | **Deploy** (single file) | Flat |
-| `GenAiFunction` | **Read / index / diff only** — deploy pending bundle machinery | `Name` dir with schema files (§8) |
-| `GenAiPlannerBundle` | **Read / index / diff only** — deploy pending bundle machinery | Underscore-versioned: `Support_Agent_v2`, one component per published version |
+| `GenAiFunction` | **Deploy** (bundle ENVELOPE — §8) | `Name` dir: `Name.genAiFunction-meta.xml` + `input/schema.json` + `output/schema.json` |
+| `GenAiPlannerBundle` | **Deploy** (bundle ENVELOPE — §8; promotion of retrieved bytes, not hand-authoring) | Underscore-versioned: `Support_Agent_v2`, one component per published version |
 | `AiAuthoringBundle` | **Read only, permanently** | Naked name = highest draft; `_1`, `_2`… = published snapshots |
 
 - `AiAuthoringBundle` stays read-only **by design, permanently**: Metadata API
@@ -165,13 +165,17 @@ A representative instruction, as the org writes it:
 </genAiPluginInstructions>
 ```
 
-- **Instruction names are machine-mangled** — the org generates
-  `developerName`/`masterLabel` from the instruction text (`therearemu0`,
-  `donotdecla1`: lowercased text prefix plus an ordinal). On **modify,
-  preserve retrieved names exactly** — they are identity, not decoration.
-- For **new** instructions, whether the org accepts arbitrary well-formed
-  names or normalizes them is **not live-confirmed** — mirror the observed
-  pattern and verify with the §11 round-trip retrieve.
+- **Instruction names are org-generated, and the convention CHANGED.**
+  Current orgs mint `instruction_<sortOrder>_<epochMillis>` for both
+  `developerName` and `masterLabel` (live-confirmed:
+  `instruction_0_1789147477653`), with a `<sortOrder>` element; older agents
+  carry the legacy text-prefix mangle (`therearemu0`, `donotdecla1`). On
+  **modify, preserve retrieved names exactly** — they are identity, not
+  decoration.
+- For **new** instructions, mirror the current `instruction_<n>_<timestamp>`
+  pattern (any epoch-millis value works as a uniquifier); whether arbitrary
+  well-formed names also survive is **not live-confirmed** — verify with the
+  §11 round-trip retrieve.
 - `pluginType`: Builder topics are `Topic`; `APICustomTopic` is the
   API-defined variant. Preserve whatever was retrieved.
 
@@ -212,15 +216,31 @@ no directory, no separate meta file — with every version inline:
   **active** planner version is referenced right here in the Bot XML — planner
   and Bot edits travel together.
 
-## 8. GenAiFunction and GenAiPlannerBundle — read today, deploy pending
+## 8. GenAiFunction and GenAiPlannerBundle — bundle deploys via the envelope
 
-Contrail can **retrieve, index, and diff** these two types but **cannot
-deploy them yet** — the multi-file bundle machinery is pending. Say exactly
-that; do not improvise a workaround through another type.
+These two types are **directories of files**, and they deploy through a
+**Contrail bundle envelope**: `content` (or better, `content_file`) is JSON —
 
-`retrieve_metadata` returns the bundle's main XML plus a `bundle_files`
-listing with `snapshot_paths` for every member file. The live layout is a
-deep compiled artifact:
+```jsonc
+{ "contrail_bundle": 1, "files": {
+    "Get_Order_Status.genAiFunction-meta.xml": "<GenAiFunction>…</GenAiFunction>",
+    "input/schema.json":  "{ …JSON Schema… }",
+    "output/schema.json": "{ …JSON Schema… }"
+} }
+```
+
+- Paths are relative to the bundle's directory; the **main file is required**
+  and its name is `<api_name>.genAiFunction-meta.xml` for functions
+  (live-confirmed: the main XML keeps a `-meta.xml` suffix even in metadata
+  format) and bare `<api_name>.genAiPlannerBundle` for planner bundles.
+- Build the file set from `retrieve_metadata`'s `bundle_files` listing —
+  retrieve-first, carry every file, change only what you mean to change. The
+  approval page classifies **file-by-file** (added/removed/changed named) and
+  the whole directory is replaced on deploy.
+- A standalone `GenAiFunction` is genuinely authorable (main XML +
+  `input/schema.json` + `output/schema.json` — grammar below). A
+  `GenAiPlannerBundle` is **promotion-of-retrieved-bytes, never
+  hand-authoring**: its live layout is deep compiled output —
 
 ```
 genAiPlannerBundles/Support_Agent_v2/
@@ -230,21 +250,31 @@ genAiPlannerBundles/Support_Agent_v2/
     localActions/<Topic_ID>/<Action_ID>/input/schema.json  (+ output/)
 ```
 
-Path segments carry **org-specific IDs** — proof this is compiled output.
-When bundle deploys land, they will be promotion-of-retrieved-bytes, never
-hand-authoring. Version-suffixed bundles are **published snapshots**: modified
-deploys fail ("content cannot be changed on a locked version"); unmodified
-deploys "succeed" as misleading no-ops. Read them for history and diffs only.
-(One `AiAuthoringBundle` quirk: retrieve returns no fileProperties rows, so
-the local index has no last-modified dates for it — staleness detection is
-limited there.)
+  — path segments carry **org-specific IDs**. Version-suffixed bundles are
+  **published snapshots**: modified deploys fail ("content cannot be changed
+  on a locked version"); unmodified deploys "succeed" as misleading no-ops;
+  the approval page repeats this on every planner-bundle modify.
+  (One `AiAuthoringBundle` quirk: retrieve returns no fileProperties rows, so
+  the local index has no last-modified dates for it — staleness detection is
+  limited there.)
 
-Grammar worth knowing **now**, because it explains live failures:
+GenAiFunction grammar (live-confirmed against a platform-generated action):
 
+- Main XML root `<GenAiFunction>` with `developerName`, `localDeveloperName`
+  (a WSDL-only field the catalog omits), `masterLabel`, `invocationTarget` +
+  `invocationTargetType` (e.g. `generatePromptResponse` targeting a prompt
+  template, `apex`, `flow`), `isConfirmationRequired`, and the
+  progress-indicator pair (`isIncludeInProgressIndicator`,
+  `progressIndicatorMessage`) the catalog also omits.
+- Schemas use `lightning:type` annotations (`lightning__textType`,
+  `lightning__booleanType`, root `lightning__objectType`) plus
+  `copilotAction:isUserInput` on inputs and
+  `copilotAction:isDisplayable`/`isUsedByPlanner` on outputs.
 - **The one-output rule** — the catalog on `copilotAction:isUsedByPlanner`
   in a function's output schema: "At least one output property must have this
-  value as true or else the planner returns random responses." Diagnostic
-  gold when an agent answers nonsense after an action runs.
+  value as true or else the planner returns random responses." (The
+  platform's own generated schemas set it true on every output property.)
+  Diagnostic gold when an agent answers nonsense after an action runs.
 - **The `plannerSurfaces` patch** — verbatim from the deployment guide, added
   inside the `GenAiPlannerBundle` main XML:
 
@@ -260,9 +290,10 @@ Grammar worth knowing **now**, because it explains live failures:
   Without it, Agent Builder Preview shows "Something went wrong" and the
   Agent Runtime API returns `500 UNKNOWN_EXCEPTION` on session creation. On
   Agent-Script agents the publish pipeline only generates a `Messaging`
-  surface — the patch must be **re-applied after every publish**. Until
-  bundle deploys land, Contrail's role is to detect the missing block in
-  retrieved XML and hand the human the exact patch.
+  surface — the patch must be **re-applied after every publish**. Apply it
+  through the envelope: retrieve the bundle, add the block to the main XML,
+  carry every other file unchanged, deploy through the ritual (the
+  deactivate gate applies — §5).
 
 ## 9. Permissions
 

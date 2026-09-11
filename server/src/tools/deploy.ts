@@ -166,9 +166,15 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
                     'AiEvaluationDefinition (Testing Center test definitions), BotTemplate, ' +
                     'BotBlock, or child types CustomField / ValidationRule / ' +
                     'CustomLabel / ListView / RecordType / BotVersion (dotted MyBot.v1). ' +
-                    'NOT deployable (read/diff only): GenAiFunction, GenAiPlannerBundle, ' +
-                    'AiAuthoringBundle — bundle types; agent publish/activate/deactivate ' +
-                    'are org-side human steps Contrail cannot perform.',
+                    'Bundle types GenAiFunction / GenAiPlannerBundle (one component = a ' +
+                    'directory of files) take a Contrail bundle ENVELOPE as content: JSON ' +
+                    '{"contrail_bundle":1, "files": {"<relative path>": "<body>", ...}} — ' +
+                    'the file set retrieve_metadata\'s bundle_files listing shows, main ' +
+                    'file included (e.g. "My_Fn.genAiFunction-meta.xml"). ' +
+                    'NOT deployable (read/diff only): AiAuthoringBundle — a Metadata API ' +
+                    'deploy of Agent Script silently skips reasoning actions; and agent ' +
+                    'publish/activate/deactivate are org-side human steps Contrail ' +
+                    'cannot perform.',
                 ),
               api_name: z.string().describe('Full API name; children dotted (Account.MyField__c).'),
               content: z

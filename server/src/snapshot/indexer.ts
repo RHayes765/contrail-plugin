@@ -236,8 +236,13 @@ export function indexSnapshotFiles(
   for (const group of bundles.values()) {
     const apiName = decodeSegment(group.seg);
     const sorted = [...group.files].sort((a, b) => a.rel.localeCompare(b.rel));
-    const mainRel = `${group.spec.dir}/${group.seg}/${group.seg}${group.spec.mainExt}`;
-    const main = sorted.find((f) => f.rel === mainRel);
+    // Main-file resolution tries the bare extension, then the -meta.xml
+    // flavor: GenAiFunction's main XML retrieves as
+    // <Name>.genAiFunction-meta.xml (live-confirmed) while
+    // GenAiPlannerBundle's is bare <Name>.genAiPlannerBundle.
+    const base = `${group.spec.dir}/${group.seg}/${group.seg}${group.spec.mainExt}`;
+    const main =
+      sorted.find((f) => f.rel === base) ?? sorted.find((f) => f.rel === `${base}-meta.xml`);
     const content = sorted
       .map((f) => `<!-- contrail:file ${f.rel} -->\n${f.text}`)
       .join('\n');
