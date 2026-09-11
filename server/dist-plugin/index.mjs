@@ -26287,7 +26287,11 @@ var DEFAULT_CONFIG = {
       "ApexPage",
       "GlobalValueSet",
       "Layout",
-      "CustomMetadata"
+      "CustomMetadata",
+      // S31: the lead-conversion singleton — one small file, and lead
+      // routing/conversion work reads it constantly. Absent-until-configured
+      // orgs return nothing for it (harmless).
+      "LeadConvertSettings"
     ],
     pollIntervalMs: 2e3,
     retrieveTimeoutMs: 10 * 60 * 1e3,
@@ -29551,6 +29555,9 @@ var SIMPLE_DIR_TYPES = [
   },
   { dir: "layouts", ext: ".layout", type: "Layout" },
   { dir: "customMetadata", ext: ".md", type: "CustomMetadata" },
+  // S31: the lead-conversion singleton. Capitalized dir + singular extension
+  // are the platform's own quirk (live-confirmed).
+  { dir: "LeadConvertSettings", ext: ".LeadConvertSetting", type: "LeadConvertSettings" },
   // S30: Agentforce single-file types (v66+ — see config apiVersion note).
   { dir: "genAiPlugins", ext: ".genAiPlugin", type: "GenAiPlugin" },
   { dir: "genAiPromptTemplates", ext: ".genAiPromptTemplate", type: "GenAiPromptTemplate" },
@@ -30323,6 +30330,8 @@ var TYPE_DIRS = {
   ManagedEventSubscription: "managedEventSubscriptions",
   Layout: "layouts",
   CustomMetadata: "customMetadata",
+  // S31: the lead-conversion singleton (capitalized dir is the platform's).
+  LeadConvertSettings: "LeadConvertSettings",
   // S29: the first shared-dir case — content and folder types own ONE
   // directory. Sound only because normalizeRefreshTypes couples them into
   // every refresh/staleness check (a lone 'Report' request would otherwise
@@ -30844,6 +30853,13 @@ var FILE_TYPES = {
   // with the type name WITHOUT the __mdt suffix; metadata format uses the
   // bare .md extension.
   CustomMetadata: { dir: "customMetadata", ext: ".md" },
+  // S31: lead-conversion field mappings. A SINGLETON — exactly one component
+  // per org, fullName literally 'LeadConvertSettings'. The naming is the
+  // platform's own quirk (live-confirmed): CAPITALIZED directory and a
+  // singular '.LeadConvertSetting' extension. The component does not exist
+  // until an org saves custom lead mappings (a wildcard retrieve then
+  // returns nothing — harmless).
+  LeadConvertSettings: { dir: "LeadConvertSettings", ext: ".LeadConvertSetting" },
   // S29: analytics types (folder-based). EXPLICIT-REFRESH-ONLY — absent from
   // the default snapshot manifest (S17 precedent; big orgs carry thousands of
   // reports). api_name is 'FolderDevName/Name' ('unfiled$public/Name' for
@@ -31232,9 +31248,9 @@ function analyzeChanges(db, store, conn, components, deletions) {
           );
         }
       }
-      if ((c.type === "FlexiPage" || c.type === "CustomApplication" || c.type === "Layout" || c.type === "Report" || c.type === "Dashboard" || c.type === "GenAiPlugin" || c.type === "GenAiPromptTemplate" || c.type === "Bot") && change === "modify") {
+      if ((c.type === "FlexiPage" || c.type === "CustomApplication" || c.type === "Layout" || c.type === "Report" || c.type === "Dashboard" || c.type === "GenAiPlugin" || c.type === "GenAiPromptTemplate" || c.type === "Bot" || c.type === "LeadConvertSettings") && change === "modify") {
         warnings.push(
-          `WHOLE-DOCUMENT REPLACE \u2014 this deploy fully replaces the org's ${c.type}; anything not present in the proposed content is removed.` + (c.type === "Bot" ? " A <botVersions> block omitted from a Bot document is a VERSION DELETE." : "")
+          `WHOLE-DOCUMENT REPLACE \u2014 this deploy fully replaces the org's ${c.type}; anything not present in the proposed content is removed.` + (c.type === "Bot" ? " A <botVersions> block omitted from a Bot document is a VERSION DELETE." : c.type === "LeadConvertSettings" ? " An <objectMapping> omitted here is a lead field mapping DELETED org-wide." : "")
         );
       }
       if (c.type === "GenAiPromptTemplate" && change === "modify") {
@@ -33113,7 +33129,7 @@ function getUpdateNotice(installedVersion, repo, enabled) {
 }
 
 // src/core/version.ts
-var ENGINE_VERSION = "0.22.0";
+var ENGINE_VERSION = "0.23.0";
 
 // src/tools/register.ts
 var UPDATE_REPO = "RHayes765/contrail-plugin";
@@ -35385,7 +35401,7 @@ function registerDeployTools(server, deps) {
         components: external_exports.array(
           external_exports.object({
             type: external_exports.string().describe(
-              `ApexClass, ApexTrigger, ApexPage, Flow, CustomObject, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, GlobalValueSet, ConnectedApp, NamedCredential, ExternalCredential, PlatformEventChannel(Member), ManagedEventSubscription, Layout, CustomMetadata (records, dotted Type.Record names), Report / Dashboard (folder-qualified "FolderDevName/Name" api_names; deploy the ReportFolder/DashboardFolder component first or in the same package for a new folder), ReportFolder / DashboardFolder (content = the whole <ReportFolder> doc with folderShares \u2014 folder sharing is what makes reports visible), Agentforce types Bot, GenAiPlugin (agent topics \u2014 modifying one on an ACTIVE agent needs the human to deactivate it first), GenAiPromptTemplate (activeVersionIdentifier is org-generated: retrieve-first, never hand-type it), GenAiPromptTemplateActv, AiEvaluationDefinition (Testing Center test definitions), BotTemplate, BotBlock, or child types CustomField / ValidationRule / CustomLabel / ListView / RecordType / BotVersion (dotted MyBot.v1). Bundle types GenAiFunction / GenAiPlannerBundle (one component = a directory of files) take a Contrail bundle ENVELOPE as content: JSON {"contrail_bundle":1, "files": {"<relative path>": "<body>", ...}} \u2014 the file set retrieve_metadata's bundle_files listing shows, main file included (e.g. "My_Fn.genAiFunction-meta.xml"). NOT deployable (read/diff only): AiAuthoringBundle \u2014 a Metadata API deploy of Agent Script silently skips reasoning actions; and agent publish/activate/deactivate are org-side human steps Contrail cannot perform.`
+              `ApexClass, ApexTrigger, ApexPage, Flow, CustomObject, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, GlobalValueSet, ConnectedApp, NamedCredential, ExternalCredential, PlatformEventChannel(Member), ManagedEventSubscription, Layout, CustomMetadata (records, dotted Type.Record names), LeadConvertSettings (SINGLETON \u2014 api_name is literally "LeadConvertSettings"; a modify replaces ALL lead field mappings, retrieve-first), Report / Dashboard (folder-qualified "FolderDevName/Name" api_names; deploy the ReportFolder/DashboardFolder component first or in the same package for a new folder), ReportFolder / DashboardFolder (content = the whole <ReportFolder> doc with folderShares \u2014 folder sharing is what makes reports visible), Agentforce types Bot, GenAiPlugin (agent topics \u2014 modifying one on an ACTIVE agent needs the human to deactivate it first), GenAiPromptTemplate (activeVersionIdentifier is org-generated: retrieve-first, never hand-type it), GenAiPromptTemplateActv, AiEvaluationDefinition (Testing Center test definitions), BotTemplate, BotBlock, or child types CustomField / ValidationRule / CustomLabel / ListView / RecordType / BotVersion (dotted MyBot.v1). Bundle types GenAiFunction / GenAiPlannerBundle (one component = a directory of files) take a Contrail bundle ENVELOPE as content: JSON {"contrail_bundle":1, "files": {"<relative path>": "<body>", ...}} \u2014 the file set retrieve_metadata's bundle_files listing shows, main file included (e.g. "My_Fn.genAiFunction-meta.xml"). NOT deployable (read/diff only): AiAuthoringBundle \u2014 a Metadata API deploy of Agent Script silently skips reasoning actions; and agent publish/activate/deactivate are org-side human steps Contrail cannot perform.`
             ),
             api_name: external_exports.string().describe("Full API name; children dotted (Account.MyField__c)."),
             content: external_exports.string().optional().describe(
