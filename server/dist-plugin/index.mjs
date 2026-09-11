@@ -29676,8 +29676,8 @@ function indexSnapshotFiles(files, fileProps, retrievedAt) {
   for (const group of bundles.values()) {
     const apiName = decodeSegment(group.seg);
     const sorted = [...group.files].sort((a, b) => a.rel.localeCompare(b.rel));
-    const mainRel = `${group.spec.dir}/${group.seg}/${group.seg}${group.spec.mainExt}`;
-    const main2 = sorted.find((f) => f.rel === mainRel);
+    const base = `${group.spec.dir}/${group.seg}/${group.seg}${group.spec.mainExt}`;
+    const main2 = sorted.find((f) => f.rel === base) ?? sorted.find((f) => f.rel === `${base}-meta.xml`);
     const content = sorted.map((f) => `<!-- contrail:file ${f.rel} -->
 ${f.text}`).join("\n");
     push(group.spec.type, apiName, main2?.rel ?? sorted[0].rel, content);
@@ -30854,16 +30854,27 @@ var FILE_TYPES = {
   Dashboard: { dir: "dashboards", ext: ".dashboard", foldered: true },
   ReportFolder: { dir: "reports", ext: "", metaOnly: true, manifestType: "Report" },
   DashboardFolder: { dir: "dashboards", ext: "", metaOnly: true, manifestType: "Dashboard" },
-  // S30: Agentforce single-file types (v66+ — see the config apiVersion
-  // note). The Bot document carries its versions INLINE (<botVersions>) in
-  // metadata format — BotVersion deploys as a dotted-name child (see
-  // CHILD_TYPES). The bundle types (GenAiFunction, GenAiPlannerBundle,
-  // AiAuthoringBundle — one component = a directory of files) are
-  // deliberately NOT here yet: read/index/diff works, deploy waits for the
-  // bundle machinery; AiAuthoringBundle stays read-only regardless, because
+  // S30: Agentforce types (v66+ — see the config apiVersion note). The Bot
+  // document carries its versions INLINE (<botVersions>) in metadata format
+  // — BotVersion deploys as a dotted-name child (see CHILD_TYPES). The two
+  // deployable bundle types carry a Contrail bundle ENVELOPE as content
+  // (see FileSpec.envelope). AiAuthoringBundle stays read-only permanently:
   // a plain Metadata API deploy of Agent Script silently does not apply
-  // reasoning actions (only Salesforce's publish pipeline compiles them).
+  // reasoning actions (only Salesforce's publish pipeline compiles them) —
+  // a deploy that validates and then lies is not a deploy Contrail offers.
   Bot: { dir: "bots", ext: ".bot" },
+  GenAiFunction: {
+    dir: "genAiFunctions",
+    ext: ".genAiFunction",
+    envelope: true,
+    envelopeMainSuffix: ".genAiFunction-meta.xml"
+  },
+  GenAiPlannerBundle: {
+    dir: "genAiPlannerBundles",
+    ext: ".genAiPlannerBundle",
+    envelope: true,
+    envelopeMainSuffix: ".genAiPlannerBundle"
+  },
   GenAiPlugin: { dir: "genAiPlugins", ext: ".genAiPlugin" },
   GenAiPromptTemplate: { dir: "genAiPromptTemplates", ext: ".genAiPromptTemplate" },
   GenAiPromptTemplateActv: {
@@ -30931,6 +30942,65 @@ var CHILD_TYPES2 = {
 };
 var NAME_RE = /^[A-Za-z0-9_.\- ()'&]+$/;
 var FOLDER_SEGMENT_RE = /^[A-Za-z0-9_$]+$/;
+var BUNDLE_REL_SEGMENT_RE = /^[A-Za-z0-9_$][A-Za-z0-9_$.\-]*$/;
+var BUNDLE_MAX_FILES = 100;
+var BUNDLE_MAX_DEPTH = 8;
+function parseBundleEnvelope(type, apiName, content, mainFile) {
+  let parsed;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    throw new ContrailError(
+      `${type} ${apiName}: content must be a Contrail bundle envelope \u2014 JSON of the shape {"contrail_bundle":1, "files": {"${mainFile}": "<xml>", "input/schema.json": "\u2026"}}. Bundle types are directories of files; retrieve_metadata's bundle_files listing shows the real file set to carry over.`,
+      "bad_component"
+    );
+  }
+  const env = parsed;
+  if (env.contrail_bundle !== 1 || typeof env.files !== "object" || env.files === null) {
+    throw new ContrailError(
+      `${type} ${apiName}: envelope must carry contrail_bundle: 1 and a files object.`,
+      "bad_component"
+    );
+  }
+  const files = env.files;
+  const entries = Object.entries(files);
+  if (entries.length === 0 || entries.length > BUNDLE_MAX_FILES) {
+    throw new ContrailError(
+      `${type} ${apiName}: envelope carries ${entries.length} files (1\u2013${BUNDLE_MAX_FILES} allowed).`,
+      "bad_component"
+    );
+  }
+  const out = {};
+  for (const [rel, body] of entries) {
+    if (rel.includes("\\") || rel.includes("..")) {
+      throw new ContrailError(
+        `${type} ${apiName}: invalid envelope path "${rel}"`,
+        "bad_component"
+      );
+    }
+    const segs = rel.split("/");
+    if (segs.length === 0 || segs.length > BUNDLE_MAX_DEPTH || segs.some((s) => !BUNDLE_REL_SEGMENT_RE.test(s))) {
+      throw new ContrailError(
+        `${type} ${apiName}: invalid envelope path "${rel}"`,
+        "bad_component"
+      );
+    }
+    if (typeof body !== "string") {
+      throw new ContrailError(
+        `${type} ${apiName}: envelope file "${rel}" must be a string body.`,
+        "bad_component"
+      );
+    }
+    out[rel] = body;
+  }
+  if (!(mainFile in out)) {
+    throw new ContrailError(
+      `${type} ${apiName}: envelope is missing its main file "${mainFile}".`,
+      "bad_component"
+    );
+  }
+  return out;
+}
 var XMLNS = "http://soap.sforce.com/2006/04/metadata";
 function buildDeployZip(components, deletions, apiVersionNumber, metaXmlLookup) {
   const files = /* @__PURE__ */ new Map();
@@ -30944,7 +31014,23 @@ function buildDeployZip(components, deletions, apiVersionNumber, metaXmlLookup) 
   for (const c of components) {
     validateTypeAndName(c.type, c.api_name);
     const fileSpec = FILE_TYPES[c.type];
+    if (fileSpec?.envelope) {
+      const mainFile = `${c.api_name}${fileSpec.envelopeMainSuffix ?? fileSpec.ext}`;
+      const bundleFiles = parseBundleEnvelope(c.type, c.api_name, c.content, mainFile);
+      const dirPrefix = `${fileSpec.dir}/${fileSafeSegment(c.api_name)}/`;
+      for (const [rel, body] of Object.entries(bundleFiles)) {
+        files.set(`${dirPrefix}${rel}`, strToU8(body));
+      }
+      addMember(fileSpec.manifestType ?? c.type, c.api_name);
+      continue;
+    }
     if (fileSpec) {
+      if (/^\s*\{\s*"contrail_bundle"/.test(c.content)) {
+        throw new ContrailError(
+          `${c.type} ${c.api_name}: a Contrail bundle envelope was passed but ${c.type} is a single-file type \u2014 pass the document itself as content.`,
+          "bad_component"
+        );
+      }
       const path11 = zipPathFor(fileSpec, c.api_name);
       files.set(path11, strToU8(c.content));
       if (fileSpec.metaRoot) {
@@ -31092,6 +31178,43 @@ function analyzeChanges(db, store, conn, components, deletions) {
       });
       continue;
     }
+    const envSpec = FILE_TYPES[c.type];
+    if (envSpec?.envelope) {
+      const mainFile = `${c.api_name}${envSpec.envelopeMainSuffix ?? envSpec.ext}`;
+      const proposed = parseBundleEnvelope(c.type, c.api_name, c.content, mainFile);
+      const existingBundle = db.getArtifact(conn.id, c.type, c.api_name);
+      const warnings2 = [];
+      let change2;
+      if (!existingBundle) {
+        change2 = "add";
+      } else {
+        const old = readBundleFiles(store, conn, envSpec.dir, c.api_name);
+        const added = Object.keys(proposed).filter((k) => !(k in old));
+        const removed = Object.keys(old).filter((k) => !(k in proposed));
+        const changed = Object.keys(proposed).filter(
+          (k) => k in old && old[k].trim() !== proposed[k].trim()
+        );
+        change2 = added.length + removed.length + changed.length === 0 ? "unchanged_content" : "modify";
+        if (change2 === "modify") {
+          const describe = (label, list) => list.length > 0 ? `${label} ${list.slice(0, 8).join(", ")}${list.length > 8 ? "\u2026" : ""}` : "";
+          const delta = [
+            describe("changed:", changed),
+            describe("added:", added),
+            describe("removed:", removed)
+          ].filter(Boolean).join("; ");
+          warnings2.push(
+            `BUNDLE REPLACE \u2014 this deploy replaces the org's whole ${c.type} directory (${Object.keys(proposed).length} files; ${delta}).`
+          );
+        }
+      }
+      if (c.type === "GenAiPlannerBundle" && change2 === "modify") {
+        warnings2.push(
+          `AGENT MUST BE DEACTIVATED FIRST \u2014 deploying GenAiPlannerBundle changes for an ACTIVE agent version fails, and version-suffixed bundles are PUBLISHED SNAPSHOTS: a modified deploy of one fails org-side even deactivated (unmodified re-deploys "succeed" as no-ops). Deactivate in Agent Builder, deploy, then reactivate (Contrail cannot do those steps; verify with BotVersion.Status). On Agent-Script agents the next publish overwrites hand-edits.`
+        );
+      }
+      changes.push({ type: c.type, api_name: c.api_name, change: change2, warnings: warnings2, ...sourceOf(c) });
+      continue;
+    }
     const existing = db.getArtifact(conn.id, c.type, c.api_name);
     const warnings = [];
     let change;
@@ -31149,7 +31272,7 @@ function analyzeChanges(db, store, conn, components, deletions) {
         `activeVersionIdentifier on a NET-NEW template \u2014 this token is org-generated and cannot be authored from scratch. Omit it (the org mints one on deploy), or retrieve-first if this template already exists under another name.`
       );
     }
-    if ((c.type === "GenAiPlannerBundle" || c.type === "GenAiPlugin") && change === "modify") {
+    if (c.type === "GenAiPlugin" && change === "modify") {
       warnings.push(
         `AGENT MUST BE DEACTIVATED FIRST \u2014 deploying ${c.type} changes for an ACTIVE agent version fails. Deactivate the agent in Agent Builder, deploy, then reactivate (Contrail cannot do those steps; verify with BotVersion.Status).`
       );
@@ -31207,6 +31330,10 @@ function isGranted(containerText, need) {
       return permissionBlocks(containerText, "applicationVisibilities").some(
         (b) => named(b, "application", need.api_name) && flagOn(b, "visible")
       );
+    case "agent":
+      return permissionBlocks(containerText, "agentAccesses").some(
+        (b) => named(b, "agentName", need.api_name) && flagOn(b, "enabled")
+      );
     case "tab": {
       const blocks = [
         ...permissionBlocks(containerText, "tabVisibilities"),
@@ -31238,6 +31365,8 @@ function analyzePermissionCoverage(components) {
       needs.push({ type: "ApexPage", api_name: c.api_name, permission: "Visualforce page access", kind: "page" });
     } else if (c.type === "CustomApplication") {
       needs.push({ type: "CustomApplication", api_name: c.api_name, permission: "app visibility", kind: "application" });
+    } else if (c.type === "Bot") {
+      needs.push({ type: "Bot", api_name: c.api_name, permission: "agent access (agentAccesses)", kind: "agent" });
     } else if (c.type === "CustomObject") {
       if (isCustomEntity(c.api_name)) {
         needs.push({ type: "CustomObject", api_name: c.api_name, permission: "object permissions", kind: "object" });
@@ -31263,6 +31392,15 @@ function analyzePermissionCoverage(components) {
 }
 function escapeRegex2(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function readBundleFiles(store, conn, dir, apiName) {
+  const prefix = `${dir}/${fileSafeSegment(apiName)}/`;
+  const out = {};
+  for (const rel of store.listCurrentFiles(conn.id, prefix)) {
+    const body = store.readCurrentFile(conn.id, rel);
+    if (body !== null) out[rel.slice(prefix.length)] = body;
+  }
+  return out;
 }
 function readOldContent(store, conn, type, apiName, filePath) {
   const file = store.readCurrentFile(conn.id, filePath);
@@ -32975,7 +33113,7 @@ function getUpdateNotice(installedVersion, repo, enabled) {
 }
 
 // src/core/version.ts
-var ENGINE_VERSION = "0.21.0";
+var ENGINE_VERSION = "0.22.0";
 
 // src/tools/register.ts
 var UPDATE_REPO = "RHayes765/contrail-plugin";
@@ -35247,7 +35385,7 @@ function registerDeployTools(server, deps) {
         components: external_exports.array(
           external_exports.object({
             type: external_exports.string().describe(
-              'ApexClass, ApexTrigger, ApexPage, Flow, CustomObject, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, GlobalValueSet, ConnectedApp, NamedCredential, ExternalCredential, PlatformEventChannel(Member), ManagedEventSubscription, Layout, CustomMetadata (records, dotted Type.Record names), Report / Dashboard (folder-qualified "FolderDevName/Name" api_names; deploy the ReportFolder/DashboardFolder component first or in the same package for a new folder), ReportFolder / DashboardFolder (content = the whole <ReportFolder> doc with folderShares \u2014 folder sharing is what makes reports visible), Agentforce types Bot, GenAiPlugin (agent topics \u2014 modifying one on an ACTIVE agent needs the human to deactivate it first), GenAiPromptTemplate (activeVersionIdentifier is org-generated: retrieve-first, never hand-type it), GenAiPromptTemplateActv, AiEvaluationDefinition (Testing Center test definitions), BotTemplate, BotBlock, or child types CustomField / ValidationRule / CustomLabel / ListView / RecordType / BotVersion (dotted MyBot.v1). NOT deployable (read/diff only): GenAiFunction, GenAiPlannerBundle, AiAuthoringBundle \u2014 bundle types; agent publish/activate/deactivate are org-side human steps Contrail cannot perform.'
+              `ApexClass, ApexTrigger, ApexPage, Flow, CustomObject, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, GlobalValueSet, ConnectedApp, NamedCredential, ExternalCredential, PlatformEventChannel(Member), ManagedEventSubscription, Layout, CustomMetadata (records, dotted Type.Record names), Report / Dashboard (folder-qualified "FolderDevName/Name" api_names; deploy the ReportFolder/DashboardFolder component first or in the same package for a new folder), ReportFolder / DashboardFolder (content = the whole <ReportFolder> doc with folderShares \u2014 folder sharing is what makes reports visible), Agentforce types Bot, GenAiPlugin (agent topics \u2014 modifying one on an ACTIVE agent needs the human to deactivate it first), GenAiPromptTemplate (activeVersionIdentifier is org-generated: retrieve-first, never hand-type it), GenAiPromptTemplateActv, AiEvaluationDefinition (Testing Center test definitions), BotTemplate, BotBlock, or child types CustomField / ValidationRule / CustomLabel / ListView / RecordType / BotVersion (dotted MyBot.v1). Bundle types GenAiFunction / GenAiPlannerBundle (one component = a directory of files) take a Contrail bundle ENVELOPE as content: JSON {"contrail_bundle":1, "files": {"<relative path>": "<body>", ...}} \u2014 the file set retrieve_metadata's bundle_files listing shows, main file included (e.g. "My_Fn.genAiFunction-meta.xml"). NOT deployable (read/diff only): AiAuthoringBundle \u2014 a Metadata API deploy of Agent Script silently skips reasoning actions; and agent publish/activate/deactivate are org-side human steps Contrail cannot perform.`
             ),
             api_name: external_exports.string().describe("Full API name; children dotted (Account.MyField__c)."),
             content: external_exports.string().optional().describe(
