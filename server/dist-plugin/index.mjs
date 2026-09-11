@@ -7004,12 +7004,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs14, exportName) {
+    function addFormats(ajv, list, fs15, exportName) {
       var _a2;
       var _b2;
       (_a2 = (_b2 = ajv.opts.code).formats) !== null && _a2 !== void 0 ? _a2 : _b2.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs14[f]);
+        ajv.addFormat(f, fs15[f]);
     }
     module.exports = exports = formatsPlugin;
     Object.defineProperty(exports, "__esModule", { value: true });
@@ -26245,7 +26245,11 @@ import fs3 from "node:fs";
 var DEFAULT_CONFIG = {
   salesforce: {
     clientId: "PlatformCLI",
-    apiVersion: "v63.0",
+    // S30: v66 is the floor for the Agentforce types (GenAiPlannerBundle
+    // exists only at v64+, AiAuthoringBundle only at v66+; the legacy
+    // GenAiPlanner type died at v64 — probed live). A config.json that pins
+    // an older version keeps it until the human edits it.
+    apiVersion: "v66.0",
     scopes: ["refresh_token", "api", "web"]
   },
   oauth: {
@@ -26263,7 +26267,12 @@ var DEFAULT_CONFIG = {
     // their folders) are likewise explicit-refresh-only — big orgs carry
     // thousands of reports and every folder costs a listMetadata query;
     // refresh_snapshot types:['Report'] pulls ReportFolder along
-    // automatically (they share a snapshot directory).
+    // automatically (they share a snapshot directory). S30: Agentforce types
+    // (Bot, GenAiPlugin, GenAiFunction, GenAiPlannerBundle,
+    // AiAuthoringBundle, GenAiPromptTemplate[Actv], AiEvaluationDefinition,
+    // BotTemplate, BotBlock) are explicit-refresh-only too — they are
+    // licensing-gated (unlicensed orgs report them unsupported, degraded
+    // per-type with a warning) and need salesforce.apiVersion v66+.
     types: [
       "ApexClass",
       "ApexTrigger",
@@ -29016,6 +29025,36 @@ var SnapshotStore = class {
       return null;
     }
   }
+  /**
+   * S30: every file under a directory prefix of the current/ tree, as
+   * relative paths (forward slashes), sorted — the read surface for bundle
+   * types, where one component is a directory of files. Same containment
+   * discipline as the single-file reads; empty when the prefix is absent or
+   * would escape.
+   */
+  listCurrentFiles(connectionId, relDirPrefix) {
+    const dir = path3.join(this.connDir(connectionId), "current");
+    const target = path3.resolve(dir, relDirPrefix);
+    if (!target.startsWith(path3.resolve(dir) + path3.sep)) return [];
+    const out = [];
+    const walk = (abs) => {
+      let entries;
+      try {
+        entries = fs9.readdirSync(abs, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const e of entries) {
+        const child = path3.join(abs, e.name);
+        if (e.isDirectory()) walk(child);
+        else if (e.isFile()) {
+          out.push(path3.relative(dir, child).replaceAll(path3.sep, "/"));
+        }
+      }
+    };
+    walk(target);
+    return out.sort();
+  }
   removeConnection(connectionId) {
     fs9.rmSync(this.connDir(connectionId), { recursive: true, force: true });
   }
@@ -29087,6 +29126,20 @@ var MetadataSoapClient = class {
    * explicit-refresh-only types; never silently skipped.
    */
   async listMetadata(types) {
+    return (await this.listAll(types, false)).props;
+  }
+  /**
+   * S30: like listMetadata, but a type the org/API version does not know
+   * (INVALID_TYPE — an older API version, or an unlicensed feature like the
+   * Agentforce types on a non-Agentforce org) degrades to a per-type report
+   * instead of poisoning the whole call. Every other fault still throws.
+   * Callers doing multi-type inventory (refresh, staleness, drift) use this
+   * so one unsupported type never sinks the healthy ones.
+   */
+  async listMetadataDetailed(types) {
+    return this.listAll(types, true);
+  }
+  async listAll(types, degradeInvalidTypes) {
     const flat = [];
     const foldered = [];
     const seen = /* @__PURE__ */ new Set();
@@ -29104,12 +29157,13 @@ var MetadataSoapClient = class {
         wantFlat(t);
       }
     }
-    const all = await this.listQueries(flat);
+    const unsupported = /* @__PURE__ */ new Set();
+    const all = await this.listQueries(flat, degradeInvalidTypes, unsupported);
     if (foldered.length > 0) {
       const folderQueries = [];
       for (const t of foldered) {
         const cfg = FOLDERED_TYPES[t];
-        if (!cfg) continue;
+        if (!cfg || unsupported.has(cfg.folderType)) continue;
         const folders = all.filter((p) => p.type === cfg.folderType).map((p) => p.fullName);
         if (cfg.unfiledFolder && !folders.includes(cfg.unfiledFolder)) {
           folders.push(cfg.unfiledFolder);
@@ -29118,49 +29172,72 @@ var MetadataSoapClient = class {
       }
       if (folderQueries.length > 0) {
         log("info", "listing foldered metadata per folder", { queries: folderQueries.length });
-        for (const p of await this.listQueries(folderQueries)) {
+        for (const p of await this.listQueries(folderQueries, degradeInvalidTypes, unsupported)) {
           all.push(p);
+        }
+      }
+    }
+    for (const t of foldered) {
+      const cfg = FOLDERED_TYPES[t];
+      if (cfg && unsupported.has(cfg.folderType)) unsupported.add(t);
+    }
+    return { props: all, unsupportedTypes: [...unsupported].filter((t) => types.includes(t)) };
+  }
+  /** listMetadata accepts at most 3 queries per call; chunk transparently. */
+  async listQueries(queries, degradeInvalidTypes, unsupported) {
+    const all = [];
+    for (let i = 0; i < queries.length; i += 3) {
+      const chunk = queries.slice(i, i + 3);
+      try {
+        all.push(...await this.listChunk(chunk));
+      } catch (err2) {
+        const msg = String(err2 instanceof Error ? err2.message : err2);
+        if (!degradeInvalidTypes || !/INVALID_TYPE/i.test(msg)) throw err2;
+        for (const q of chunk) {
+          try {
+            all.push(...await this.listChunk([q]));
+          } catch (err22) {
+            const msg2 = String(err22 instanceof Error ? err22.message : err22);
+            if (!/INVALID_TYPE/i.test(msg2)) throw err22;
+            unsupported.add(q.type);
+          }
         }
       }
     }
     return all;
   }
-  /** listMetadata accepts at most 3 queries per call; chunk transparently. */
-  async listQueries(queries) {
-    const all = [];
-    for (let i = 0; i < queries.length; i += 3) {
-      const chunk = queries.slice(i, i + 3);
-      const queriesXml = chunk.map(
-        (q) => `<met:queries>${// WSDL sequence order: folder BEFORE type.
-        q.folder ? `<met:folder>${escapeXml(q.folder)}</met:folder>` : ""}<met:type>${escapeXml(q.type)}</met:type></met:queries>`
-      ).join("");
-      const body = `<met:listMetadata>${queriesXml}<met:asOfVersion>${this.versionNumber}</met:asOfVersion></met:listMetadata>`;
-      const parsed = await this.call(body);
-      const result = xmlDig(parsed, "Envelope", "Body", "listMetadataResponse", "result");
-      const foldersByType = /* @__PURE__ */ new Map();
-      for (const q of chunk) {
-        if (q.folder) {
-          const set = foldersByType.get(q.type) ?? /* @__PURE__ */ new Set();
-          set.add(q.folder);
-          foldersByType.set(q.type, set);
-        }
+  async listChunk(chunk) {
+    const queriesXml = chunk.map(
+      (q) => `<met:queries>${// WSDL sequence order: folder BEFORE type.
+      q.folder ? `<met:folder>${escapeXml(q.folder)}</met:folder>` : ""}<met:type>${escapeXml(q.type)}</met:type></met:queries>`
+    ).join("");
+    const body = `<met:listMetadata>${queriesXml}<met:asOfVersion>${this.versionNumber}</met:asOfVersion></met:listMetadata>`;
+    const parsed = await this.call(body);
+    const result = xmlDig(parsed, "Envelope", "Body", "listMetadataResponse", "result");
+    const foldersByType = /* @__PURE__ */ new Map();
+    for (const q of chunk) {
+      if (q.folder) {
+        const set = foldersByType.get(q.type) ?? /* @__PURE__ */ new Set();
+        set.add(q.folder);
+        foldersByType.set(q.type, set);
       }
-      for (const item of asArray(result)) {
-        if (item && typeof item === "object" && item.fullName && item.type) {
-          const folderSet = foldersByType.get(item.type);
-          const folder = folderSet?.size === 1 ? [...folderSet][0] : void 0;
-          const fullName = folder && !item.fullName.includes("/") ? `${folder}/${item.fullName}` : item.fullName;
-          all.push({
-            type: item.type,
-            fullName,
-            fileName: item.fileName ?? "",
-            id: item.id ?? "",
-            lastModifiedDate: item.lastModifiedDate ?? "",
-            lastModifiedByName: item.lastModifiedByName ?? "",
-            manageableState: item.manageableState,
-            namespacePrefix: item.namespacePrefix
-          });
-        }
+    }
+    const all = [];
+    for (const item of asArray(result)) {
+      if (item && typeof item === "object" && item.fullName && item.type) {
+        const folderSet = foldersByType.get(item.type);
+        const folder = folderSet?.size === 1 ? [...folderSet][0] : void 0;
+        const fullName = folder && !item.fullName.includes("/") ? `${folder}/${item.fullName}` : item.fullName;
+        all.push({
+          type: item.type,
+          fullName,
+          fileName: item.fileName ?? "",
+          id: item.id ?? "",
+          lastModifiedDate: item.lastModifiedDate ?? "",
+          lastModifiedByName: item.lastModifiedByName ?? "",
+          manageableState: item.manageableState,
+          namespacePrefix: item.namespacePrefix
+        });
       }
     }
     return all;
@@ -29353,6 +29430,10 @@ var RestClient = class {
   async toolingQuery(soql, maxRows = 2e3) {
     return (await this.runQuery(`/services/data/${this.apiVersion}/tooling/query`, soql, maxRows)).records;
   }
+  /** S30: tooling flavor of queryWithCount (the agent-graph sObjects are Tooling-only). */
+  async toolingQueryWithCount(soql, maxRows = 2e3) {
+    return this.runQuery(`/services/data/${this.apiVersion}/tooling/query`, soql, maxRows);
+  }
   async describeSObject(name) {
     const res = await this.request(
       `/services/data/${this.apiVersion}/sobjects/${encodeURIComponent(name)}/describe`
@@ -29469,11 +29550,27 @@ var SIMPLE_DIR_TYPES = [
     type: "ManagedEventSubscription"
   },
   { dir: "layouts", ext: ".layout", type: "Layout" },
-  { dir: "customMetadata", ext: ".md", type: "CustomMetadata" }
+  { dir: "customMetadata", ext: ".md", type: "CustomMetadata" },
+  // S30: Agentforce single-file types (v66+ — see config apiVersion note).
+  { dir: "genAiPlugins", ext: ".genAiPlugin", type: "GenAiPlugin" },
+  { dir: "genAiPromptTemplates", ext: ".genAiPromptTemplate", type: "GenAiPromptTemplate" },
+  {
+    dir: "genAiPromptTemplateActivations",
+    ext: ".genAiPromptTemplateActivation",
+    type: "GenAiPromptTemplateActv"
+  },
+  { dir: "aiEvaluationDefinitions", ext: ".aiEvaluationDefinition", type: "AiEvaluationDefinition" },
+  { dir: "botTemplates", ext: ".botTemplate", type: "BotTemplate" },
+  { dir: "botBlocks", ext: ".botBlock", type: "BotBlock" }
 ];
 var FOLDERED_DIR_TYPES = [
   { dir: "reports", ext: ".report", type: "Report", folderType: "ReportFolder" },
   { dir: "dashboards", ext: ".dashboard", type: "Dashboard", folderType: "DashboardFolder" }
+];
+var BUNDLE_DIR_TYPES = [
+  { dir: "genAiFunctions", type: "GenAiFunction", mainExt: ".genAiFunction" },
+  { dir: "genAiPlannerBundles", type: "GenAiPlannerBundle", mainExt: ".genAiPlannerBundle" },
+  { dir: "aiAuthoringBundles", type: "AiAuthoringBundle", mainExt: ".agent" }
 ];
 function indexSnapshotFiles(files, fileProps, retrievedAt) {
   const props = /* @__PURE__ */ new Map();
@@ -29492,8 +29589,24 @@ function indexSnapshotFiles(files, fileProps, retrievedAt) {
       content
     });
   };
+  const bundles = /* @__PURE__ */ new Map();
   for (const [relPath, bytes] of files) {
     if (relPath === "package.xml") continue;
+    const bundleSpec = BUNDLE_DIR_TYPES.find((b) => relPath.startsWith(`${b.dir}/`));
+    if (bundleSpec) {
+      const inner = relPath.slice(bundleSpec.dir.length + 1);
+      const slash = inner.indexOf("/");
+      if (slash <= 0) {
+        log("debug", "snapshot file not indexed (unmapped type)", { relPath });
+        continue;
+      }
+      const seg = inner.slice(0, slash);
+      const key2 = `${bundleSpec.type}:${seg}`;
+      const group = bundles.get(key2) ?? { spec: bundleSpec, seg, files: [] };
+      group.files.push({ rel: relPath, text: Buffer.from(bytes).toString("utf8") });
+      bundles.set(key2, group);
+      continue;
+    }
     const foldered = FOLDERED_DIR_TYPES.find((f) => relPath.startsWith(`${f.dir}/`));
     if (foldered) {
       const inner = relPath.slice(foldered.dir.length + 1);
@@ -29542,6 +29655,13 @@ function indexSnapshotFiles(files, fileProps, retrievedAt) {
         const child = blockFullName(block);
         if (child) push("CustomLabel", child, relPath, block, labelsProp);
       }
+    } else if (relPath.startsWith("bots/") && relPath.endsWith(".bot")) {
+      const botProp = props.get(`Bot:${name.toLowerCase()}`);
+      push("Bot", name, relPath, content);
+      for (const block of extractChildBlocks(content, "botVersions")) {
+        const child = blockFullName(block);
+        if (child) push("BotVersion", `${name}.${child}`, relPath, block, botProp);
+      }
     } else {
       const simple = SIMPLE_DIR_TYPES.find(
         (s) => relPath.startsWith(`${s.dir}/`) && relPath.endsWith(s.ext)
@@ -29552,6 +29672,15 @@ function indexSnapshotFiles(files, fileProps, retrievedAt) {
         log("debug", "snapshot file not indexed (unmapped type)", { relPath });
       }
     }
+  }
+  for (const group of bundles.values()) {
+    const apiName = decodeSegment(group.seg);
+    const sorted = [...group.files].sort((a, b) => a.rel.localeCompare(b.rel));
+    const mainRel = `${group.spec.dir}/${group.seg}/${group.seg}${group.spec.mainExt}`;
+    const main2 = sorted.find((f) => f.rel === mainRel);
+    const content = sorted.map((f) => `<!-- contrail:file ${f.rel} -->
+${f.text}`).join("\n");
+    push(group.spec.type, apiName, main2?.rel ?? sorted[0].rel, content);
   }
   return artifacts;
 }
@@ -29744,6 +29873,30 @@ function extractDashboardRefs(xml) {
   }
   return refs.list();
 }
+function extractGenAiPluginRefs(xml) {
+  const refs = new RefSet();
+  for (const m of xml.matchAll(/<functionName>([^<]+)<\/functionName>/g)) {
+    refs.add("GenAiFunction", m[1]);
+  }
+  return refs.list();
+}
+function extractGenAiPlannerRefs(xml) {
+  const refs = new RefSet();
+  for (const m of xml.matchAll(/<genAiPluginName>([^<]+)<\/genAiPluginName>/g)) {
+    refs.add("GenAiPlugin", m[1]);
+  }
+  for (const m of xml.matchAll(/<functionName>([^<]+)<\/functionName>/g)) {
+    refs.add("GenAiFunction", m[1]);
+  }
+  return refs.list();
+}
+function extractBotRefs(xml) {
+  const refs = new RefSet();
+  for (const m of xml.matchAll(/<genAiPlannerName>([^<]+)<\/genAiPlannerName>/g)) {
+    refs.add("GenAiPlannerBundle", m[1]);
+  }
+  return refs.list();
+}
 function buildKnownArtifacts(artifacts) {
   const known = {
     classes: /* @__PURE__ */ new Map(),
@@ -29796,6 +29949,12 @@ function extractAllEdges(connectionId, artifacts, known = buildKnownArtifacts(ar
       add(a.type, a.apiName, extractReportRefs(a.content));
     } else if (a.type === "Dashboard") {
       add(a.type, a.apiName, extractDashboardRefs(a.content));
+    } else if (a.type === "GenAiPlugin") {
+      add(a.type, a.apiName, extractGenAiPluginRefs(a.content));
+    } else if (a.type === "GenAiPlannerBundle") {
+      add(a.type, a.apiName, extractGenAiPlannerRefs(a.content));
+    } else if (a.type === "Bot") {
+      add(a.type, a.apiName, extractBotRefs(a.content));
     }
   }
   return edges;
@@ -29859,7 +30018,9 @@ async function fetchOrgDependencyEdges(rest, connectionId, types) {
 // src/snapshot/engine.ts
 var CHILD_TYPES = {
   CustomObject: ["CustomField", "ValidationRule", "ListView", "RecordType"],
-  CustomLabels: ["CustomLabel"]
+  CustomLabels: ["CustomLabel"],
+  // S30: Bot versions live inline in the Bot document (metadata format).
+  Bot: ["BotVersion"]
 };
 var COUPLED_TYPES = {
   Report: "ReportFolder",
@@ -29947,13 +30108,24 @@ var SnapshotEngine = class {
     const rest = new RestClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
     job.progress = "listing metadata";
     let listedProps = [];
+    let unsupportedTypes = [];
     try {
-      listedProps = await soap.listMetadata(types);
+      const detailed = await soap.listMetadataDetailed(types);
+      listedProps = detailed.props;
+      unsupportedTypes = detailed.unsupportedTypes;
     } catch (err2) {
       warnings.push(`listMetadata failed (${String(err2 instanceof Error ? err2.message : err2)}); staleness data will be limited`);
     }
+    let retrieveTypes = types;
+    if (unsupportedTypes.length > 0) {
+      const unsupported = new Set(unsupportedTypes);
+      retrieveTypes = types.filter((t) => !unsupported.has(t));
+      warnings.push(
+        `${unsupportedTypes.join(", ")} not supported by this org/API version \u2014 skipped (feature not licensed, or salesforce.apiVersion too old).`
+      );
+    }
     job.progress = "starting retrieve";
-    const retrieveMembers = buildRetrieveMembers(types, listedProps, warnings);
+    const retrieveMembers = buildRetrieveMembers(retrieveTypes, listedProps, warnings);
     if (Object.keys(retrieveMembers).length === 0) {
       throw new ContrailError(
         `nothing retrievable for the requested types (${types.join(", ")}): ${warnings.join(" ")}`,
@@ -29988,13 +30160,13 @@ var SnapshotEngine = class {
     const retrievedAt = (/* @__PURE__ */ new Date()).toISOString();
     this.store.saveZip(conn.id, status.zipFile, retrievedAt);
     const extracted = this.store.extractRetrieveZip(status.zipFile);
-    const affectedTypes = withChildTypes(types);
+    const affectedTypes = withChildTypes(retrieveTypes);
     const affectedSet = new Set(affectedTypes);
-    const fullManifest = this.config.snapshot.types.every((t) => types.includes(t));
+    const fullManifest = this.config.snapshot.types.every((t) => retrieveTypes.includes(t));
     let files = extracted;
     let clearDirs;
     if (!fullManifest) {
-      const ownedDirs = ownedDirsForTypes(types);
+      const ownedDirs = ownedDirsForTypes(retrieveTypes);
       if (ownedDirs) {
         files = new Map(
           [...extracted].filter(([rel]) => {
@@ -30004,7 +30176,7 @@ var SnapshotEngine = class {
         );
         clearDirs = [...ownedDirs];
       } else {
-        clearDirs = dirsForTypes(types, extracted);
+        clearDirs = dirsForTypes(retrieveTypes, extracted);
       }
     }
     this.store.writeCurrent(conn.id, files, clearDirs ? { clearDirs } : void 0);
@@ -30023,9 +30195,9 @@ var SnapshotEngine = class {
     const extractorEdges = extractAllEdges(conn.id, artifacts, known);
     this.db.replaceEdges(conn.id, "extractor", affectedTypes, extractorEdges);
     job.progress = "querying org dependency data";
-    const orgDeps = await fetchOrgDependencyEdges(rest, conn.id, types);
+    const orgDeps = await fetchOrgDependencyEdges(rest, conn.id, retrieveTypes);
     warnings.push(...orgDeps.warnings);
-    this.db.replaceEdges(conn.id, "org", types, orgDeps.edges);
+    this.db.replaceEdges(conn.id, "org", retrieveTypes, orgDeps.edges);
     const summary = {
       connection: conn.alias,
       types,
@@ -30052,7 +30224,7 @@ var SnapshotEngine = class {
   async checkStaleness(conn, types) {
     const checkTypes = normalizeRefreshTypes(types ?? this.config.snapshot.types);
     const soap = new MetadataSoapClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
-    const props = await soap.listMetadata(checkTypes);
+    const { props, unsupportedTypes } = await soap.listMetadataDetailed(checkTypes);
     const stale = [];
     let missing = 0;
     for (const p of props) {
@@ -30071,11 +30243,12 @@ var SnapshotEngine = class {
         });
       }
     }
+    const unsupportedNote = unsupportedTypes.length > 0 ? ` ${unsupportedTypes.join(", ")} not supported by this org/API version \u2014 not checked.` : "";
     return {
       checked_types: checkTypes,
       stale: stale.slice(0, 100),
       missing_from_index: missing,
-      note: stale.length || missing ? "Run refresh_snapshot to bring the local snapshot up to date." : "Snapshot is current for the checked types."
+      note: (stale.length || missing ? "Run refresh_snapshot to bring the local snapshot up to date." : "Snapshot is current for the checked types.") + unsupportedNote
     };
   }
 };
@@ -30157,7 +30330,19 @@ var TYPE_DIRS = {
   Report: "reports",
   ReportFolder: "reports",
   Dashboard: "dashboards",
-  DashboardFolder: "dashboards"
+  DashboardFolder: "dashboards",
+  // S30: Agentforce types (v66+; explicit-refresh-only, like the analytics
+  // and integration families).
+  Bot: "bots",
+  GenAiPlugin: "genAiPlugins",
+  GenAiFunction: "genAiFunctions",
+  GenAiPlannerBundle: "genAiPlannerBundles",
+  AiAuthoringBundle: "aiAuthoringBundles",
+  GenAiPromptTemplate: "genAiPromptTemplates",
+  GenAiPromptTemplateActv: "genAiPromptTemplateActivations",
+  AiEvaluationDefinition: "aiEvaluationDefinitions",
+  BotTemplate: "botTemplates",
+  BotBlock: "botBlocks"
 };
 function ownedDirsForTypes(types) {
   const dirs = /* @__PURE__ */ new Set();
@@ -30668,7 +30853,26 @@ var FILE_TYPES = {
   Report: { dir: "reports", ext: ".report", foldered: true },
   Dashboard: { dir: "dashboards", ext: ".dashboard", foldered: true },
   ReportFolder: { dir: "reports", ext: "", metaOnly: true, manifestType: "Report" },
-  DashboardFolder: { dir: "dashboards", ext: "", metaOnly: true, manifestType: "Dashboard" }
+  DashboardFolder: { dir: "dashboards", ext: "", metaOnly: true, manifestType: "Dashboard" },
+  // S30: Agentforce single-file types (v66+ — see the config apiVersion
+  // note). The Bot document carries its versions INLINE (<botVersions>) in
+  // metadata format — BotVersion deploys as a dotted-name child (see
+  // CHILD_TYPES). The bundle types (GenAiFunction, GenAiPlannerBundle,
+  // AiAuthoringBundle — one component = a directory of files) are
+  // deliberately NOT here yet: read/index/diff works, deploy waits for the
+  // bundle machinery; AiAuthoringBundle stays read-only regardless, because
+  // a plain Metadata API deploy of Agent Script silently does not apply
+  // reasoning actions (only Salesforce's publish pipeline compiles them).
+  Bot: { dir: "bots", ext: ".bot" },
+  GenAiPlugin: { dir: "genAiPlugins", ext: ".genAiPlugin" },
+  GenAiPromptTemplate: { dir: "genAiPromptTemplates", ext: ".genAiPromptTemplate" },
+  GenAiPromptTemplateActv: {
+    dir: "genAiPromptTemplateActivations",
+    ext: ".genAiPromptTemplateActivation"
+  },
+  AiEvaluationDefinition: { dir: "aiEvaluationDefinitions", ext: ".aiEvaluationDefinition" },
+  BotTemplate: { dir: "botTemplates", ext: ".botTemplate" },
+  BotBlock: { dir: "botBlocks", ext: ".botBlock" }
 };
 var XMLNS_META = "http://soap.sforce.com/2006/04/metadata";
 function flowDeactivationXml() {
@@ -30712,6 +30916,16 @@ var CHILD_TYPES2 = {
     dir: "objects",
     ext: ".object",
     tag: "recordTypes",
+    parentFromName: (n) => n.split(".")[0] ?? ""
+  },
+  // S30: bot versions are children of the Bot document (dotted MyBot.v1 —
+  // the same fullName shape the Metadata API uses for standalone BotVersion
+  // deploys).
+  BotVersion: {
+    containerRoot: "Bot",
+    dir: "bots",
+    ext: ".bot",
+    tag: "botVersions",
     parentFromName: (n) => n.split(".")[0] ?? ""
   }
 };
@@ -30895,10 +31109,19 @@ function analyzeChanges(db, store, conn, components, deletions) {
           );
         }
       }
-      if ((c.type === "FlexiPage" || c.type === "CustomApplication" || c.type === "Layout" || c.type === "Report" || c.type === "Dashboard") && change === "modify") {
+      if ((c.type === "FlexiPage" || c.type === "CustomApplication" || c.type === "Layout" || c.type === "Report" || c.type === "Dashboard" || c.type === "GenAiPlugin" || c.type === "GenAiPromptTemplate" || c.type === "Bot") && change === "modify") {
         warnings.push(
-          `WHOLE-DOCUMENT REPLACE \u2014 this deploy fully replaces the org's ${c.type}; anything not present in the proposed content is removed.`
+          `WHOLE-DOCUMENT REPLACE \u2014 this deploy fully replaces the org's ${c.type}; anything not present in the proposed content is removed.` + (c.type === "Bot" ? " A <botVersions> block omitted from a Bot document is a VERSION DELETE." : "")
         );
+      }
+      if (c.type === "GenAiPromptTemplate" && change === "modify") {
+        const oldId = oldContent?.match(/<activeVersionIdentifier>([^<]*)</)?.[1];
+        const newId = c.content.match(/<activeVersionIdentifier>([^<]*)</)?.[1];
+        if (oldId && newId && oldId !== newId) {
+          warnings.push(
+            `activeVersionIdentifier ALTERED (${oldId.slice(0, 12)}\u2026 \u2192 ${newId.slice(0, 12)}\u2026) \u2014 these tokens are org-generated; a hand-edited value is rejected or mis-targets the active version. To activate a new version, retrieve after deploying it and repoint using the versionIdentifier the org minted.`
+          );
+        }
       }
       if ((c.type === "ReportFolder" || c.type === "DashboardFolder") && change === "modify") {
         warnings.push(
@@ -30919,6 +31142,16 @@ function analyzeChanges(db, store, conn, components, deletions) {
     if ((c.type === "Report" || c.type === "Dashboard") && change === "add") {
       warnings.push(
         `NEW ${c.type.toUpperCase()} visibility is governed by its FOLDER's sharing (folderShares on the folder component), not by permission sets \u2014 this deploy grants nobody new access by itself.`
+      );
+    }
+    if (c.type === "GenAiPromptTemplate" && change === "add" && /<activeVersionIdentifier>[^<]/.test(c.content)) {
+      warnings.push(
+        `activeVersionIdentifier on a NET-NEW template \u2014 this token is org-generated and cannot be authored from scratch. Omit it (the org mints one on deploy), or retrieve-first if this template already exists under another name.`
+      );
+    }
+    if ((c.type === "GenAiPlannerBundle" || c.type === "GenAiPlugin") && change === "modify") {
+      warnings.push(
+        `AGENT MUST BE DEACTIVATED FIRST \u2014 deploying ${c.type} changes for an ACTIVE agent version fails. Deactivate the agent in Agent Builder, deploy, then reactivate (Contrail cannot do those steps; verify with BotVersion.Status).`
       );
     }
     changes.push({ type: c.type, api_name: c.api_name, change, warnings, ...sourceOf(c) });
@@ -32742,7 +32975,7 @@ function getUpdateNotice(installedVersion, repo, enabled) {
 }
 
 // src/core/version.ts
-var ENGINE_VERSION = "0.20.0";
+var ENGINE_VERSION = "0.21.0";
 
 // src/tools/register.ts
 var UPDATE_REPO = "RHayes765/contrail-plugin";
@@ -32953,6 +33186,9 @@ function registerTools(server, deps) {
   );
 }
 
+// src/tools/metadata.ts
+import fs12 from "node:fs";
+
 // src/core/gate.ts
 function assertGrant(connection, tool, audit) {
   if (!(tool in TOOL_GRANT_MAP)) {
@@ -32990,14 +33226,19 @@ var ORG_CHANGES_CHILD_TYPES = /* @__PURE__ */ new Set([
   "CustomLabel",
   "CustomLabels",
   "ListView",
-  "RecordType"
+  "RecordType",
+  // S30: bot versions never enumerate via flat listMetadata (live-probed) —
+  // drift for them rides the Bot document.
+  "BotVersion"
 ]);
 var CHILD_SPEC = {
   CustomField: { parentType: "CustomObject", tag: "fields" },
   ValidationRule: { parentType: "CustomObject", tag: "validationRules" },
   CustomLabel: { parentType: "CustomLabels", tag: "labels" },
   ListView: { parentType: "CustomObject", tag: "listViews" },
-  RecordType: { parentType: "CustomObject", tag: "recordTypes" }
+  RecordType: { parentType: "CustomObject", tag: "recordTypes" },
+  // S30: bot versions live inline in the Bot document (dotted MyBot.v1).
+  BotVersion: { parentType: "Bot", tag: "botVersions" }
 };
 function registerMetadataTools(server, deps) {
   const { db, audit, config: config2, engine, store, tokenMgr } = deps;
@@ -33148,6 +33389,7 @@ function registerMetadataTools(server, deps) {
             if (onDisk) entry.snapshot_path = onDisk;
           }
           if (content.note) entry.note = content.note;
+          if (content.bundle_files) entry.bundle_files = content.bundle_files;
           if (includeDeps) {
             entry.uses = db.edgesFrom(conn.id, args.type, name).slice(0, 15).map((e) => `${e.toType}:${e.toName} (${e.source})`);
             entry.used_by = db.edgesTo(conn.id, args.type, name).slice(0, 15).map((e) => `${e.fromType}:${e.fromName} (${e.source})`);
@@ -33466,8 +33708,43 @@ function registerMetadataTools(server, deps) {
     })
   );
 }
+var BUNDLE_TYPES = /* @__PURE__ */ new Set(["GenAiFunction", "GenAiPlannerBundle", "AiAuthoringBundle"]);
 async function fetchArtifactContent(deps, conn, type, name) {
   const { db, store, tokenMgr, config: config2 } = deps;
+  if (BUNDLE_TYPES.has(type)) {
+    const artifact = db.getArtifact(conn.id, type, name);
+    if (!artifact?.filePath) {
+      throw new ContrailError(
+        `${type} ${name} is not in the local snapshot \u2014 run refresh_snapshot with types:["${type}"] (bundle types are explicit-refresh-only).`,
+        "artifact_not_found"
+      );
+    }
+    const body2 = store.readCurrentFile(conn.id, artifact.filePath);
+    if (body2 === null) {
+      throw new ContrailError(
+        `${type} ${name} index row exists but its snapshot file is missing \u2014 run refresh_snapshot.`,
+        "artifact_not_found"
+      );
+    }
+    const dirPrefix = artifact.filePath.split("/").slice(0, 2).join("/");
+    const bundleFiles = store.listCurrentFiles(conn.id, dirPrefix).filter((rel) => rel !== artifact.filePath).map((rel) => {
+      const abs = store.currentFilePath(conn.id, rel);
+      let bytes = 0;
+      try {
+        bytes = abs ? fs12.statSync(abs).size : 0;
+      } catch {
+      }
+      return { path: rel, bytes, snapshot_path: abs };
+    });
+    return {
+      body: body2,
+      source: "snapshot",
+      ...bundleFiles.length > 0 ? {
+        bundle_files: bundleFiles,
+        note: `Bundle component: the main file is shown; ${bundleFiles.length} sibling file(s) listed in bundle_files with snapshot_path for direct reading.`
+      } : {}
+    };
+  }
   if (type === "ApexClass" || type === "ApexTrigger") {
     const rest = new RestClient(tokenMgr, conn, config2.salesforce.apiVersion);
     try {
@@ -34077,17 +34354,31 @@ function registerDataTools(server, deps) {
     "soql_query",
     {
       title: "Run a SOQL query",
-      description: "Run a read-only SOQL SELECT against a connection. Row-capped (default 500, max 2000) with the org-side total count included so truncation is never silent.",
+      description: "Run a read-only SOQL SELECT against a connection. Row-capped (default 500, max 2000) with the org-side total count included so truncation is never silent. tooling=true queries the Tooling API instead (needed for setup/agent-graph sObjects like GenAiPluginDefinition \u2014 requires the metadata_read grant too, because Tooling sObjects expose metadata content wholesale).",
       inputSchema: {
         connection: external_exports.string().describe("Connection alias (or id)."),
         query: external_exports.string().min(8).describe("The SOQL SELECT statement."),
-        limit: external_exports.number().int().min(1).max(MAX_ROWS).optional().describe(`Row cap (default ${DEFAULT_ROWS}).`)
+        limit: external_exports.number().int().min(1).max(MAX_ROWS).optional().describe(`Row cap (default ${DEFAULT_ROWS}).`),
+        tooling: external_exports.boolean().optional().describe(
+          "Query the Tooling API (metadata-class sObjects). Requires metadata_read in addition to data_read."
+        )
       }
     },
     async (args) => guarded(async () => {
       const conn = requireConnection(args.connection, "soql_query");
       const soql = args.query.trim();
       if (!/^select\s/i.test(soql)) return fail("Only SELECT queries are accepted.");
+      if (args.tooling && !conn.grants.metadata_read) {
+        audit.record("grant.refused", {
+          connectionId: conn.id,
+          tool: "soql_query",
+          outcome: "refused",
+          detail: { required: "metadata_read", reason: "tooling_query" }
+        });
+        return fail(
+          `Tooling API queries read metadata-class content, so tooling=true requires the "metadata_read" grant on "${conn.alias}" in addition to data_read. Grants are set on the connection management page (manage_connection).`
+        );
+      }
       const structural = stripSoqlLiterals(soql);
       if (/\bfor\s+update\b/i.test(structural)) {
         return fail("FOR UPDATE locks rows \u2014 not available through soql_query.");
@@ -34107,7 +34398,8 @@ function registerDataTools(server, deps) {
         }
       }
       const cap = args.limit ?? DEFAULT_ROWS;
-      const { records, totalSize } = await rest(conn).queryWithCount(soql, cap);
+      const client = rest(conn);
+      const { records, totalSize } = args.tooling ? await client.toolingQueryWithCount(soql, cap) : await client.queryWithCount(soql, cap);
       const cleaned = records.map((r) => truncateDeep(stripAttributes(r)));
       const { kept, dropped } = fitToBudget(cleaned, MAX_RESPONSE_CHARS);
       const truncated = dropped > 0 || totalSize !== null && kept.length > 0 && totalSize > kept.length;
@@ -34813,7 +35105,7 @@ async function pollApexTestRun(client, alias, runId) {
 
 // src/deploy/sources.ts
 import crypto3 from "node:crypto";
-import fs12 from "node:fs";
+import fs13 from "node:fs";
 import path6 from "node:path";
 var MAX_SOURCE_FILE_BYTES = 5e6;
 function allowedSourceRoots(configured = []) {
@@ -34822,7 +35114,7 @@ function allowedSourceRoots(configured = []) {
   for (const root of roots) {
     if (!path6.isAbsolute(root)) continue;
     try {
-      real.push(fs12.realpathSync(root));
+      real.push(fs13.realpathSync(root));
     } catch {
     }
   }
@@ -34844,11 +35136,11 @@ function resolveSourcePath(rawPath, configuredRoots = [], opts = {}) {
   }
   let real;
   try {
-    real = fs12.realpathSync(given);
+    real = fs13.realpathSync(given);
   } catch {
     throw new ContrailError(`${noun} does not exist: ${given}`, "source_not_found");
   }
-  const stat = fs12.statSync(real);
+  const stat = fs13.statSync(real);
   if (!stat.isFile()) {
     throw new ContrailError(`${noun} is not a regular file: ${given}`, "bad_source_path");
   }
@@ -34869,7 +35161,7 @@ function resolveSourcePath(rawPath, configuredRoots = [], opts = {}) {
 }
 function resolveSourceFile(rawPath, configuredRoots = []) {
   const { absPath } = resolveSourcePath(rawPath, configuredRoots);
-  const bytes = fs12.readFileSync(absPath);
+  const bytes = fs13.readFileSync(absPath);
   return {
     content: bytes.toString("utf8"),
     sourcePath: absPath,
@@ -34955,7 +35247,7 @@ function registerDeployTools(server, deps) {
         components: external_exports.array(
           external_exports.object({
             type: external_exports.string().describe(
-              'ApexClass, ApexTrigger, ApexPage, Flow, CustomObject, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, GlobalValueSet, ConnectedApp, NamedCredential, ExternalCredential, PlatformEventChannel(Member), ManagedEventSubscription, Layout, CustomMetadata (records, dotted Type.Record names), Report / Dashboard (folder-qualified "FolderDevName/Name" api_names; deploy the ReportFolder/DashboardFolder component first or in the same package for a new folder), ReportFolder / DashboardFolder (content = the whole <ReportFolder> doc with folderShares \u2014 folder sharing is what makes reports visible), or child types CustomField / ValidationRule / CustomLabel / ListView / RecordType.'
+              'ApexClass, ApexTrigger, ApexPage, Flow, CustomObject, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, GlobalValueSet, ConnectedApp, NamedCredential, ExternalCredential, PlatformEventChannel(Member), ManagedEventSubscription, Layout, CustomMetadata (records, dotted Type.Record names), Report / Dashboard (folder-qualified "FolderDevName/Name" api_names; deploy the ReportFolder/DashboardFolder component first or in the same package for a new folder), ReportFolder / DashboardFolder (content = the whole <ReportFolder> doc with folderShares \u2014 folder sharing is what makes reports visible), Agentforce types Bot, GenAiPlugin (agent topics \u2014 modifying one on an ACTIVE agent needs the human to deactivate it first), GenAiPromptTemplate (activeVersionIdentifier is org-generated: retrieve-first, never hand-type it), GenAiPromptTemplateActv, AiEvaluationDefinition (Testing Center test definitions), BotTemplate, BotBlock, or child types CustomField / ValidationRule / CustomLabel / ListView / RecordType / BotVersion (dotted MyBot.v1). NOT deployable (read/diff only): GenAiFunction, GenAiPlannerBundle, AiAuthoringBundle \u2014 bundle types; agent publish/activate/deactivate are org-side human steps Contrail cannot perform.'
             ),
             api_name: external_exports.string().describe("Full API name; children dotted (Account.MyField__c)."),
             content: external_exports.string().optional().describe(
@@ -35379,7 +35671,7 @@ function registerLocalDiagTools(server, deps) {
 
 // src/localdiag/runner.ts
 import { spawn } from "node:child_process";
-import fs13 from "node:fs";
+import fs14 from "node:fs";
 import path9 from "node:path";
 import { pathToFileURL as pathToFileURL3 } from "node:url";
 
@@ -35764,20 +36056,20 @@ function createLocalDiagRunner(opts) {
   const classesDir = () => path9.join(opts.workspaceRoot, "force-app", "main", "default", "classes");
   function ensureWorkspace() {
     const dir = classesDir();
-    fs13.mkdirSync(dir, { recursive: true });
-    for (const name of fs13.readdirSync(dir)) {
+    fs14.mkdirSync(dir, { recursive: true });
+    for (const name of fs14.readdirSync(dir)) {
       if (name === SEED_NAME) continue;
       try {
-        fs13.rmSync(path9.join(dir, name), { force: true });
+        fs14.rmSync(path9.join(dir, name), { force: true });
       } catch {
       }
     }
-    fs13.writeFileSync(path9.join(dir, SEED_NAME), SEED_SOURCE, "utf8");
+    fs14.writeFileSync(path9.join(dir, SEED_NAME), SEED_SOURCE, "utf8");
   }
   function scriptFor(lane) {
     if (!opts.vendorDir) return null;
     const script = lane === "apex" ? path9.join(opts.vendorDir, "apex-ls", "dist", "server.node.js") : path9.join(opts.vendorDir, "bin", "soql-lsp.bundled.js");
-    return fs13.existsSync(script) ? script : null;
+    return fs14.existsSync(script) ? script : null;
   }
   function enqueue(name, work) {
     const lane = lanes[name];
@@ -35855,7 +36147,7 @@ function createLocalDiagRunner(opts) {
         ensureWorkspace();
         const filename = apexScratchName(source, kind);
         const filePath = path9.join(classesDir(), filename);
-        fs13.writeFileSync(filePath, source, "utf8");
+        fs14.writeFileSync(filePath, source, "utf8");
         let client = null;
         try {
           client = await startApexServer(spawnLsp, gate.script, opts.workspaceRoot);
@@ -35886,7 +36178,7 @@ function createLocalDiagRunner(opts) {
         try {
           if (!lane.client?.alive) {
             killSoql();
-            fs13.mkdirSync(opts.workspaceRoot, { recursive: true });
+            fs14.mkdirSync(opts.workspaceRoot, { recursive: true });
             lane.client = await startSoqlServer(spawnLsp, gate.script, opts.workspaceRoot);
           }
           const diagnostics = await checkSoqlOnce(
