@@ -457,6 +457,8 @@ const TYPE_DIRS: Record<string, string> = {
   ManagedEventSubscription: 'managedEventSubscriptions',
   Layout: 'layouts',
   CustomMetadata: 'customMetadata',
+  // S31: the lead-conversion singleton (capitalized dir is the platform's).
+  LeadConvertSettings: 'LeadConvertSettings',
   // S29: the first shared-dir case — content and folder types own ONE
   // directory. Sound only because normalizeRefreshTypes couples them into
   // every refresh/staleness check (a lone 'Report' request would otherwise

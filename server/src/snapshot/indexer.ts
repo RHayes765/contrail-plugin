@@ -47,6 +47,9 @@ const SIMPLE_DIR_TYPES: Array<{ dir: string; ext: string; type: string }> = [
   },
   { dir: 'layouts', ext: '.layout', type: 'Layout' },
   { dir: 'customMetadata', ext: '.md', type: 'CustomMetadata' },
+  // S31: the lead-conversion singleton. Capitalized dir + singular extension
+  // are the platform's own quirk (live-confirmed).
+  { dir: 'LeadConvertSettings', ext: '.LeadConvertSetting', type: 'LeadConvertSettings' },
   // S30: Agentforce single-file types (v66+ — see config apiVersion note).
   { dir: 'genAiPlugins', ext: '.genAiPlugin', type: 'GenAiPlugin' },
   { dir: 'genAiPromptTemplates', ext: '.genAiPromptTemplate', type: 'GenAiPromptTemplate' },

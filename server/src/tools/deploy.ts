@@ -154,7 +154,9 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
                     'CustomTab, FlexiPage, CustomApplication, ReportType, GlobalValueSet, ' +
                     'ConnectedApp, NamedCredential, ExternalCredential, PlatformEventChannel(Member), ' +
                     'ManagedEventSubscription, Layout, CustomMetadata (records, dotted ' +
-                    'Type.Record names), Report / Dashboard (folder-qualified ' +
+                    'Type.Record names), LeadConvertSettings (SINGLETON — api_name is ' +
+                    'literally "LeadConvertSettings"; a modify replaces ALL lead field ' +
+                    'mappings, retrieve-first), Report / Dashboard (folder-qualified ' +
                     '"FolderDevName/Name" api_names; deploy the ReportFolder/DashboardFolder ' +
                     'component first or in the same package for a new folder), ' +
                     'ReportFolder / DashboardFolder (content = the whole <ReportFolder> doc ' +

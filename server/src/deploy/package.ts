@@ -131,6 +131,13 @@ const FILE_TYPES: Record<string, FileSpec> = {
   // with the type name WITHOUT the __mdt suffix; metadata format uses the
   // bare .md extension.
   CustomMetadata: { dir: 'customMetadata', ext: '.md' },
+  // S31: lead-conversion field mappings. A SINGLETON — exactly one component
+  // per org, fullName literally 'LeadConvertSettings'. The naming is the
+  // platform's own quirk (live-confirmed): CAPITALIZED directory and a
+  // singular '.LeadConvertSetting' extension. The component does not exist
+  // until an org saves custom lead mappings (a wildcard retrieve then
+  // returns nothing — harmless).
+  LeadConvertSettings: { dir: 'LeadConvertSettings', ext: '.LeadConvertSetting' },
   // S29: analytics types (folder-based). EXPLICIT-REFRESH-ONLY — absent from
   // the default snapshot manifest (S17 precedent; big orgs carry thousands of
   // reports). api_name is 'FolderDevName/Name' ('unfiled$public/Name' for
@@ -717,7 +724,8 @@ export function analyzeChanges(
           c.type === 'Dashboard' ||
           c.type === 'GenAiPlugin' ||
           c.type === 'GenAiPromptTemplate' ||
-          c.type === 'Bot') &&
+          c.type === 'Bot' ||
+          c.type === 'LeadConvertSettings') &&
         change === 'modify'
       ) {
         warnings.push(
@@ -725,7 +733,9 @@ export function analyzeChanges(
             `anything not present in the proposed content is removed.` +
             (c.type === 'Bot'
               ? ' A <botVersions> block omitted from a Bot document is a VERSION DELETE.'
-              : ''),
+              : c.type === 'LeadConvertSettings'
+                ? ' An <objectMapping> omitted here is a lead field mapping DELETED org-wide.'
+                : ''),
         );
       }
       // S30: the activeVersionIdentifier is an org-generated token. Altering

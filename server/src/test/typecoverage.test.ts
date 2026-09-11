@@ -1080,3 +1080,58 @@ describe('S30 Stage 2: bundle envelope deploys', () => {
     expect(analyzePermissionCoverage([bot, mentionedOff]).uncovered).toHaveLength(1);
   });
 });
+
+describe('S31: LeadConvertSettings (the lead-conversion singleton)', () => {
+  const conn = { id: 'conn-1', alias: 'dev' } as ConnectionRecord;
+
+  it('places the singleton with the platform-quirk naming and a literal member', () => {
+    const built = buildDeployZip(
+      [comp('LeadConvertSettings', 'LeadConvertSettings', '<LeadConvertSettings/>')],
+      [],
+      V,
+      noMeta,
+    );
+    // Live-confirmed quirk: CAPITALIZED dir, singular '.LeadConvertSetting'.
+    expect(built.files).toContain('LeadConvertSettings/LeadConvertSettings.LeadConvertSetting');
+    expect(built.packageXml).toContain('<name>LeadConvertSettings</name>');
+    expect(built.packageXml).toContain('<members>LeadConvertSettings</members>');
+  });
+
+  it('indexes the retrieved singleton file', () => {
+    const files = new Map(
+      Object.entries({
+        'LeadConvertSettings/LeadConvertSettings.LeadConvertSetting': strToU8(
+          '<LeadConvertSettings><objectMapping><inputObject>Lead</inputObject></objectMapping></LeadConvertSettings>',
+        ),
+      }),
+    );
+    const artifacts = indexSnapshotFiles(files, [], '2026-09-11T00:00:00.000Z');
+    expect(artifacts).toHaveLength(1);
+    expect(artifacts[0]).toMatchObject({
+      type: 'LeadConvertSettings',
+      apiName: 'LeadConvertSettings',
+      filePath: 'LeadConvertSettings/LeadConvertSettings.LeadConvertSetting',
+    });
+  });
+
+  it('a modify warns that omitted mappings are DELETED org-wide', () => {
+    const db = {
+      getArtifact: () => ({
+        filePath: 'LeadConvertSettings/LeadConvertSettings.LeadConvertSetting',
+      }),
+    } as unknown as ContrailDb;
+    const store = {
+      readCurrentFile: () => '<LeadConvertSettings>old</LeadConvertSettings>',
+    } as unknown as SnapshotStore;
+    const { changes } = analyzeChanges(
+      db,
+      store,
+      conn,
+      [comp('LeadConvertSettings', 'LeadConvertSettings', '<LeadConvertSettings>new</LeadConvertSettings>')],
+      [],
+    );
+    expect(changes[0]!.change).toBe('modify');
+    expect(changes[0]!.warnings.join(' ')).toMatch(/WHOLE-DOCUMENT REPLACE/);
+    expect(changes[0]!.warnings.join(' ')).toMatch(/mapping DELETED org-wide/);
+  });
+});

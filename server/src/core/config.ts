@@ -144,6 +144,10 @@ export const DEFAULT_CONFIG: ContrailConfig = {
       'GlobalValueSet',
       'Layout',
       'CustomMetadata',
+      // S31: the lead-conversion singleton — one small file, and lead
+      // routing/conversion work reads it constantly. Absent-until-configured
+      // orgs return nothing for it (harmless).
+      'LeadConvertSettings',
     ],
     pollIntervalMs: 2000,
     retrieveTimeoutMs: 10 * 60 * 1000,

@@ -161,6 +161,16 @@ Instead, write the edited source to a file and give `validate_deploy` the path:
   fail, unmodified ones "succeed" as misleading no-ops. Bundle types
   (GenAiFunction, GenAiPlannerBundle, AiAuthoringBundle) read and diff but
   do not deploy yet.
+- **LeadConvertSettings is a whole-org singleton.** api_name is literally
+  `LeadConvertSettings` (one component per org; it does not exist until the
+  org saves custom lead mappings). A modify **replaces every lead field
+  mapping at once** — an `<objectMapping>` you omit is a mapping you deleted,
+  so always retrieve-first and edit the complete document. Mappings pair
+  `<inputField>` (Lead) with `<outputField>` (Account/Contact/Opportunity) —
+  `describe_schema` both objects before adding one; mapped fields must be
+  type-compatible and writeable on the target. The file placement is the
+  platform's own quirk (`LeadConvertSettings/LeadConvertSettings.LeadConvertSetting`
+  — capitalized directory, singular extension); Contrail handles it.
 - **Namespaces** can contain single underscores (`sales_channel__Foo`), so split a
   qualified API name at the **first** `__`, never with a greedy pattern.
 - **Names**: components deploy under `type/Name.ext`; the tools reject names with

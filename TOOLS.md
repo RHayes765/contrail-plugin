@@ -474,7 +474,10 @@ validation issues **no** code.
   `CustomApplication`, `ReportType`, `GlobalValueSet`, `ConnectedApp`,
   `NamedCredential`, `ExternalCredential`, `PlatformEventChannel(Member)`,
   `ManagedEventSubscription`, `Layout`, `CustomMetadata` (records, dotted
-  `Type.Record` names), `Report` / `Dashboard` (folder-qualified
+  `Type.Record` names), `LeadConvertSettings` (the lead-conversion
+  singleton — api_name literally `LeadConvertSettings`; a modify replaces
+  ALL lead field mappings, and the page says so),
+  `Report` / `Dashboard` (folder-qualified
   `Folder/Name` api_names; access is FOLDER sharing, and the approval page
   says so), `ReportFolder` / `DashboardFolder` (the folder definition itself,
   carrying the `folderShares` — deploy it with a report headed for a new
@@ -666,7 +669,7 @@ sections' defaults automatically.
 | | `scopes` | `refresh_token, api, web` | OAuth scopes requested. |
 | `oauth` | `callbackPort` / `callbackPath` | `1717` / `/OauthRedirect` | Must match the connected app's registered callback. |
 | | `flowTimeoutMs` | 10 min | Browser-flow hard limit. |
-| `snapshot` | `types` | 14 types | The default retrieve manifest (ApexClass, ApexTrigger, Flow, CustomObject, CustomLabels, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, ApexPage, GlobalValueSet, Layout, CustomMetadata). Report/Dashboard (+ their folders) are deployable and indexable but deliberately OUT of the default — `refresh_snapshot types:["Report"]` pulls them explicitly (every folder costs a listMetadata query, and report-heavy orgs have thousands). |
+| `snapshot` | `types` | 15 types | The default retrieve manifest (ApexClass, ApexTrigger, Flow, CustomObject, CustomLabels, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, ApexPage, GlobalValueSet, Layout, CustomMetadata, LeadConvertSettings). Report/Dashboard (+ their folders) and the Agentforce types are deployable and indexable but deliberately OUT of the default — `refresh_snapshot types:[…]` pulls them explicitly. |
 | | `pollIntervalMs` / `retrieveTimeoutMs` | 2 s / 10 min | Retrieve polling. |
 | `updates` | `checkEnabled` | `true` | Daily anonymous release check — the only phone-home; `false` disables it entirely. |
 | `localDiagnostics` | `enabled` | `true` | `check_apex`/`check_soql`; `false` makes them report honestly unavailable. |
