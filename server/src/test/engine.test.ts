@@ -413,3 +413,131 @@ describe('S29: foldered refresh (Report/ReportFolder)', () => {
     expect(db.getArtifact(connId, 'Report', 'Ops/Weekly')).toBeTruthy();
   });
 });
+
+describe('S30: unsupported-type refresh degrade', () => {
+  function stubAgentforceSalesforce(): void {
+    vi.stubGlobal('fetch', async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/services/oauth2/token')) {
+        return new Response(
+          JSON.stringify({
+            access_token: 'AT-stub',
+            instance_url: 'https://inst.stub.salesforce.com',
+            id: 'https://login.salesforce.com/id/00D1/0051',
+            token_type: 'Bearer',
+          }),
+        );
+      }
+      if (url.includes('/services/Soap/m/')) {
+        const body = String(init?.body ?? '');
+        if (body.includes('<met:listMetadata>')) {
+          // The org does not know GenAiPlannerBundle (old API version or
+          // unlicensed) — the whole chunk faults, then per-query retries.
+          if (body.includes('<met:type>GenAiPlannerBundle</met:type>')) {
+            return new Response(
+              soapEnvelope(
+                `<soapenv:Fault><faultcode>sf:INVALID_TYPE</faultcode>
+                 <faultstring>INVALID_TYPE: Cannot use: GenAiPlannerBundle in this version</faultstring></soapenv:Fault>`,
+              ),
+              { status: 500 },
+            );
+          }
+          return new Response(
+            soapEnvelope(
+              `<listMetadataResponse xmlns="http://soap.sforce.com/2006/04/metadata">
+                 ${listResult('GenAiPlugin', 'Order_Topic', 'genAiPlugins/Order_Topic.genAiPlugin')}
+               </listMetadataResponse>`,
+            ),
+          );
+        }
+        if (body.includes('<met:retrieve>')) {
+          // The retrieve must never even ASK for the unsupported type.
+          if (body.includes('<met:name>GenAiPlannerBundle</met:name>')) {
+            return new Response('unsupported type in retrieve', { status: 500 });
+          }
+          return new Response(
+            soapEnvelope(
+              `<retrieveResponse xmlns="http://soap.sforce.com/2006/04/metadata">
+                 <result><id>09S-agent</id><done>false</done><state>Queued</state></result>
+               </retrieveResponse>`,
+            ),
+          );
+        }
+        if (body.includes('<met:checkRetrieveStatus>')) {
+          const zip = Buffer.from(
+            zipSync({
+              'unpackaged/package.xml': strToU8('<Package/>'),
+              'unpackaged/genAiPlugins/Order_Topic.genAiPlugin': strToU8('<GenAiPlugin/>'),
+            }),
+          ).toString('base64');
+          return new Response(
+            soapEnvelope(
+              `<checkRetrieveStatusResponse xmlns="http://soap.sforce.com/2006/04/metadata">
+                 <result><done>true</done><status>Succeeded</status><success>true</success>
+                   <id>09S-agent</id><zipFile>${zip}</zipFile>
+                   ${fileProp('GenAiPlugin', 'Order_Topic', 'genAiPlugins/Order_Topic.genAiPlugin')}
+                 </result>
+               </checkRetrieveStatusResponse>`,
+            ),
+          );
+        }
+        return new Response('unexpected SOAP body', { status: 500 });
+      }
+      if (url.includes('/tooling/query')) {
+        return new Response(JSON.stringify({ done: true, records: [] }));
+      }
+      return new Response('not found', { status: 404 });
+    });
+  }
+
+  it('one unsupported type warns and drops out; healthy types refresh; its state survives', async () => {
+    // Pre-existing planner bundle snapshot state that MUST survive the skip.
+    store.writeCurrent(
+      connId,
+      new Map([
+        [
+          'genAiPlannerBundles/Agent_v1/Agent_v1.genAiPlannerBundle',
+          strToU8('<GenAiPlannerBundle>keep me</GenAiPlannerBundle>'),
+        ],
+      ]),
+    );
+    db.replaceArtifactsForTypes(connId, ['GenAiPlannerBundle'], [
+      {
+        connectionId: connId,
+        type: 'GenAiPlannerBundle',
+        apiName: 'Agent_v1',
+        filePath: 'genAiPlannerBundles/Agent_v1/Agent_v1.genAiPlannerBundle',
+        contentHash: 'h',
+        lastModifiedDate: null,
+        lastModifiedBy: null,
+        retrievedAt: '2026-09-01T00:00:00.000Z',
+        content: '',
+      },
+    ]);
+
+    stubAgentforceSalesforce();
+    const conn = db.getConnection(connId)!;
+    const outcome = await engine.refresh(conn, ['GenAiPlugin', 'GenAiPlannerBundle']);
+    expect(outcome.status).toBe('complete');
+    if (outcome.status !== 'complete') return;
+
+    expect(outcome.summary.warnings.join(' ')).toMatch(/GenAiPlannerBundle not supported/);
+    expect(outcome.summary.artifact_counts).toMatchObject({ GenAiPlugin: 1 });
+    expect(db.getArtifact(connId, 'GenAiPlugin', 'Order_Topic')).toBeTruthy();
+
+    // The unsupported type's snapshot file AND index row are untouched.
+    expect(
+      store.readCurrentFile(connId, 'genAiPlannerBundles/Agent_v1/Agent_v1.genAiPlannerBundle'),
+    ).toContain('keep me');
+    expect(db.getArtifact(connId, 'GenAiPlannerBundle', 'Agent_v1')).toBeTruthy();
+  });
+
+  it('every requested type unsupported fails LOUDLY, wiping nothing', async () => {
+    stubAgentforceSalesforce();
+    const conn = db.getConnection(connId)!;
+    const outcome = await engine.refresh(conn, ['GenAiPlannerBundle']);
+    expect(outcome.status).toBe('failed');
+    if (outcome.status !== 'failed') return;
+    expect(outcome.error).toMatch(/nothing retrievable/);
+  });
+});

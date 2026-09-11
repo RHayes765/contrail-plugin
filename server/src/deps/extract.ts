@@ -211,6 +211,48 @@ export function extractDashboardRefs(xml: string): Ref[] {
   return refs.list();
 }
 
+/**
+ * S30: agent topic → the actions it can invoke. <functionName> values are
+ * GenAiFunction developer names (live-confirmed tag).
+ */
+export function extractGenAiPluginRefs(xml: string): Ref[] {
+  const refs = new RefSet();
+  for (const m of xml.matchAll(/<functionName>([^<]+)<\/functionName>/g)) {
+    refs.add('GenAiFunction', m[1]!);
+  }
+  return refs.list();
+}
+
+/**
+ * S30: planner bundle → its topics and actions. localTopicLinks carry
+ * <genAiPluginName>; inline localTopics carry <functionName> action refs
+ * (live-confirmed tags — the bundle's concatenated index content includes
+ * the main XML, which is where these live).
+ */
+export function extractGenAiPlannerRefs(xml: string): Ref[] {
+  const refs = new RefSet();
+  for (const m of xml.matchAll(/<genAiPluginName>([^<]+)<\/genAiPluginName>/g)) {
+    refs.add('GenAiPlugin', m[1]!);
+  }
+  for (const m of xml.matchAll(/<functionName>([^<]+)<\/functionName>/g)) {
+    refs.add('GenAiFunction', m[1]!);
+  }
+  return refs.list();
+}
+
+/**
+ * S30: Bot → the planner version(s) its versions reference
+ * (<conversationDefinitionPlanners><genAiPlannerName> — the WSDL element
+ * name, live-confirmed; the catalog's docs call it conversationPlanner).
+ */
+export function extractBotRefs(xml: string): Ref[] {
+  const refs = new RefSet();
+  for (const m of xml.matchAll(/<genAiPlannerName>([^<]+)<\/genAiPlannerName>/g)) {
+    refs.add('GenAiPlannerBundle', m[1]!);
+  }
+  return refs.list();
+}
+
 /** Case-insensitive lookup maps from the freshly indexed artifact set. */
 export interface KnownArtifacts {
   classes: Map<string, string>;
@@ -287,6 +329,12 @@ export function extractAllEdges(
       add(a.type, a.apiName, extractReportRefs(a.content));
     } else if (a.type === 'Dashboard') {
       add(a.type, a.apiName, extractDashboardRefs(a.content));
+    } else if (a.type === 'GenAiPlugin') {
+      add(a.type, a.apiName, extractGenAiPluginRefs(a.content));
+    } else if (a.type === 'GenAiPlannerBundle') {
+      add(a.type, a.apiName, extractGenAiPlannerRefs(a.content));
+    } else if (a.type === 'Bot') {
+      add(a.type, a.apiName, extractBotRefs(a.content));
     }
   }
   return edges;

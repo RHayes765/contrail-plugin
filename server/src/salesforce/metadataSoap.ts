@@ -115,6 +115,27 @@ export class MetadataSoapClient {
    * explicit-refresh-only types; never silently skipped.
    */
   async listMetadata(types: string[]): Promise<FileProperties[]> {
+    return (await this.listAll(types, false)).props;
+  }
+
+  /**
+   * S30: like listMetadata, but a type the org/API version does not know
+   * (INVALID_TYPE — an older API version, or an unlicensed feature like the
+   * Agentforce types on a non-Agentforce org) degrades to a per-type report
+   * instead of poisoning the whole call. Every other fault still throws.
+   * Callers doing multi-type inventory (refresh, staleness, drift) use this
+   * so one unsupported type never sinks the healthy ones.
+   */
+  async listMetadataDetailed(
+    types: string[],
+  ): Promise<{ props: FileProperties[]; unsupportedTypes: string[] }> {
+    return this.listAll(types, true);
+  }
+
+  private async listAll(
+    types: string[],
+    degradeInvalidTypes: boolean,
+  ): Promise<{ props: FileProperties[]; unsupportedTypes: string[] }> {
     const flat: ListQuery[] = [];
     const foldered: string[] = [];
     const seen = new Set<string>();
@@ -134,13 +155,14 @@ export class MetadataSoapClient {
       }
     }
 
-    const all = await this.listQueries(flat);
+    const unsupported = new Set<string>();
+    const all = await this.listQueries(flat, degradeInvalidTypes, unsupported);
 
     if (foldered.length > 0) {
       const folderQueries: ListQuery[] = [];
       for (const t of foldered) {
         const cfg = FOLDERED_TYPES[t];
-        if (!cfg) continue;
+        if (!cfg || unsupported.has(cfg.folderType)) continue;
         const folders = all
           .filter((p) => p.type === cfg.folderType)
           .map((p) => p.fullName);
@@ -151,59 +173,91 @@ export class MetadataSoapClient {
       }
       if (folderQueries.length > 0) {
         log('info', 'listing foldered metadata per folder', { queries: folderQueries.length });
-        for (const p of await this.listQueries(folderQueries)) {
+        for (const p of await this.listQueries(folderQueries, degradeInvalidTypes, unsupported)) {
           all.push(p);
+        }
+      }
+    }
+    // A foldered content type whose folder-enumeration type was unsupported
+    // is itself unsupported (its per-folder pass never ran).
+    for (const t of foldered) {
+      const cfg = FOLDERED_TYPES[t];
+      if (cfg && unsupported.has(cfg.folderType)) unsupported.add(t);
+    }
+    return { props: all, unsupportedTypes: [...unsupported].filter((t) => types.includes(t)) };
+  }
+
+  /** listMetadata accepts at most 3 queries per call; chunk transparently. */
+  private async listQueries(
+    queries: ListQuery[],
+    degradeInvalidTypes: boolean,
+    unsupported: Set<string>,
+  ): Promise<FileProperties[]> {
+    const all: FileProperties[] = [];
+    for (let i = 0; i < queries.length; i += 3) {
+      const chunk = queries.slice(i, i + 3);
+      try {
+        all.push(...(await this.listChunk(chunk)));
+      } catch (err) {
+        const msg = String(err instanceof Error ? err.message : err);
+        if (!degradeInvalidTypes || !/INVALID_TYPE/i.test(msg)) throw err;
+        // One unknown type faults the whole chunk — retry each query alone so
+        // the healthy types' inventory survives, and record the bad ones.
+        for (const q of chunk) {
+          try {
+            all.push(...(await this.listChunk([q])));
+          } catch (err2) {
+            const msg2 = String(err2 instanceof Error ? err2.message : err2);
+            if (!/INVALID_TYPE/i.test(msg2)) throw err2;
+            unsupported.add(q.type);
+          }
         }
       }
     }
     return all;
   }
 
-  /** listMetadata accepts at most 3 queries per call; chunk transparently. */
-  private async listQueries(queries: ListQuery[]): Promise<FileProperties[]> {
-    const all: FileProperties[] = [];
-    for (let i = 0; i < queries.length; i += 3) {
-      const chunk = queries.slice(i, i + 3);
-      const queriesXml = chunk
-        .map(
-          (q) =>
-            `<met:queries>${
-              // WSDL sequence order: folder BEFORE type.
-              q.folder ? `<met:folder>${escapeXml(q.folder)}</met:folder>` : ''
-            }<met:type>${escapeXml(q.type)}</met:type></met:queries>`,
-        )
-        .join('');
-      const body = `<met:listMetadata>${queriesXml}<met:asOfVersion>${this.versionNumber}</met:asOfVersion></met:listMetadata>`;
-      const parsed = await this.call(body);
-      const result = xmlDig(parsed, 'Envelope', 'Body', 'listMetadataResponse', 'result');
-      // Defensive normalization: per-folder results are expected to come back
-      // folder-qualified already; prefix bare names ONLY when the chunk holds
-      // exactly one folder for that type (ambiguous chunks trust the org).
-      const foldersByType = new Map<string, Set<string>>();
-      for (const q of chunk) {
-        if (q.folder) {
-          const set = foldersByType.get(q.type) ?? new Set<string>();
-          set.add(q.folder);
-          foldersByType.set(q.type, set);
-        }
+  private async listChunk(chunk: ListQuery[]): Promise<FileProperties[]> {
+    const queriesXml = chunk
+      .map(
+        (q) =>
+          `<met:queries>${
+            // WSDL sequence order: folder BEFORE type.
+            q.folder ? `<met:folder>${escapeXml(q.folder)}</met:folder>` : ''
+          }<met:type>${escapeXml(q.type)}</met:type></met:queries>`,
+      )
+      .join('');
+    const body = `<met:listMetadata>${queriesXml}<met:asOfVersion>${this.versionNumber}</met:asOfVersion></met:listMetadata>`;
+    const parsed = await this.call(body);
+    const result = xmlDig(parsed, 'Envelope', 'Body', 'listMetadataResponse', 'result');
+    // Defensive normalization: per-folder results are expected to come back
+    // folder-qualified already; prefix bare names ONLY when the chunk holds
+    // exactly one folder for that type (ambiguous chunks trust the org).
+    const foldersByType = new Map<string, Set<string>>();
+    for (const q of chunk) {
+      if (q.folder) {
+        const set = foldersByType.get(q.type) ?? new Set<string>();
+        set.add(q.folder);
+        foldersByType.set(q.type, set);
       }
-      for (const item of asArray(result as Record<string, string> | Record<string, string>[])) {
-        if (item && typeof item === 'object' && item.fullName && item.type) {
-          const folderSet = foldersByType.get(item.type);
-          const folder = folderSet?.size === 1 ? [...folderSet][0] : undefined;
-          const fullName =
-            folder && !item.fullName.includes('/') ? `${folder}/${item.fullName}` : item.fullName;
-          all.push({
-            type: item.type,
-            fullName,
-            fileName: item.fileName ?? '',
-            id: item.id ?? '',
-            lastModifiedDate: item.lastModifiedDate ?? '',
-            lastModifiedByName: item.lastModifiedByName ?? '',
-            manageableState: item.manageableState,
-            namespacePrefix: item.namespacePrefix,
-          });
-        }
+    }
+    const all: FileProperties[] = [];
+    for (const item of asArray(result as Record<string, string> | Record<string, string>[])) {
+      if (item && typeof item === 'object' && item.fullName && item.type) {
+        const folderSet = foldersByType.get(item.type);
+        const folder = folderSet?.size === 1 ? [...folderSet][0] : undefined;
+        const fullName =
+          folder && !item.fullName.includes('/') ? `${folder}/${item.fullName}` : item.fullName;
+        all.push({
+          type: item.type,
+          fullName,
+          fileName: item.fileName ?? '',
+          id: item.id ?? '',
+          lastModifiedDate: item.lastModifiedDate ?? '',
+          lastModifiedByName: item.lastModifiedByName ?? '',
+          manageableState: item.manageableState,
+          namespacePrefix: item.namespacePrefix,
+        });
       }
     }
     return all;

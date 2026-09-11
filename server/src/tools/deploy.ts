@@ -159,8 +159,16 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
                     'component first or in the same package for a new folder), ' +
                     'ReportFolder / DashboardFolder (content = the whole <ReportFolder> doc ' +
                     'with folderShares — folder sharing is what makes reports visible), ' +
-                    'or child types CustomField / ValidationRule / ' +
-                    'CustomLabel / ListView / RecordType.',
+                    'Agentforce types Bot, GenAiPlugin (agent topics — modifying one on an ' +
+                    'ACTIVE agent needs the human to deactivate it first), ' +
+                    'GenAiPromptTemplate (activeVersionIdentifier is org-generated: ' +
+                    'retrieve-first, never hand-type it), GenAiPromptTemplateActv, ' +
+                    'AiEvaluationDefinition (Testing Center test definitions), BotTemplate, ' +
+                    'BotBlock, or child types CustomField / ValidationRule / ' +
+                    'CustomLabel / ListView / RecordType / BotVersion (dotted MyBot.v1). ' +
+                    'NOT deployable (read/diff only): GenAiFunction, GenAiPlannerBundle, ' +
+                    'AiAuthoringBundle — bundle types; agent publish/activate/deactivate ' +
+                    'are org-side human steps Contrail cannot perform.',
                 ),
               api_name: z.string().describe('Full API name; children dotted (Account.MyField__c).'),
               content: z

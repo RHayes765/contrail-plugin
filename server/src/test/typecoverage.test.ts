@@ -623,3 +623,250 @@ describe('S29: Report & Dashboard (foldered types)', () => {
     expect(built.packageXml).toContain(`<members>${indexed!.apiName}</members>`);
   });
 });
+
+describe('S30: Agentforce types', () => {
+  const conn = { id: 'conn-1', alias: 'dev' } as ConnectionRecord;
+
+  it('places each single-file agent type in its folder with a literal member', () => {
+    const cases: Array<[string, string, string]> = [
+      ['Bot', 'Support_Agent', 'bots/Support_Agent.bot'],
+      ['GenAiPlugin', 'Order_Topic', 'genAiPlugins/Order_Topic.genAiPlugin'],
+      [
+        'GenAiPromptTemplate',
+        'Case_Summary',
+        'genAiPromptTemplates/Case_Summary.genAiPromptTemplate',
+      ],
+      [
+        'GenAiPromptTemplateActv',
+        'Case_Summary_Actv',
+        'genAiPromptTemplateActivations/Case_Summary_Actv.genAiPromptTemplateActivation',
+      ],
+      [
+        'AiEvaluationDefinition',
+        'Support_Agent_Tests',
+        'aiEvaluationDefinitions/Support_Agent_Tests.aiEvaluationDefinition',
+      ],
+      ['BotTemplate', 'Support_Tmpl', 'botTemplates/Support_Tmpl.botTemplate'],
+      ['BotBlock', 'Greeting_Block', 'botBlocks/Greeting_Block.botBlock'],
+    ];
+    for (const [type, name, path] of cases) {
+      const built = buildDeployZip([comp(type, name, `<${type}/>`)], [], V, noMeta);
+      expect(built.files, `${type} placement`).toContain(path);
+      expect(built.packageXml).toContain(`<name>${type}</name>`);
+      expect(built.packageXml).toContain(`<members>${name}</members>`);
+    }
+  });
+
+  it('BotVersion children merge into one Bot container document', () => {
+    const built = buildDeployZip(
+      [
+        comp('BotVersion', 'Support_Agent.v1', '<botVersions><fullName>v1</fullName></botVersions>'),
+        comp('BotVersion', 'Support_Agent.v2', '<botVersions><fullName>v2</fullName></botVersions>'),
+      ],
+      [],
+      V,
+      noMeta,
+    );
+    expect(built.files).toContain('bots/Support_Agent.bot');
+    const doc = zipText(built.zip, 'bots/Support_Agent.bot');
+    expect(doc).toContain('<Bot xmlns=');
+    expect(doc).toContain('<fullName>v1</fullName>');
+    expect(doc).toContain('<fullName>v2</fullName>');
+    expect(built.packageXml).toContain('<name>BotVersion</name>');
+    expect(built.packageXml).toContain('<members>Support_Agent.v1</members>');
+  });
+
+  it('still refuses mixing a full Bot document with its version children', () => {
+    expect(() =>
+      buildDeployZip(
+        [
+          comp('Bot', 'Support_Agent', '<Bot/>'),
+          comp('BotVersion', 'Support_Agent.v1', '<botVersions/>'),
+        ],
+        [],
+        V,
+        noMeta,
+      ),
+    ).toThrow(/pick one form/);
+  });
+
+  it('PIN: bundle types are NOT deployable until the bundle machinery lands', () => {
+    for (const type of ['GenAiFunction', 'GenAiPlannerBundle', 'AiAuthoringBundle']) {
+      expect(
+        () => buildDeployZip([comp(type, 'X', '<X/>')], [], V, noMeta),
+        `${type} must be refused`,
+      ).toThrow(/not deployable through Contrail/);
+    }
+  });
+
+  it('warns honestly on the prompt-template identifier, both change kinds', () => {
+    const dbAdd = { getArtifact: () => null } as unknown as ContrailDb;
+    const storeNone = { readCurrentFile: () => null } as unknown as SnapshotStore;
+    const added = analyzeChanges(
+      dbAdd,
+      storeNone,
+      conn,
+      [
+        comp(
+          'GenAiPromptTemplate',
+          'Fresh',
+          '<GenAiPromptTemplate><activeVersionIdentifier>abc=_1</activeVersionIdentifier></GenAiPromptTemplate>',
+        ),
+      ],
+      [],
+    );
+    expect(added.changes[0]!.warnings.join(' ')).toMatch(/org-generated/);
+
+    const dbMod = { getArtifact: () => ({ filePath: 'x' }) } as unknown as ContrailDb;
+    const storeOld = {
+      readCurrentFile: () =>
+        '<GenAiPromptTemplate><activeVersionIdentifier>REAL_TOKEN=_1</activeVersionIdentifier></GenAiPromptTemplate>',
+    } as unknown as SnapshotStore;
+    const altered = analyzeChanges(
+      dbMod,
+      storeOld,
+      conn,
+      [
+        comp(
+          'GenAiPromptTemplate',
+          'Fresh',
+          '<GenAiPromptTemplate><activeVersionIdentifier>FAKED_TOKEN=_2</activeVersionIdentifier></GenAiPromptTemplate>',
+        ),
+      ],
+      [],
+    );
+    expect(altered.changes[0]!.warnings.join(' ')).toMatch(/ALTERED/);
+    expect(altered.changes[0]!.warnings.join(' ')).toMatch(/WHOLE-DOCUMENT REPLACE/);
+
+    const unchangedId = analyzeChanges(
+      dbMod,
+      storeOld,
+      conn,
+      [
+        comp(
+          'GenAiPromptTemplate',
+          'Fresh',
+          '<GenAiPromptTemplate><activeVersionIdentifier>REAL_TOKEN=_1</activeVersionIdentifier><x/></GenAiPromptTemplate>',
+        ),
+      ],
+      [],
+    );
+    expect(unchangedId.changes[0]!.warnings.join(' ')).not.toMatch(/ALTERED/);
+  });
+
+  it('warns on the deactivate gate for topic modifies; Bot modify names version deletes', () => {
+    const dbMod = { getArtifact: () => ({ filePath: 'x' }) } as unknown as ContrailDb;
+    const storeOld = { readCurrentFile: () => '<old/>' } as unknown as SnapshotStore;
+    const topic = analyzeChanges(
+      dbMod,
+      storeOld,
+      conn,
+      [comp('GenAiPlugin', 'Order_Topic', '<GenAiPlugin>new</GenAiPlugin>')],
+      [],
+    );
+    expect(topic.changes[0]!.warnings.join(' ')).toMatch(/DEACTIVATED FIRST/);
+    expect(topic.changes[0]!.warnings.join(' ')).toMatch(/WHOLE-DOCUMENT REPLACE/);
+
+    const bot = analyzeChanges(
+      dbMod,
+      storeOld,
+      conn,
+      [comp('Bot', 'Support_Agent', '<Bot>new</Bot>')],
+      [],
+    );
+    expect(bot.changes[0]!.warnings.join(' ')).toMatch(/VERSION DELETE/);
+  });
+
+  it('deployZipEntryPath matches the builder for Bot and its version children', async () => {
+    const { deployZipEntryPath } = await import('../deploy/package.js');
+    expect(deployZipEntryPath('Bot', 'Support_Agent')).toEqual({
+      path: 'bots/Support_Agent.bot',
+      child: false,
+    });
+    expect(deployZipEntryPath('BotVersion', 'Support_Agent.v1')).toEqual({
+      path: 'bots/Support_Agent.bot',
+      child: true,
+      childTag: 'botVersions',
+      childName: 'v1',
+    });
+  });
+
+  it('indexes agent metadata: flat types, the Bot container, and bundles as ONE row', () => {
+    const botXml =
+      '<Bot><label>S</label><botVersions><fullName>v1</fullName>' +
+      '<entryDialog>Welcome</entryDialog></botVersions>' +
+      '<botVersions><fullName>v2</fullName></botVersions></Bot>';
+    const files = new Map(
+      Object.entries({
+        'bots/Support_Agent.bot': strToU8(botXml),
+        'genAiPlugins/Order_Topic.genAiPlugin': strToU8('<GenAiPlugin/>'),
+        'genAiPromptTemplates/Case_Summary.genAiPromptTemplate': strToU8('<GenAiPromptTemplate/>'),
+        'aiEvaluationDefinitions/Agent_Tests.aiEvaluationDefinition': strToU8(
+          '<AiEvaluationDefinition/>',
+        ),
+        'genAiFunctions/Get_Status/Get_Status.genAiFunction': strToU8('<GenAiFunction/>'),
+        'genAiFunctions/Get_Status/input/schema.json': strToU8('{"title":"inputs"}'),
+        'genAiFunctions/Get_Status/output/schema.json': strToU8('{"title":"outputs"}'),
+        'genAiPlannerBundles/Agent_v1/Agent_v1.genAiPlannerBundle': strToU8(
+          '<GenAiPlannerBundle/>',
+        ),
+        'genAiPlannerBundles/Agent_v1/agentGraph/Agent_v1_graph.json': strToU8('{"nodes":[]}'),
+        'genAiPlannerBundles/Agent_v1/localActions/Topic_1/Act_1/input/schema.json': strToU8('{}'),
+        'aiAuthoringBundles/My_Agent/My_Agent.agent': strToU8('agent script text'),
+        'aiAuthoringBundles/My_Agent/My_Agent.bundle-meta.xml': strToU8(
+          '<AiAuthoringBundle><bundleType>AGENT</bundleType></AiAuthoringBundle>',
+        ),
+      }),
+    );
+    const artifacts = indexSnapshotFiles(files, [], '2026-09-10T00:00:00.000Z');
+    const keys = new Set(artifacts.map((a) => `${a.type}:${a.apiName}`));
+
+    expect(keys.has('Bot:Support_Agent')).toBe(true);
+    expect(keys.has('BotVersion:Support_Agent.v1')).toBe(true);
+    expect(keys.has('BotVersion:Support_Agent.v2')).toBe(true);
+    expect(keys.has('GenAiPlugin:Order_Topic')).toBe(true);
+    expect(keys.has('GenAiPromptTemplate:Case_Summary')).toBe(true);
+    expect(keys.has('AiEvaluationDefinition:Agent_Tests')).toBe(true);
+    // Bundles: exactly ONE row each, main file as filePath, every sibling in content.
+    expect(keys.has('GenAiFunction:Get_Status')).toBe(true);
+    expect(keys.has('GenAiPlannerBundle:Agent_v1')).toBe(true);
+    expect(keys.has('AiAuthoringBundle:My_Agent')).toBe(true);
+    expect(artifacts.filter((a) => a.type === 'GenAiFunction')).toHaveLength(1);
+
+    const fn = artifacts.find((a) => a.apiName === 'Get_Status')!;
+    expect(fn.filePath).toBe('genAiFunctions/Get_Status/Get_Status.genAiFunction');
+    expect(fn.content).toContain('contrail:file genAiFunctions/Get_Status/input/schema.json');
+    expect(fn.content).toContain('"title":"inputs"');
+    expect(fn.content).toContain('"title":"outputs"');
+
+    // The .bundle-meta.xml is bundle CONTENT — not swallowed by the meta skip.
+    const authoring = artifacts.find((a) => a.apiName === 'My_Agent')!;
+    expect(authoring.filePath).toBe('aiAuthoringBundles/My_Agent/My_Agent.agent');
+    expect(authoring.content).toContain('<bundleType>AGENT</bundleType>');
+
+    // BotVersion children carry their own fragment, pointing at the parent file.
+    const v1 = artifacts.find((a) => a.apiName === 'Support_Agent.v1')!;
+    expect(v1.content).toContain('<entryDialog>Welcome</entryDialog>');
+    expect(v1.content).not.toContain('v2');
+    expect(v1.filePath).toBe('bots/Support_Agent.bot');
+  });
+
+  it('two bundles with same-named inner files never collide', () => {
+    const files = new Map(
+      Object.entries({
+        'genAiFunctions/Fn_A/Fn_A.genAiFunction': strToU8('<GenAiFunction>a</GenAiFunction>'),
+        'genAiFunctions/Fn_A/input/schema.json': strToU8('{"a":1}'),
+        'genAiFunctions/Fn_B/Fn_B.genAiFunction': strToU8('<GenAiFunction>b</GenAiFunction>'),
+        'genAiFunctions/Fn_B/input/schema.json': strToU8('{"b":2}'),
+      }),
+    );
+    const artifacts = indexSnapshotFiles(files, [], '2026-09-10T00:00:00.000Z');
+    const a = artifacts.find((x) => x.apiName === 'Fn_A')!;
+    const b = artifacts.find((x) => x.apiName === 'Fn_B')!;
+    expect(artifacts).toHaveLength(2);
+    expect(a.content).toContain('"a":1');
+    expect(a.content).not.toContain('"b":2');
+    expect(b.content).toContain('"b":2');
+    expect(a.contentHash).not.toBe(b.contentHash);
+  });
+});

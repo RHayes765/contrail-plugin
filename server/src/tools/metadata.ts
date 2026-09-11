@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ToolDeps } from './register.js';
@@ -51,6 +52,9 @@ const ORG_CHANGES_CHILD_TYPES = new Set([
   'CustomLabels',
   'ListView',
   'RecordType',
+  // S30: bot versions never enumerate via flat listMetadata (live-probed) —
+  // drift for them rides the Bot document.
+  'BotVersion',
 ]);
 
 /** Container file location + child tag for fragment types. */
@@ -60,6 +64,8 @@ const CHILD_SPEC: Record<string, { parentType: string; tag: string }> = {
   CustomLabel: { parentType: 'CustomLabels', tag: 'labels' },
   ListView: { parentType: 'CustomObject', tag: 'listViews' },
   RecordType: { parentType: 'CustomObject', tag: 'recordTypes' },
+  // S30: bot versions live inline in the Bot document (dotted MyBot.v1).
+  BotVersion: { parentType: 'Bot', tag: 'botVersions' },
 };
 
 export function registerMetadataTools(server: McpServer, deps: ToolDeps): void {
@@ -274,6 +280,7 @@ export function registerMetadataTools(server: McpServer, deps: ToolDeps): void {
               if (onDisk) entry.snapshot_path = onDisk;
             }
             if (content.note) entry.note = content.note;
+            if (content.bundle_files) entry.bundle_files = content.bundle_files;
             if (includeDeps) {
               entry.uses = db
                 .edgesFrom(conn.id, args.type, name)
@@ -724,13 +731,71 @@ export function registerMetadataTools(server: McpServer, deps: ToolDeps): void {
   );
 }
 
+/**
+ * S30: bundle types — ONE component is a DIRECTORY of files; the index row's
+ * filePath points at the main file, and retrieve returns it plus a
+ * bundle_files listing of every sibling (path + size + snapshot_path) so
+ * callers with file tools read the rest directly.
+ */
+const BUNDLE_TYPES = new Set(['GenAiFunction', 'GenAiPlannerBundle', 'AiAuthoringBundle']);
+
 async function fetchArtifactContent(
   deps: ToolDeps,
   conn: ConnectionRecord,
   type: string,
   name: string,
-): Promise<{ body: string; source: string; note?: string }> {
+): Promise<{
+  body: string;
+  source: string;
+  note?: string;
+  bundle_files?: Array<{ path: string; bytes: number; snapshot_path: string | null }>;
+}> {
   const { db, store, tokenMgr, config } = deps;
+
+  if (BUNDLE_TYPES.has(type)) {
+    const artifact = db.getArtifact(conn.id, type, name);
+    if (!artifact?.filePath) {
+      throw new ContrailError(
+        `${type} ${name} is not in the local snapshot — run refresh_snapshot with ` +
+          `types:["${type}"] (bundle types are explicit-refresh-only).`,
+        'artifact_not_found',
+      );
+    }
+    const body = store.readCurrentFile(conn.id, artifact.filePath);
+    if (body === null) {
+      throw new ContrailError(
+        `${type} ${name} index row exists but its snapshot file is missing — run refresh_snapshot.`,
+        'artifact_not_found',
+      );
+    }
+    // dir/<BundleName>/ is the component's directory.
+    const dirPrefix = artifact.filePath.split('/').slice(0, 2).join('/');
+    const bundleFiles = store
+      .listCurrentFiles(conn.id, dirPrefix)
+      .filter((rel) => rel !== artifact.filePath)
+      .map((rel) => {
+        const abs = store.currentFilePath(conn.id, rel);
+        let bytes = 0;
+        try {
+          bytes = abs ? fs.statSync(abs).size : 0;
+        } catch {
+          // Size is a courtesy; the listing stands without it.
+        }
+        return { path: rel, bytes, snapshot_path: abs };
+      });
+    return {
+      body,
+      source: 'snapshot',
+      ...(bundleFiles.length > 0
+        ? {
+            bundle_files: bundleFiles,
+            note:
+              `Bundle component: the main file is shown; ${bundleFiles.length} sibling ` +
+              `file(s) listed in bundle_files with snapshot_path for direct reading.`,
+          }
+        : {}),
+    };
+  }
 
   if (type === 'ApexClass' || type === 'ApexTrigger') {
     const rest = new RestClient(tokenMgr, conn, config.salesforce.apiVersion);

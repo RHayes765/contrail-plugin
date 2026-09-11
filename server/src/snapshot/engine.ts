@@ -50,6 +50,8 @@ interface RefreshJob extends RefreshJobState {
 const CHILD_TYPES: Record<string, string[]> = {
   CustomObject: ['CustomField', 'ValidationRule', 'ListView', 'RecordType'],
   CustomLabels: ['CustomLabel'],
+  // S30: Bot versions live inline in the Bot document (metadata format).
+  Bot: ['BotVersion'],
 };
 
 /**
@@ -164,14 +166,29 @@ export class SnapshotEngine {
 
     job.progress = 'listing metadata';
     let listedProps: FileProperties[] = [];
+    let unsupportedTypes: string[] = [];
     try {
-      listedProps = await soap.listMetadata(types);
+      const detailed = await soap.listMetadataDetailed(types);
+      listedProps = detailed.props;
+      unsupportedTypes = detailed.unsupportedTypes;
     } catch (err) {
       warnings.push(`listMetadata failed (${String(err instanceof Error ? err.message : err)}); staleness data will be limited`);
     }
+    // S30: a type this org/API version does not know (older version, or an
+    // unlicensed feature like the Agentforce types) drops out per-type with
+    // an honest warning — it never sinks the healthy types' refresh.
+    let retrieveTypes = types;
+    if (unsupportedTypes.length > 0) {
+      const unsupported = new Set(unsupportedTypes);
+      retrieveTypes = types.filter((t) => !unsupported.has(t));
+      warnings.push(
+        `${unsupportedTypes.join(', ')} not supported by this org/API version — skipped ` +
+          `(feature not licensed, or salesforce.apiVersion too old).`,
+      );
+    }
 
     job.progress = 'starting retrieve';
-    const retrieveMembers = buildRetrieveMembers(types, listedProps, warnings);
+    const retrieveMembers = buildRetrieveMembers(retrieveTypes, listedProps, warnings);
     if (Object.keys(retrieveMembers).length === 0) {
       // Loud, never a silent dir wipe: foldered types with no listable
       // inventory leave nothing to retrieve.
@@ -210,9 +227,11 @@ export class SnapshotEngine {
     const retrievedAt = new Date().toISOString();
     this.store.saveZip(conn.id, status.zipFile, retrievedAt);
     const extracted = this.store.extractRetrieveZip(status.zipFile);
-    const affectedTypes = withChildTypes(types);
+    // Downstream authority is scoped to what was actually RETRIEVED — an
+    // unsupported type that was skipped must keep its snapshot/index state.
+    const affectedTypes = withChildTypes(retrieveTypes);
     const affectedSet = new Set(affectedTypes);
-    const fullManifest = this.config.snapshot.types.every((t) => types.includes(t));
+    const fullManifest = this.config.snapshot.types.every((t) => retrieveTypes.includes(t));
 
     // A refresh is authoritative ONLY for the types it asked for. On a
     // partial refresh, both the files written and the artifacts indexed are
@@ -222,7 +241,7 @@ export class SnapshotEngine {
     let files = extracted;
     let clearDirs: string[] | undefined;
     if (!fullManifest) {
-      const ownedDirs = ownedDirsForTypes(types);
+      const ownedDirs = ownedDirsForTypes(retrieveTypes);
       if (ownedDirs) {
         files = new Map(
           [...extracted].filter(([rel]) => {
@@ -232,7 +251,7 @@ export class SnapshotEngine {
         );
         clearDirs = [...ownedDirs];
       } else {
-        clearDirs = dirsForTypes(types, extracted);
+        clearDirs = dirsForTypes(retrieveTypes, extracted);
       }
     }
     this.store.writeCurrent(conn.id, files, clearDirs ? { clearDirs } : undefined);
@@ -256,9 +275,9 @@ export class SnapshotEngine {
     this.db.replaceEdges(conn.id, 'extractor', affectedTypes, extractorEdges);
 
     job.progress = 'querying org dependency data';
-    const orgDeps = await fetchOrgDependencyEdges(rest, conn.id, types);
+    const orgDeps = await fetchOrgDependencyEdges(rest, conn.id, retrieveTypes);
     warnings.push(...orgDeps.warnings);
-    this.db.replaceEdges(conn.id, 'org', types, orgDeps.edges);
+    this.db.replaceEdges(conn.id, 'org', retrieveTypes, orgDeps.edges);
 
     const summary: RefreshSummary = {
       connection: conn.alias,
@@ -295,7 +314,7 @@ export class SnapshotEngine {
   }> {
     const checkTypes = normalizeRefreshTypes(types ?? this.config.snapshot.types);
     const soap = new MetadataSoapClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
-    const props = await soap.listMetadata(checkTypes);
+    const { props, unsupportedTypes } = await soap.listMetadataDetailed(checkTypes);
     const stale: Array<{
       type: string;
       api_name: string;
@@ -326,14 +345,18 @@ export class SnapshotEngine {
         });
       }
     }
+    const unsupportedNote =
+      unsupportedTypes.length > 0
+        ? ` ${unsupportedTypes.join(', ')} not supported by this org/API version — not checked.`
+        : '';
     return {
       checked_types: checkTypes,
       stale: stale.slice(0, 100),
       missing_from_index: missing,
       note:
-        stale.length || missing
+        (stale.length || missing
           ? 'Run refresh_snapshot to bring the local snapshot up to date.'
-          : 'Snapshot is current for the checked types.',
+          : 'Snapshot is current for the checked types.') + unsupportedNote,
     };
   }
 }
@@ -442,6 +465,18 @@ const TYPE_DIRS: Record<string, string> = {
   ReportFolder: 'reports',
   Dashboard: 'dashboards',
   DashboardFolder: 'dashboards',
+  // S30: Agentforce types (v66+; explicit-refresh-only, like the analytics
+  // and integration families).
+  Bot: 'bots',
+  GenAiPlugin: 'genAiPlugins',
+  GenAiFunction: 'genAiFunctions',
+  GenAiPlannerBundle: 'genAiPlannerBundles',
+  AiAuthoringBundle: 'aiAuthoringBundles',
+  GenAiPromptTemplate: 'genAiPromptTemplates',
+  GenAiPromptTemplateActv: 'genAiPromptTemplateActivations',
+  AiEvaluationDefinition: 'aiEvaluationDefinitions',
+  BotTemplate: 'botTemplates',
+  BotBlock: 'botBlocks',
 };
 
 /** The refreshed types' own directories — null if any requested type has no known mapping. */

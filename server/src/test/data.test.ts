@@ -141,6 +141,21 @@ function stubSalesforce(): void {
           }),
         );
       }
+      if (q.includes('FROM GenAiPluginDefinition')) {
+        return new Response(
+          JSON.stringify({
+            totalSize: 1,
+            done: true,
+            records: [
+              {
+                attributes: { type: 'GenAiPluginDefinition', url: 'z' },
+                DeveloperName: 'Order_Management',
+                MasterLabel: 'Order Management',
+              },
+            ],
+          }),
+        );
+      }
       return new Response(JSON.stringify({ totalSize: 0, done: true, records: [] }));
     }
     if (url.includes('/tooling/sobjects/ApexLog/') && url.endsWith('/Body')) {
@@ -392,6 +407,43 @@ describe('soql_query', () => {
     expect(textOf(result)).toContain('data_read');
     expect(
       db.queryAuditEvents({}).some((e) => e.eventType === 'grant.refused' && e.tool === 'soql_query'),
+    ).toBe(true);
+  });
+
+  it('S30: tooling=true routes to the Tooling API (agent-graph sObjects)', async () => {
+    const result = await client.callTool({
+      name: 'soql_query',
+      arguments: {
+        connection: 'data-org',
+        query: 'SELECT DeveloperName, MasterLabel FROM GenAiPluginDefinition',
+        tooling: true,
+      },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = JSON.parse(textOf(result)) as { records: Array<Record<string, unknown>> };
+    expect(parsed.records[0]).toMatchObject({ DeveloperName: 'Order_Management' });
+  });
+
+  it('S30: tooling=true is metadata-class — refused without metadata_read, audited', async () => {
+    const result = await client.callTool({
+      name: 'soql_query',
+      arguments: {
+        connection: 'data-only',
+        query: 'SELECT DeveloperName FROM GenAiPluginDefinition',
+        tooling: true,
+      },
+    });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain('metadata_read');
+    expect(
+      db
+        .queryAuditEvents({})
+        .some(
+          (e) =>
+            e.eventType === 'grant.refused' &&
+            e.tool === 'soql_query' &&
+            (e.detail as Record<string, unknown>)?.reason === 'tooling_query',
+        ),
     ).toBe(true);
   });
 });

@@ -127,6 +127,25 @@ const FILE_TYPES: Record<string, FileSpec> = {
   Dashboard: { dir: 'dashboards', ext: '.dashboard', foldered: true },
   ReportFolder: { dir: 'reports', ext: '', metaOnly: true, manifestType: 'Report' },
   DashboardFolder: { dir: 'dashboards', ext: '', metaOnly: true, manifestType: 'Dashboard' },
+  // S30: Agentforce single-file types (v66+ — see the config apiVersion
+  // note). The Bot document carries its versions INLINE (<botVersions>) in
+  // metadata format — BotVersion deploys as a dotted-name child (see
+  // CHILD_TYPES). The bundle types (GenAiFunction, GenAiPlannerBundle,
+  // AiAuthoringBundle — one component = a directory of files) are
+  // deliberately NOT here yet: read/index/diff works, deploy waits for the
+  // bundle machinery; AiAuthoringBundle stays read-only regardless, because
+  // a plain Metadata API deploy of Agent Script silently does not apply
+  // reasoning actions (only Salesforce's publish pipeline compiles them).
+  Bot: { dir: 'bots', ext: '.bot' },
+  GenAiPlugin: { dir: 'genAiPlugins', ext: '.genAiPlugin' },
+  GenAiPromptTemplate: { dir: 'genAiPromptTemplates', ext: '.genAiPromptTemplate' },
+  GenAiPromptTemplateActv: {
+    dir: 'genAiPromptTemplateActivations',
+    ext: '.genAiPromptTemplateActivation',
+  },
+  AiEvaluationDefinition: { dir: 'aiEvaluationDefinitions', ext: '.aiEvaluationDefinition' },
+  BotTemplate: { dir: 'botTemplates', ext: '.botTemplate' },
+  BotBlock: { dir: 'botBlocks', ext: '.botBlock' },
 };
 
 const XMLNS_META = 'http://soap.sforce.com/2006/04/metadata';
@@ -177,6 +196,16 @@ const CHILD_TYPES: Record<
     dir: 'objects',
     ext: '.object',
     tag: 'recordTypes',
+    parentFromName: (n) => n.split('.')[0] ?? '',
+  },
+  // S30: bot versions are children of the Bot document (dotted MyBot.v1 —
+  // the same fullName shape the Metadata API uses for standalone BotVersion
+  // deploys).
+  BotVersion: {
+    containerRoot: 'Bot',
+    dir: 'bots',
+    ext: '.bot',
+    tag: 'botVersions',
     parentFromName: (n) => n.split('.')[0] ?? '',
   },
 };
@@ -500,13 +529,34 @@ export function analyzeChanges(
           c.type === 'CustomApplication' ||
           c.type === 'Layout' ||
           c.type === 'Report' ||
-          c.type === 'Dashboard') &&
+          c.type === 'Dashboard' ||
+          c.type === 'GenAiPlugin' ||
+          c.type === 'GenAiPromptTemplate' ||
+          c.type === 'Bot') &&
         change === 'modify'
       ) {
         warnings.push(
           `WHOLE-DOCUMENT REPLACE — this deploy fully replaces the org's ${c.type}; ` +
-            `anything not present in the proposed content is removed.`,
+            `anything not present in the proposed content is removed.` +
+            (c.type === 'Bot'
+              ? ' A <botVersions> block omitted from a Bot document is a VERSION DELETE.'
+              : ''),
         );
+      }
+      // S30: the activeVersionIdentifier is an org-generated token. Altering
+      // it by hand mis-targets (or fails) the active-version pointer — the
+      // doctrine is retrieve-first, then modify the retrieved copy.
+      if (c.type === 'GenAiPromptTemplate' && change === 'modify') {
+        const oldId = oldContent?.match(/<activeVersionIdentifier>([^<]*)</)?.[1];
+        const newId = c.content.match(/<activeVersionIdentifier>([^<]*)</)?.[1];
+        if (oldId && newId && oldId !== newId) {
+          warnings.push(
+            `activeVersionIdentifier ALTERED (${oldId.slice(0, 12)}… → ${newId.slice(0, 12)}…) — ` +
+              `these tokens are org-generated; a hand-edited value is rejected or mis-targets ` +
+              `the active version. To activate a new version, retrieve after deploying it and ` +
+              `repoint using the versionIdentifier the org minted.`,
+          );
+        }
       }
       // Folder definitions replace their sharing wholesale: the folderShares
       // in this content ARE the folder's sharing after the deploy.
@@ -542,6 +592,34 @@ export function analyzeChanges(
         `NEW ${c.type.toUpperCase()} visibility is governed by its FOLDER's sharing ` +
           `(folderShares on the folder component), not by permission sets — this ` +
           `deploy grants nobody new access by itself.`,
+      );
+    }
+    // S30: a NET-NEW prompt template carrying a hand-typed identifier cannot
+    // be right — the org mints these tokens on deploy.
+    if (
+      c.type === 'GenAiPromptTemplate' &&
+      change === 'add' &&
+      /<activeVersionIdentifier>[^<]/.test(c.content)
+    ) {
+      warnings.push(
+        `activeVersionIdentifier on a NET-NEW template — this token is org-generated and ` +
+          `cannot be authored from scratch. Omit it (the org mints one on deploy), or ` +
+          `retrieve-first if this template already exists under another name.`,
+      );
+    }
+    // S30: the deactivate gate. Topic/action/instruction changes against an
+    // ACTIVE agent version fail org-side — the human deactivates in Agent
+    // Builder first, then reactivates after the deploy. Contrail has no
+    // activate/deactivate path (that lifecycle is org-side, not Metadata
+    // API); check state with soql_query on BotVersion.Status.
+    if (
+      (c.type === 'GenAiPlannerBundle' || c.type === 'GenAiPlugin') &&
+      change === 'modify'
+    ) {
+      warnings.push(
+        `AGENT MUST BE DEACTIVATED FIRST — deploying ${c.type} changes for an ACTIVE ` +
+          `agent version fails. Deactivate the agent in Agent Builder, deploy, then ` +
+          `reactivate (Contrail cannot do those steps; verify with BotVersion.Status).`,
       );
     }
     changes.push({ type: c.type, api_name: c.api_name, change, warnings, ...sourceOf(c) });

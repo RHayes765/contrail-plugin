@@ -168,3 +168,63 @@ describe('S29: report & dashboard extractors', () => {
     expect(keys).toContain('Dashboard:Exec/Overview>Report:Ops/Weekly');
   });
 });
+
+describe('S30: agent-graph extractors', () => {
+  it('topic → actions, planner bundle → topics + actions, bot → planner', async () => {
+    const { extractGenAiPluginRefs, extractGenAiPlannerRefs, extractBotRefs } = await import(
+      '../deps/extract.js'
+    );
+    expect(
+      extractGenAiPluginRefs(
+        '<GenAiPlugin><genAiFunctions><functionName>Get_Status</functionName></genAiFunctions>' +
+          '<genAiFunctions><functionName>Create_Case</functionName></genAiFunctions></GenAiPlugin>',
+      ),
+    ).toEqual([
+      { toType: 'GenAiFunction', toName: 'Get_Status' },
+      { toType: 'GenAiFunction', toName: 'Create_Case' },
+    ]);
+
+    expect(
+      extractGenAiPlannerRefs(
+        '<GenAiPlannerBundle><localTopicLinks><genAiPluginName>Orders</genAiPluginName></localTopicLinks>' +
+          '<localTopics><genAiFunctions><functionName>Get_Status</functionName></genAiFunctions></localTopics>' +
+          '</GenAiPlannerBundle>',
+      ),
+    ).toEqual([
+      { toType: 'GenAiPlugin', toName: 'Orders' },
+      { toType: 'GenAiFunction', toName: 'Get_Status' },
+    ]);
+
+    expect(
+      extractBotRefs(
+        '<Bot><botVersions><conversationDefinitionPlanners>' +
+          '<genAiPlannerName>Agent_v4</genAiPlannerName>' +
+          '</conversationDefinitionPlanners></botVersions></Bot>',
+      ),
+    ).toEqual([{ toType: 'GenAiPlannerBundle', toName: 'Agent_v4' }]);
+  });
+
+  it('indexed agent artifacts produce joinable edges through extractAllEdges', () => {
+    const files = new Map(
+      Object.entries({
+        'bots/Support.bot': strToU8(
+          '<Bot><botVersions><fullName>v1</fullName><conversationDefinitionPlanners>' +
+            '<genAiPlannerName>Support_v1</genAiPlannerName></conversationDefinitionPlanners>' +
+            '</botVersions></Bot>',
+        ),
+        'genAiPlugins/Orders.genAiPlugin': strToU8(
+          '<GenAiPlugin><genAiFunctions><functionName>Get_Status</functionName></genAiFunctions></GenAiPlugin>',
+        ),
+        'genAiPlannerBundles/Support_v1/Support_v1.genAiPlannerBundle': strToU8(
+          '<GenAiPlannerBundle><localTopicLinks><genAiPluginName>Orders</genAiPluginName></localTopicLinks></GenAiPlannerBundle>',
+        ),
+      }),
+    );
+    const artifacts = indexSnapshotFiles(files, [], '2026-09-10T00:00:00.000Z');
+    const edges = extractAllEdges('conn1', artifacts);
+    const keys = edges.map((e) => `${e.fromType}:${e.fromName}>${e.toType}:${e.toName}`);
+    expect(keys).toContain('Bot:Support>GenAiPlannerBundle:Support_v1');
+    expect(keys).toContain('GenAiPlannerBundle:Support_v1>GenAiPlugin:Orders');
+    expect(keys).toContain('GenAiPlugin:Orders>GenAiFunction:Get_Status');
+  });
+});

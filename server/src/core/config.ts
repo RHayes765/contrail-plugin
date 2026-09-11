@@ -101,7 +101,11 @@ export interface ContrailConfig {
 export const DEFAULT_CONFIG: ContrailConfig = {
   salesforce: {
     clientId: 'PlatformCLI',
-    apiVersion: 'v63.0',
+    // S30: v66 is the floor for the Agentforce types (GenAiPlannerBundle
+    // exists only at v64+, AiAuthoringBundle only at v66+; the legacy
+    // GenAiPlanner type died at v64 — probed live). A config.json that pins
+    // an older version keeps it until the human edits it.
+    apiVersion: 'v66.0',
     scopes: ['refresh_token', 'api', 'web'],
   },
   oauth: {
@@ -119,7 +123,12 @@ export const DEFAULT_CONFIG: ContrailConfig = {
     // their folders) are likewise explicit-refresh-only — big orgs carry
     // thousands of reports and every folder costs a listMetadata query;
     // refresh_snapshot types:['Report'] pulls ReportFolder along
-    // automatically (they share a snapshot directory).
+    // automatically (they share a snapshot directory). S30: Agentforce types
+    // (Bot, GenAiPlugin, GenAiFunction, GenAiPlannerBundle,
+    // AiAuthoringBundle, GenAiPromptTemplate[Actv], AiEvaluationDefinition,
+    // BotTemplate, BotBlock) are explicit-refresh-only too — they are
+    // licensing-gated (unlicensed orgs report them unsupported, degraded
+    // per-type with a warning) and need salesforce.apiVersion v66+.
     types: [
       'ApexClass',
       'ApexTrigger',

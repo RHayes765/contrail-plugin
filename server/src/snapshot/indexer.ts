@@ -47,6 +47,17 @@ const SIMPLE_DIR_TYPES: Array<{ dir: string; ext: string; type: string }> = [
   },
   { dir: 'layouts', ext: '.layout', type: 'Layout' },
   { dir: 'customMetadata', ext: '.md', type: 'CustomMetadata' },
+  // S30: Agentforce single-file types (v66+ — see config apiVersion note).
+  { dir: 'genAiPlugins', ext: '.genAiPlugin', type: 'GenAiPlugin' },
+  { dir: 'genAiPromptTemplates', ext: '.genAiPromptTemplate', type: 'GenAiPromptTemplate' },
+  {
+    dir: 'genAiPromptTemplateActivations',
+    ext: '.genAiPromptTemplateActivation',
+    type: 'GenAiPromptTemplateActv',
+  },
+  { dir: 'aiEvaluationDefinitions', ext: '.aiEvaluationDefinition', type: 'AiEvaluationDefinition' },
+  { dir: 'botTemplates', ext: '.botTemplate', type: 'BotTemplate' },
+  { dir: 'botBlocks', ext: '.botBlock', type: 'BotBlock' },
 ];
 
 /**
@@ -61,6 +72,24 @@ const SIMPLE_DIR_TYPES: Array<{ dir: string; ext: string; type: string }> = [
 const FOLDERED_DIR_TYPES: Array<{ dir: string; ext: string; type: string; folderType: string }> = [
   { dir: 'reports', ext: '.report', type: 'Report', folderType: 'ReportFolder' },
   { dir: 'dashboards', ext: '.dashboard', type: 'Dashboard', folderType: 'DashboardFolder' },
+];
+
+/**
+ * S30: bundle types — ONE component = a DIRECTORY of files
+ * (`dir/<BundleName>/…`, arbitrary depth below: GenAiPlannerBundle nests
+ * localActions five segments deep). Indexed as ONE row per bundle: apiName =
+ * the directory name (Salesforce guarantees it unique per type — no
+ * same-leaf collisions by construction), filePath = the main file
+ * (`dir/<n>/<n><mainExt>`, else the first file), FTS content = every file
+ * concatenated in sorted-path order under `<!-- contrail:file … -->` headers
+ * so schema/JSON text is searchable and the contentHash sees sibling drift.
+ * Checked BEFORE the generic -meta.xml skip — AiAuthoringBundle's
+ * `.bundle-meta.xml` is real content, not a skippable sidecar.
+ */
+const BUNDLE_DIR_TYPES: Array<{ dir: string; type: string; mainExt: string }> = [
+  { dir: 'genAiFunctions', type: 'GenAiFunction', mainExt: '.genAiFunction' },
+  { dir: 'genAiPlannerBundles', type: 'GenAiPlannerBundle', mainExt: '.genAiPlannerBundle' },
+  { dir: 'aiAuthoringBundles', type: 'AiAuthoringBundle', mainExt: '.agent' },
 ];
 
 export function indexSnapshotFiles(
@@ -92,10 +121,36 @@ export function indexSnapshotFiles(
     });
   };
 
+  // S30 bundle accumulation: files group per bundle during the walk, rows
+  // emit after it (one row per bundle needs all its files first).
+  const bundles = new Map<
+    string,
+    { spec: (typeof BUNDLE_DIR_TYPES)[number]; seg: string; files: Array<{ rel: string; text: string }> }
+  >();
+
   for (const [relPath, bytes] of files) {
     if (relPath === 'package.xml') continue;
 
-    // Foldered analytics dirs first — their folder definitions are -meta.xml
+    // Bundle dirs first — AiAuthoringBundle's .bundle-meta.xml is content the
+    // generic -meta.xml skip below would swallow.
+    const bundleSpec = BUNDLE_DIR_TYPES.find((b) => relPath.startsWith(`${b.dir}/`));
+    if (bundleSpec) {
+      const inner = relPath.slice(bundleSpec.dir.length + 1);
+      const slash = inner.indexOf('/');
+      if (slash <= 0) {
+        // A stray flat file directly under the bundle type dir.
+        log('debug', 'snapshot file not indexed (unmapped type)', { relPath });
+        continue;
+      }
+      const seg = inner.slice(0, slash);
+      const key = `${bundleSpec.type}:${seg}`;
+      const group = bundles.get(key) ?? { spec: bundleSpec, seg, files: [] };
+      group.files.push({ rel: relPath, text: Buffer.from(bytes).toString('utf8') });
+      bundles.set(key, group);
+      continue;
+    }
+
+    // Foldered analytics dirs next — their folder definitions are -meta.xml
     // files the generic skip below would otherwise swallow.
     const foldered = FOLDERED_DIR_TYPES.find((f) => relPath.startsWith(`${f.dir}/`));
     if (foldered) {
@@ -153,6 +208,18 @@ export function indexSnapshotFiles(
         const child = blockFullName(block);
         if (child) push('CustomLabel', child, relPath, block, labelsProp);
       }
+    } else if (relPath.startsWith('bots/') && relPath.endsWith('.bot')) {
+      // S30: a Bot is ONE flat metadata-format file with its versions inline
+      // (<botVersions><fullName>v1</fullName>…) — the CustomObject container
+      // pattern. BotVersion children index dotted (MyBot.v1), which is also
+      // their standalone deploy fullName; flat listMetadata never enumerates
+      // them, so staleness rides the Bot file (children inherit its prop).
+      const botProp = props.get(`Bot:${name.toLowerCase()}`);
+      push('Bot', name, relPath, content);
+      for (const block of extractChildBlocks(content, 'botVersions')) {
+        const child = blockFullName(block);
+        if (child) push('BotVersion', `${name}.${child}`, relPath, block, botProp);
+      }
     } else {
       const simple = SIMPLE_DIR_TYPES.find(
         (s) => relPath.startsWith(`${s.dir}/`) && relPath.endsWith(s.ext),
@@ -163,6 +230,18 @@ export function indexSnapshotFiles(
         log('debug', 'snapshot file not indexed (unmapped type)', { relPath });
       }
     }
+  }
+
+  // Emit ONE row per accumulated bundle.
+  for (const group of bundles.values()) {
+    const apiName = decodeSegment(group.seg);
+    const sorted = [...group.files].sort((a, b) => a.rel.localeCompare(b.rel));
+    const mainRel = `${group.spec.dir}/${group.seg}/${group.seg}${group.spec.mainExt}`;
+    const main = sorted.find((f) => f.rel === mainRel);
+    const content = sorted
+      .map((f) => `<!-- contrail:file ${f.rel} -->\n${f.text}`)
+      .join('\n');
+    push(group.spec.type, apiName, main?.rel ?? sorted[0]!.rel, content);
   }
   return artifacts;
 }

@@ -244,3 +244,73 @@ describe('MetadataSoapClient', () => {
     await expect(client.listMetadata(['ApexClass'])).rejects.toThrow(/no metadata api for you/);
   });
 });
+
+describe('S30: listMetadataDetailed INVALID_TYPE degrade', () => {
+  function stubWithInvalidType(): { calls: string[] } {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', async (_url: unknown, init?: RequestInit) => {
+      const body = String(init?.body);
+      calls.push(body);
+      if (body.includes('<met:type>GenAiPlannerBundle</met:type>')) {
+        return new Response(
+          soapEnvelope(
+            `<soapenv:Fault><faultcode>sf:INVALID_TYPE</faultcode>
+             <faultstring>INVALID_TYPE: Cannot use: GenAiPlannerBundle in this version</faultstring></soapenv:Fault>`,
+          ),
+          { status: 500 },
+        );
+      }
+      const type = body.match(/<met:type>(\w+)<\/met:type>/)?.[1] ?? 'ApexClass';
+      return new Response(
+        soapEnvelope(
+          `<listMetadataResponse xmlns="http://soap.sforce.com/2006/04/metadata">
+             <result><fullName>Item_${type}</fullName><type>${type}</type>
+               <fileName>x</fileName><id>1</id>
+               <lastModifiedDate>2026-09-01T00:00:00.000Z</lastModifiedDate>
+               <lastModifiedByName>Ryley</lastModifiedByName></result>
+           </listMetadataResponse>`,
+        ),
+      );
+    });
+    return { calls };
+  }
+
+  it('a faulting chunk retries per query; healthy types survive, bad ones are reported', async () => {
+    const { calls } = stubWithInvalidType();
+    const client = new MetadataSoapClient(fakeTokenMgr(['AT']), CONN, 'v66.0');
+    const { props, unsupportedTypes } = await client.listMetadataDetailed([
+      'ApexClass',
+      'GenAiPlannerBundle',
+      'Flow',
+    ]);
+    expect(unsupportedTypes).toEqual(['GenAiPlannerBundle']);
+    const names = props.map((p) => `${p.type}:${p.fullName}`).sort();
+    expect(names).toEqual(['ApexClass:Item_ApexClass', 'Flow:Item_Flow']);
+    // 1 chunk call (faulted) + 3 per-query retries.
+    expect(calls.length).toBe(4);
+  });
+
+  it('plain listMetadata keeps its throwing contract for INVALID_TYPE', async () => {
+    stubWithInvalidType();
+    const client = new MetadataSoapClient(fakeTokenMgr(['AT']), CONN, 'v66.0');
+    await expect(client.listMetadata(['ApexClass', 'GenAiPlannerBundle'])).rejects.toThrow(
+      /INVALID_TYPE/,
+    );
+  });
+
+  it('non-INVALID_TYPE faults still throw through the detailed path', async () => {
+    vi.stubGlobal('fetch', async () =>
+      new Response(
+        soapEnvelope(
+          `<soapenv:Fault><faultcode>sf:INSUFFICIENT_ACCESS</faultcode>
+           <faultstring>no metadata api for you</faultstring></soapenv:Fault>`,
+        ),
+        { status: 500 },
+      ),
+    );
+    const client = new MetadataSoapClient(fakeTokenMgr(['AT']), CONN, 'v66.0');
+    await expect(client.listMetadataDetailed(['ApexClass'])).rejects.toThrow(
+      /no metadata api for you/,
+    );
+  });
+});

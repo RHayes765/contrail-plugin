@@ -60,7 +60,10 @@ export function registerDataTools(server: McpServer, deps: ToolDeps): void {
       title: 'Run a SOQL query',
       description:
         'Run a read-only SOQL SELECT against a connection. Row-capped (default 500, max ' +
-        '2000) with the org-side total count included so truncation is never silent.',
+        '2000) with the org-side total count included so truncation is never silent. ' +
+        'tooling=true queries the Tooling API instead (needed for setup/agent-graph ' +
+        'sObjects like GenAiPluginDefinition — requires the metadata_read grant too, ' +
+        'because Tooling sObjects expose metadata content wholesale).',
       inputSchema: {
         connection: z.string().describe('Connection alias (or id).'),
         query: z.string().min(8).describe('The SOQL SELECT statement.'),
@@ -71,13 +74,36 @@ export function registerDataTools(server: McpServer, deps: ToolDeps): void {
           .max(MAX_ROWS)
           .optional()
           .describe(`Row cap (default ${DEFAULT_ROWS}).`),
+        tooling: z
+          .boolean()
+          .optional()
+          .describe(
+            'Query the Tooling API (metadata-class sObjects). Requires metadata_read in ' +
+              'addition to data_read.',
+          ),
       },
     },
-    async (args: { connection: string; query: string; limit?: number }) =>
+    async (args: { connection: string; query: string; limit?: number; tooling?: boolean }) =>
       guarded(async () => {
         const conn = requireConnection(args.connection, 'soql_query');
         const soql = args.query.trim();
         if (!/^select\s/i.test(soql)) return fail('Only SELECT queries are accepted.');
+        // S30: the Tooling API is metadata-in-sObject-clothing — every row is
+        // the class of content metadata_read reserves, so the whole surface
+        // is gated on it (matching the GRANT_GATED_SOBJECTS philosophy).
+        if (args.tooling && !conn.grants.metadata_read) {
+          audit.record('grant.refused', {
+            connectionId: conn.id,
+            tool: 'soql_query',
+            outcome: 'refused',
+            detail: { required: 'metadata_read', reason: 'tooling_query' },
+          });
+          return fail(
+            `Tooling API queries read metadata-class content, so tooling=true requires the ` +
+              `"metadata_read" grant on "${conn.alias}" in addition to data_read. Grants are ` +
+              `set on the connection management page (manage_connection).`,
+          );
+        }
         // Structural checks run on the literal-stripped text so quoted values
         // can neither trip them nor hide from them.
         const structural = stripSoqlLiterals(soql);
@@ -102,7 +128,10 @@ export function registerDataTools(server: McpServer, deps: ToolDeps): void {
           }
         }
         const cap = args.limit ?? DEFAULT_ROWS;
-        const { records, totalSize } = await rest(conn).queryWithCount(soql, cap);
+        const client = rest(conn);
+        const { records, totalSize } = args.tooling
+          ? await client.toolingQueryWithCount(soql, cap)
+          : await client.queryWithCount(soql, cap);
         const cleaned = records.map((r) => truncateDeep(stripAttributes(r)));
         const { kept, dropped } = fitToBudget(cleaned, MAX_RESPONSE_CHARS);
         const truncated =

@@ -103,6 +103,37 @@ export class SnapshotStore {
     }
   }
 
+  /**
+   * S30: every file under a directory prefix of the current/ tree, as
+   * relative paths (forward slashes), sorted — the read surface for bundle
+   * types, where one component is a directory of files. Same containment
+   * discipline as the single-file reads; empty when the prefix is absent or
+   * would escape.
+   */
+  listCurrentFiles(connectionId: string, relDirPrefix: string): string[] {
+    const dir = path.join(this.connDir(connectionId), 'current');
+    const target = path.resolve(dir, relDirPrefix);
+    if (!target.startsWith(path.resolve(dir) + path.sep)) return [];
+    const out: string[] = [];
+    const walk = (abs: string) => {
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(abs, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const e of entries) {
+        const child = path.join(abs, e.name);
+        if (e.isDirectory()) walk(child);
+        else if (e.isFile()) {
+          out.push(path.relative(dir, child).replaceAll(path.sep, '/'));
+        }
+      }
+    };
+    walk(target);
+    return out.sort();
+  }
+
   removeConnection(connectionId: string): void {
     fs.rmSync(this.connDir(connectionId), { recursive: true, force: true });
   }
