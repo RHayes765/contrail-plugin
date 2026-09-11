@@ -1,0 +1,407 @@
+---
+name: agentforce-architecture-analyze
+description: "Declared architecture snapshot for one Agentforce agent through the Contrail engine: planner bundle, topics, actions, flows, Apex, and prompt templates. Renders a human-readable architecture document and Mermaid invocation graph from design-time metadata (not runtime audit rows). TRIGGER when user asks to describe, diagram, inventory, audit, or document the architecture / action tree / topic structure / tool inventory of a specific agent by agent API name on a specific connection, or to compare two agent versions (e.g. v3 vs v5). DO NOT TRIGGER for runtime session traces, conversation transcripts, generation timings, or gateway audit chains — this skill reads design-time metadata only, and runtime telemetry lives in Data Cloud, which Contrail does not reach. DO NOT TRIGGER for creating or editing agent metadata — this skill reviews, never authors; authoring is agentforce-metadata-generate."
+metadata:
+  domains: ["Agentforce"]
+  minApiVersion: "66.0"
+  upstream:
+    repo: "forcedotcom/sf-skills"
+    commit: "49064f7"
+    version: "1.0"
+    adapted: "2026-09-10"
+  relatedSkills:
+    - "salesforce-house-rules"
+    - "agentforce-metadata-generate"
+    - "agentforce-eval-generate"
+---
+
+# agentforce-architecture-analyze — declared architecture snapshot
+
+Design-time metadata tree for one Agentforce agent: bot → planner bundle →
+topics → actions → flows → Apex → prompt templates. Two arms, one output:
+
+- **Arm 1 (PRIMARY)** — the metadata walk: `soql_query` to resolve the agent,
+  `refresh_snapshot` + `retrieve_metadata` to read the Bot file and the
+  planner bundle, then follow references down to Flows and Apex.
+- **Arm 2** — the Tooling object graph: `soql_query` with `tooling: true`
+  against the `GenAi*Definition` sObjects, for orgs where you want row-level
+  fields (instruction ordering, invocation targets, plugin flags) without
+  parsing bundle XML.
+
+**This skill REVIEWS, it never authors.** Any request to change what the
+review finds — add a topic, rewire an action, fix an instruction — routes to
+**agentforce-metadata-generate**. Follow **salesforce-house-rules** for
+connections and grants before the first tool call.
+
+## The v66 floor and the planner cutover
+
+Agent metadata has a **hard API-version cutover**, confirmed live:
+
+- At **v63 and below**: legacy `GenAiPlanner` is valid; `GenAiPlannerBundle`
+  is an invalid type.
+- At **v64 and above**: `GenAiPlanner` is DEAD (invalid type);
+  **`GenAiPlannerBundle` replaces it** — same components, new compiled shape.
+- **This skill requires the connection's apiVersion at 66.0+** (the pack's
+  Agentforce floor; everything in the family is valid there). A connection
+  pinned below the floor cannot see the bundle types at all — surface that as
+  the failure, don't work around it.
+
+Do not consult, retrieve, or reason about legacy `GenAiPlanner` metadata; at
+the pinned version it does not exist.
+
+## If the user hasn't given enough to proceed
+
+When invoked with no agent name AND no connection, ask — do not guess and do
+not start retrieving:
+
+> Which agent should I document, and on which connection?
+>
+> I need:
+> - **Agent API name** — the `DeveloperName` of the `BotDefinition` (e.g.
+>   `MyAgent`). Not the label.
+> - **Connection** — the Contrail connection name (`list_connections` shows
+>   what's configured).
+>
+> Optional:
+> - **Version** — a `BotVersion.DeveloperName` like `v5`. If omitted, I
+>   resolve the active version.
+
+## Ground before you walk
+
+House rules first: `list_connections`, `get_permissions`. This skill needs:
+
+| Grant | Used for |
+|---|---|
+| `data_read` | Arm 1 step 1 (`BotDefinition`/`BotVersion` are Data-API queryable) |
+| `metadata_read` | `refresh_snapshot`, `retrieve_metadata`, and — together with `data_read` — every `tooling: true` query in Arm 2 |
+
+If a grant is missing, do not probe by calling the tool anyway — record the
+gap (`arm 2 unavailable: metadata_read not granted`), offer
+`manage_connection`, and say so in the final document. A missing grant
+degrades an arm; it never silently truncates the tree.
+
+---
+
+## Arm 1 — the metadata walk (PRIMARY)
+
+### Step 1 — resolve the agent and its version (Data API)
+
+`BotDefinition` and `BotVersion` are ordinary Data-API sObjects — no
+`tooling` flag needed:
+
+```sql
+SELECT Id, DeveloperName, Status, BotDefinitionId,
+       BotDefinition.DeveloperName, BotDefinition.MasterLabel
+FROM BotVersion
+WHERE BotDefinition.DeveloperName = '{{AGENT_API_NAME}}'
+```
+
+- `BotVersion.Status` is the activation state: `Active` = the currently
+  published version, `Inactive` = everything else. No version pinned by the
+  user → take the `Active` row.
+- `BotVersion.DeveloperName` is the **version API name** (`v5`); `MasterLabel`
+  is the human label. Never mix them — the planner bundle name below is built
+  from the version API name.
+
+### Step 2 — refresh the snapshot for the agent types
+
+Agent types are **explicit-refresh-only** — the default sweep never picks
+them up:
+
+```jsonc
+refresh_snapshot { "connection": "<name>",
+  "types": ["Bot", "GenAiPlannerBundle", "GenAiPlugin", "GenAiFunction", "GenAiPromptTemplate"] }
+```
+
+Unsupported types degrade **per-type** (the rest of the refresh proceeds);
+report any type that degraded rather than pretending it was indexed.
+
+### Step 3 — read the Bot file
+
+`retrieve_metadata` type `Bot`, api_name = the agent. **A Bot is ONE flat
+file** with every version inline as `<botVersions>` blocks — there is no
+directory and no per-version file. Inside the resolved version's block, the
+planner link is:
+
+```xml
+<botVersions>
+    <fullName>v2</fullName>
+    <conversationDefinitionPlanners>
+        <genAiPlannerName>My_Agent_v2</genAiPlannerName>
+    </conversationDefinitionPlanners>
+    …
+</botVersions>
+```
+
+`<genAiPlannerName>` names the `GenAiPlannerBundle` for that version.
+(Documentation catalogs call this element `conversationPlanner`; the live
+retrieve says `conversationDefinitionPlanners` — trust the retrieve.)
+
+### Step 4 — retrieve the planner bundle
+
+`retrieve_metadata` type `GenAiPlannerBundle` for the resolved
+`<Agent>_v<N>` name. Bundles are **read-only through Contrail**: the call
+returns the **main XML** plus a `bundle_files` listing
+(`path` / `bytes` / `snapshot_path`) for the sibling files:
+
+```text
+genAiPlannerBundles/My_Agent_v2/
+  My_Agent_v2.genAiPlannerBundle        ← main XML (returned directly)
+  agentGraph/My_Agent_v2_graph.json     ← via bundle_files
+  agentScript/My_Agent_v2_definition.agent
+  localActions/<Topic_ID>/<Action_ID>/input/schema.json
+  localActions/<Topic_ID>/<Action_ID>/output/schema.json
+```
+
+- The **main XML carries the topic tree inline**: `<localTopicLinks>` blocks
+  reference topics by `<genAiPluginName>`, and `<localTopics>` blocks carry
+  full inline GenAiPlugin-shaped content — label, scope, instructions, and
+  `<genAiFunctions><functionName>` action references.
+- The sibling files (agent graph JSON, agent script, per-action I/O schemas)
+  are read via each entry's `snapshot_path` where file tools exist (Claude
+  Code). In a chat surface without file tools, report their `path` + `bytes`
+  from `bundle_files` and work from the main XML alone — say so in the
+  Unresolved section rather than guessing at their content.
+- **Path segments carry org-specific IDs** (shape:
+  `<Topic_Label>_16jXX000000abcd` — a topic or action name suffixed with a
+  record-ID fragment from the compiling org). The bundle is a
+  compiled artifact: names embed record IDs from the org that compiled it.
+  That is one more reason this skill never hand-edits what it reads.
+
+### Step 5 — walk down to actions, flows, Apex, prompts
+
+Forward-only, from the bundle outward:
+
+| Reference found | Where | Resolve with |
+|---|---|---|
+| `<genAiPluginName>` | main XML `localTopicLinks` | `retrieve_metadata` type `GenAiPlugin` (reusable topic asset) — or the matching inline `<localTopics>` block, for planner-local topics |
+| `<functionName>` | topic content (`<genAiFunctions>`) | `retrieve_metadata` type `GenAiFunction` (reusable action asset; also a read-only bundle with I/O schemas in `bundle_files`) — or the bundle's `localActions/` schemas for planner-local actions |
+| flow invocation target | action definition | `retrieve_metadata` type `Flow` |
+| apex invocation target | action definition | `retrieve_metadata` type `ApexClass` |
+| prompt-template target (`generatePromptResponse`) | action definition | `retrieve_metadata` type `GenAiPromptTemplate` (single flat file) |
+| standard invocable action | action definition | declared only — record it, nothing further to fetch |
+
+Anything that does not resolve — a name with no snapshot entry, an ID-shaped
+target with an unknown prefix, a sibling file you could not read — goes in
+the **Unresolved** section with a reason. Never silently drop a node.
+
+### Classic vs NGA — one tree shape
+
+Two planner families exist and the document normalizes both into a single
+tree. The discriminator is `GenAiPlannerDefinition.PlannerType` (Arm 2):
+`AiCopilot__*` values are the classic ReAct family; `Atlas__*` values are the
+NGA (multi-agent orchestration) family. The practical difference for the
+walk: classic invocation targets are DeveloperName strings; **NGA targets are
+sometimes raw 15/18-char Salesforce IDs** (`01p…` = ApexClass, `301…`/`300…` =
+Flow, `0hf…` = prompt template). Route ID-shaped targets by prefix; an
+unknown prefix is an Unresolved entry with
+`reason="unknown-id-prefix:<prefix>"`, not a guess.
+
+---
+
+## The rendered document — output contract
+
+One markdown document, one `#` H1 (`<agent> <version> — architecture`),
+numbered `##` sections in this order:
+
+1. **Agent overview** — 2-column kv table: api name, version, label,
+   description, agent type, planner bundle name, generation (classic / NGA).
+   A missing value renders `-`, never an empty cell.
+2. **Anatomy summary** — one paragraph with topic / action / flow / Apex /
+   prompt counts, then health callouts: a `> **Health: PARTIAL.**`
+   blockquote when any arm or fetch degraded, with reasons.
+3. **Action tree** — Mermaid flowchart (template below) with one subgraph per
+   topic; planner-level actions in a synthetic `_plannerActions` subgraph.
+4. **Topic anatomy** — one `###` per topic: label, scope, instruction list
+   in `SortOrder`, action list. Zero topics is valid — render
+   `_No topics defined (planner exposes actions directly)._`
+5. **Action catalog** — flat table: Action | Topic | Target type | Target.
+6. **Flow / Apex / Prompt catalogs** — one `###` bucket each; per artifact,
+   its api name and a short signature (flow: type + start; Apex: class +
+   invocable method; prompt: type + active version token).
+7. **Unresolved** — table of Kind | Name | Reason. Always render the section;
+   `_No unresolved references._` when clean. Partial results are surfaced
+   here, never silenced.
+
+**Deterministic ordering, everywhere:** children sort alphabetically by
+api name, case-insensitive; topics render before planner-level actions.
+The one exception: action order **inside a flow** is the author's execution
+sequence — never re-sort it.
+
+### Mermaid templates
+
+Adapt these two shapes to the real tree (IDs must be unique; keep labels
+short — the catalogs carry the detail):
+
+```mermaid
+flowchart TB
+    subgraph T1[Topic: Case_Management]
+        A1[Create_Case]
+        A2[Summarize_Case]
+    end
+    subgraph _plannerActions[Planner-level actions]
+        P1[Escalate_To_Human]
+    end
+    Planner --> T1
+    Planner --> _plannerActions
+    A1 --> F1[Flow: Create_Case_Flow]
+    A2 --> PT1[Prompt: Case_Summary]
+    P1 --> X1[Apex: EscalationService]
+```
+
+```mermaid
+flowchart LR
+    User --> Planner
+    Planner -->|caseId: Id| A1[Create_Case]
+    Planner --> A2[Summarize_Case]
+```
+
+Label data-flow edges with `var: Type` only where a parameter mapping is
+actually known (Arm 2's attribute rows); otherwise leave the edge bare. If
+the tree is large, prefer a per-topic diagram over one unreadable graph and
+say the diagram is partitioned.
+
+---
+
+## Comparing versions
+
+To diff v3 vs v5 (or the same version across two connections):
+
+1. Resolve both planner bundle names (steps 1–3 twice).
+2. `diff_artifact` on the two `GenAiPlannerBundle` artifacts. Bundles diff as
+   their **concatenated content** — main XML plus sibling files in one
+   stream. JSON siblings (agent graph, schemas) degrade to a **line diff**;
+   that is fine, but say so — a moved JSON key can show as delete+add.
+3. Summarize per layer: topics added/removed, instructions changed, action
+   wiring changed, backing flow/Apex changed (diff those artifacts too when
+   they differ).
+
+`diff_artifact` works on any indexed artifact, so the same move covers a
+single flow or prompt template between versions or orgs.
+
+---
+
+## Arm 2 — the Tooling object graph
+
+The compiled row-store view of the same architecture. Every `GenAi*`
+sObject here is **Tooling-only**: `soql_query` with `tooling: true`, which
+requires `metadata_read` **on top of** `data_read`.
+
+```text
+GenAiPlannerDefinition            (planner root — one row per agent version)
+ ├── GenAiPluginDefinition        (topics — WHERE PlannerId = :plannerId)
+ │    ├── GenAiPluginInstructionDef  (per-topic instructions)
+ │    └── GenAiPluginFunctionDef     (topic → function join)
+ │         └── GenAiFunctionDefinition  (actions: invocation targets)
+ └── GenAiPlannerFunctionDef      (planner-scope → function join)
+```
+
+Adapted queries — replace the `{{…}}` placeholders; run in this order,
+feeding IDs forward:
+
+```sql
+-- 1. Planner root. Version-suffixed DeveloperName (My_Agent_v2-style).
+SELECT Id, DeveloperName, MasterLabel, Description, PlannerType
+FROM GenAiPlannerDefinition
+WHERE DeveloperName LIKE '{{AGENT_API_NAME}}%\_{{VERSION}}'
+```
+
+```sql
+-- 2. Topics for the planner.
+SELECT Id, DeveloperName, MasterLabel, Description, PluginType, Scope,
+       IsLocal, CanEscalate, Source, LocalDeveloperName
+FROM GenAiPluginDefinition
+WHERE PlannerId = '{{PLANNER_ID}}'
+```
+
+```sql
+-- 3. Instructions per topic (order by SortOrder when rendering).
+SELECT Id, GenAiPluginDefinitionId, DeveloperName, MasterLabel, Description, SortOrder
+FROM GenAiPluginInstructionDef
+WHERE GenAiPluginDefinitionId IN ({{PLUGIN_IDS}})
+```
+
+```sql
+-- 4. Topic → function join (plugin scope).
+SELECT Id, PluginId, Function
+FROM GenAiPluginFunctionDef
+WHERE PluginId IN ({{PLUGIN_IDS}})
+```
+
+```sql
+-- 5. Actions with their invocation targets.
+SELECT Id, DeveloperName, MasterLabel, Description, InvocationTargetType,
+       InvocationTarget, IsLocal, IsConfirmationRequired, Source,
+       PluginId, PlannerId, LocalDeveloperName
+FROM GenAiFunctionDefinition
+WHERE PluginId IN ({{PLUGIN_IDS}})
+```
+
+```sql
+-- 6. Planner-scope → function join (NOT the same object as query 4).
+SELECT Id, PlannerId, Plugin
+FROM GenAiPlannerFunctionDef
+WHERE PlannerId = '{{PLANNER_ID}}'
+```
+
+### Field gotchas that bite
+
+- **`GenAiPluginFunctionDef` vs `GenAiPlannerFunctionDef` are different
+  tables.** Topic-scope join keyed on `PluginId` vs planner-scope join keyed
+  on `PlannerId` — near-identical shapes, easy to swap, wrong tree when you
+  do. Queries 4 and 6 above are the pair; keep them straight.
+- **Mixed case is mandatory** for the `GenAi*` sObject names
+  (`GenAiPluginDefinition`, not `genaiplugindefinition`). SOQL keywords are
+  case-insensitive; Tooling sObject and field names are not, in practice —
+  match the describe spelling exactly.
+- **`complexvalue` columns force single-row queries.** `Metadata`,
+  `FullName`, and `AgentGraph` (on `GenAiPlannerDefinition`) trigger
+  `MALFORMED_QUERY … no more than one row` when a query selecting them can
+  return ≥2 rows. The queries above deliberately omit all three — Arm 1's
+  retrieve is the right way to read full bodies.
+- **`InvocationTargetType`** routes the walk: `flow`, `apex`,
+  `standardInvocableAction`, `generatePromptResponse`. `InvocationTarget` is
+  a DeveloperName on classic planners and sometimes a raw ID on NGA (see the
+  classic-vs-NGA note in Arm 1).
+- **`BotVersion.DeveloperName` is the version API name** (`v5`), not the
+  label — same rule as Arm 1 step 1.
+
+### describe_schema honesty
+
+`describe_schema` describes **Data-API sObjects only** — it cannot see the
+Tooling-only `GenAi*` objects at all. Do not "verify" Arm 2 field names with
+it and do not report its silence as the objects being absent. The field lists
+baked into the queries above are the substitute; when one errors with
+`INVALID_FIELD`, drop the named field, note it in Unresolved, and continue.
+
+---
+
+## Invariants — both arms
+
+- **Forward-only traversal.** Every reference is followed from planner →
+  children. No backward lookups, no "what uses this flow" sweeps.
+- **Partial results are surfaced, never silenced.** Every degraded type,
+  missing grant, unreadable sibling file, or unknown target lands in the
+  Unresolved section with a reason.
+- **Deterministic output.** Same connection + agent + version → the same
+  document, modulo timestamps. Ordering rules are in the output contract.
+- **Read-only.** This skill calls no write tool. If the review produces
+  change recommendations, they are handed to agentforce-metadata-generate
+  (and the house-rules §3 ritual) — never applied from here.
+
+## Honest close
+
+Say what the snapshot is not:
+
+- **Design-time only.** This is what the agent is *declared* to do. Runtime
+  behavior — session traces, conversation transcripts, which topic actually
+  fired — lives in Data Cloud, which Contrail does not reach. Do not
+  extrapolate runtime claims from declared metadata.
+- **Activation state comes from `BotVersion.Status`,** not from the presence
+  of metadata. A retrieved bundle proves the version exists, not that it is
+  live.
+- **Publish / activate / preview of an agent is org-UI work** in Agent
+  Builder — hand those steps to the human.
+
+---
+*Adapted for Contrail from [forcedotcom/sf-skills](https://github.com/forcedotcom/sf-skills) @ 49064f7 (Apache-2.0, © Salesforce, Inc.). Modified: retargeted from sf CLI / DX MCP scripts to the Contrail engine tools; script pipeline replaced with a two-arm tool workflow; planner model updated for the v64+ GenAiPlannerBundle cutover (live-verified on an Agentforce DE org, 2026-09).*

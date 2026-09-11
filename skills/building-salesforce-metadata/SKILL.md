@@ -43,6 +43,11 @@ as a field without FLS. Ship the folder component (with its `folderShares`)
 alongside a report headed for a new folder, the same way you ship a permission
 set alongside a new field.
 
+**Agentforce agents return to the rule proper**: agent access IS a real
+permission-set block (`agentAccesses` with `agentName` + `enabled` — see
+`platform-permission-set-generate`), so a permission set travels with
+agent-facing components the normal way.
+
 ## Editing existing metadata: read the whole thing first
 
 When you modify an existing flow or object rather than authoring a new one, work
@@ -140,6 +145,22 @@ Instead, write the edited source to a file and give `validate_deploy` the path:
   together, or the dashboard renders empty. Modifies are whole-document
   replaces. These types are explicit-refresh-only: `refresh_snapshot
   types:["Report"]` pulls them into the snapshot (the folder type rides along).
+- **Agent (GenAi*) metadata plays by its own rules.** The types need
+  `salesforce.apiVersion` v66+ and Agentforce licensing (unsupported types
+  drop out of a refresh with a warning, per type). A `Bot` document carries
+  its versions INLINE — deploying one is a whole-document replace, and an
+  omitted `<botVersions>` block is a **version delete**; `BotVersion` deploys
+  standalone as a dotted child (`MyBot.v1`). Topic/planner changes against an
+  **active** agent version fail: the human deactivates in Agent Builder
+  first, then reactivates after (check state with `soql_query` on
+  `BotVersion.Status`; Contrail cannot activate/deactivate — nor publish,
+  preview, or run evals: see `agentforce-metadata-generate` for the full
+  lifecycle boundary). `GenAiPromptTemplate.activeVersionIdentifier` is an
+  org-generated token — retrieve-first, never hand-typed. Version-suffixed
+  planner bundles (`Agent_v3`) are published snapshots: modified deploys
+  fail, unmodified ones "succeed" as misleading no-ops. Bundle types
+  (GenAiFunction, GenAiPlannerBundle, AiAuthoringBundle) read and diff but
+  do not deploy yet.
 - **Namespaces** can contain single underscores (`sales_channel__Foo`), so split a
   qualified API name at the **first** `__`, never with a greedy pattern.
 - **Names**: components deploy under `type/Name.ext`; the tools reject names with

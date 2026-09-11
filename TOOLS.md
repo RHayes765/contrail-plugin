@@ -33,7 +33,7 @@ with a few desktop-app differences [noted at the end](#the-desktop-app).
 | [`get_setup_audit`](#get_setup_audit) | metadata_read | SetupAuditTrail — config changes that never surface as metadata |
 | [`diff_orgs`](#diff_orgs) | metadata_read (both) | Whole-org snapshot diff, bucketed by type |
 | [`diff_artifact`](#diff_artifact) | metadata_read (both) | Semantic diff of one artifact across two orgs |
-| [`soql_query`](#soql_query) | data_read | Read-only SOQL, row-capped, truncation-honest |
+| [`soql_query`](#soql_query) | data_read | Read-only SOQL, row-capped, truncation-honest (`tooling: true` needs metadata_read too) |
 | [`get_record`](#get_record) | data_read | One record by id |
 | [`explain_access`](#explain_access) | data_read | Why a user can/can't see an object or field (CRUD + FLS) |
 | [`get_report_data`](#get_report_data) | data_read | Run a saved report and read its results (sync Analytics API) |
@@ -313,11 +313,15 @@ diagnostics content are additionally grant-gated: `ApexClass`, `ApexTrigger`,
 `ApexPage`, `ApexComponent`, `EmailTemplate`, `StaticResource`,
 `FlowDefinitionView`, `SetupAuditTrail` need `metadata_read`; `ApexLog`,
 `FlowInterview` need `diagnostics_read` — the raw-SOQL path and the dedicated
-tools always agree.
+tools always agree. `tooling: true` queries the **Tooling API** instead —
+needed for setup/agent-graph sObjects like `GenAiPluginDefinition` — and
+requires `metadata_read` on top of `data_read` (Tooling rows are
+metadata-class content, wholesale).
 
 - `connection` — alias (or id).
 - `query` — the SELECT statement.
 - `limit` *(optional)* — 1–2000, default 500.
+- `tooling` *(optional)* — query the Tooling API (needs `metadata_read` too).
 
 ### `get_record`
 
@@ -474,8 +478,20 @@ validation issues **no** code.
   `Folder/Name` api_names; access is FOLDER sharing, and the approval page
   says so), `ReportFolder` / `DashboardFolder` (the folder definition itself,
   carrying the `folderShares` — deploy it with a report headed for a new
-  folder), and child types `CustomField` / `ValidationRule` /
-  `CustomLabel` / `ListView` / `RecordType` (dotted API names).
+  folder), Agentforce types `Bot` (one document, versions inline — an
+  omitted version block is a VERSION DELETE and the page says so),
+  `GenAiPlugin` (topics — modifying one on an ACTIVE agent needs the human
+  to deactivate it first; the page warns), `GenAiPromptTemplate`
+  (`activeVersionIdentifier` is org-generated — retrieve-first, and the page
+  warns on hand-typed/altered tokens), `GenAiPromptTemplateActv`,
+  `AiEvaluationDefinition`, `BotTemplate`, `BotBlock`, and child types
+  `CustomField` / `ValidationRule` / `CustomLabel` / `ListView` /
+  `RecordType` / `BotVersion` (dotted API names — `MyBot.v1`).
+  **Read/diff-only for now**: `GenAiFunction`, `GenAiPlannerBundle`,
+  `AiAuthoringBundle` (bundle types — one component is a directory of
+  files); and agent **publish / activate / deactivate / preview / eval
+  runs** are org-side human steps Contrail cannot perform (the
+  `agentforce-metadata-generate` skill carries the full boundary).
 - `destructive` *(≤50)* — `{type, api_name}` to DELETE; led prominently on
   the page. Deletions are accepted for **any** metadata type, including
   types Contrail cannot author — cleanup is a feature; the guard is the
@@ -605,7 +621,7 @@ cause) — row data never enters the conversation in either direction.
 
 ## The skill pack
 
-Thirteen skills ship with Contrail (in `skills/`), encoding the judgment layer —
+Seventeen skills ship with Contrail (in `skills/`), encoding the judgment layer —
 the difference between an agent that has tools and one that uses them the
 way a careful practitioner would. In Claude Code they load automatically
 with the plugin; in Claude Desktop they are added once via the Skills UI; in
@@ -626,6 +642,10 @@ the desktop app they are bundled and selectable per project.
 | `platform-report-generate` | Report metadata: format taxonomy (tabular/summary/matrix/joined), columns, filters, charts, buckets, cross-filters, folder pairing. |
 | `platform-custom-report-type-generate` | Custom report types: base objects, up to 3 join levels, field sections. |
 | `platform-dashboard-generate` | Dashboards: components and their report references, the running-user doctrine, filters, grid layouts, folder sharing. |
+| `agentforce-metadata-generate` | The Agentforce hub: two-domain model, the LIFECYCLE BOUNDARY (what only a human can do), topic/bot authoring, the deactivate gate, license traps. |
+| `agentforce-architecture-analyze` | Read-side agent analysis: architecture doc + Mermaid graph from design-time metadata; the Tooling object graph. |
+| `platform-prompt-template-generate` | Prompt Builder templates: grammar, merge-field language, the org-generated activeVersionIdentifier doctrine. |
+| `agentforce-eval-generate` | Testing Center definitions (AiEvaluationDefinition): expectation semantics, grounding against the real agent, test design. |
 
 ---
 
@@ -638,7 +658,7 @@ sections' defaults automatically.
 | Section | Key | Default | Meaning |
 |---|---|---|---|
 | `salesforce` | `clientId` | `PlatformCLI` | OAuth client (public, PKCE). Swap in your own connected app. |
-| | `apiVersion` | `v63.0` | REST/Tooling/Metadata API version. |
+| | `apiVersion` | `v66.0` | REST/Tooling/Metadata API version. v66 is the floor for the Agentforce types; a config.json pinning an older version keeps it until edited. |
 | | `scopes` | `refresh_token, api, web` | OAuth scopes requested. |
 | `oauth` | `callbackPort` / `callbackPath` | `1717` / `/OauthRedirect` | Must match the connected app's registered callback. |
 | | `flowTimeoutMs` | 10 min | Browser-flow hard limit. |

@@ -14,6 +14,25 @@ single MCP Bundle that installs into Claude Desktop via Settings → Extensions
 (no Node install, no npm, no config editing on the target machine) and covers
 Windows x64/ARM and macOS Intel/Apple Silicon from one file. 35 tools.
 
+**Agentforce metadata (S30).** The agent stack is readable, diffable, and
+(largely) deployable: `Bot`/`BotVersion`, topics (`GenAiPlugin`), prompt
+templates, Testing Center definitions (`AiEvaluationDefinition`),
+`BotTemplate`/`BotBlock` deploy through the ritual; the bundle types
+(`GenAiFunction`, `GenAiPlannerBundle`, `AiAuthoringBundle` — one component
+= a directory of files) index and diff read-only for now. Contrail is the
+first tool in this ecosystem to author the runtime GenAI XML directly — with
+the honesty to match: the approval page warns about the deactivate-first
+gate, org-generated prompt-template version tokens, and Bot version deletes,
+and the **lifecycle boundary** is stated everywhere it matters (publish,
+activate/deactivate, preview, and eval runs are human steps in Agentforce
+Studio / Agent Builder — Contrail verifies from outside via
+`BotVersion.Status`). Requires API v66+ (now the default) and Agentforce
+licensing; unlicensed orgs degrade per-type with a warning, never a broken
+refresh. `soql_query` gained `tooling: true` (metadata_read-gated) for the
+Tooling-only agent-graph sObjects. Four new skills:
+`agentforce-metadata-generate`, `agentforce-architecture-analyze`,
+`platform-prompt-template-generate`, `agentforce-eval-generate`.
+
 **Reports & Dashboards (S29).** `Report` and `Dashboard` are deployable,
 retrievable, diffable, and indexable — Contrail's first folder-based types
 (api_names are `FolderDevName/Name`; the folder itself deploys as a

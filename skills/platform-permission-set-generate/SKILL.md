@@ -208,7 +208,7 @@ namespace prefix (`ns__ClassName`).
   set it cannot be broadened without recreating the set.
 - Exactly one `recordTypeVisibilities` per object may be `default` true.
 
-## Agentforce agent access (XML knowledge only)
+## Agentforce agent access
 
 ```xml
 <agentAccesses>
@@ -218,9 +218,10 @@ namespace prefix (`ns__ClassName`).
 ```
 
 `agentName` is the employee agent's developer name; `enabled` true grants access.
-No Contrail tool enumerates agent developer names — take the exact name from the
-human and let validation be the arbiter; if the deploy target has no Agentforce,
-omit this block entirely.
+Enumerate agent developer names with `list_metadata` type `Bot` (live) or
+`soql_query` on `BotDefinition` — never guess one. If the deploy target has no
+Agentforce, omit this block entirely. Agent metadata itself is
+`agentforce-metadata-generate`'s territory.
 
 ## What Contrail's coverage checker counts as a grant
 

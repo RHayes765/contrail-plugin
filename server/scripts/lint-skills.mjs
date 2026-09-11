@@ -29,6 +29,10 @@ const banned = [
   { re: /--target-org/i, why: 'sf CLI org addressing — Contrail names connections' },
   { re: /\bexecute_metadata_action\b/i, why: 'DX MCP generation pipeline — no Contrail equivalent' },
   { re: /\bapex\s+run\s+test\b/i, why: 'sf CLI test invocation — Contrail runs tests via validate_deploy or run_apex_tests' },
+  // S30: the agent lifecycle CLI. `sf agent publish/activate/deactivate/
+  // preview` have NO Contrail path — the skills hand those steps to the
+  // human, never to a CLI Contrail does not have.
+  { re: /\bsf\s+agent\b/i, why: 'sf agent lifecycle CLI — no Contrail path; hand off to the human' },
 ];
 
 let failures = 0;
