@@ -26260,7 +26260,7 @@ var DEFAULT_CONFIG = {
   },
   snapshot: {
     // Integration/eventing types (ConnectedApp, NamedCredential,
-    // ExternalCredential, PlatformEventChannel[Member],
+    // ExternalCredential, AuthProvider, PlatformEventChannel[Member],
     // ManagedEventSubscription) are deployable and indexable but kept OUT of
     // the default manifest — retrieve them explicitly via refresh_snapshot
     // types, or add them here. S29: analytics types (Report, Dashboard and
@@ -29542,6 +29542,7 @@ var SIMPLE_DIR_TYPES = [
   { dir: "connectedApps", ext: ".connectedApp", type: "ConnectedApp" },
   { dir: "namedCredentials", ext: ".namedCredential", type: "NamedCredential" },
   { dir: "externalCredentials", ext: ".externalCredential", type: "ExternalCredential" },
+  { dir: "authproviders", ext: ".authprovider", type: "AuthProvider" },
   { dir: "platformEventChannels", ext: ".platformEventChannel", type: "PlatformEventChannel" },
   {
     dir: "platformEventChannelMembers",
@@ -29821,6 +29822,9 @@ function extractApexRefs(body, known, selfName) {
   for (const m of source.matchAll(/Label\.(\w+)/g)) {
     refs.add("CustomLabel", m[1]);
   }
+  for (const m of body.matchAll(/callout:([A-Za-z0-9_]+)/gi)) {
+    refs.add("NamedCredential", m[1]);
+  }
   return refs.list();
 }
 function extractObjectXmlRefs(xml, objectName, known) {
@@ -29904,6 +29908,23 @@ function extractBotRefs(xml) {
   }
   return refs.list();
 }
+function extractNamedCredentialRefs(xml) {
+  const refs = new RefSet();
+  for (const m of xml.matchAll(/<externalCredential>([^<]+)<\/externalCredential>/g)) {
+    refs.add("ExternalCredential", m[1]);
+  }
+  for (const m of xml.matchAll(/<authProvider>([^<]+)<\/authProvider>/g)) {
+    refs.add("AuthProvider", m[1]);
+  }
+  return refs.list();
+}
+function extractExternalCredentialRefs(xml) {
+  const refs = new RefSet();
+  for (const m of xml.matchAll(/<authProvider>([^<]+)<\/authProvider>/g)) {
+    refs.add("AuthProvider", m[1]);
+  }
+  return refs.list();
+}
 function buildKnownArtifacts(artifacts) {
   const known = {
     classes: /* @__PURE__ */ new Map(),
@@ -29962,6 +29983,10 @@ function extractAllEdges(connectionId, artifacts, known = buildKnownArtifacts(ar
       add(a.type, a.apiName, extractGenAiPlannerRefs(a.content));
     } else if (a.type === "Bot") {
       add(a.type, a.apiName, extractBotRefs(a.content));
+    } else if (a.type === "NamedCredential") {
+      add(a.type, a.apiName, extractNamedCredentialRefs(a.content));
+    } else if (a.type === "ExternalCredential") {
+      add(a.type, a.apiName, extractExternalCredentialRefs(a.content));
     }
   }
   return edges;
@@ -30325,6 +30350,7 @@ var TYPE_DIRS = {
   ConnectedApp: "connectedApps",
   NamedCredential: "namedCredentials",
   ExternalCredential: "externalCredentials",
+  AuthProvider: "authproviders",
   PlatformEventChannel: "platformEventChannels",
   PlatformEventChannelMember: "platformEventChannelMembers",
   ManagedEventSubscription: "managedEventSubscriptions",
@@ -30832,6 +30858,9 @@ var FILE_TYPES = {
   ConnectedApp: { dir: "connectedApps", ext: ".connectedApp" },
   NamedCredential: { dir: "namedCredentials", ext: ".namedCredential" },
   ExternalCredential: { dir: "externalCredentials", ext: ".externalCredential" },
+  // S33: lowercase dir AND extension — unusual but live-confirmed (personal-dev
+  // retrieve 2026-09-24), matching the metadata catalog.
+  AuthProvider: { dir: "authproviders", ext: ".authprovider" },
   PlatformEventChannel: { dir: "platformEventChannels", ext: ".platformEventChannel" },
   PlatformEventChannelMember: {
     dir: "platformEventChannelMembers",
@@ -31248,9 +31277,9 @@ function analyzeChanges(db, store, conn, components, deletions) {
           );
         }
       }
-      if ((c.type === "FlexiPage" || c.type === "CustomApplication" || c.type === "Layout" || c.type === "Report" || c.type === "Dashboard" || c.type === "GenAiPlugin" || c.type === "GenAiPromptTemplate" || c.type === "Bot" || c.type === "LeadConvertSettings") && change === "modify") {
+      if ((c.type === "FlexiPage" || c.type === "CustomApplication" || c.type === "Layout" || c.type === "Report" || c.type === "Dashboard" || c.type === "GenAiPlugin" || c.type === "GenAiPromptTemplate" || c.type === "Bot" || c.type === "LeadConvertSettings" || c.type === "NamedCredential" || c.type === "ExternalCredential" || c.type === "AuthProvider") && change === "modify") {
         warnings.push(
-          `WHOLE-DOCUMENT REPLACE \u2014 this deploy fully replaces the org's ${c.type}; anything not present in the proposed content is removed.` + (c.type === "Bot" ? " A <botVersions> block omitted from a Bot document is a VERSION DELETE." : c.type === "LeadConvertSettings" ? " An <objectMapping> omitted here is a lead field mapping DELETED org-wide." : "")
+          `WHOLE-DOCUMENT REPLACE \u2014 this deploy fully replaces the org's ${c.type}; anything not present in the proposed content is removed.` + (c.type === "Bot" ? " A <botVersions> block omitted from a Bot document is a VERSION DELETE." : c.type === "LeadConvertSettings" ? " An <objectMapping> omitted here is a lead field mapping DELETED org-wide." : c.type === "ExternalCredential" ? " A principal parameter omitted here is DELETED org-side \u2014 along with the credential values a human entered for it in Setup." : "")
         );
       }
       if (c.type === "GenAiPromptTemplate" && change === "modify") {
@@ -31293,6 +31322,21 @@ function analyzeChanges(db, store, conn, components, deletions) {
         `AGENT MUST BE DEACTIVATED FIRST \u2014 deploying ${c.type} changes for an ACTIVE agent version fails. Deactivate the agent in Agent Builder, deploy, then reactivate (Contrail cannot do those steps; verify with BotVersion.Status).`
       );
     }
+    if (c.type === "ExternalCredential" && change === "add") {
+      warnings.push(
+        `NEW EXTERNAL CREDENTIAL carries no secrets and grants nobody access \u2014 a human enters each principal's credential values in Setup (External Credentials) after the deploy, and callouts fail until a permission set grants externalCredentialPrincipalAccesses for its principals.`
+      );
+    }
+    {
+      const secretTags = c.type === "NamedCredential" ? ["password", "awsAccessSecret", "oauthToken", "oauthRefreshToken"] : c.type === "AuthProvider" ? ["consumerSecret"] : [];
+      for (const tag of secretTags) {
+        if (new RegExp(`<${tag}>[^<]`).test(c.content)) {
+          warnings.push(
+            `LITERAL SECRET IN DEPLOY CONTENT (<${tag}>) \u2014 this value becomes part of the local snapshot, the audit trail, and this approval page, and a retrieve returns only a placeholder (it will not round-trip). Prefer External Credentials, where secrets are entered in Setup and never touch metadata.`
+          );
+        }
+      }
+    }
     changes.push({ type: c.type, api_name: c.api_name, change, warnings, ...sourceOf(c) });
   }
   const destructive = deletions.map((d) => {
@@ -31307,6 +31351,16 @@ function analyzeChanges(db, store, conn, components, deletions) {
 }
 function sourceOf(c) {
   return c.source_path ? { source_path: c.source_path, source_sha256: c.source_sha256 } : {};
+}
+function externalCredentialPrincipals(xml) {
+  const names = [];
+  for (const block of xml.match(/<externalCredentialParameters>[\s\S]*?<\/externalCredentialParameters>/g) ?? []) {
+    const type = block.match(/<parameterType>\s*([^<]+?)\s*<\/parameterType>/)?.[1] ?? "";
+    if (!/^(NamedPrincipal|PerUserPrincipal)$/i.test(type)) continue;
+    const name = block.match(/<parameterName>\s*([^<]+?)\s*<\/parameterName>/)?.[1];
+    if (name) names.push(name);
+  }
+  return names;
 }
 function isCustomEntity(name) {
   return /__(c|b|e|x)$/i.test(name);
@@ -31350,6 +31404,10 @@ function isGranted(containerText, need) {
       return permissionBlocks(containerText, "agentAccesses").some(
         (b) => named(b, "agentName", need.api_name) && flagOn(b, "enabled")
       );
+    case "credentialPrincipal":
+      return permissionBlocks(containerText, "externalCredentialPrincipalAccesses").some(
+        (b) => named(b, "externalCredentialPrincipal", need.api_name) && flagOn(b, "enabled")
+      );
     case "tab": {
       const blocks = [
         ...permissionBlocks(containerText, "tabVisibilities"),
@@ -31383,6 +31441,15 @@ function analyzePermissionCoverage(components) {
       needs.push({ type: "CustomApplication", api_name: c.api_name, permission: "app visibility", kind: "application" });
     } else if (c.type === "Bot") {
       needs.push({ type: "Bot", api_name: c.api_name, permission: "agent access (agentAccesses)", kind: "agent" });
+    } else if (c.type === "ExternalCredential") {
+      for (const principal of externalCredentialPrincipals(c.content)) {
+        needs.push({
+          type: "ExternalCredential",
+          api_name: `${c.api_name}-${principal}`,
+          permission: "external credential principal access (externalCredentialPrincipalAccesses)",
+          kind: "credentialPrincipal"
+        });
+      }
     } else if (c.type === "CustomObject") {
       if (isCustomEntity(c.api_name)) {
         needs.push({ type: "CustomObject", api_name: c.api_name, permission: "object permissions", kind: "object" });
@@ -33129,7 +33196,7 @@ function getUpdateNotice(installedVersion, repo, enabled) {
 }
 
 // src/core/version.ts
-var ENGINE_VERSION = "0.24.0";
+var ENGINE_VERSION = "0.25.0";
 
 // src/tools/register.ts
 var UPDATE_REPO = "RHayes765/contrail-plugin";
@@ -35408,7 +35475,7 @@ function registerDeployTools(server, deps) {
         components: external_exports.array(
           external_exports.object({
             type: external_exports.string().describe(
-              `ApexClass, ApexTrigger, ApexPage, Flow, CustomObject, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, GlobalValueSet, ConnectedApp, NamedCredential, ExternalCredential, PlatformEventChannel(Member), ManagedEventSubscription, Layout, CustomMetadata (records, dotted Type.Record names), LeadConvertSettings (SINGLETON \u2014 api_name is literally "LeadConvertSettings"; a modify replaces ALL lead field mappings, retrieve-first), Report / Dashboard (folder-qualified "FolderDevName/Name" api_names; deploy the ReportFolder/DashboardFolder component first or in the same package for a new folder), ReportFolder / DashboardFolder (content = the whole <ReportFolder> doc with folderShares \u2014 folder sharing is what makes reports visible), Agentforce types Bot, GenAiPlugin (agent topics \u2014 modifying one on an ACTIVE agent needs the human to deactivate it first), GenAiPromptTemplate (activeVersionIdentifier is org-generated: retrieve-first, never hand-type it), GenAiPromptTemplateActv, AiEvaluationDefinition (Testing Center test definitions), BotTemplate, BotBlock, or child types CustomField / ValidationRule / CustomLabel / ListView / RecordType / BotVersion (dotted MyBot.v1). Bundle types GenAiFunction / GenAiPlannerBundle (one component = a directory of files) take a Contrail bundle ENVELOPE as content: JSON {"contrail_bundle":1, "files": {"<relative path>": "<body>", ...}} \u2014 the file set retrieve_metadata's bundle_files listing shows, main file included (e.g. "My_Fn.genAiFunction-meta.xml"). NOT deployable (read/diff only): AiAuthoringBundle \u2014 a Metadata API deploy of Agent Script silently skips reasoning actions; and agent publish/activate/deactivate are org-side human steps Contrail cannot perform.`
+              `ApexClass, ApexTrigger, ApexPage, Flow, CustomObject, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, GlobalValueSet, ConnectedApp, NamedCredential / ExternalCredential / AuthProvider (credential metadata NEVER carries working secrets: per-principal values are entered in Setup after deploy, retrieves return placeholders, and principals need externalCredentialPrincipalAccesses on a permission set), PlatformEventChannel(Member), ManagedEventSubscription, Layout, CustomMetadata (records, dotted Type.Record names), LeadConvertSettings (SINGLETON \u2014 api_name is literally "LeadConvertSettings"; a modify replaces ALL lead field mappings, retrieve-first), Report / Dashboard (folder-qualified "FolderDevName/Name" api_names; deploy the ReportFolder/DashboardFolder component first or in the same package for a new folder), ReportFolder / DashboardFolder (content = the whole <ReportFolder> doc with folderShares \u2014 folder sharing is what makes reports visible), Agentforce types Bot, GenAiPlugin (agent topics \u2014 modifying one on an ACTIVE agent needs the human to deactivate it first), GenAiPromptTemplate (activeVersionIdentifier is org-generated: retrieve-first, never hand-type it), GenAiPromptTemplateActv, AiEvaluationDefinition (Testing Center test definitions), BotTemplate, BotBlock, or child types CustomField / ValidationRule / CustomLabel / ListView / RecordType / BotVersion (dotted MyBot.v1). Bundle types GenAiFunction / GenAiPlannerBundle (one component = a directory of files) take a Contrail bundle ENVELOPE as content: JSON {"contrail_bundle":1, "files": {"<relative path>": "<body>", ...}} \u2014 the file set retrieve_metadata's bundle_files listing shows, main file included (e.g. "My_Fn.genAiFunction-meta.xml"). NOT deployable (read/diff only): AiAuthoringBundle \u2014 a Metadata API deploy of Agent Script silently skips reasoning actions; and agent publish/activate/deactivate are org-side human steps Contrail cannot perform.`
             ),
             api_name: external_exports.string().describe("Full API name; children dotted (Account.MyField__c)."),
             content: external_exports.string().optional().describe(
