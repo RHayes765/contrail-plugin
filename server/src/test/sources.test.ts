@@ -82,6 +82,30 @@ describe('what it refuses', () => {
     expect(() => resolveSourceFile(file)).toThrow(/staging/);
   });
 
+  it('the refusal hands the AGENT the fix and never pitches a config change', () => {
+    // Agents relay remediation text nearly verbatim. The observed failure mode:
+    // "add it to deploy.allowedSourceRoots" was offered as a peer remedy, and
+    // agents recommended the human make that permanent config edit instead of
+    // copying one file. The contract now: self-service copy-into-staging leads
+    // (with the concrete staging path in the command), and the config list is
+    // mentioned only as something never to request.
+    const file = path.join(outside, 'Big_Flow.flow');
+    fs.writeFileSync(file, '<Flow/>', 'utf8');
+    let message = '';
+    try {
+      resolveSourceFile(file);
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).toMatch(/copy the file into staging/i);
+    expect(message).toContain(path.join(tmp, 'staging'));
+    // allowedSourceRoots may appear ONLY inside the never-ask sentence — the
+    // old message offered it as a remedy BEFORE any such warning existed.
+    const neverIdx = message.indexOf('Never ask the human');
+    expect(neverIdx).toBeGreaterThan(-1);
+    expect(message.indexOf('allowedSourceRoots')).toBeGreaterThan(neverIdx);
+  });
+
   it('refuses a symlink that escapes an allowed root (the classic bypass)', () => {
     const secret = path.join(outside, 'secret.env');
     fs.writeFileSync(secret, 'ANTHROPIC_API_KEY=sk-ant-real', 'utf8');

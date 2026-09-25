@@ -18,6 +18,9 @@ let opened: string[];
 
 beforeEach(async () => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'contrail-mcp-'));
+  // Tool registration and list_connections resolve stagingDir() from the env;
+  // point it at the sandbox so the suite never touches the real data dir.
+  process.env.CONTRAIL_DATA_DIR = tmp;
   db = new ContrailDb(path.join(tmp, 'test.db'));
   opened = [];
   const deps = createDeps({
@@ -50,6 +53,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await client.close();
   db.close();
+  delete process.env.CONTRAIL_DATA_DIR;
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -150,10 +154,17 @@ describe('MCP surface', () => {
     });
     const result = await client.callTool({ name: 'list_connections', arguments: {} });
     const text = textOf(result);
-    const parsed = JSON.parse(text) as { count: number; connections: Array<Record<string, unknown>> };
+    const parsed = JSON.parse(text) as {
+      count: number;
+      connections: Array<Record<string, unknown>>;
+      staging_dir?: string;
+    };
     expect(parsed.count).toBe(1);
     expect(parsed.connections[0]!.alias).toBe('acme-uat');
     expect(text).not.toMatch(/refresh|access_token|RT-|AT-/);
+    // The session-start tool names the staging dir proactively, so agents learn
+    // where deploy bytes live before their first containment refusal.
+    expect(parsed.staging_dir).toMatch(/staging$/);
   });
 
   it('get_permissions reports granted AND not-granted, with the write-invariant note', async () => {

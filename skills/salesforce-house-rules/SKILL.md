@@ -66,6 +66,18 @@ rather than inventing what the skill would have said.
 - Deploy discipline: `validate_deploy` (checkOnly) first, always. Present its result
   to the human before anything else: the **target connection** first and unmissable,
   the component change list, test results, and blast radius.
+- **Where deploy bytes live.** Author large components into Contrail's staging
+  directory **from the start** — `staging/<project>/` under the data dir:
+  `%USERPROFILE%\.contrail\staging\<project>\` on Windows, and on other
+  platforms take the exact path from the `staging_dir` field that
+  `list_connections` returns in Claude Code — and pass that absolute path as `content_file`
+  (`csv_file` for bulk CSVs). The session's working folder is **not** a deploy
+  source root; keep a copy there for the client record if useful, but the
+  deployable file goes in staging. Wrote it somewhere else? Copy it into staging
+  and re-validate yourself. **Never ask the human to widen
+  `deploy.allowedSourceRoots`** for a one-off — that config list is for standing
+  folders the human volunteers unprompted. (In Claude Desktop chat, with no file
+  tools, pass small components inline as `content` instead.)
 - **The free local pre-check comes before the org round trip.** Run `check_apex` on
   authored Apex and `check_soql` on novel or generated SOQL — both are offline,
   cost nothing, and need no approval. Their honest scope: syntax findings are

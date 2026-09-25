@@ -67,7 +67,8 @@ reproduced byte-exactly through generated output, and one transposed character i
 flow XML is either a failed deploy or — far worse — a silently wrong behaviour that
 validates clean.
 
-Instead, write the edited source to a file and give `validate_deploy` the path:
+Instead, write the edited source to a file **under Contrail's `staging/`
+directory** and give `validate_deploy` the path:
 
 ```jsonc
 {
@@ -82,12 +83,21 @@ Instead, write the edited source to a file and give `validate_deploy` the path:
   anything large or anything you edited from a retrieved copy. Exactly one of the
   two per component — passing both is an error, because Contrail will not guess
   which one you meant to deploy.
-- The path must be **absolute**, and must sit inside Contrail's `staging/`
-  directory (under the data dir — the error message prints the exact path),
-  inside its `snapshots/` tree, or inside a directory the human listed in
+- Author the file into `staging/` **from the start** — concretely
+  `%USERPROFILE%\.contrail\staging\` on Windows; the data dir differs per
+  platform, so elsewhere take the exact path from the `staging_dir` field that
+  `list_connections` returns in Claude Code. Use a per-project
+  subfolder (`staging/<project>/`) so parallel sessions never collide, and keep a
+  copy in the project folder if the client wants a record — the session's working
+  folder itself is **not** a deploy source root.
+- The path must be **absolute**, and must sit inside `staging/`, inside
+  Contrail's `snapshots/` tree, or inside a directory the human listed in
   `deploy.allowedSourceRoots` in `config.json`. Anywhere else is refused: those
-  bytes get deployed to a live org, so the allowlist is deliberate. You cannot
-  widen it — only the human can, by editing their config.
+  bytes get deployed to a live org, so the allowlist is deliberate. Wrote the
+  file somewhere else? **Copy it into staging and re-validate yourself** — never
+  ask the human to add a folder to `deploy.allowedSourceRoots` for a one-off.
+  That list is for standing folders the human volunteers unprompted, and only
+  they can edit it.
 - The file is read **at validation time** and frozen into the approved package.
   Editing it afterwards cannot change what `execute_deploy` sends, so the human
   approves exactly the bytes that were reviewed.

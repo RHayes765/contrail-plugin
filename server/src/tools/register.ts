@@ -14,6 +14,7 @@ import type { LocalDiagRunner } from '../localdiag/types.js';
 import { ContrailError } from '../core/errors.js';
 import { grantedList, notGrantedList } from '../core/grants.js';
 import { getUpdateNotice } from '../core/updateCheck.js';
+import { stagingDir } from '../core/paths.js';
 import { ENGINE_VERSION } from '../core/version.js';
 import { log } from '../core/log.js';
 
@@ -207,7 +208,8 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
       title: 'List connected orgs',
       description:
         'List every connected org with its alias, org identity, type, and grants. Zero-cost ' +
-        'local read — call this instead of guessing which orgs exist.',
+        'local read — call this instead of guessing which orgs exist. Also returns ' +
+        'staging_dir: the directory to author content_file/csv_file sources into.',
       inputSchema: {},
     },
     async () =>
@@ -223,6 +225,10 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
         return ok({
           connections: list,
           count: list.length,
+          // The session-start surface names the staging dir PROACTIVELY, so an
+          // agent authoring a large component learns where deploy bytes live
+          // before its first validate_deploy refusal, not from it.
+          staging_dir: stagingDir(),
           ...(update
             ? {
                 update_available: update,

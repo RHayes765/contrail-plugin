@@ -96,10 +96,13 @@ ids into child files). Salesforce resolves cross-object references natively:
 - Booleans, picklist API names (not labels), record type DEVELOPER names via a
   `RecordType.DeveloperName` column if needed.
 - Where the files live: in Claude Code, write them under Contrail's `staging/`
-  directory (under the data dir — any containment error names the exact path)
-  and pass absolute paths as `csv_file`. Files are read and FROZEN at propose:
-  editing one afterwards changes nothing, and execute re-verifies the frozen
-  hashes.
+  directory **from the start** — `%USERPROFILE%\.contrail\staging\` on Windows;
+  elsewhere take the exact path from the `staging_dir` field `list_connections`
+  returns — and pass absolute paths as `csv_file`. The session's working
+  folder is not a source root: a CSV prepared elsewhere gets copied into staging,
+  never met with a request that the human widen `deploy.allowedSourceRoots`.
+  Files are read and FROZEN at propose: editing one afterwards changes nothing,
+  and execute re-verifies the frozen hashes.
 
 ## 5. Pre-flight before proposing
 

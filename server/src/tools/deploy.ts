@@ -192,12 +192,15 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
                 .optional()
                 .describe(
                   'Absolute path to a file holding the source, read byte-exactly instead of ' +
-                    'content. PREFER THIS for large components. The file must sit under ' +
-                    "Contrail's staging directory (see the error message for the exact path), " +
-                    'under its snapshots directory, or under a directory the human listed in ' +
-                    'deploy.allowedSourceRoots — Contrail will not deploy a file from anywhere ' +
-                    'else. Read at validation time and frozen into the approved package, so ' +
-                    'editing the file afterwards cannot change what gets deployed.',
+                    'content. PREFER THIS for large components, and author the file under ' +
+                    `Contrail's staging directory FROM THE START — ${stagingDir()} — because ` +
+                    'the session working folder is NOT a deploy source root. Also accepted: ' +
+                    "under Contrail's snapshots directory, or under a directory the human " +
+                    'already listed in deploy.allowedSourceRoots. Anywhere else is refused — ' +
+                    'copy the file into staging and retry; never ask the human to change ' +
+                    'config for a one-off. Read at validation time and frozen into the ' +
+                    'approved package, so editing the file afterwards cannot change what ' +
+                    'gets deployed.',
                 ),
             }),
           )
@@ -653,9 +656,11 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
               csv_file: z
                 .string()
                 .describe(
-                  'Absolute path to this step\'s CSV. Same containment as content_file: ' +
-                    "under Contrail's staging directory, snapshots, or a configured " +
-                    'deploy.allowedSourceRoots entry. Read and frozen at propose time.',
+                  "Absolute path to this step's CSV. Same containment as content_file: " +
+                    `under Contrail's staging directory (${stagingDir()} — stage CSVs there ` +
+                    'from the start; the session working folder is not a source root), ' +
+                    'snapshots, or a configured deploy.allowedSourceRoots entry. Read and ' +
+                    'frozen at propose time.',
                 ),
               object: z.string().describe('SObject API name, e.g. Account or Invoice__c.'),
               operation: z.enum(['insert', 'upsert', 'delete']),

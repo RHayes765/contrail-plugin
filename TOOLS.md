@@ -130,9 +130,12 @@ for the agent to fetch).
 
 ### `list_connections`
 
-Every connected org with alias, org identity, type, and grants. When a newer
-Contrail release exists (from the cached daily check — never a network call
-at tool time), the result carries an update notice with the download link.
+Every connected org with alias, org identity, type, and grants, plus
+`staging_dir` — the directory agents author `content_file`/`csv_file`
+sources into, named proactively on the session-start tool so it is never
+learned from a refusal. When a newer Contrail release exists (from the
+cached daily check — never a network call at tool time), the result carries
+an update notice with the download link.
 
 ### `get_permissions`
 
@@ -514,8 +517,12 @@ validation issues **no** code.
 `content_file` reads a file byte-exactly (mandatory habit for large flows —
 retyping tens of KB of XML risks silent corruption), confined to Contrail's
 staging directory, its snapshots, or `deploy.allowedSourceRoots` from
-config. The file is read at validation and **frozen** into the approved
-package — editing it afterwards changes nothing.
+config. Agents are told to author into staging **from the start** (the tool
+description and `list_connections` both name the concrete path; the session
+working folder is not a source root, and the containment refusal instructs
+copy-into-staging, never a config change). The file is read at validation
+and **frozen** into the approved package — editing it afterwards changes
+nothing.
 
 ### `execute_deploy`
 
@@ -677,7 +684,7 @@ sections' defaults automatically.
 | `deploy` | `pollIntervalMs` / `deployTimeoutMs` | 2 s / 15 min | Deploy polling. |
 | | `codeTtlMs` | 1 h | Confirmation-code lifetime. |
 | | `maxFailedAttempts` | 5 | Wrong-code guesses before the pending code locks. |
-| | `allowedSourceRoots` | `[]` | Extra dirs `content_file`/`csv_file` may read from. Config-file-only by design — no tool call can widen it. |
+| | `allowedSourceRoots` | `[]` | Extra dirs `content_file`/`csv_file` may read from — for standing folders the human volunteers unprompted. Config-file-only by design: no tool call can widen it, and agents are told never to request an entry for a one-off (they copy into `staging/` instead). |
 | `bulkLoad` | `pollIntervalMs` / `ingestTimeoutMs` | 5 s / 30 min | Ingest-job polling, per job. |
 | | `maxFileBytes` | 100 MB | Per-CSV cap (Salesforce's raw ceiling per job). |
 | | `maxFilesPerPlan` | 20 | Max steps in one bulk plan. |
@@ -731,7 +738,9 @@ on Linux; override with `CONTRAIL_DATA_DIR`) holds:
   metadata index, dependency graph, audit log, write requests.
 - `snapshots/<connection-id>/current/` — the retrieved metadata tree in
   standard source format (`classes/`, `flows/`, `objects/`, …).
-- `staging/` — where agents write files for `content_file` / `csv_file`.
+- `staging/` — where agents author files for `content_file` / `csv_file`,
+  from the start (a session's working folder is never *automatically* a
+  deploy source root).
 - `deploys/` — frozen approved payloads (cleaned when spent) and
   `<request>-results/` directories with failed-row exports (kept).
 - `config.json` — everything in the table above.

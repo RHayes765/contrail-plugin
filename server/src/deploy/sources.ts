@@ -108,10 +108,30 @@ export function resolveSourcePath(
 
   const roots = allowedSourceRoots(configuredRoots);
   if (!roots.some((root) => isInside(real, root))) {
+    // The remedy the agent can perform ITSELF leads, as a runnable command;
+    // widening the config is deliberately not offered to the agent at all.
+    // Earlier wording presented allowedSourceRoots as a peer remedy, and agents
+    // dutifully relayed it to the human as a recommended one-time config edit —
+    // normalizing a permanent widening of the deploy-read surface when a
+    // one-line copy would have done.
+    // The command is printed for the agent to RUN, so quote defensively: a
+    // path containing a single quote must not break out of the string (the
+    // agent acts under untrusted org text — a filename is attacker-influenced).
+    // PowerShell doubles quotes inside '…' and -LiteralPath defuses [ ] globs;
+    // POSIX sh closes, backslash-escapes, and reopens.
+    const psq = (s: string) => `'${s.replace(/'/g, "''")}'`;
+    const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+    const copyCmd =
+      process.platform === 'win32'
+        ? `Copy-Item -LiteralPath ${psq(given)} -Destination ${psq(stagingDir() + path.sep)}`
+        : `cp ${shq(given)} ${shq(stagingDir() + '/')}`;
     throw new ContrailError(
       `${noun} is outside every allowed deploy source root, so Contrail will not ` +
-        `deploy it. Allowed: ${roots.join(', ')}. Write the file under ${stagingDir()}, or add ` +
-        `its directory to deploy.allowedSourceRoots in config.json (only you can edit that).`,
+        `deploy it. Allowed: ${roots.join(', ')}. The fix is yours, not the human's: ` +
+        `copy the file into staging — e.g. ${copyCmd} — and retry with the staged ` +
+        `path. Never ask the human to add a folder to deploy.allowedSourceRoots for ` +
+        `a one-off; that config.json list is for standing folders the human ` +
+        `volunteers unprompted, and only they can edit it.`,
       'source_outside_roots',
     );
   }
