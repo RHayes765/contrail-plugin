@@ -223,6 +223,26 @@ Enumerate agent developer names with `list_metadata` type `Bot` (live) or
 Agentforce, omit this block entirely. Agent metadata itself is
 `agentforce-metadata-generate`'s territory.
 
+## External credential principal access
+
+```xml
+<externalCredentialPrincipalAccesses>
+    <enabled>true</enabled>
+    <externalCredentialPrincipal>Mulesoft-Basic</externalCredentialPrincipal>
+</externalCredentialPrincipalAccesses>
+```
+
+The name is **dash-joined**: `<ExternalCredentialDevName>-<principalName>` (here
+the external credential `Mulesoft`, principal `Basic`). Without this grant a
+user's callouts through the credential fail with `Insufficient privileges` —
+deploying the credential alone grants nobody anything. Enumerate real principal
+names from the ExternalCredential's own XML (`retrieve_metadata`, after
+`refresh_snapshot types:["ExternalCredential"]`): each
+`externalCredentialParameters` block whose `parameterType` is `NamedPrincipal`
+or `PerUserPrincipal` is a principal, named by its `parameterName` — never guess
+one. Credential metadata itself is `integration-connectivity-generate`'s
+territory.
+
 ## What Contrail's coverage checker counts as a grant
 
 `validate_deploy` cross-checks new components against any PermissionSet/Profile
@@ -238,6 +258,8 @@ AND the enabling flag is on** — a mention with the flag off is NOT coverage:
 | ApexPage | `pageAccesses` | `<apexPage>` | `<enabled>true</enabled>` |
 | CustomApplication | `applicationVisibilities` | `<application>` | `<visible>true</visible>` |
 | CustomTab | `tabSettings` (or profile `tabVisibilities`) | `<tab>` | `<visibility>` anything except `Hidden`/`None` |
+| Bot (Agentforce agent) | `agentAccesses` | `<agentName>` | `<enabled>true</enabled>` |
+| ExternalCredential (one need per principal it defines) | `externalCredentialPrincipalAccesses` | `<externalCredentialPrincipal>` (dash-joined `Cred-Principal`) | `<enabled>true</enabled>` |
 
 Notes that matter in practice:
 - Standard objects need no `objectPermissions` entry to silence the checker —

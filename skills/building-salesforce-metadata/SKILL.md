@@ -181,6 +181,21 @@ directory** and give `validate_deploy` the path:
   type-compatible and writeable on the target. The file placement is the
   platform's own quirk (`LeadConvertSettings/LeadConvertSettings.LeadConvertSetting`
   — capitalized directory, singular extension); Contrail handles it.
+- **Credential metadata never carries working secrets.** An `ExternalCredential`
+  defines principals; the secret **values** are entered by a human in Setup
+  after the deploy, and users need `externalCredentialPrincipalAccesses` on a
+  permission set (dash-named `Cred-Principal`) before callouts work — the
+  approval page and coverage checker both say so. Modifies are whole-document
+  replaces: a principal parameter you omit is deleted org-side **with its
+  Setup-entered secret**, so retrieve-first. Legacy `NamedCredential` fields
+  (`<password>`, AWS keys) and `AuthProvider` `<consumerSecret>` DO accept
+  literal secrets — Contrail flags them (they land in the snapshot and audit
+  trail, and retrieves return placeholders, so they never round-trip). The
+  family chains
+  `callout:` → NamedCredential → ExternalCredential → principals; full doctrine
+  in `integration-connectivity-generate`. All three types are
+  explicit-refresh-only (`refresh_snapshot
+  types:["NamedCredential","ExternalCredential","AuthProvider"]`).
 - **Namespaces** can contain single underscores (`sales_channel__Foo`), so split a
   qualified API name at the **first** `__`, never with a greedy pattern.
 - **Names**: components deploy under `type/Name.ext`; the tools reject names with

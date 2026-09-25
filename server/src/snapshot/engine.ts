@@ -452,6 +452,7 @@ const TYPE_DIRS: Record<string, string> = {
   ConnectedApp: 'connectedApps',
   NamedCredential: 'namedCredentials',
   ExternalCredential: 'externalCredentials',
+  AuthProvider: 'authproviders',
   PlatformEventChannel: 'platformEventChannels',
   PlatformEventChannelMember: 'platformEventChannelMembers',
   ManagedEventSubscription: 'managedEventSubscriptions',

@@ -152,7 +152,11 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
                 .describe(
                   'ApexClass, ApexTrigger, ApexPage, Flow, CustomObject, PermissionSet, ' +
                     'CustomTab, FlexiPage, CustomApplication, ReportType, GlobalValueSet, ' +
-                    'ConnectedApp, NamedCredential, ExternalCredential, PlatformEventChannel(Member), ' +
+                    'ConnectedApp, NamedCredential / ExternalCredential / AuthProvider ' +
+                    '(credential metadata NEVER carries working secrets: per-principal ' +
+                    'values are entered in Setup after deploy, retrieves return ' +
+                    'placeholders, and principals need externalCredentialPrincipalAccesses ' +
+                    'on a permission set), PlatformEventChannel(Member), ' +
                     'ManagedEventSubscription, Layout, CustomMetadata (records, dotted ' +
                     'Type.Record names), LeadConvertSettings (SINGLETON — api_name is ' +
                     'literally "LeadConvertSettings"; a modify replaces ALL lead field ' +

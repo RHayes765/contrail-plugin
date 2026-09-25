@@ -14,6 +14,21 @@ single MCP Bundle that installs into Claude Desktop via Settings → Extensions
 (no Node install, no npm, no config editing on the target machine) and covers
 Windows x64/ARM and macOS Intel/Apple Silicon from one file. 35 tools.
 
+**The credential family (S33).** `NamedCredential` and `ExternalCredential`
+(deployable since S17) got their sharp edges covered, and `AuthProvider`
+joined them (all three explicit-refresh-only): the approval page now tells
+the truth about secrets — credential metadata never carries working values
+(per-principal secrets are Setup-entered after deploy; a literal secret in
+legacy fields is flagged, since it would land in the snapshot and audit
+trail and never round-trip) — and the permission coverage checker counts
+`externalCredentialPrincipalAccesses` grants per principal (dash-named
+`Cred-Principal`, live-confirmed). The dependency graph learned the chain:
+Apex `callout:` references → NamedCredential → ExternalCredential →
+AuthProvider. A new adapted skill, `integration-connectivity-generate`,
+carries the doctrine (external-credentials-first, the secret boundary, the
+permission pairing, callout rules); `platform-permission-set-generate` and
+`building-salesforce-metadata` learned the family too.
+
 **Agentforce metadata (S30).** The agent stack is readable, diffable, and
 deployable: `Bot`/`BotVersion`, topics (`GenAiPlugin`), prompt templates,
 Testing Center definitions (`AiEvaluationDefinition`),

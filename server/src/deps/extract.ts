@@ -131,6 +131,11 @@ export function extractApexRefs(
   for (const m of source.matchAll(/Label\.(\w+)/g)) {
     refs.add('CustomLabel', m[1]!);
   }
+  // S33: callout endpoints. 'callout:My_NC/path' lives INSIDE a string
+  // literal, which stripApexNoise blanks — so this scan runs on the RAW body.
+  for (const m of body.matchAll(/callout:([A-Za-z0-9_]+)/gi)) {
+    refs.add('NamedCredential', m[1]!);
+  }
   return refs.list();
 }
 
@@ -253,6 +258,34 @@ export function extractBotRefs(xml: string): Ref[] {
   return refs.list();
 }
 
+/**
+ * S33: NamedCredential → the ExternalCredential its Authentication parameter
+ * names (<namedCredentialParameters><externalCredential>, live-confirmed) and,
+ * on legacy NamedCredentials, the AuthProvider (top-level <authProvider>).
+ */
+export function extractNamedCredentialRefs(xml: string): Ref[] {
+  const refs = new RefSet();
+  for (const m of xml.matchAll(/<externalCredential>([^<]+)<\/externalCredential>/g)) {
+    refs.add('ExternalCredential', m[1]!);
+  }
+  for (const m of xml.matchAll(/<authProvider>([^<]+)<\/authProvider>/g)) {
+    refs.add('AuthProvider', m[1]!);
+  }
+  return refs.list();
+}
+
+/**
+ * S33: ExternalCredential → the AuthProvider a browser-flow OAuth credential
+ * references (an <authProvider> element inside externalCredentialParameters).
+ */
+export function extractExternalCredentialRefs(xml: string): Ref[] {
+  const refs = new RefSet();
+  for (const m of xml.matchAll(/<authProvider>([^<]+)<\/authProvider>/g)) {
+    refs.add('AuthProvider', m[1]!);
+  }
+  return refs.list();
+}
+
 /** Case-insensitive lookup maps from the freshly indexed artifact set. */
 export interface KnownArtifacts {
   classes: Map<string, string>;
@@ -335,6 +368,10 @@ export function extractAllEdges(
       add(a.type, a.apiName, extractGenAiPlannerRefs(a.content));
     } else if (a.type === 'Bot') {
       add(a.type, a.apiName, extractBotRefs(a.content));
+    } else if (a.type === 'NamedCredential') {
+      add(a.type, a.apiName, extractNamedCredentialRefs(a.content));
+    } else if (a.type === 'ExternalCredential') {
+      add(a.type, a.apiName, extractExternalCredentialRefs(a.content));
     }
   }
   return edges;

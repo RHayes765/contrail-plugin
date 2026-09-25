@@ -1135,3 +1135,126 @@ describe('S31: LeadConvertSettings (the lead-conversion singleton)', () => {
     expect(changes[0]!.warnings.join(' ')).toMatch(/mapping DELETED org-wide/);
   });
 });
+
+describe('S33: the credential family (NamedCredential / ExternalCredential / AuthProvider)', () => {
+  const conn = { id: 'conn-1', alias: 'dev' } as ConnectionRecord;
+
+  it('places AuthProvider in its all-lowercase folder (live-confirmed) and manifests it', () => {
+    const built = buildDeployZip([comp('AuthProvider', 'Acme_SSO', '<AuthProvider/>')], [], V, noMeta);
+    expect(built.files).toContain('authproviders/Acme_SSO.authprovider');
+    expect(built.packageXml).toContain('<name>AuthProvider</name>');
+    expect(built.packageXml).toContain('<members>Acme_SSO</members>');
+  });
+
+  it('indexes a retrieved authproviders tree', () => {
+    const files = new Map(
+      Object.entries({
+        'authproviders/Acme_SSO.authprovider': strToU8('<AuthProvider><providerType>OpenIdConnect</providerType></AuthProvider>'),
+      }),
+    );
+    const artifacts = indexSnapshotFiles(files, [], '2026-09-24T00:00:00.000Z');
+    expect(artifacts).toHaveLength(1);
+    expect(artifacts[0]).toMatchObject({ type: 'AuthProvider', apiName: 'Acme_SSO' });
+  });
+
+  it('modifying any credential-family document warns WHOLE-DOCUMENT REPLACE (principals called out)', () => {
+    const db = {
+      getArtifact: (_c: string, type: string, name: string) => ({
+        filePath: `x/${type}/${name}`,
+      }),
+    } as unknown as ContrailDb;
+    const store = { readCurrentFile: () => '<old/>' } as unknown as SnapshotStore;
+    for (const [type, tail] of [
+      ['NamedCredential', null],
+      ['ExternalCredential', /principal parameter omitted here is DELETED/],
+      ['AuthProvider', null],
+    ] as Array<[string, RegExp | null]>) {
+      const { changes } = analyzeChanges(db, store, conn, [comp(type, 'Thing', '<new/>')], []);
+      const text = changes[0]!.warnings.join(' ');
+      expect(text, type).toMatch(/WHOLE-DOCUMENT REPLACE/);
+      if (tail) expect(text, type).toMatch(tail);
+    }
+  });
+
+  it('a NEW external credential warns: no secrets deployed, nobody granted', () => {
+    const db = { getArtifact: () => null } as unknown as ContrailDb;
+    const store = { readCurrentFile: () => null } as unknown as SnapshotStore;
+    const { changes } = analyzeChanges(
+      db,
+      store,
+      conn,
+      [comp('ExternalCredential', 'Billing_Auth', '<ExternalCredential/>')],
+      [],
+    );
+    const text = changes[0]!.warnings.join(' ');
+    expect(text).toMatch(/carries no secrets and grants nobody access/);
+    expect(text).toMatch(/externalCredentialPrincipalAccesses/);
+  });
+
+  it('a literal secret in legacy NamedCredential or AuthProvider content is flagged', () => {
+    const db = { getArtifact: () => null } as unknown as ContrailDb;
+    const store = { readCurrentFile: () => null } as unknown as SnapshotStore;
+    const nc = analyzeChanges(db, store, conn, [
+      comp('NamedCredential', 'Legacy_API', '<NamedCredential><password>hunter2</password></NamedCredential>'),
+    ], []);
+    expect(nc.changes[0]!.warnings.join(' ')).toMatch(/LITERAL SECRET IN DEPLOY CONTENT \(<password>\)/);
+    const ap = analyzeChanges(db, store, conn, [
+      comp('AuthProvider', 'Acme_SSO', '<AuthProvider><consumerSecret>shh</consumerSecret></AuthProvider>'),
+    ], []);
+    expect(ap.changes[0]!.warnings.join(' ')).toMatch(/LITERAL SECRET IN DEPLOY CONTENT \(<consumerSecret>\)/);
+    // An EMPTY tag is not a literal secret, and modern external credentials
+    // never trip the arm at all.
+    const clean = analyzeChanges(db, store, conn, [
+      comp('NamedCredential', 'Modern_API', '<NamedCredential><password></password></NamedCredential>'),
+      comp('ExternalCredential', 'Auth', '<ExternalCredential><externalCredentialParameters><parameterValue>notasecret</parameterValue></externalCredentialParameters></ExternalCredential>'),
+    ], []);
+    for (const c of clean.changes) {
+      expect(c.warnings.join(' ')).not.toMatch(/LITERAL SECRET/);
+    }
+  });
+
+  it('every principal an ExternalCredential defines needs a dash-named principal-access grant', () => {
+    const cred = comp(
+      'ExternalCredential',
+      'Mulesoft',
+      '<ExternalCredential><authenticationProtocol>Basic</authenticationProtocol>' +
+        '<externalCredentialParameters><parameterName>Custom</parameterName>' +
+        '<parameterType>AuthProtocolVariant</parameterType></externalCredentialParameters>' +
+        '<externalCredentialParameters><parameterName>Basic</parameterName>' +
+        '<parameterType>NamedPrincipal</parameterType><sequenceNumber>1</sequenceNumber></externalCredentialParameters>' +
+        '<externalCredentialParameters><parameterName>Per_User</parameterName>' +
+        '<parameterType>PerUserPrincipal</parameterType><sequenceNumber>2</sequenceNumber></externalCredentialParameters>' +
+        '</ExternalCredential>',
+    );
+    // No permission container: both principals uncovered, non-principal params silent.
+    const bare = analyzePermissionCoverage([cred]);
+    expect(bare.uncovered.map((u) => u.api_name).sort()).toEqual(['Mulesoft-Basic', 'Mulesoft-Per_User']);
+    // The live-confirmed dash-named grant covers exactly its principal.
+    const ps = comp(
+      'PermissionSet',
+      'Integration_User',
+      '<PermissionSet><externalCredentialPrincipalAccesses><enabled>true</enabled>' +
+        '<externalCredentialPrincipal>Mulesoft-Basic</externalCredentialPrincipal>' +
+        '</externalCredentialPrincipalAccesses></PermissionSet>',
+    );
+    const covered = analyzePermissionCoverage([cred, ps]);
+    expect(covered.uncovered.map((u) => u.api_name)).toEqual(['Mulesoft-Per_User']);
+    // enabled=false is a mention, not coverage.
+    const disabled = comp(
+      'PermissionSet',
+      'Integration_User',
+      '<PermissionSet><externalCredentialPrincipalAccesses><enabled>false</enabled>' +
+        '<externalCredentialPrincipal>Mulesoft-Basic</externalCredentialPrincipal>' +
+        '</externalCredentialPrincipalAccesses></PermissionSet>',
+    );
+    expect(analyzePermissionCoverage([cred, disabled]).uncovered).toHaveLength(2);
+  });
+
+  it('NamedCredential and AuthProvider deliberately produce NO permission needs', () => {
+    const res = analyzePermissionCoverage([
+      comp('NamedCredential', 'Billing_API', '<NamedCredential/>'),
+      comp('AuthProvider', 'Acme_SSO', '<AuthProvider/>'),
+    ]);
+    expect(res.uncovered).toHaveLength(0);
+  });
+});

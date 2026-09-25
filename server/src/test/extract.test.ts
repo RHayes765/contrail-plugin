@@ -228,3 +228,61 @@ describe('S30: agent-graph extractors', () => {
     expect(keys).toContain('GenAiPlugin:Orders>GenAiFunction:Get_Status');
   });
 });
+
+describe('S33: credential-family extractors', () => {
+  it('NamedCredential → ExternalCredential + AuthProvider; ExternalCredential → AuthProvider', async () => {
+    const { extractNamedCredentialRefs, extractExternalCredentialRefs } = await import(
+      '../deps/extract.js'
+    );
+    // Live-confirmed shape: the Authentication parameter names the external
+    // credential; legacy NCs carry a top-level authProvider instead.
+    const nc = extractNamedCredentialRefs(
+      '<NamedCredential><namedCredentialParameters><externalCredential>Billing_Auth</externalCredential>' +
+        '<parameterName>ExternalCredential</parameterName><parameterType>Authentication</parameterType>' +
+        '</namedCredentialParameters><authProvider>Acme_SSO</authProvider></NamedCredential>',
+    );
+    const ncKeys = nc.map((r) => `${r.toType}:${r.toName}`).sort();
+    expect(ncKeys).toEqual(['AuthProvider:Acme_SSO', 'ExternalCredential:Billing_Auth']);
+
+    const ec = extractExternalCredentialRefs(
+      '<ExternalCredential><externalCredentialParameters><authProvider>Acme_SSO</authProvider>' +
+        '<parameterType>AuthProvider</parameterType></externalCredentialParameters></ExternalCredential>',
+    );
+    expect(ec.map((r) => `${r.toType}:${r.toName}`)).toEqual(['AuthProvider:Acme_SSO']);
+  });
+
+  it("Apex callout:Name references survive string-literal stripping", async () => {
+    const { extractApexRefs, buildKnownArtifacts } = await import('../deps/extract.js');
+    const body =
+      "public class BillingClient {\n" +
+      "  void call() {\n" +
+      "    HttpRequest r = new HttpRequest();\n" +
+      "    r.setEndpoint('callout:Billing_API/v2/invoices');\n" +
+      "  }\n" +
+      "}";
+    const refs = extractApexRefs(body, buildKnownArtifacts([]), 'BillingClient');
+    expect(refs.map((r) => `${r.toType}:${r.toName}`)).toContain('NamedCredential:Billing_API');
+  });
+
+  it('indexed credential artifacts produce joinable edges through extractAllEdges', () => {
+    const files = new Map(
+      Object.entries({
+        'namedCredentials/Billing_API.namedCredential': strToU8(
+          '<NamedCredential><namedCredentialParameters><externalCredential>Billing_Auth</externalCredential>' +
+            '<parameterName>ExternalCredential</parameterName><parameterType>Authentication</parameterType>' +
+            '</namedCredentialParameters></NamedCredential>',
+        ),
+        'externalCredentials/Billing_Auth.externalCredential': strToU8(
+          '<ExternalCredential><externalCredentialParameters><authProvider>Acme_SSO</authProvider>' +
+            '</externalCredentialParameters></ExternalCredential>',
+        ),
+        'authproviders/Acme_SSO.authprovider': strToU8('<AuthProvider/>'),
+      }),
+    );
+    const artifacts = indexSnapshotFiles(files, [], '2026-09-24T00:00:00.000Z');
+    const edges = extractAllEdges('conn1', artifacts);
+    const keys = edges.map((e) => `${e.fromType}:${e.fromName}>${e.toType}:${e.toName}`);
+    expect(keys).toContain('NamedCredential:Billing_API>ExternalCredential:Billing_Auth');
+    expect(keys).toContain('ExternalCredential:Billing_Auth>AuthProvider:Acme_SSO');
+  });
+});

@@ -1,6 +1,6 @@
 --- a/SKILL.md
 +++ b/SKILL.md
-@@ -1,34 +1,85 @@
+@@ -1,189 +1,334 @@
  ---
  name: platform-permission-set-generate
 -description: "Generates correct, deployable Salesforce permission set metadata (PermissionSet XML) with object, field, user, and app permissions. Use this skill when creating or editing permission set metadata, object permissions, field-level security (FLS), tab visibility, or deploying permission sets."
@@ -97,7 +97,14 @@
  
  ```xml
  <objectPermissions>
-@@ -43,9 +94,14 @@
+     <allowCreate>true</allowCreate>
+     <allowRead>true</allowRead>
+     <allowEdit>true</allowEdit>
+     <allowDelete>false</allowDelete>
+     <modifyAllRecords>false</modifyAllRecords>
+     <viewAllRecords>false</viewAllRecords>
+     <viewAllFields>false</viewAllFields>
+     <object>Account</object>
  </objectPermissions>
  ```
  
@@ -114,7 +121,9 @@
  
  ```xml
  <fieldPermissions>
-@@ -55,26 +111,20 @@
+     <editable>true</editable>
+     <readable>true</readable>
+     <field>Account.SSN__c</field>
  </fieldPermissions>
  ```
  
@@ -154,7 +163,12 @@
  
  ```xml
  <userPermissions>
-@@ -87,20 +137,19 @@
+     <enabled>true</enabled>
+     <name>ApiEnabled</name>
+ </userPermissions>
+ <userPermissions>
+     <enabled>true</enabled>
+     <name>RunReports</name>
  </userPermissions>
  ```
  
@@ -186,7 +200,12 @@
  
  ```xml
  <applicationVisibilities>
-@@ -113,22 +162,20 @@
+     <application>Sales_Console</application>
+     <visible>true</visible>
+ </applicationVisibilities>
+ <tabSettings>
+     <tab>CustomTab__c</tab>
+     <visibility>Visible</visibility>
  </tabSettings>
  ```
  
@@ -222,7 +241,12 @@
  
  ```xml
  <classAccesses>
-@@ -141,9 +188,11 @@
+     <apexClass>CustomController</apexClass>
+     <enabled>true</enabled>
+ </classAccesses>
+ <pageAccesses>
+     <apexPage>CustomPage</apexPage>
+     <enabled>true</enabled>
  </pageAccesses>
  ```
  
@@ -236,7 +260,10 @@
  
  ```xml
  <license>Salesforce</license>
-@@ -154,36 +203,101 @@
+ <hasActivationRequired>false</hasActivationRequired>
+ <recordTypeVisibilities>
+     <recordType>Account.Business</recordType>
+     <visible>true</visible>
      <default>true</default>
  </recordTypeVisibilities>
  ```
@@ -248,7 +275,7 @@
 +  set it cannot be broadened without recreating the set.
 +- Exactly one `recordTypeVisibilities` per object may be `default` true.
 +
-+## Agentforce agent access (XML knowledge only)
++## Agentforce agent access
 +
 +```xml
  <agentAccesses>
@@ -265,22 +292,40 @@
 -- Agent names must match existing Agentforce Employee Agent developer names
 -
 -## Validation Checklist
--
++`agentName` is the employee agent's developer name; `enabled` true grants access.
++Enumerate agent developer names with `list_metadata` type `Bot` (live) or
++`soql_query` on `BotDefinition` — never guess one. If the deploy target has no
++Agentforce, omit this block entirely. Agent metadata itself is
++`agentforce-metadata-generate`'s territory.
+ 
 -Before deploying, verify:
 -- [ ] fullName, label, description set
 -- [ ] Permissions follow least privilege
 -- [ ] No required fields in `<fieldPermissions>`
 -- [ ] No duplicate permissions
 -- [ ] No lengthy comments
--
++## External credential principal access
+ 
 -## What Causes Deployment Failure
--
++```xml
++<externalCredentialPrincipalAccesses>
++    <enabled>true</enabled>
++    <externalCredentialPrincipal>Mulesoft-Basic</externalCredentialPrincipal>
++</externalCredentialPrincipalAccesses>
++```
+ 
 -- **Field permissions on required fields:** Any required field in `<fieldPermissions>` fails deployment. Required fields cannot have FLS; omit them entirely. Always confirm from object/field metadata that a field exists and is not required—never assume.
 -- **Incorrect API names:** Using the wrong name or missing suffixes (e.g. missing `__c` for custom objects, fields, tabs) cause failure.
-+`agentName` is the employee agent's developer name; `enabled` true grants access.
-+No Contrail tool enumerates agent developer names — take the exact name from the
-+human and let validation be the arbiter; if the deploy target has no Agentforce,
-+omit this block entirely.
++The name is **dash-joined**: `<ExternalCredentialDevName>-<principalName>` (here
++the external credential `Mulesoft`, principal `Basic`). Without this grant a
++user's callouts through the credential fail with `Insufficient privileges` —
++deploying the credential alone grants nobody anything. Enumerate real principal
++names from the ExternalCredential's own XML (`retrieve_metadata`, after
++`refresh_snapshot types:["ExternalCredential"]`): each
++`externalCredentialParameters` block whose `parameterType` is `NamedPrincipal`
++or `PerUserPrincipal` is a principal, named by its `parameterName` — never guess
++one. Credential metadata itself is `integration-connectivity-generate`'s
++territory.
 +
 +## What Contrail's coverage checker counts as a grant
 +
@@ -297,6 +342,8 @@
 +| ApexPage | `pageAccesses` | `<apexPage>` | `<enabled>true</enabled>` |
 +| CustomApplication | `applicationVisibilities` | `<application>` | `<visible>true</visible>` |
 +| CustomTab | `tabSettings` (or profile `tabVisibilities`) | `<tab>` | `<visibility>` anything except `Hidden`/`None` |
++| Bot (Agentforce agent) | `agentAccesses` | `<agentName>` | `<enabled>true</enabled>` |
++| ExternalCredential (one need per principal it defines) | `externalCredentialPrincipalAccesses` | `<externalCredentialPrincipal>` (dash-joined `Cred-Principal`) | `<enabled>true</enabled>` |
 +
 +Notes that matter in practice:
 +- Standard objects need no `objectPermissions` entry to silence the checker —
@@ -359,6 +406,14 @@
 +`PermissionSetAssignment` (`AssigneeId`, `PermissionSetId` — query the id with
 +`soql_query` after deploy) via `dml_propose`, and it takes the same human
 +approval through `dml_execute`.
++
++**Diagnosing access ("why can't this user see X?") starts with `explain_access`**
++`{user, object, field?}` — it rolls up effective CRUD/FLS across the user's
++profile and permission sets, names which assignment grants each bit, and counts
++who else holds each granting set. CRUD/FLS only: record-level sharing is not
++evaluated, so a granted read plus an invisible record points at sharing, not
++permissions. Fix gaps with a permission set authored per this skill, never by
++editing profiles.
  
 -Deploy using Salesforce CLI
 \ No newline at end of file

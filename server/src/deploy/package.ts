@@ -110,6 +110,9 @@ const FILE_TYPES: Record<string, FileSpec> = {
   ConnectedApp: { dir: 'connectedApps', ext: '.connectedApp' },
   NamedCredential: { dir: 'namedCredentials', ext: '.namedCredential' },
   ExternalCredential: { dir: 'externalCredentials', ext: '.externalCredential' },
+  // S33: lowercase dir AND extension — unusual but live-confirmed (personal-dev
+  // retrieve 2026-09-24), matching the metadata catalog.
+  AuthProvider: { dir: 'authproviders', ext: '.authprovider' },
   PlatformEventChannel: { dir: 'platformEventChannels', ext: '.platformEventChannel' },
   PlatformEventChannelMember: {
     dir: 'platformEventChannelMembers',
@@ -725,7 +728,10 @@ export function analyzeChanges(
           c.type === 'GenAiPlugin' ||
           c.type === 'GenAiPromptTemplate' ||
           c.type === 'Bot' ||
-          c.type === 'LeadConvertSettings') &&
+          c.type === 'LeadConvertSettings' ||
+          c.type === 'NamedCredential' ||
+          c.type === 'ExternalCredential' ||
+          c.type === 'AuthProvider') &&
         change === 'modify'
       ) {
         warnings.push(
@@ -735,7 +741,10 @@ export function analyzeChanges(
               ? ' A <botVersions> block omitted from a Bot document is a VERSION DELETE.'
               : c.type === 'LeadConvertSettings'
                 ? ' An <objectMapping> omitted here is a lead field mapping DELETED org-wide.'
-                : ''),
+                : c.type === 'ExternalCredential'
+                  ? ' A principal parameter omitted here is DELETED org-side — along with the' +
+                    ' credential values a human entered for it in Setup.'
+                  : ''),
         );
       }
       // S30: the activeVersionIdentifier is an org-generated token. Altering
@@ -816,6 +825,41 @@ export function analyzeChanges(
           `reactivate (Contrail cannot do those steps; verify with BotVersion.Status).`,
       );
     }
+    // S33: a NEW external credential defines principals but carries NO secret
+    // values and grants NO access — both of those are post-deploy steps, and
+    // silence here would let "deployed" read as "working".
+    if (c.type === 'ExternalCredential' && change === 'add') {
+      warnings.push(
+        `NEW EXTERNAL CREDENTIAL carries no secrets and grants nobody access — a human ` +
+          `enters each principal's credential values in Setup (External Credentials) after ` +
+          `the deploy, and callouts fail until a permission set grants ` +
+          `externalCredentialPrincipalAccesses for its principals.`,
+      );
+    }
+    // S33: literal secrets in deploy content. Modern credential metadata never
+    // carries secret values (they live in Setup, per principal) — but the
+    // LEGACY NamedCredential fields and AuthProvider.consumerSecret accept
+    // them, and a deployed secret lands in the local snapshot, the audit
+    // trail, and this approval page, while retrieves return placeholders so
+    // the value never round-trips.
+    {
+      const secretTags =
+        c.type === 'NamedCredential'
+          ? ['password', 'awsAccessSecret', 'oauthToken', 'oauthRefreshToken']
+          : c.type === 'AuthProvider'
+            ? ['consumerSecret']
+            : [];
+      for (const tag of secretTags) {
+        if (new RegExp(`<${tag}>[^<]`).test(c.content)) {
+          warnings.push(
+            `LITERAL SECRET IN DEPLOY CONTENT (<${tag}>) — this value becomes part of the ` +
+              `local snapshot, the audit trail, and this approval page, and a retrieve ` +
+              `returns only a placeholder (it will not round-trip). Prefer External ` +
+              `Credentials, where secrets are entered in Setup and never touch metadata.`,
+          );
+        }
+      }
+    }
     changes.push({ type: c.type, api_name: c.api_name, change, warnings, ...sourceOf(c) });
   }
 
@@ -851,7 +895,25 @@ interface PermissionNeed {
   type: string;
   api_name: string;
   permission: string;
-  kind: 'field' | 'object' | 'class' | 'tab' | 'page' | 'application' | 'agent';
+  kind: 'field' | 'object' | 'class' | 'tab' | 'page' | 'application' | 'agent' | 'credentialPrincipal';
+}
+
+/**
+ * S33: principals defined by an ExternalCredential — externalCredentialParameters
+ * whose parameterType is NamedPrincipal or PerUserPrincipal; the principal's
+ * name is its parameterName (live-confirmed grammar). Permission sets grant
+ * them as `<ExternalCredentialDevName>-<principalName>` (dash-joined, e.g.
+ * "Mulesoft-Basic" — live-confirmed from a real org's permission set).
+ */
+function externalCredentialPrincipals(xml: string): string[] {
+  const names: string[] = [];
+  for (const block of xml.match(/<externalCredentialParameters>[\s\S]*?<\/externalCredentialParameters>/g) ?? []) {
+    const type = block.match(/<parameterType>\s*([^<]+?)\s*<\/parameterType>/)?.[1] ?? '';
+    if (!/^(NamedPrincipal|PerUserPrincipal)$/i.test(type)) continue;
+    const name = block.match(/<parameterName>\s*([^<]+?)\s*<\/parameterName>/)?.[1];
+    if (name) names.push(name);
+  }
+  return names;
 }
 
 /** Custom entities (need explicit object permissions); standard objects don't. */
@@ -911,6 +973,12 @@ function isGranted(containerText: string, need: PermissionNeed): boolean {
       return permissionBlocks(containerText, 'agentAccesses').some(
         (b) => named(b, 'agentName', need.api_name) && flagOn(b, 'enabled'),
       );
+    case 'credentialPrincipal':
+      // S33: external credential principals are granted by name
+      // "<ExtCredDevName>-<principalName>" in a real PermissionSet block.
+      return permissionBlocks(containerText, 'externalCredentialPrincipalAccesses').some(
+        (b) => named(b, 'externalCredentialPrincipal', need.api_name) && flagOn(b, 'enabled'),
+      );
     case 'tab': {
       const blocks = [
         ...permissionBlocks(containerText, 'tabVisibilities'),
@@ -960,6 +1028,20 @@ export function analyzePermissionCoverage(components: ProposedComponent[]): Perm
     } else if (c.type === 'Bot') {
       // S30: users reach an agent through agentAccesses on a permission set.
       needs.push({ type: 'Bot', api_name: c.api_name, permission: 'agent access (agentAccesses)', kind: 'agent' });
+    } else if (c.type === 'ExternalCredential') {
+      // S33: every principal an external credential defines needs an
+      // externalCredentialPrincipalAccesses grant before anyone's callouts
+      // work. Deliberately NO arm for NamedCredential (access rides the
+      // external credential's principals; legacy NCs have no permission-set
+      // grant at all) or AuthProvider (no permission-set block exists).
+      for (const principal of externalCredentialPrincipals(c.content)) {
+        needs.push({
+          type: 'ExternalCredential',
+          api_name: `${c.api_name}-${principal}`,
+          permission: 'external credential principal access (externalCredentialPrincipalAccesses)',
+          kind: 'credentialPrincipal',
+        });
+      }
     } else if (c.type === 'CustomObject') {
       if (isCustomEntity(c.api_name)) {
         needs.push({ type: 'CustomObject', api_name: c.api_name, permission: 'object permissions', kind: 'object' });

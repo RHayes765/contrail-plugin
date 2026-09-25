@@ -116,7 +116,7 @@ export const DEFAULT_CONFIG: ContrailConfig = {
   },
   snapshot: {
     // Integration/eventing types (ConnectedApp, NamedCredential,
-    // ExternalCredential, PlatformEventChannel[Member],
+    // ExternalCredential, AuthProvider, PlatformEventChannel[Member],
     // ManagedEventSubscription) are deployable and indexable but kept OUT of
     // the default manifest — retrieve them explicitly via refresh_snapshot
     // types, or add them here. S29: analytics types (Report, Dashboard and

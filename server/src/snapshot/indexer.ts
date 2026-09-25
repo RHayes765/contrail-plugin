@@ -34,6 +34,7 @@ const SIMPLE_DIR_TYPES: Array<{ dir: string; ext: string; type: string }> = [
   { dir: 'connectedApps', ext: '.connectedApp', type: 'ConnectedApp' },
   { dir: 'namedCredentials', ext: '.namedCredential', type: 'NamedCredential' },
   { dir: 'externalCredentials', ext: '.externalCredential', type: 'ExternalCredential' },
+  { dir: 'authproviders', ext: '.authprovider', type: 'AuthProvider' },
   { dir: 'platformEventChannels', ext: '.platformEventChannel', type: 'PlatformEventChannel' },
   {
     dir: 'platformEventChannelMembers',

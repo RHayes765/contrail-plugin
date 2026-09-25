@@ -31,6 +31,7 @@ deploy fails:
 | Reports — formats, columns, filters, groupings, folders | `platform-report-generate` |
 | Custom report types — base objects, joins, field sections | `platform-custom-report-type-generate` |
 | Dashboards — components, running user, filters, folders | `platform-dashboard-generate` |
+| Named/External Credentials, Auth Providers, outbound callout auth | `integration-connectivity-generate` |
 | Agentforce agent metadata — topics, bots, the deactivate gate | `agentforce-metadata-generate` |
 | Documenting or diagramming an existing agent's architecture | `agentforce-architecture-analyze` |
 | Prompt templates — Prompt Builder metadata, merge fields, versions | `platform-prompt-template-generate` |

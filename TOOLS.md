@@ -475,7 +475,12 @@ validation issues **no** code.
   Types include `ApexClass`, `ApexTrigger`, `ApexPage`, `Flow`,
   `CustomObject`, `PermissionSet`, `CustomTab`, `FlexiPage`,
   `CustomApplication`, `ReportType`, `GlobalValueSet`, `ConnectedApp`,
-  `NamedCredential`, `ExternalCredential`, `PlatformEventChannel(Member)`,
+  `NamedCredential` / `ExternalCredential` / `AuthProvider` (credential
+  metadata never carries working secrets — per-principal values are
+  Setup-entered after deploy, retrieves return placeholders, literal legacy
+  secrets are flagged on the approval page, and each principal needs an
+  `externalCredentialPrincipalAccesses` grant the coverage checker counts),
+  `PlatformEventChannel(Member)`,
   `ManagedEventSubscription`, `Layout`, `CustomMetadata` (records, dotted
   `Type.Record` names), `LeadConvertSettings` (the lead-conversion
   singleton — api_name literally `LeadConvertSettings`; a modify replaces
@@ -635,7 +640,7 @@ cause) — row data never enters the conversation in either direction.
 
 ## The skill pack
 
-Seventeen skills ship with Contrail (in `skills/`), encoding the judgment layer —
+Eighteen skills ship with Contrail (in `skills/`), encoding the judgment layer —
 the difference between an agent that has tools and one that uses them the
 way a careful practitioner would. In Claude Code they load automatically
 with the plugin; in Claude Desktop they are added once via the Skills UI; in
@@ -653,6 +658,7 @@ the desktop app they are bundled and selectable per project.
 | `platform-permission-set-generate` | What goes inside PermissionSet XML — every generator delegates its permission step here. |
 | `platform-validation-rule-generate` | Validation rules and their formulas, including deploy-failure triage. |
 | `salesforce-data-migration` | Bulk loads: dml-vs-bulk choice, load order from the relationship graph, external-ID reference columns, failed-row (`sf__Error`) triage. |
+| `integration-connectivity-generate` | The credential family: External/Named Credentials, Auth Providers, the secret boundary (principal values are Setup-side), the dash-named principal-access pairing, callout doctrine. |
 | `platform-report-generate` | Report metadata: format taxonomy (tabular/summary/matrix/joined), columns, filters, charts, buckets, cross-filters, folder pairing. |
 | `platform-custom-report-type-generate` | Custom report types: base objects, up to 3 join levels, field sections. |
 | `platform-dashboard-generate` | Dashboards: components and their report references, the running-user doctrine, filters, grid layouts, folder sharing. |
@@ -676,7 +682,7 @@ sections' defaults automatically.
 | | `scopes` | `refresh_token, api, web` | OAuth scopes requested. |
 | `oauth` | `callbackPort` / `callbackPath` | `1717` / `/OauthRedirect` | Must match the connected app's registered callback. |
 | | `flowTimeoutMs` | 10 min | Browser-flow hard limit. |
-| `snapshot` | `types` | 15 types | The default retrieve manifest (ApexClass, ApexTrigger, Flow, CustomObject, CustomLabels, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, ApexPage, GlobalValueSet, Layout, CustomMetadata, LeadConvertSettings). Report/Dashboard (+ their folders) and the Agentforce types are deployable and indexable but deliberately OUT of the default — `refresh_snapshot types:[…]` pulls them explicitly. |
+| `snapshot` | `types` | 15 types | The default retrieve manifest (ApexClass, ApexTrigger, Flow, CustomObject, CustomLabels, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, ApexPage, GlobalValueSet, Layout, CustomMetadata, LeadConvertSettings). Report/Dashboard (+ their folders), the Agentforce types, and the integration group (ConnectedApp, NamedCredential, ExternalCredential, AuthProvider, PlatformEventChannel[Member], ManagedEventSubscription) are deployable and indexable but deliberately OUT of the default — `refresh_snapshot types:[…]` pulls them explicitly. |
 | | `pollIntervalMs` / `retrieveTimeoutMs` | 2 s / 10 min | Retrieve polling. |
 | `updates` | `checkEnabled` | `true` | Daily anonymous release check — the only phone-home; `false` disables it entirely. |
 | `localDiagnostics` | `enabled` | `true` | `check_apex`/`check_soql`; `false` makes them report honestly unavailable. |
