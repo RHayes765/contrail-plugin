@@ -33129,7 +33129,7 @@ function getUpdateNotice(installedVersion, repo, enabled) {
 }
 
 // src/core/version.ts
-var ENGINE_VERSION = "0.23.0";
+var ENGINE_VERSION = "0.24.0";
 
 // src/tools/register.ts
 var UPDATE_REPO = "RHayes765/contrail-plugin";
@@ -33256,7 +33256,7 @@ function registerTools(server, deps) {
     "list_connections",
     {
       title: "List connected orgs",
-      description: "List every connected org with its alias, org identity, type, and grants. Zero-cost local read \u2014 call this instead of guessing which orgs exist.",
+      description: "List every connected org with its alias, org identity, type, and grants. Zero-cost local read \u2014 call this instead of guessing which orgs exist. Also returns staging_dir: the directory to author content_file/csv_file sources into.",
       inputSchema: {}
     },
     async () => guarded(() => {
@@ -33269,6 +33269,10 @@ function registerTools(server, deps) {
       return ok({
         connections: list,
         count: list.length,
+        // The session-start surface names the staging dir PROACTIVELY, so an
+        // agent authoring a large component learns where deploy bytes live
+        // before its first validate_deploy refusal, not from it.
+        staging_dir: stagingDir(),
         ...update ? {
           update_available: update,
           update_note: `Contrail ${update.latest} is available (you are on ${update.installed}). Tell the human: download it at ${update.download_url} \u2014 a Claude Desktop extension updates by installing the new .mcpb over the old one.`
@@ -35306,8 +35310,11 @@ function resolveSourcePath(rawPath, configuredRoots = [], opts = {}) {
   }
   const roots = allowedSourceRoots(configuredRoots);
   if (!roots.some((root) => isInside(real, root))) {
+    const psq = (s) => `'${s.replace(/'/g, "''")}'`;
+    const shq = (s) => `'${s.replace(/'/g, `'\\''`)}'`;
+    const copyCmd = process.platform === "win32" ? `Copy-Item -LiteralPath ${psq(given)} -Destination ${psq(stagingDir() + path6.sep)}` : `cp ${shq(given)} ${shq(stagingDir() + "/")}`;
     throw new ContrailError(
-      `${noun} is outside every allowed deploy source root, so Contrail will not deploy it. Allowed: ${roots.join(", ")}. Write the file under ${stagingDir()}, or add its directory to deploy.allowedSourceRoots in config.json (only you can edit that).`,
+      `${noun} is outside every allowed deploy source root, so Contrail will not deploy it. Allowed: ${roots.join(", ")}. The fix is yours, not the human's: copy the file into staging \u2014 e.g. ${copyCmd} \u2014 and retry with the staged path. Never ask the human to add a folder to deploy.allowedSourceRoots for a one-off; that config.json list is for standing folders the human volunteers unprompted, and only they can edit it.`,
       "source_outside_roots"
     );
   }
@@ -35408,7 +35415,7 @@ function registerDeployTools(server, deps) {
               "Full source for file types; for child types, the XML block exactly as retrieve_metadata returns it (e.g. <fields>\u2026</fields>). Exactly one of content or content_file is required."
             ),
             content_file: external_exports.string().optional().describe(
-              "Absolute path to a file holding the source, read byte-exactly instead of content. PREFER THIS for large components. The file must sit under Contrail's staging directory (see the error message for the exact path), under its snapshots directory, or under a directory the human listed in deploy.allowedSourceRoots \u2014 Contrail will not deploy a file from anywhere else. Read at validation time and frozen into the approved package, so editing the file afterwards cannot change what gets deployed."
+              `Absolute path to a file holding the source, read byte-exactly instead of content. PREFER THIS for large components, and author the file under Contrail's staging directory FROM THE START \u2014 ${stagingDir()} \u2014 because the session working folder is NOT a deploy source root. Also accepted: under Contrail's snapshots directory, or under a directory the human already listed in deploy.allowedSourceRoots. Anywhere else is refused \u2014 copy the file into staging and retry; never ask the human to change config for a one-off. Read at validation time and frozen into the approved package, so editing the file afterwards cannot change what gets deployed.`
             )
           })
         ).max(50).optional().describe("Components to create or update."),
@@ -35696,7 +35703,7 @@ function registerDeployTools(server, deps) {
         steps: external_exports.array(
           external_exports.object({
             csv_file: external_exports.string().describe(
-              "Absolute path to this step's CSV. Same containment as content_file: under Contrail's staging directory, snapshots, or a configured deploy.allowedSourceRoots entry. Read and frozen at propose time."
+              `Absolute path to this step's CSV. Same containment as content_file: under Contrail's staging directory (${stagingDir()} \u2014 stage CSVs there from the start; the session working folder is not a source root), snapshots, or a configured deploy.allowedSourceRoots entry. Read and frozen at propose time.`
             ),
             object: external_exports.string().describe("SObject API name, e.g. Account or Invoice__c."),
             operation: external_exports.enum(["insert", "upsert", "delete"]),
