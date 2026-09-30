@@ -25414,9 +25414,9 @@ var GRANT_DEPENDENCIES = {
 var GRANT_DESCRIPTIONS = {
   metadata_read: "Read metadata: retrieve flows, Apex, objects/fields; search, diff, and dependency analysis.",
   metadata_write: "Validate and execute metadata deploys, and activate/deactivate Agentforce agent versions (live behavior). Requires metadata_read. Every change requires explicit human confirmation.",
-  diagnostics_read: "Read debug logs and flow error details, run Apex tests (test transactions always roll back), and set trace flags. May expose incidental record data present in logs.",
+  diagnostics_read: "Read debug logs and flow error details, run Apex tests (test transactions always roll back), poll Agentforce agent evaluation runs and read their results, and set trace flags. May expose incidental record data present in logs.",
   data_read: "Run SOQL queries, read records, and run reports for their data (row-capped).",
-  data_write: "Propose and execute DML and anonymous Apex scripts. Requires data_read. Every write requires explicit human confirmation."
+  data_write: "Propose and execute DML and anonymous Apex scripts, and start Agentforce agent evaluation runs (the agent under test executes its REAL actions \u2014 no rollback). Requires data_read. DML, Apex, and bulk writes each require explicit human confirmation; an evaluation run executes only a definition a human already approved through the deploy ritual."
 };
 function emptyGrantSet() {
   return {
@@ -25483,6 +25483,10 @@ var TOOL_GRANT_MAP = {
   get_report_data: "data_read",
   get_debug_logs: "diagnostics_read",
   run_apex_tests: "diagnostics_read",
+  // S35: the map carries the poll/results grant; STARTING a run additionally
+  // requires data_write via an in-handler check (soql tooling-gate pattern) —
+  // never read this map alone as the whole truth for run_agent_eval.
+  run_agent_eval: "diagnostics_read",
   get_flow_errors: "diagnostics_read",
   validate_deploy: "metadata_write",
   execute_deploy: "metadata_write",
@@ -33473,7 +33477,7 @@ function getUpdateNotice(installedVersion, repo, enabled) {
 }
 
 // src/core/version.ts
-var ENGINE_VERSION = "0.26.0";
+var ENGINE_VERSION = "0.27.0";
 
 // src/tools/register.ts
 var UPDATE_REPO = "RHayes765/contrail-plugin";
@@ -35247,6 +35251,68 @@ function registerDataTools(server, deps) {
     })
   );
   server.registerTool(
+    "run_agent_eval",
+    {
+      title: "Run an Agentforce Testing Center evaluation",
+      description: 'Start and poll an Agentforce Testing Center evaluation run for an AiEvaluationDefinition already deployed to the org. Two-step like run_apex_tests: submit with eval (the definition DeveloperName) for a run_id; call again with run_id to poll and, once complete, read per-case results \u2014 routed topic, executed action sequence, and each expectation outcome. Side effects, honestly: the agent under test executes its REAL actions during the run \u2014 records they create or change are NOT rolled back (unlike Apex test runs), so prefer sandboxes for agents whose actions write. Runs take MINUTES (poll sparingly); orgs allow ~10 concurrent runs. Polling and results need diagnostics_read; STARTING a run additionally requires data_write, because it triggers real agent-action execution \u2014 the definition itself was approved through the deploy ritual, which is why no further confirmation code is needed here. Requires an ACTIVE agent version. (The newer Studio "AI testing" beta API is undocumented \u2014 not available through Contrail.)',
+      inputSchema: {
+        connection: external_exports.string().describe("Connection alias (or id)."),
+        eval: external_exports.string().regex(/^[A-Za-z][A-Za-z0-9_]*$/).optional().describe(
+          "The AiEvaluationDefinition DeveloperName to run. Exactly one of eval, run_id."
+        ),
+        run_id: external_exports.string().regex(/^[a-zA-Z0-9]{15}([a-zA-Z0-9]{3})?$/).optional().describe("Run id from a previous submit \u2014 polls status and, when done, results."),
+        include_details: external_exports.boolean().optional().describe("true: include the org's raw testCases payload alongside the summary.")
+      }
+    },
+    async (args) => guarded(async () => {
+      const conn = requireConnection(args.connection, "run_agent_eval");
+      const client = rest(conn);
+      const modes = [args.eval, args.run_id].filter((v) => v !== void 0);
+      if (modes.length !== 1) return fail("Pass exactly one of eval or run_id.");
+      if (args.run_id !== void 0) {
+        return pollAgentEvalRun(
+          client,
+          config2.salesforce.apiVersion,
+          conn.alias,
+          args.run_id,
+          args.include_details === true
+        );
+      }
+      if (!conn.grants.data_write) {
+        audit.record("grant.refused", {
+          connectionId: conn.id,
+          tool: "run_agent_eval",
+          outcome: "refused",
+          detail: { required: "data_write", reason: "agent_eval_start" }
+        });
+        return fail(
+          `Starting an evaluation run executes the agent's REAL actions, so it requires the "data_write" grant on "${conn.alias}" in addition to diagnostics_read (polling an existing run_id needs only diagnostics_read). Grants are set on the connection management page (manage_connection).`
+        );
+      }
+      const res = await client.request(
+        `/services/data/${config2.salesforce.apiVersion}/einstein/ai-evaluations/runs`,
+        { method: "POST", body: JSON.stringify({ aiEvaluationDefinitionName: args.eval }) }
+      );
+      const submitted = await res.json();
+      if (typeof submitted.runId !== "string" || !SF_ID_RE.test(submitted.runId)) {
+        return fail(
+          `unexpected response from the evaluation runner: ${JSON.stringify(submitted).slice(0, 200)}`
+        );
+      }
+      audit.record("agent_eval.started", {
+        connectionId: conn.id,
+        tool: "run_agent_eval",
+        detail: { definition: args.eval, runId: submitted.runId }
+      });
+      return ok({
+        connection: conn.alias,
+        run_id: submitted.runId,
+        status: typeof submitted.status === "string" ? submitted.status : "NEW",
+        note: "Submitted \u2014 the agent under test will execute its REAL actions (no rollback). Runs take minutes; call run_agent_eval again with this run_id to poll, sparingly."
+      });
+    })
+  );
+  server.registerTool(
     "set_trace_flag",
     {
       title: "Turn on debug logging (trace flag)",
@@ -35604,6 +35670,83 @@ async function pollApexTestRun(client, alias, runId) {
     ...coverageNote ? { coverage_note: coverageNote } : {}
   });
 }
+async function pollAgentEvalRun(client, apiVersion, alias, runId, includeDetails) {
+  const base = `/services/data/${apiVersion}/einstein/ai-evaluations/runs/${runId}`;
+  const statusRes = await client.request(base);
+  const run = await statusRes.json();
+  const status = typeof run.status === "string" ? run.status : "UNKNOWN";
+  if (status === "ERROR") {
+    return ok({
+      connection: alias,
+      run_id: runId,
+      status,
+      error_message: run.errorMessage ?? null,
+      note: "The RUN ITSELF failed \u2014 no case results exist. This is not a test failure."
+    });
+  }
+  if (status !== "COMPLETED" && status !== "TERMINATED") {
+    return ok({
+      connection: alias,
+      run_id: runId,
+      status,
+      start_time: run.startTime ?? null,
+      note: "Still running \u2014 evaluation runs take minutes. Poll again sparingly."
+    });
+  }
+  const resultsRes = await client.request(`${base}/results`);
+  const report = await resultsRes.json();
+  const rawCases = Array.isArray(report.testCases) ? report.testCases : [];
+  const passedOf = (row) => {
+    const raw = row.result ?? row.metricScore;
+    if (raw === "PASS") return true;
+    if (raw === "FAILURE" || raw === "FAILED") return false;
+    return null;
+  };
+  const cases = rawCases.map((tc) => {
+    const expectations = (tc.testResults ?? []).map((row) => ({
+      name: row.name ?? null,
+      passed: passedOf(row),
+      actual_value: row.actualValue ?? null,
+      expected_value: row.expectedValue ?? null,
+      metric_label: row.metricLabel ?? row.metricScore ?? row.result ?? null,
+      score: row.score ?? null,
+      explainability: typeof row.metricExplainability === "string" ? row.metricExplainability.slice(0, 500) : null,
+      status: row.status ?? null,
+      error_code: row.errorCode ?? null,
+      error_message: row.errorMessage ?? null
+    }));
+    return {
+      number: tc.testNumber ?? null,
+      status: tc.status ?? null,
+      utterance: tc.inputs?.utterance ?? null,
+      topic: tc.generatedData?.topic ?? null,
+      actions_sequence: tc.generatedData?.actionsSequence ?? null,
+      outcome: tc.generatedData?.outcome ?? null,
+      expectations
+    };
+  });
+  const totals = { cases: cases.length, passed: 0, failed: 0, other: 0 };
+  for (const c of cases) {
+    const s = String(c.status ?? "").toUpperCase();
+    if (s.startsWith("PASS")) totals.passed += 1;
+    else if (s.startsWith("FAIL")) totals.failed += 1;
+    else totals.other += 1;
+  }
+  const { kept, dropped } = fitToBudget(cases.map((c) => truncateDeep(c)), MAX_RESPONSE_CHARS);
+  return ok({
+    connection: alias,
+    run_id: runId,
+    status,
+    subject_name: report.subjectName ?? null,
+    start_time: run.startTime ?? null,
+    end_time: run.endTime ?? null,
+    totals,
+    cases: kept,
+    ...dropped > 0 ? { cases_truncated: true, cases_note: `Dropped ${dropped} case(s) to fit the response.` } : {},
+    ...status === "TERMINATED" ? { note: "Run TERMINATED before finishing \u2014 partial results at best, NOT a pass." } : {},
+    ...includeDetails ? { raw_test_cases: truncateDeep(rawCases) } : {}
+  });
+}
 
 // src/deploy/sources.ts
 import crypto3 from "node:crypto";
@@ -35752,7 +35895,7 @@ function registerDeployTools(server, deps) {
         components: external_exports.array(
           external_exports.object({
             type: external_exports.string().describe(
-              `ApexClass, ApexTrigger, ApexPage, Flow, CustomObject, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, GlobalValueSet, ConnectedApp, NamedCredential / ExternalCredential / AuthProvider (credential metadata NEVER carries working secrets: per-principal values are entered in Setup after deploy, retrieves return placeholders, and principals need externalCredentialPrincipalAccesses on a permission set), PlatformEventChannel(Member), ManagedEventSubscription, Layout, CustomMetadata (records, dotted Type.Record names), LeadConvertSettings (SINGLETON \u2014 api_name is literally "LeadConvertSettings"; a modify replaces ALL lead field mappings, retrieve-first), Report / Dashboard (folder-qualified "FolderDevName/Name" api_names; deploy the ReportFolder/DashboardFolder component first or in the same package for a new folder), ReportFolder / DashboardFolder (content = the whole <ReportFolder> doc with folderShares \u2014 folder sharing is what makes reports visible), Agentforce types Bot, GenAiPlugin (agent topics \u2014 modifying one on an ACTIVE agent needs the human to deactivate it first), GenAiPromptTemplate (activeVersionIdentifier is org-generated: retrieve-first, never hand-type it), GenAiPromptTemplateActv, AiEvaluationDefinition (Testing Center test definitions), BotTemplate, BotBlock, or child types CustomField / ValidationRule / CustomLabel / ListView / RecordType / BotVersion (dotted MyBot.v1). Bundle types GenAiFunction / GenAiPlannerBundle / AiAuthoringBundle (one component = a directory of files) take a Contrail bundle ENVELOPE as content: JSON {"contrail_bundle":1, "files": {"<relative path>": "<body>", ...}} \u2014 the file set retrieve_metadata's bundle_files listing shows, main file included (e.g. "My_Fn.genAiFunction-meta.xml"). AiAuthoringBundle deploys as a DRAFT STAGE: exactly <Name>.agent (plaintext Agent Script) + <Name>.bundle-meta.xml; nothing compiles and the running agent is unchanged until a human publishes the draft. Agent publish/preview/eval runs stay human; activate/deactivate goes through agent_activation_propose/execute (its own ritual).`
+              `ApexClass, ApexTrigger, ApexPage, Flow, CustomObject, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, GlobalValueSet, ConnectedApp, NamedCredential / ExternalCredential / AuthProvider (credential metadata NEVER carries working secrets: per-principal values are entered in Setup after deploy, retrieves return placeholders, and principals need externalCredentialPrincipalAccesses on a permission set), PlatformEventChannel(Member), ManagedEventSubscription, Layout, CustomMetadata (records, dotted Type.Record names), LeadConvertSettings (SINGLETON \u2014 api_name is literally "LeadConvertSettings"; a modify replaces ALL lead field mappings, retrieve-first), Report / Dashboard (folder-qualified "FolderDevName/Name" api_names; deploy the ReportFolder/DashboardFolder component first or in the same package for a new folder), ReportFolder / DashboardFolder (content = the whole <ReportFolder> doc with folderShares \u2014 folder sharing is what makes reports visible), Agentforce types Bot, GenAiPlugin (agent topics \u2014 modifying one on an ACTIVE agent needs the human to deactivate it first), GenAiPromptTemplate (activeVersionIdentifier is org-generated: retrieve-first, never hand-type it), GenAiPromptTemplateActv, AiEvaluationDefinition (Testing Center test definitions), BotTemplate, BotBlock, or child types CustomField / ValidationRule / CustomLabel / ListView / RecordType / BotVersion (dotted MyBot.v1). Bundle types GenAiFunction / GenAiPlannerBundle / AiAuthoringBundle (one component = a directory of files) take a Contrail bundle ENVELOPE as content: JSON {"contrail_bundle":1, "files": {"<relative path>": "<body>", ...}} \u2014 the file set retrieve_metadata's bundle_files listing shows, main file included (e.g. "My_Fn.genAiFunction-meta.xml"). AiAuthoringBundle deploys as a DRAFT STAGE: exactly <Name>.agent (plaintext Agent Script) + <Name>.bundle-meta.xml; nothing compiles and the running agent is unchanged until a human publishes the draft. Agent publish/preview stay human; activate/deactivate goes through agent_activation_propose/execute (its own ritual), and eval runs through run_agent_eval.`
             ),
             api_name: external_exports.string().describe("Full API name; children dotted (Account.MyField__c)."),
             content: external_exports.string().optional().describe(
