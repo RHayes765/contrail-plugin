@@ -25413,7 +25413,7 @@ var GRANT_DEPENDENCIES = {
 };
 var GRANT_DESCRIPTIONS = {
   metadata_read: "Read metadata: retrieve flows, Apex, objects/fields; search, diff, and dependency analysis.",
-  metadata_write: "Validate and execute metadata deploys. Requires metadata_read. Every deploy requires explicit human confirmation.",
+  metadata_write: "Validate and execute metadata deploys, and activate/deactivate Agentforce agent versions (live behavior). Requires metadata_read. Every change requires explicit human confirmation.",
   diagnostics_read: "Read debug logs and flow error details, run Apex tests (test transactions always roll back), and set trace flags. May expose incidental record data present in logs.",
   data_read: "Run SOQL queries, read records, and run reports for their data (row-capped).",
   data_write: "Propose and execute DML and anonymous Apex scripts. Requires data_read. Every write requires explicit human confirmation."
@@ -25487,6 +25487,9 @@ var TOOL_GRANT_MAP = {
   validate_deploy: "metadata_write",
   execute_deploy: "metadata_write",
   deactivate_flow: "metadata_write",
+  // S34: flipping a live agent version is org configuration, not data.
+  agent_activation_propose: "metadata_write",
+  agent_activation_execute: "metadata_write",
   dml_propose: "data_write",
   dml_execute: "data_write",
   apex_propose: "data_write",
@@ -26246,10 +26249,14 @@ var DEFAULT_CONFIG = {
   salesforce: {
     clientId: "PlatformCLI",
     // S30: v66 is the floor for the Agentforce types (GenAiPlannerBundle
-    // exists only at v64+, AiAuthoringBundle only at v66+; the legacy
-    // GenAiPlanner type died at v64 — probed live). A config.json that pins
-    // an older version keeps it until the human edits it.
-    apiVersion: "v66.0",
+    // exists only at v64+, AiAuthoringBundle only at v66+, and it deploys
+    // draft-stage since S34; the legacy GenAiPlanner type died at v64 —
+    // probed live). S34: default raised to v67 (Summer '26) — probed healthy
+    // for the whole old-model agent family on live orgs 2026-09-30; Winter
+    // '27's v68 (AiAgentDefinition era) was not yet reachable and lands in a
+    // later release. A config.json that pins an older version keeps it until
+    // the human edits it.
+    apiVersion: "v67.0",
     scopes: ["refresh_token", "api", "web"]
   },
   oauth: {
@@ -27197,7 +27204,7 @@ function renderSuccessPage(opts) {
 function renderApprovalPage(opts) {
   const isProd = opts.org.orgType === "production";
   const badgeClass = isProd ? "production" : opts.org.orgType === "sandbox" ? "sandbox" : "other";
-  const title = opts.kind === "deploy" ? "Approve this deploy" : opts.kind === "apex" ? "Approve this anonymous Apex script" : opts.kind === "bulk" ? "Approve this bulk data load" : "Approve this data change";
+  const title = opts.kind === "deploy" ? "Approve this deploy" : opts.kind === "apex" ? "Approve this anonymous Apex script" : opts.kind === "bulk" ? "Approve this bulk data load" : opts.kind === "activation" ? "Approve this agent activation change" : "Approve this data change";
   const row = (c, danger) => `
     <div class="chg${danger ? " danger" : ""}">
       <div class="chg-label">${esc2(c.label)}</div>
@@ -30901,12 +30908,9 @@ var FILE_TYPES = {
   DashboardFolder: { dir: "dashboards", ext: "", metaOnly: true, manifestType: "Dashboard" },
   // S30: Agentforce types (v66+ — see the config apiVersion note). The Bot
   // document carries its versions INLINE (<botVersions>) in metadata format
-  // — BotVersion deploys as a dotted-name child (see CHILD_TYPES). The two
+  // — BotVersion deploys as a dotted-name child (see CHILD_TYPES). The
   // deployable bundle types carry a Contrail bundle ENVELOPE as content
-  // (see FileSpec.envelope). AiAuthoringBundle stays read-only permanently:
-  // a plain Metadata API deploy of Agent Script silently does not apply
-  // reasoning actions (only Salesforce's publish pipeline compiles them) —
-  // a deploy that validates and then lies is not a deploy Contrail offers.
+  // (see FileSpec.envelope).
   Bot: { dir: "bots", ext: ".bot" },
   GenAiFunction: {
     dir: "genAiFunctions",
@@ -30928,7 +30932,23 @@ var FILE_TYPES = {
   },
   AiEvaluationDefinition: { dir: "aiEvaluationDefinitions", ext: ".aiEvaluationDefinition" },
   BotTemplate: { dir: "botTemplates", ext: ".botTemplate" },
-  BotBlock: { dir: "botBlocks", ext: ".botBlock" }
+  BotBlock: { dir: "botBlocks", ext: ".botBlock" },
+  // S34: Agent Script deploys as a DRAFT STAGE (reversing S30's read-only
+  // stance, which guarded against a real lie — pretending a deploy compiles.
+  // It never does, at any API version: a no-<target> deploy lands the script
+  // as a DRAFT in Agentforce Studio, documented and runtime-inert, and the
+  // D1 warning in analyzeChanges says exactly that on every approval page.
+  // Compiling/publishing stays human — Studio or Salesforce's Agentforce DX
+  // publish command; the undocumented publish endpoints are a permanent
+  // non-goal). Exactly two files, live-confirmed: <Name>.agent (PLAINTEXT
+  // Agent Script) + <Name>.bundle-meta.xml.
+  AiAuthoringBundle: {
+    dir: "aiAuthoringBundles",
+    ext: ".agent",
+    envelope: true,
+    envelopeMainSuffix: ".agent",
+    requiredSuffixes: [".bundle-meta.xml"]
+  }
 };
 var XMLNS_META = "http://soap.sforce.com/2006/04/metadata";
 function flowDeactivationXml() {
@@ -30990,7 +31010,7 @@ var FOLDER_SEGMENT_RE = /^[A-Za-z0-9_$]+$/;
 var BUNDLE_REL_SEGMENT_RE = /^[A-Za-z0-9_$][A-Za-z0-9_$.\-]*$/;
 var BUNDLE_MAX_FILES = 100;
 var BUNDLE_MAX_DEPTH = 8;
-function parseBundleEnvelope(type, apiName, content, mainFile) {
+function parseBundleEnvelope(type, apiName, content, mainFile, alsoRequired = []) {
   let parsed;
   try {
     parsed = JSON.parse(content);
@@ -31044,6 +31064,14 @@ function parseBundleEnvelope(type, apiName, content, mainFile) {
       "bad_component"
     );
   }
+  for (const name of alsoRequired) {
+    if (!(name in out)) {
+      throw new ContrailError(
+        `${type} ${apiName}: envelope is missing required file "${name}" \u2014 this bundle type requires ${[mainFile, ...alsoRequired].join(" + ")}.`,
+        "bad_component"
+      );
+    }
+  }
   return out;
 }
 var XMLNS = "http://soap.sforce.com/2006/04/metadata";
@@ -31061,7 +31089,8 @@ function buildDeployZip(components, deletions, apiVersionNumber, metaXmlLookup) 
     const fileSpec = FILE_TYPES[c.type];
     if (fileSpec?.envelope) {
       const mainFile = `${c.api_name}${fileSpec.envelopeMainSuffix ?? fileSpec.ext}`;
-      const bundleFiles = parseBundleEnvelope(c.type, c.api_name, c.content, mainFile);
+      const alsoRequired = (fileSpec.requiredSuffixes ?? []).map((s) => `${c.api_name}${s}`);
+      const bundleFiles = parseBundleEnvelope(c.type, c.api_name, c.content, mainFile, alsoRequired);
       const dirPrefix = `${fileSpec.dir}/${fileSafeSegment(c.api_name)}/`;
       for (const [rel, body] of Object.entries(bundleFiles)) {
         files.set(`${dirPrefix}${rel}`, strToU8(body));
@@ -31226,7 +31255,13 @@ function analyzeChanges(db, store, conn, components, deletions) {
     const envSpec = FILE_TYPES[c.type];
     if (envSpec?.envelope) {
       const mainFile = `${c.api_name}${envSpec.envelopeMainSuffix ?? envSpec.ext}`;
-      const proposed = parseBundleEnvelope(c.type, c.api_name, c.content, mainFile);
+      const proposed = parseBundleEnvelope(
+        c.type,
+        c.api_name,
+        c.content,
+        mainFile,
+        (envSpec.requiredSuffixes ?? []).map((s) => `${c.api_name}${s}`)
+      );
       const existingBundle = db.getArtifact(conn.id, c.type, c.api_name);
       const warnings2 = [];
       let change2;
@@ -31254,8 +31289,26 @@ function analyzeChanges(db, store, conn, components, deletions) {
       }
       if (c.type === "GenAiPlannerBundle" && change2 === "modify") {
         warnings2.push(
-          `AGENT MUST BE DEACTIVATED FIRST \u2014 deploying GenAiPlannerBundle changes for an ACTIVE agent version fails, and version-suffixed bundles are PUBLISHED SNAPSHOTS: a modified deploy of one fails org-side even deactivated (unmodified re-deploys "succeed" as no-ops). Deactivate in Agent Builder, deploy, then reactivate (Contrail cannot do those steps; verify with BotVersion.Status). On Agent-Script agents the next publish overwrites hand-edits.`
+          `AGENT MUST BE DEACTIVATED FIRST \u2014 deploying GenAiPlannerBundle changes for an ACTIVE agent version fails, and version-suffixed bundles are PUBLISHED SNAPSHOTS: a modified deploy of one fails org-side even deactivated (unmodified re-deploys "succeed" as no-ops). Deactivate first (agent_activation_propose/execute, or Agent Builder), deploy, then reactivate; verify with BotVersion.Status. On Agent-Script agents the next publish overwrites hand-edits.`
         );
+      }
+      if (c.type === "AiAuthoringBundle") {
+        warnings2.push(
+          `DRAFT STAGE ONLY \u2014 this deploy stages Agent Script as a draft in Agentforce Studio. Nothing is compiled and the RUNNING AGENT IS UNCHANGED: topics, actions, and behavior go live only when a human publishes the draft (Agentforce Studio, or Salesforce's Agentforce DX publish command). A green deploy here is a staged draft, not a shipped agent.`
+        );
+        const target = proposed[`${c.api_name}.bundle-meta.xml`]?.match(
+          /<target>\s*([^<]+?)\s*<\/target>/
+        )?.[1];
+        if (target) {
+          warnings2.push(
+            `TARGET LINK, NOT A COMPILE \u2014 <target> pins this bundle to runtime version "${target}"; the deploy FAILS unless that Bot/BotVersion already exists in the org or ships in this same package. Linking never compiles or publishes anything.`
+          );
+        }
+        if (/_\d+$/.test(c.api_name)) {
+          warnings2.push(
+            `PUBLISHED-SNAPSHOT NAME \u2014 "${c.api_name}" is a version-suffixed published snapshot; the platform owns those. The editable draft is the NAKED bundle name \u2014 deploy a suffixed name only when promoting retrieved bytes.`
+          );
+        }
       }
       changes.push({ type: c.type, api_name: c.api_name, change: change2, warnings: warnings2, ...sourceOf(c) });
       continue;
@@ -31319,7 +31372,7 @@ function analyzeChanges(db, store, conn, components, deletions) {
     }
     if (c.type === "GenAiPlugin" && change === "modify") {
       warnings.push(
-        `AGENT MUST BE DEACTIVATED FIRST \u2014 deploying ${c.type} changes for an ACTIVE agent version fails. Deactivate the agent in Agent Builder, deploy, then reactivate (Contrail cannot do those steps; verify with BotVersion.Status).`
+        `AGENT MUST BE DEACTIVATED FIRST \u2014 deploying ${c.type} changes for an ACTIVE agent version fails. Deactivate first (agent_activation_propose/execute, or Agent Builder), deploy, then reactivate \u2014 each flip its own approval; verify with BotVersion.Status.`
       );
     }
     if (c.type === "ExternalCredential" && change === "add") {
@@ -32306,6 +32359,230 @@ var DeployEngine = class {
     });
     return result;
   }
+  // ── agent activation (S34) ─────────────────────────────────────────────
+  /**
+   * Stage an agent activation change behind the ritual (kind 'activation').
+   * The documented Connect REST resource (/connect/bot-versions/{id}/
+   * activation, v50+) flips a PUBLISHED BotVersion Active/Inactive — live
+   * behavior, immediately, so it rides the same two-step approval as every
+   * write. Resolution happens AT PROPOSE TIME: the BotVersion Id and its
+   * current status are frozen into the payload, and execute re-GETs after
+   * the POST so the result reports what the org confirms, never what was
+   * requested. Compiling/publishing Agent Script remains out of scope — this
+   * flips existing published versions only, and the org's own messages[]
+   * explain refusals (e.g. an unpublished version) verbatim.
+   */
+  async proposeActivation(conn, input) {
+    const rest = new RestClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
+    const esc3 = (s) => s.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    const rows = await rest.query(
+      `SELECT Id, DeveloperName, Status FROM BotVersion WHERE BotDefinition.DeveloperName = '${esc3(input.agent)}' ORDER BY DeveloperName`
+    );
+    if (rows.length === 0) {
+      throw new ContrailError(
+        `No agent named "${input.agent}" in "${conn.alias}" \u2014 enumerate agents with soql_query on BotDefinition (SELECT DeveloperName FROM BotDefinition) or list_metadata type Bot.`,
+        "not_found"
+      );
+    }
+    const version2 = rows.find((r) => r.DeveloperName === input.version);
+    if (!version2) {
+      throw new ContrailError(
+        `Agent "${input.agent}" has no version "${input.version}". Its versions: ` + rows.map((r) => `${r.DeveloperName} (${r.Status})`).join(", ") + ".",
+        "not_found"
+      );
+    }
+    if (version2.Status === input.status) {
+      return {
+        connection: conn.alias,
+        agent: input.agent,
+        version: input.version,
+        status: version2.Status,
+        proposed: false,
+        note: `BotVersion ${input.version} of ${input.agent} is already ${version2.Status} \u2014 nothing to approve.`
+      };
+    }
+    const superseded = this.db.supersedePendingRequests(conn.id, "activation");
+    if (superseded > 0) {
+      this.audit.record("activation.superseded", {
+        connectionId: conn.id,
+        tool: "agent_activation_propose",
+        detail: { count: superseded }
+      });
+    }
+    const code = generateConfirmationCode();
+    const expiresAt = new Date(Date.now() + this.config.deploy.codeTtlMs).toISOString();
+    const verb = input.status === "Active" ? "ACTIVATE" : "DEACTIVATE";
+    const label = `${verb} ${input.agent} ${input.version} (currently ${version2.Status})`;
+    const request = this.db.insertDeployRequest({
+      connectionId: conn.id,
+      kind: "activation",
+      confirmationCode: code,
+      expiresAt,
+      payloadJson: JSON.stringify({
+        activation: true,
+        version: 1,
+        bot_developer_name: input.agent,
+        bot_version_developer_name: input.version,
+        bot_version_id: version2.Id,
+        from_status: version2.Status,
+        to_status: input.status
+      }),
+      summaryJson: JSON.stringify({ rows: [{ label, warnings: [] }] })
+    });
+    const approval = await this.approvals.present(
+      renderApprovalPage({
+        kind: "activation",
+        code,
+        expiresAt,
+        org: {
+          alias: conn.alias,
+          orgName: conn.orgName,
+          orgType: conn.orgType,
+          instanceUrl: conn.instanceUrl
+        },
+        changes: [
+          {
+            label,
+            warnings: [],
+            detail: `BotVersion ${version2.Id}
+status ${version2.Status} \u2192 ${input.status}
+POST /connect/bot-versions/${version2.Id}/activation`
+          }
+        ],
+        destructive: [],
+        results: [
+          {
+            label: "Validation",
+            value: "none \u2014 the org accepts or refuses the change only when you approve"
+          }
+        ],
+        blast: [],
+        warnings: [
+          "LIVE AGENT BEHAVIOR \u2014 this changes what users experience IMMEDIATELY. Deactivating takes the agent version offline on every channel it serves; activating puts this version in front of users. This is not a metadata deploy: there is no draft in between."
+        ]
+      }),
+      this.requestStatusCheck(request.id),
+      this.config.deploy.codeTtlMs + 6e4
+    );
+    this.audit.record("activation.proposed", {
+      connectionId: conn.id,
+      tool: "agent_activation_propose",
+      detail: {
+        requestId: request.id,
+        agent: input.agent,
+        version: input.version,
+        from: version2.Status,
+        to: input.status
+      }
+    });
+    return {
+      connection: conn.alias,
+      org_type: conn.orgType,
+      request_id: request.id,
+      agent: input.agent,
+      version: input.version,
+      bot_version_id: version2.Id,
+      current_status: version2.Status,
+      requested_status: input.status,
+      proposed: true,
+      expires_at: expiresAt,
+      approval_page: approvalForAgent("activation", approval)
+    };
+  }
+  async executeActivation(conn, code) {
+    const claim = this.claimCode(conn, "activation", code, "agent_activation_execute");
+    if (claim.kind === "terminal") return claim.result;
+    if (claim.kind === "running") {
+      return {
+        connection: conn.alias,
+        executed: false,
+        note: "This activation change is already being executed by a concurrent call \u2014 not re-run."
+      };
+    }
+    const request = claim.request;
+    const payload = JSON.parse(request.payloadJson ?? "{}");
+    if (payload.activation !== true || !payload.bot_version_id || !payload.to_status) {
+      const result2 = {
+        connection: conn.alias,
+        executed: false,
+        error_message: "The approved activation change is missing from the request payload.",
+        note: "Propose again for a fresh code."
+      };
+      this.db.finishDeployRequest(request.id, "execution_failed", JSON.stringify(result2));
+      this.audit.record("activation.execution_failed", {
+        connectionId: conn.id,
+        tool: "agent_activation_execute",
+        outcome: "error",
+        detail: { requestId: request.id, reason: "payload_missing" }
+      });
+      return result2;
+    }
+    const rest = new RestClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
+    const resource = `/services/data/${this.config.salesforce.apiVersion}/connect/bot-versions/${payload.bot_version_id}/activation`;
+    let posted;
+    let confirmed = {};
+    try {
+      const res = await rest.request(resource, {
+        method: "POST",
+        body: JSON.stringify({ status: payload.to_status })
+      });
+      posted = await res.json();
+      const check2 = await rest.request(resource);
+      confirmed = await check2.json();
+    } catch (err2) {
+      const message = String(err2 instanceof Error ? err2.message : err2);
+      const result2 = {
+        connection: conn.alias,
+        executed: false,
+        agent: payload.bot_developer_name,
+        version: payload.bot_version_developer_name,
+        error_message: message,
+        note: "The request did not complete cleanly \u2014 the change may or may not have applied. The confirmation code is spent; check BotVersion.Status (soql_query) before proposing again."
+      };
+      this.db.finishDeployRequest(request.id, "execution_failed", JSON.stringify(result2));
+      this.audit.record("activation.execution_failed", {
+        connectionId: conn.id,
+        tool: "agent_activation_execute",
+        outcome: "error",
+        detail: { requestId: request.id, error: message }
+      });
+      return result2;
+    }
+    const confirmedStatus = confirmed.isActivated === true ? "Active" : confirmed.isActivated === false ? "Inactive" : "unconfirmed";
+    const executed = confirmedStatus === payload.to_status;
+    const result = {
+      connection: conn.alias,
+      executed,
+      agent: payload.bot_developer_name,
+      version: payload.bot_version_developer_name,
+      bot_version_id: payload.bot_version_id,
+      requested_status: payload.to_status,
+      confirmed_status: confirmedStatus,
+      is_activated: confirmed.isActivated === true,
+      // The platform explains refusals (e.g. an unpublished version) here.
+      messages: posted.messages ?? [],
+      note: executed ? `${payload.bot_developer_name} ${payload.bot_version_developer_name} is now ${confirmedStatus}. This changed live behavior \u2014 no deploy or refresh follows.` : `The org did not confirm the change: requested ${payload.to_status}, org reports ${confirmedStatus}. Read messages[] \u2014 the code is spent either way.`
+    };
+    this.db.finishDeployRequest(
+      request.id,
+      executed ? "executed" : "execution_failed",
+      JSON.stringify(result)
+    );
+    if (executed) this.notifyExecuted(request, result);
+    this.audit.record(executed ? "activation.executed" : "activation.execution_failed", {
+      connectionId: conn.id,
+      tool: "agent_activation_execute",
+      outcome: executed ? "success" : "error",
+      detail: {
+        requestId: request.id,
+        agent: payload.bot_developer_name,
+        version: payload.bot_version_developer_name,
+        to: payload.to_status,
+        confirmed: confirmedStatus
+      }
+    });
+    return result;
+  }
   // ── bulk data loads ────────────────────────────────────────────────────
   /**
    * Stage a bulk load plan behind the ritual (kind 'bulk'): scan and FREEZE
@@ -33087,7 +33364,7 @@ function approvalForAgent(kind, approval) {
   };
 }
 function kindNoun(kind) {
-  return kind === "deploy" ? "deploy" : kind === "apex" ? "Apex script" : kind === "bulk" ? "bulk data load" : "change";
+  return kind === "deploy" ? "deploy" : kind === "apex" ? "Apex script" : kind === "bulk" ? "bulk data load" : kind === "activation" ? "agent activation change" : "change";
 }
 function safeUnlink(filePath) {
   try {
@@ -33196,7 +33473,7 @@ function getUpdateNotice(installedVersion, repo, enabled) {
 }
 
 // src/core/version.ts
-var ENGINE_VERSION = "0.25.0";
+var ENGINE_VERSION = "0.26.0";
 
 // src/tools/register.ts
 var UPDATE_REPO = "RHayes765/contrail-plugin";
@@ -35475,7 +35752,7 @@ function registerDeployTools(server, deps) {
         components: external_exports.array(
           external_exports.object({
             type: external_exports.string().describe(
-              `ApexClass, ApexTrigger, ApexPage, Flow, CustomObject, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, GlobalValueSet, ConnectedApp, NamedCredential / ExternalCredential / AuthProvider (credential metadata NEVER carries working secrets: per-principal values are entered in Setup after deploy, retrieves return placeholders, and principals need externalCredentialPrincipalAccesses on a permission set), PlatformEventChannel(Member), ManagedEventSubscription, Layout, CustomMetadata (records, dotted Type.Record names), LeadConvertSettings (SINGLETON \u2014 api_name is literally "LeadConvertSettings"; a modify replaces ALL lead field mappings, retrieve-first), Report / Dashboard (folder-qualified "FolderDevName/Name" api_names; deploy the ReportFolder/DashboardFolder component first or in the same package for a new folder), ReportFolder / DashboardFolder (content = the whole <ReportFolder> doc with folderShares \u2014 folder sharing is what makes reports visible), Agentforce types Bot, GenAiPlugin (agent topics \u2014 modifying one on an ACTIVE agent needs the human to deactivate it first), GenAiPromptTemplate (activeVersionIdentifier is org-generated: retrieve-first, never hand-type it), GenAiPromptTemplateActv, AiEvaluationDefinition (Testing Center test definitions), BotTemplate, BotBlock, or child types CustomField / ValidationRule / CustomLabel / ListView / RecordType / BotVersion (dotted MyBot.v1). Bundle types GenAiFunction / GenAiPlannerBundle (one component = a directory of files) take a Contrail bundle ENVELOPE as content: JSON {"contrail_bundle":1, "files": {"<relative path>": "<body>", ...}} \u2014 the file set retrieve_metadata's bundle_files listing shows, main file included (e.g. "My_Fn.genAiFunction-meta.xml"). NOT deployable (read/diff only): AiAuthoringBundle \u2014 a Metadata API deploy of Agent Script silently skips reasoning actions; and agent publish/activate/deactivate are org-side human steps Contrail cannot perform.`
+              `ApexClass, ApexTrigger, ApexPage, Flow, CustomObject, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, GlobalValueSet, ConnectedApp, NamedCredential / ExternalCredential / AuthProvider (credential metadata NEVER carries working secrets: per-principal values are entered in Setup after deploy, retrieves return placeholders, and principals need externalCredentialPrincipalAccesses on a permission set), PlatformEventChannel(Member), ManagedEventSubscription, Layout, CustomMetadata (records, dotted Type.Record names), LeadConvertSettings (SINGLETON \u2014 api_name is literally "LeadConvertSettings"; a modify replaces ALL lead field mappings, retrieve-first), Report / Dashboard (folder-qualified "FolderDevName/Name" api_names; deploy the ReportFolder/DashboardFolder component first or in the same package for a new folder), ReportFolder / DashboardFolder (content = the whole <ReportFolder> doc with folderShares \u2014 folder sharing is what makes reports visible), Agentforce types Bot, GenAiPlugin (agent topics \u2014 modifying one on an ACTIVE agent needs the human to deactivate it first), GenAiPromptTemplate (activeVersionIdentifier is org-generated: retrieve-first, never hand-type it), GenAiPromptTemplateActv, AiEvaluationDefinition (Testing Center test definitions), BotTemplate, BotBlock, or child types CustomField / ValidationRule / CustomLabel / ListView / RecordType / BotVersion (dotted MyBot.v1). Bundle types GenAiFunction / GenAiPlannerBundle / AiAuthoringBundle (one component = a directory of files) take a Contrail bundle ENVELOPE as content: JSON {"contrail_bundle":1, "files": {"<relative path>": "<body>", ...}} \u2014 the file set retrieve_metadata's bundle_files listing shows, main file included (e.g. "My_Fn.genAiFunction-meta.xml"). AiAuthoringBundle deploys as a DRAFT STAGE: exactly <Name>.agent (plaintext Agent Script) + <Name>.bundle-meta.xml; nothing compiles and the running agent is unchanged until a human publishes the draft. Agent publish/preview/eval runs stay human; activate/deactivate goes through agent_activation_propose/execute (its own ritual).`
             ),
             api_name: external_exports.string().describe("Full API name; children dotted (Account.MyField__c)."),
             content: external_exports.string().optional().describe(
@@ -35757,6 +36034,48 @@ function registerDeployTools(server, deps) {
     async (args) => guarded(async () => {
       const conn = requireConnection(args.connection, "apex_execute");
       const result = await deploys.executeApex(conn, args.confirmation_code);
+      return ok(result);
+    })
+  );
+  server.registerTool(
+    "agent_activation_propose",
+    {
+      title: "Propose an agent activation change (two-step)",
+      description: "Stage activating or deactivating a PUBLISHED Agentforce agent version behind the approval ritual. This changes LIVE behavior immediately on execute \u2014 no draft in between \u2014 so nothing happens until the human reads the confirmation code from the approval page and you pass it to agent_activation_execute. The BotVersion is resolved and its current status frozen at propose; a version already in the requested state is refused without burning an approval. Only published versions can flip (the org refuses drafts, verbatim in messages[]). Publishing/compiling Agent Script is NOT this tool \u2014 that stays human.",
+      inputSchema: {
+        connection: external_exports.string().describe("Target connection alias (or id) \u2014 name it unmissably to the human."),
+        agent: external_exports.string().describe("The agent's Bot DeveloperName (soql_query BotDefinition to enumerate)."),
+        version: external_exports.string().describe("The BotVersion DeveloperName, e.g. 'v2'."),
+        status: external_exports.enum(["Active", "Inactive"]).describe("The state to put the version in.")
+      }
+    },
+    async (args) => guarded(async () => {
+      const conn = requireConnection(args.connection, "agent_activation_propose");
+      const preview = await deploys.proposeActivation(conn, {
+        agent: args.agent,
+        version: args.version,
+        status: args.status
+      });
+      if (preview.proposed !== true) return ok(preview);
+      return ok(
+        preview,
+        `Proposed \u2014 nothing changed yet. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`
+      );
+    })
+  );
+  server.registerTool(
+    "agent_activation_execute",
+    {
+      title: "Execute a proposed agent activation change",
+      description: "Apply the agent activation change the given confirmation code approves \u2014 one documented Connect REST call, then a re-read so the result reports what the org CONFIRMS. The code exists only on the human's approval page \u2014 only pass a code the human just gave you. Single-use, ~1h expiry, invalidated by a new agent_activation_propose on the same connection. Changes live agent behavior immediately on success.",
+      inputSchema: {
+        connection: external_exports.string().describe("Target connection alias (or id)."),
+        confirmation_code: external_exports.string().describe("The code the human read from the approval page (format XXXX-XXXX).")
+      }
+    },
+    async (args) => guarded(async () => {
+      const conn = requireConnection(args.connection, "agent_activation_execute");
+      const result = await deploys.executeActivation(conn, args.confirmation_code);
       return ok(result);
     })
   );
