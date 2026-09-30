@@ -171,6 +171,24 @@ every eval deploy summary: "deployed to **dev-org**; run it with
   judge's reasoning — quote it when explaining a failure. (The org's
   pass-field schema varies by release — the tool tolerates both; the raw
   rows are available via `include_details`.)
+- **Live-confirmed facts (personal-dev run, 2026-10-01, ~2 min for 2
+  cases):** the org emitted the `result: PASS|FAILURE` + numeric `score`
+  schema (no `metricScore` field); it RENAMES expectations in results —
+  `topic_sequence_match` reports as `topic_assertion`,
+  `action_sequence_match` as `actions_assertion` (match on either when
+  cross-referencing); **topic names are the CLEAN base names**
+  (`Case_Categorization_Summarization`, `off_topic`), not the ID-suffixed
+  local developer names the Tooling API lists; the initial submit status is
+  `PENDING`; judge metrics (coherence/completeness) DO emit PASS/FAILURE
+  verdicts with 0–4-ish scores; `actionsSequence` arrives as a string
+  literal like `['Action_Name']`; case-level `status` is `COMPLETED`
+  (completion, not a verdict) — judge each case by its expectations, and
+  read the tool's `totals.other` accordingly.
+- **Deploy-availability gate (live-confirmed 2026-10-01):** an org without
+  Testing Center provisioned refuses the AiEvaluationDefinition deploy with
+  "Not available for deploy for this organization" — a provisioning gap,
+  not a grammar error; the human enables Testing Center in that org's Setup
+  (one fresh Agentforce DE showed the gate while an older DE deployed fine).
 - **An ERROR run is the RUN failing** (commonly: no active agent version) —
   no case results exist; it is not a test failure. TERMINATED is partial at
   best, never a pass.
