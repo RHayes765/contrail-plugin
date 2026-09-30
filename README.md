@@ -12,7 +12,20 @@ install, see [Getting Started](Getting%20Started.md).
 P0.1–P0.6 Phase 0 surface. `npm run mcpb` builds `contrail-<version>.mcpb`, a
 single MCP Bundle that installs into Claude Desktop via Settings → Extensions
 (no Node install, no npm, no config editing on the target machine) and covers
-Windows x64/ARM and macOS Intel/Apple Silicon from one file. 37 tools.
+Windows x64/ARM and macOS Intel/Apple Silicon from one file. 38 tools.
+
+**The agent testing loop (S35).** The full test cycle runs in-conversation:
+author an `AiEvaluationDefinition` (since S30), deploy it through the
+ritual, then **`run_agent_eval`** executes it in Testing Center via the
+documented Connect API and reads back per-case results — routed topic,
+executed action sequence, every expectation outcome (with the judge's
+explanation quoted on failures). Honesty first: the agent under test
+executes its **real actions with no rollback** — the tool, the grant page,
+and the skills all say so, starting a run requires `data_write` on top of
+`diagnostics_read`, and subagents never hold the tool. One-off "just ask
+the agent something" smoke tests ride the existing anonymous-Apex ritual
+via the documented `generateAiAgentResponse` action — reply read from the
+debug log, no new machinery, no undocumented endpoints.
 
 **Agent Script lifecycle (S34).** The honest slice of the agent lifecycle a
 tool can own: `AiAuthoringBundle` (Agent Script source) now deploys as a
@@ -56,10 +69,11 @@ since S34 — see above). Contrail is the
 first tool in this ecosystem to author the runtime GenAI XML directly — with
 the honesty to match: the approval page warns about the deactivate-first
 gate, org-generated prompt-template version tokens, and Bot version deletes,
-and the **lifecycle boundary** is stated everywhere it matters (publish,
-preview, and eval runs are human steps in Agentforce Studio / Agent Builder;
-activate/deactivate moved behind Contrail's own ritual in S34 — and Contrail
-still verifies from outside via `BotVersion.Status`). Requires API v66+
+and the **lifecycle boundary** is stated everywhere it matters (publish and
+preview are human steps in Agentforce Studio / Agent Builder;
+activate/deactivate moved behind Contrail's own ritual in S34, eval runs
+behind `run_agent_eval` in S35 — and Contrail still verifies from outside
+via `BotVersion.Status`). Requires API v66+
 (default is v67 since S34) and Agentforce licensing; unlicensed orgs degrade
 per-type with a warning, never a broken refresh. `soql_query` gained `tooling: true` (metadata_read-gated) for the
 Tooling-only agent-graph sObjects. Four new skills:

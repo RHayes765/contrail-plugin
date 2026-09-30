@@ -143,6 +143,16 @@ rather than inventing what the skill would have said.
   exists. The result's `confirmed_status` is the org's answer (the tool
   re-reads after the write); relay `messages[]` verbatim when the org
   refuses. Publishing/compiling agents stays human, always.
+- **Agent evaluation runs execute REAL actions and do not roll back.**
+  `run_agent_eval` runs a deployed AiEvaluationDefinition: unlike
+  `run_apex_tests` (whose test transactions always roll back), the agent
+  under test executes its actual actions — records they create or change
+  stay. No confirmation code, deliberately: the definition is the run's only
+  input and it already passed the deploy ritual — never treat `run_agent_eval`
+  as a side-effect channel. Polling needs `diagnostics_read`; starting a run
+  needs `data_write` too. Runs take minutes (~10 concurrent max) — poll
+  sparingly, prefer sandboxes for agents whose actions write, and relay org
+  refusals verbatim.
 - **Anonymous Apex rides the same ritual and commits.** `apex_propose` stages a
   script (max 32k chars); the approval page shows it **verbatim** with the
   warning that it runs with the human's permissions — so present the script in

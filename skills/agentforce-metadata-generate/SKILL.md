@@ -67,8 +67,7 @@ ritual. These operations remain **human-only**, handed off every time:
 | Operation | Where the human does it |
 |---|---|
 | Publish/compile an Agent Script agent | Agentforce Studio, or Salesforce's Agentforce DX publish command |
-| Preview a conversation | Agent Builder preview panel |
-| Run evaluations | Testing Center |
+| Preview a conversation | Agent Builder preview panel (one-shot utterance checks: the `generateAiAgentResponse` anonymous-Apex pattern — agentforce-eval-generate §7) |
 | Create a new draft version | Agentforce Studio, on a published version |
 
 **Activate / deactivate moved to Contrail**: `agent_activation_propose` →
@@ -77,6 +76,12 @@ one documented Connect REST call on a PUBLISHED version, each flip its own
 ritual (the page warns it changes live behavior immediately). The org refuses
 drafts and explains refusals in the result's `messages[]` — relay them
 verbatim.
+
+**Run evaluations moved to Contrail too** (S35): `run_agent_eval` executes a
+deployed AiEvaluationDefinition and fetches per-case results — the agent
+under test executes its REAL actions (no rollback), so sandbox-first;
+authoring, running, and reading results are agentforce-eval-generate's
+territory.
 
 What Contrail verifies from outside: activation state via `soql_query`
 — `SELECT Id, DeveloperName, Status FROM BotVersion WHERE

@@ -164,9 +164,10 @@ directory** and give `validate_deploy` the path:
   **active** agent version fail: the human deactivates in Agent Builder
   first, then reactivates after (check state with `soql_query` on
   `BotVersion.Status`; activate/deactivate goes through
-  `agent_activation_propose/execute`, each flip its own ritual — publish,
-  preview, and eval runs stay human: see `agentforce-metadata-generate` for
-  the full lifecycle boundary). `GenAiPromptTemplate.activeVersionIdentifier`
+  `agent_activation_propose/execute`, each flip its own ritual; eval runs go
+  through `run_agent_eval` (REAL actions execute — see
+  agentforce-eval-generate) — publish and preview stay human: see
+  `agentforce-metadata-generate` for the full lifecycle boundary). `GenAiPromptTemplate.activeVersionIdentifier`
   is an org-generated token — retrieve-first, never hand-typed.
   Version-suffixed planner bundles (`Agent_v3`) are published snapshots:
   modified deploys fail, unmodified ones "succeed" as misleading no-ops.

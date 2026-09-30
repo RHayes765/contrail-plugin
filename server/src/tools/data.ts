@@ -664,6 +664,112 @@ export function registerDataTools(server: McpServer, deps: ToolDeps): void {
   );
 
   server.registerTool(
+    'run_agent_eval',
+    {
+      title: 'Run an Agentforce Testing Center evaluation',
+      description:
+        'Start and poll an Agentforce Testing Center evaluation run for an ' +
+        'AiEvaluationDefinition already deployed to the org. Two-step like run_apex_tests: ' +
+        'submit with eval (the definition DeveloperName) for a run_id; call again with ' +
+        'run_id to poll and, once complete, read per-case results — routed topic, executed ' +
+        'action sequence, and each expectation outcome. Side effects, honestly: the agent ' +
+        'under test executes its REAL actions during the run — records they create or ' +
+        'change are NOT rolled back (unlike Apex test runs), so prefer sandboxes for ' +
+        'agents whose actions write. Runs take MINUTES (poll sparingly); orgs allow ~10 ' +
+        'concurrent runs. Polling and results need diagnostics_read; STARTING a run ' +
+        'additionally requires data_write, because it triggers real agent-action ' +
+        'execution — the definition itself was approved through the deploy ritual, which ' +
+        'is why no further confirmation code is needed here. Requires an ACTIVE agent ' +
+        'version. (The newer Studio "AI testing" beta API is undocumented — not available ' +
+        'through Contrail.)',
+      inputSchema: {
+        connection: z.string().describe('Connection alias (or id).'),
+        eval: z
+          .string()
+          .regex(/^[A-Za-z][A-Za-z0-9_]*$/)
+          .optional()
+          .describe(
+            'The AiEvaluationDefinition DeveloperName to run. Exactly one of eval, run_id.',
+          ),
+        run_id: z
+          .string()
+          .regex(/^[a-zA-Z0-9]{15}([a-zA-Z0-9]{3})?$/)
+          .optional()
+          .describe('Run id from a previous submit — polls status and, when done, results.'),
+        include_details: z
+          .boolean()
+          .optional()
+          .describe('true: include the org\'s raw testCases payload alongside the summary.'),
+      },
+    },
+    async (args: {
+      connection: string;
+      eval?: string;
+      run_id?: string;
+      include_details?: boolean;
+    }) =>
+      guarded(async () => {
+        const conn = requireConnection(args.connection, 'run_agent_eval');
+        const client = rest(conn);
+        const modes = [args.eval, args.run_id].filter((v) => v !== undefined);
+        if (modes.length !== 1) return fail('Pass exactly one of eval or run_id.');
+
+        if (args.run_id !== undefined) {
+          return pollAgentEvalRun(
+            client,
+            config.salesforce.apiVersion,
+            conn.alias,
+            args.run_id,
+            args.include_details === true,
+          );
+        }
+
+        // S35: STARTING a run triggers real agent-action execution (the one
+        // data_write-class act without a confirmation code — the ritual
+        // already approved the definition, which is the run's only input).
+        if (!conn.grants.data_write) {
+          audit.record('grant.refused', {
+            connectionId: conn.id,
+            tool: 'run_agent_eval',
+            outcome: 'refused',
+            detail: { required: 'data_write', reason: 'agent_eval_start' },
+          });
+          return fail(
+            `Starting an evaluation run executes the agent's REAL actions, so it requires ` +
+              `the "data_write" grant on "${conn.alias}" in addition to diagnostics_read ` +
+              `(polling an existing run_id needs only diagnostics_read). Grants are set on ` +
+              `the connection management page (manage_connection).`,
+          );
+        }
+
+        const res = await client.request(
+          `/services/data/${config.salesforce.apiVersion}/einstein/ai-evaluations/runs`,
+          { method: 'POST', body: JSON.stringify({ aiEvaluationDefinitionName: args.eval }) },
+        );
+        const submitted = (await res.json()) as { runId?: unknown; status?: unknown };
+        if (typeof submitted.runId !== 'string' || !SF_ID_RE.test(submitted.runId)) {
+          return fail(
+            `unexpected response from the evaluation runner: ` +
+              `${JSON.stringify(submitted).slice(0, 200)}`,
+          );
+        }
+        audit.record('agent_eval.started', {
+          connectionId: conn.id,
+          tool: 'run_agent_eval',
+          detail: { definition: args.eval, runId: submitted.runId },
+        });
+        return ok({
+          connection: conn.alias,
+          run_id: submitted.runId,
+          status: typeof submitted.status === 'string' ? submitted.status : 'NEW',
+          note:
+            'Submitted — the agent under test will execute its REAL actions (no rollback). ' +
+            'Runs take minutes; call run_agent_eval again with this run_id to poll, sparingly.',
+        });
+      }),
+  );
+
+  server.registerTool(
     'set_trace_flag',
     {
       title: 'Turn on debug logging (trace flag)',
@@ -1184,5 +1290,125 @@ async function pollApexTestRun(client: RestClient, alias: string, runId: string)
       : {}),
     ...(coverage ? { coverage } : {}),
     ...(coverageNote ? { coverage_note: coverageNote } : {}),
+  });
+}
+
+/**
+ * S35: poll an Agentforce Testing Center evaluation run and, when terminal,
+ * fetch and map its results. Two schema realities are tolerated on the
+ * pass/fail field — the docs say `metricScore: PASS|FAILED`, the official
+ * library types say `result: PASS|FAILURE` plus a numeric score — and
+ * anything else (instruction_adherence's HIGH|LOW|UNCERTAIN, absent, novel)
+ * maps `passed` to NULL with the raw value left visible: "read the label",
+ * never a fabricated verdict.
+ */
+async function pollAgentEvalRun(
+  client: RestClient,
+  apiVersion: string,
+  alias: string,
+  runId: string,
+  includeDetails: boolean,
+) {
+  const base = `/services/data/${apiVersion}/einstein/ai-evaluations/runs/${runId}`;
+  const statusRes = await client.request(base);
+  const run = (await statusRes.json()) as {
+    status?: string;
+    startTime?: string;
+    endTime?: string;
+    errorMessage?: string | null;
+  };
+  const status = typeof run.status === 'string' ? run.status : 'UNKNOWN';
+
+  if (status === 'ERROR') {
+    return ok({
+      connection: alias,
+      run_id: runId,
+      status,
+      error_message: run.errorMessage ?? null,
+      note: 'The RUN ITSELF failed — no case results exist. This is not a test failure.',
+    });
+  }
+  if (status !== 'COMPLETED' && status !== 'TERMINATED') {
+    // NEW, IN_PROGRESS, or anything unrecognized: fail open as in-progress
+    // with the raw status shown rather than guessing at terminality.
+    return ok({
+      connection: alias,
+      run_id: runId,
+      status,
+      start_time: run.startTime ?? null,
+      note: 'Still running — evaluation runs take minutes. Poll again sparingly.',
+    });
+  }
+
+  const resultsRes = await client.request(`${base}/results`);
+  const report = (await resultsRes.json()) as {
+    subjectName?: string;
+    testCases?: Array<{
+      status?: string;
+      testNumber?: number;
+      inputs?: { utterance?: string };
+      generatedData?: { topic?: string; actionsSequence?: string[]; outcome?: string };
+      testResults?: Array<Record<string, unknown>>;
+    }>;
+  };
+  const rawCases = Array.isArray(report.testCases) ? report.testCases : [];
+
+  const passedOf = (row: Record<string, unknown>): boolean | null => {
+    const raw = row.result ?? row.metricScore;
+    if (raw === 'PASS') return true;
+    if (raw === 'FAILURE' || raw === 'FAILED') return false;
+    return null;
+  };
+  const cases = rawCases.map((tc) => {
+    const expectations = (tc.testResults ?? []).map((row) => ({
+      name: row.name ?? null,
+      passed: passedOf(row),
+      actual_value: row.actualValue ?? null,
+      expected_value: row.expectedValue ?? null,
+      metric_label: row.metricLabel ?? row.metricScore ?? row.result ?? null,
+      score: row.score ?? null,
+      explainability:
+        typeof row.metricExplainability === 'string'
+          ? row.metricExplainability.slice(0, 500)
+          : null,
+      status: row.status ?? null,
+      error_code: row.errorCode ?? null,
+      error_message: row.errorMessage ?? null,
+    }));
+    return {
+      number: tc.testNumber ?? null,
+      status: tc.status ?? null,
+      utterance: tc.inputs?.utterance ?? null,
+      topic: tc.generatedData?.topic ?? null,
+      actions_sequence: tc.generatedData?.actionsSequence ?? null,
+      outcome: tc.generatedData?.outcome ?? null,
+      expectations,
+    };
+  });
+  const totals = { cases: cases.length, passed: 0, failed: 0, other: 0 };
+  for (const c of cases) {
+    const s = String(c.status ?? '').toUpperCase();
+    if (s.startsWith('PASS')) totals.passed += 1;
+    else if (s.startsWith('FAIL')) totals.failed += 1;
+    else totals.other += 1;
+  }
+
+  const { kept, dropped } = fitToBudget(cases.map((c) => truncateDeep(c)), MAX_RESPONSE_CHARS);
+  return ok({
+    connection: alias,
+    run_id: runId,
+    status,
+    subject_name: report.subjectName ?? null,
+    start_time: run.startTime ?? null,
+    end_time: run.endTime ?? null,
+    totals,
+    cases: kept,
+    ...(dropped > 0
+      ? { cases_truncated: true, cases_note: `Dropped ${dropped} case(s) to fit the response.` }
+      : {}),
+    ...(status === 'TERMINATED'
+      ? { note: 'Run TERMINATED before finishing — partial results at best, NOT a pass.' }
+      : {}),
+    ...(includeDetails ? { raw_test_cases: truncateDeep(rawCases) } : {}),
   });
 }

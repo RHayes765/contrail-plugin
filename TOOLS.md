@@ -1,6 +1,6 @@
 # Contrail Reference — tools, features, configuration
 
-Everything Contrail can do, in one place. Current as of **v0.26.0** (37 tools).
+Everything Contrail can do, in one place. Current as of **v0.27.0** (38 tools).
 The same tool surface is available in all three installs — the Claude Desktop
 extension (`.mcpb`), the Claude Code plugin, and the Contrail desktop app —
 with a few desktop-app differences [noted at the end](#the-desktop-app).
@@ -39,6 +39,7 @@ with a few desktop-app differences [noted at the end](#the-desktop-app).
 | [`get_report_data`](#get_report_data) | data_read | Run a saved report and read its results (sync Analytics API) |
 | [`get_debug_logs`](#get_debug_logs) | diagnostics_read | List or read Apex debug logs |
 | [`run_apex_tests`](#run_apex_tests) | diagnostics_read | Run deployed Apex tests standalone (submit + poll) |
+| [`run_agent_eval`](#run_agent_eval) | diagnostics_read (+data_write to start) | Run a Testing Center agent evaluation (REAL actions execute) |
 | [`get_flow_errors`](#get_flow_errors) | diagnostics_read | Persisted flow interview problems |
 | [`set_trace_flag`](#set_trace_flag) | diagnostics_read | Turn on debug logging for a bounded window |
 | [`check_apex`](#check_apex) | — | Free local static Apex check (offline, pre-deploy) |
@@ -69,11 +70,13 @@ management page (and only there); the server re-checks them on every call.
 |---|---|
 | `metadata_read` | Retrieve flows, Apex, objects/fields; search, diff, dependency analysis. |
 | `metadata_write` | Validate and execute metadata deploys, and activate/deactivate Agentforce agent versions (live behavior). Requires `metadata_read`. |
-| `diagnostics_read` | Debug logs, flow errors, standalone Apex test runs, trace flags. May expose incidental record data present in logs. |
+| `diagnostics_read` | Debug logs, flow errors, standalone Apex test runs, agent evaluation polling and results, trace flags. May expose incidental record data present in logs. |
 | `data_read` | SOQL queries and record reads (row-capped). |
-| `data_write` | DML, anonymous Apex, and bulk loads — propose and execute. Requires `data_read`. |
+| `data_write` | DML, anonymous Apex, and bulk loads — propose and execute — plus starting agent evaluation runs (the agent under test executes its REAL actions; the definition was ritual-approved, so a run start needs no code). Requires `data_read`. |
 
-**Layer 2 — the write approval ritual.** Every write, in every environment
+**Layer 2 — the write approval ritual.** Every write (one carve-out:
+starting an agent evaluation run, whose only input is a definition that
+already passed this ritual — see `run_agent_eval`), in every environment
 (sandboxes included), is two-step:
 
 1. A `*_propose` / `validate_deploy` call computes the full consequence
@@ -402,6 +405,31 @@ ever touched them, labeled as such, never attributed to this run alone.
 New or edited test classes reach the org via `validate_deploy` /
 `execute_deploy` first (`test_level: RunSpecifiedTests` verifies both the
 class and its tests in one validation).
+
+### `run_agent_eval`
+
+Runs an **Agentforce Testing Center evaluation** — a deployed
+`AiEvaluationDefinition` — and reads per-case results: routed topic,
+executed action sequence, and every expectation outcome. Same two-step
+shape as `run_apex_tests` (submit with `eval` → `run_id`; call again to
+poll), with one crucial difference stated everywhere: **the agent under
+test executes its REAL actions — nothing rolls back**, so prefer
+sandboxes/dev orgs for agents whose actions write. Runs take minutes
+(~10 concurrent per org, ≤1,000 cases per definition). Polling and results
+ride `diagnostics_read`; **starting** a run additionally requires
+`data_write` — no confirmation code, because the definition is the run's
+only input and it already passed the deploy ritual. Requires an ACTIVE
+agent version; a run-level `ERROR` is the run failing (not a test verdict),
+and pass/fail mapping tolerates both result schemas Salesforce emits
+(anything label-shaped — e.g. `instruction_adherence`'s HIGH/LOW/UNCERTAIN —
+comes back as `passed: null` with the label visible). Costs: Salesforce's
+own sources differ (newer Help says Testing Center is unmetered as of
+Summer '26; older docs mention Einstein Requests) — check your org's
+consumption cards rather than trusting either claim. The newer Studio
+"AI testing" beta API is undocumented and not offered.
+
+- `connection`; exactly one of `eval` (definition DeveloperName) or
+  `run_id`; `include_details` *(optional)* for the raw org payload.
 
 ### `get_flow_errors`
 
@@ -733,7 +761,7 @@ Env overrides: `CONTRAIL_SF_CLIENT_ID`, `CONTRAIL_SF_API_VERSION`,
 ## The desktop app
 
 The [Contrail desktop app](https://github.com/RHayes765/contrail-desktop)
-runs the same engine and the same 37 capabilities under an embedded agent
+runs the same engine and the same 38 capabilities under an embedded agent
 runtime, and adds:
 
 - **Projects as context silos.** Each project binds its own org connections

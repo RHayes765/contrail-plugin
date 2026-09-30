@@ -180,9 +180,10 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
                     '"My_Fn.genAiFunction-meta.xml"). AiAuthoringBundle deploys as a DRAFT ' +
                     'STAGE: exactly <Name>.agent (plaintext Agent Script) + ' +
                     '<Name>.bundle-meta.xml; nothing compiles and the running agent is ' +
-                    'unchanged until a human publishes the draft. Agent publish/preview/' +
-                    'eval runs stay human; activate/deactivate goes through ' +
-                    'agent_activation_propose/execute (its own ritual).',
+                    'unchanged until a human publishes the draft. Agent publish/preview ' +
+                    'stay human; activate/deactivate goes through ' +
+                    'agent_activation_propose/execute (its own ritual), and eval runs ' +
+                    'through run_agent_eval.',
                 ),
               api_name: z.string().describe('Full API name; children dotted (Account.MyField__c).'),
               content: z

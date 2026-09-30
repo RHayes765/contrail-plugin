@@ -31,11 +31,15 @@ export const GRANT_DESCRIPTIONS: Readonly<Record<Grant, string>> = {
     'human confirmation.',
   diagnostics_read:
     'Read debug logs and flow error details, run Apex tests (test transactions always ' +
-    'roll back), and set trace flags. May expose incidental record data present in logs.',
+    'roll back), poll Agentforce agent evaluation runs and read their results, and set ' +
+    'trace flags. May expose incidental record data present in logs.',
   data_read: 'Run SOQL queries, read records, and run reports for their data (row-capped).',
   data_write:
-    'Propose and execute DML and anonymous Apex scripts. Requires data_read. Every write ' +
-    'requires explicit human confirmation.',
+    'Propose and execute DML and anonymous Apex scripts, and start Agentforce agent ' +
+    'evaluation runs (the agent under test executes its REAL actions — no rollback). ' +
+    'Requires data_read. DML, Apex, and bulk writes each require explicit human ' +
+    'confirmation; an evaluation run executes only a definition a human already approved ' +
+    'through the deploy ritual.',
 };
 
 export function emptyGrantSet(): GrantSet {
@@ -125,6 +129,10 @@ export const TOOL_GRANT_MAP: Readonly<Record<string, Grant | null>> = {
   get_report_data: 'data_read',
   get_debug_logs: 'diagnostics_read',
   run_apex_tests: 'diagnostics_read',
+  // S35: the map carries the poll/results grant; STARTING a run additionally
+  // requires data_write via an in-handler check (soql tooling-gate pattern) —
+  // never read this map alone as the whole truth for run_agent_eval.
+  run_agent_eval: 'diagnostics_read',
   get_flow_errors: 'diagnostics_read',
   validate_deploy: 'metadata_write',
   execute_deploy: 'metadata_write',

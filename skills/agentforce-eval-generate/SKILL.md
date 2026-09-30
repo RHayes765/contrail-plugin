@@ -1,6 +1,6 @@
 ---
 name: agentforce-eval-generate
-description: "Use this skill when users need to author Agentforce agent tests or evaluations through the Contrail engine — AiEvaluationDefinition metadata, Testing Center test authoring, or requests like 'write tests for my agent', 'add an eval case', or asserting which topic/actions an utterance should route to. DO NOT TRIGGER for Apex tests (platform-apex-test-generate), for RUNNING or interpreting eval results (no Contrail path — the human runs evals in Testing Center), or for debugging agent behavior (agentforce-metadata-generate / agentforce-architecture-analyze)."
+description: "Use this skill when users need to author, RUN, or interpret Agentforce agent tests through the Contrail engine — AiEvaluationDefinition metadata, Testing Center test authoring, run_agent_eval runs and their results, or one-off utterance smoke tests against an active agent. Trigger on 'write tests for my agent', 'run the agent evals', 'why did this test case fail', 'hit the agent with an utterance', or asserting which topic/actions an utterance should route to. DO NOT TRIGGER for Apex tests (platform-apex-test-generate) or for debugging agent metadata itself (agentforce-metadata-generate / agentforce-architecture-analyze)."
 metadata:
   domains: ["Agentforce"]
   minApiVersion: "66.0"
@@ -142,14 +142,81 @@ package, so **omit `test_level` entirely**. Then verify:
 2. `refresh_snapshot` with `types: ["AiEvaluationDefinition"]` — agent types
    are explicit-refresh-only.
 
-The honest boundary: **RUNNING the eval is Testing Center** (Connect REST
-under the hood) — the human runs it and reads results there; Contrail has no
-path to execute or fetch eval runs. And evals run only against **activated,
-published** agents — so the lifecycle boundary in
-**agentforce-metadata-generate** §2 applies twice: the human must have
-published and activated the agent before the test can run, and the run
-itself is theirs too. End every eval deploy summary naming both: "deployed
-to **dev-org**; runnable once v2 is active, from Testing Center."
+Running is Contrail's too now: **`run_agent_eval`** (§6) executes the
+deployed definition and fetches results. Two prerequisites survive: the
+agent needs an **active** version (activate through
+`agent_activation_propose/execute` or Agent Builder), and — said plainly on
+every run — **the agent under test executes its REAL actions with no
+rollback**, so prefer sandboxes/dev orgs for agents whose actions write. End
+every eval deploy summary: "deployed to **dev-org**; run it with
+`run_agent_eval` once v2 is active."
+
+## 6. Running and reading results (run_agent_eval)
+
+- **Grants**: polling and results need `diagnostics_read`; **starting** a run
+  additionally needs `data_write` (it triggers real agent-action execution).
+  No confirmation code — the definition itself already passed the deploy
+  ritual, and it is the run's only input.
+- **Cadence**: submit with `eval` (the definition DeveloperName) → `run_id`;
+  poll with `run_id` **sparingly** — runs take MINUTES. Orgs allow ~10
+  concurrent runs and ≤1,000 cases per definition; an org refusal is relayed
+  verbatim.
+- **Reading results**: each case carries `generatedData` — `topic` and
+  `actions_sequence` are the ROUTING TRUTH to compare against your
+  `topic_sequence_match`/`action_sequence_match` expectations. Each
+  expectation row has `passed`: `true`/`false` when the org emitted a
+  verdict, **`null` when it emitted a label instead** (notably
+  `instruction_adherence`, which yields HIGH/LOW/UNCERTAIN — read
+  `metric_label`, don't treat null as a fail). `explainability` quotes the
+  judge's reasoning — quote it when explaining a failure. (The org's
+  pass-field schema varies by release — the tool tolerates both; the raw
+  rows are available via `include_details`.)
+- **An ERROR run is the RUN failing** (commonly: no active agent version) —
+  no case results exist; it is not a test failure. TERMINATED is partial at
+  best, never a pass.
+- **After a run against a writing agent, check what the actions did** — the
+  side effects are real records; `soql_query` them and say so in the summary.
+- The newer Agentforce Studio "AI testing" runner (`AiTestingDefinition`) is
+  an undocumented beta — not available through Contrail; say so if asked.
+
+## 7. One-off utterance smoke tests (anonymous Apex, no new machinery)
+
+For "just ask the agent something and show me the reply" — the documented
+`generateAiAgentResponse` invocable action, through the EXISTING anonymous
+Apex ritual. The reply comes back via the debug log, so `set_trace_flag`
+FIRST, then `apex_propose` this (human reads the code, `apex_execute`), then
+`get_debug_logs` and grep `CONTRAIL_SMOKE`:
+
+```apex
+// One utterance against an ACTIVE agent. REAL actions execute — sandbox first.
+Invocable.Action action = Invocable.Action.createCustomAction(
+    'generateAiAgentResponse', null, 'Order_Agent', '1.0.0');
+action.setInvocationParameter('userMessage', 'Where is my order 00001234?');
+// Multi-turn: pass the sessionId a previous call returned.
+// action.setInvocationParameter('sessionId', '<prior-session-id>');
+List<Invocable.Action.Result> results = action.invoke();
+Invocable.Action.Result r = results[0];
+if (r.isSuccess()) {
+    System.debug('CONTRAIL_SMOKE agentResponse: ' + r.getOutputParameters().get('agentResponse'));
+    System.debug('CONTRAIL_SMOKE sessionId: ' + r.getOutputParameters().get('sessionId'));
+} else {
+    System.debug('CONTRAIL_SMOKE errors: ' + r.getErrors());
+}
+```
+
+Honest limits: reply TEXT only — no topic/action trace (routing assertions
+belong to evals, §6); active agents only; not available to the Platform
+Integration User; cannot be wrapped in an Apex test; version `'1.1.0'` adds a
+`structuredAgentResponse` output. Multi-turn conversations keep passing the
+returned `sessionId`. **Two cautions:** (1) this pattern is not yet
+live-verified from anonymous Apex — if the invocable refuses that context,
+deploy a thin wrapper class through the normal ritual and call the wrapper
+instead; (2) the utterance lands inside an Apex string literal — escape `'`
+and `\` per Apex string rules before embedding it, and never paste untrusted
+text verbatim into the script (the human reads the script on the approval
+page; keep it readable and inert). (The Agent API proper — `api.salesforce.com` sessions —
+needs a JWT from a specially configured External Client App; that setup is a
+documented alternative Contrail deliberately does not automate.)
 
 ---
 *Adapted for Contrail from [forcedotcom/sf-skills](https://github.com/forcedotcom/sf-skills) @ 49064f7 (the AiEvaluationDefinition Metadata API catalog entry, with test-design judgment drawn from the agentforce-test skill references; Apache-2.0, © Salesforce, Inc.). Modified: retargeted from the Salesforce CLI test-spec workflow to direct XML authoring through the Contrail engine tools and the human-approval write contract.*
