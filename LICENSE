@@ -1,0 +1,26 @@
+Copyright (c) 2026 Ryley Hayes. All rights reserved.
+
+This repository's source code is made publicly viewable, but no license is
+granted to use, copy, modify, or redistribute it, in whole or in part, except
+as stated below or with the copyright holder's prior written permission.
+
+LIMITED USE GRANT. Permission is granted to download, install, and run
+unmodified release builds of Contrail (as published on this repository's
+Releases page) for personal or internal business use. This grant does not
+include the right to modify, redistribute, sublicense, sell, or offer
+Contrail as a service.
+
+THIRD-PARTY MATERIALS. Portions of this repository are adapted from or vendor
+third-party projects and remain under their own licenses, which continue to
+apply to those portions only:
+
+- Skills under skills/ adapted from the Salesforce Skills Library
+  (forcedotcom/sf-skills), (c) Salesforce, Inc. — Apache License 2.0
+  (see LICENSE-APACHE-2.0 and NOTICE).
+- Prebuilt language-server bundles under server/vendor/ — Apache License 2.0,
+  (c) Salesforce, Inc. (see LICENSE-APACHE-2.0 and server/vendor/PROVENANCE.md).
+- Embedded libraries identified in NOTICE — MIT (see LICENSE-MIT) and
+  BSD-3-Clause (see LICENSE-BSD-3-CLAUSE).
+
+Nothing in this file limits the rights granted by those third-party licenses
+for the portions they cover.

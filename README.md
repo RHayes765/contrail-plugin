@@ -234,6 +234,14 @@ URL. Env overrides: `CONTRAIL_SF_CLIENT_ID`, `CONTRAIL_SF_API_VERSION`,
 - **Data:** connection metadata + audit log in SQLite under
   `%LOCALAPPDATA%\Contrail` (override: `CONTRAIL_DATA_DIR`).
 
+## License
+
+Contrail is © Ryley Hayes, all rights reserved, with a limited grant to run
+unmodified release builds — see [LICENSE](LICENSE). Portions (the adapted
+skills and the vendored language servers) are third-party content under
+Apache-2.0/MIT/BSD-3-Clause and keep their own notices — see
+[NOTICE](NOTICE).
+
 ## Development
 
 ```bash
