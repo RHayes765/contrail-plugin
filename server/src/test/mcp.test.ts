@@ -70,6 +70,8 @@ describe('MCP surface', () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
+      'agent_activation_execute',
+      'agent_activation_propose',
       'apex_execute',
       'apex_propose',
       'bulk_load_execute',

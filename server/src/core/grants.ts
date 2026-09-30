@@ -26,7 +26,9 @@ export const GRANT_DESCRIPTIONS: Readonly<Record<Grant, string>> = {
   metadata_read:
     'Read metadata: retrieve flows, Apex, objects/fields; search, diff, and dependency analysis.',
   metadata_write:
-    'Validate and execute metadata deploys. Requires metadata_read. Every deploy requires explicit human confirmation.',
+    'Validate and execute metadata deploys, and activate/deactivate Agentforce agent ' +
+    'versions (live behavior). Requires metadata_read. Every change requires explicit ' +
+    'human confirmation.',
   diagnostics_read:
     'Read debug logs and flow error details, run Apex tests (test transactions always ' +
     'roll back), and set trace flags. May expose incidental record data present in logs.',
@@ -127,6 +129,9 @@ export const TOOL_GRANT_MAP: Readonly<Record<string, Grant | null>> = {
   validate_deploy: 'metadata_write',
   execute_deploy: 'metadata_write',
   deactivate_flow: 'metadata_write',
+  // S34: flipping a live agent version is org configuration, not data.
+  agent_activation_propose: 'metadata_write',
+  agent_activation_execute: 'metadata_write',
   dml_propose: 'data_write',
   dml_execute: 'data_write',
   apex_propose: 'data_write',

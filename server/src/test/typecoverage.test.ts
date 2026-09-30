@@ -690,10 +690,16 @@ describe('S30: Agentforce types', () => {
     ).toThrow(/pick one form/);
   });
 
-  it('PIN: AiAuthoringBundle stays read-only — an Agent Script deploy would lie', () => {
+  it('PIN FLIP (S30→S34): AiAuthoringBundle deploys — as a DRAFT-stage envelope', () => {
+    // S30 pinned this type read-only because pretending a deploy compiles
+    // Agent Script would lie. S34 reversed it DELIBERATELY: a no-target
+    // deploy is the documented draft-staging step, and the D1 warning now
+    // carries the honesty instead (see the S34 describe below). Raw
+    // non-envelope content still fails — as an envelope error, not a
+    // not-deployable one.
     expect(() =>
       buildDeployZip([comp('AiAuthoringBundle', 'X', 'agent script')], [], V, noMeta),
-    ).toThrow(/not deployable through Contrail/);
+    ).toThrow(/bundle envelope/);
   });
 
   it('warns honestly on the prompt-template identifier, both change kinds', () => {
@@ -1256,5 +1262,95 @@ describe('S33: the credential family (NamedCredential / ExternalCredential / Aut
       comp('AuthProvider', 'Acme_SSO', '<AuthProvider/>'),
     ]);
     expect(res.uncovered).toHaveLength(0);
+  });
+});
+
+describe('S34: AiAuthoringBundle draft-stage deploys', () => {
+  const conn = { id: 'conn-1', alias: 'dev' } as ConnectionRecord;
+  const env = (name: string, files: Record<string, string>) =>
+    comp('AiAuthoringBundle', name, JSON.stringify({ contrail_bundle: 1, files }));
+  const okFiles = (name: string) => ({
+    [`${name}.agent`]: 'system:\n  instructions: |\n    Probe.\n',
+    [`${name}.bundle-meta.xml`]:
+      '<?xml version="1.0" encoding="UTF-8"?>\n<AiAuthoringBundle xmlns="http://soap.sforce.com/2006/04/metadata">\n    <bundleType>AGENT</bundleType>\n</AiAuthoringBundle>\n',
+  });
+
+  it('places the two-file envelope under aiAuthoringBundles/ with ONE member', () => {
+    const built = buildDeployZip([env('My_Agent', okFiles('My_Agent'))], [], V, noMeta);
+    expect(built.files).toContain('aiAuthoringBundles/My_Agent/My_Agent.agent');
+    expect(built.files).toContain('aiAuthoringBundles/My_Agent/My_Agent.bundle-meta.xml');
+    expect(built.packageXml).toContain('<name>AiAuthoringBundle</name>');
+    expect(built.packageXml.match(/<members>My_Agent<\/members>/g)).toHaveLength(1);
+  });
+
+  it('refuses an envelope missing the required .bundle-meta.xml, naming the 2-file shape', () => {
+    const files = okFiles('My_Agent');
+    delete files['My_Agent.bundle-meta.xml'];
+    expect(() => buildDeployZip([env('My_Agent', files)], [], V, noMeta)).toThrow(
+      /missing required file "My_Agent\.bundle-meta\.xml".*My_Agent\.agent \+ My_Agent\.bundle-meta\.xml/,
+    );
+    // The main-file check stays its own distinct error.
+    const noMain = okFiles('My_Agent');
+    delete noMain['My_Agent.agent'];
+    expect(() => buildDeployZip([env('My_Agent', noMain)], [], V, noMeta)).toThrow(
+      /missing its main file "My_Agent\.agent"/,
+    );
+  });
+
+  it('D1: EVERY draft deploy warns that nothing compiles — add and modify alike', () => {
+    const dbAdd = { getArtifact: () => null } as unknown as ContrailDb;
+    const storeNone = { readCurrentFile: () => null, listCurrentFiles: () => [] } as unknown as SnapshotStore;
+    const add = analyzeChanges(dbAdd, storeNone, conn, [env('My_Agent', okFiles('My_Agent'))], []);
+    expect(add.changes[0]!.change).toBe('add');
+    expect(add.changes[0]!.warnings.join(' ')).toMatch(/DRAFT STAGE ONLY/);
+    expect(add.changes[0]!.warnings.join(' ')).toMatch(/RUNNING AGENT IS UNCHANGED/);
+
+    const dbMod = {
+      getArtifact: () => ({ filePath: 'aiAuthoringBundles/My_Agent/My_Agent.agent' }),
+    } as unknown as ContrailDb;
+    const storeMod = {
+      readCurrentFile: (_c: unknown, rel: string) =>
+        rel.endsWith('.agent') ? 'old script' : '<AiAuthoringBundle/>',
+      listCurrentFiles: () => [
+        'aiAuthoringBundles/My_Agent/My_Agent.agent',
+        'aiAuthoringBundles/My_Agent/My_Agent.bundle-meta.xml',
+      ],
+    } as unknown as SnapshotStore;
+    const mod = analyzeChanges(dbMod, storeMod, conn, [env('My_Agent', okFiles('My_Agent'))], []);
+    expect(mod.changes[0]!.change).toBe('modify');
+    const text = mod.changes[0]!.warnings.join(' ');
+    expect(text).toMatch(/DRAFT STAGE ONLY/);
+    expect(text).toMatch(/BUNDLE REPLACE/);
+  });
+
+  it('D2: a <target> in the bundle meta warns LINK-not-compile; absent stays silent', () => {
+    const dbAdd = { getArtifact: () => null } as unknown as ContrailDb;
+    const storeNone = { readCurrentFile: () => null, listCurrentFiles: () => [] } as unknown as SnapshotStore;
+    const files = okFiles('My_Agent');
+    files['My_Agent.bundle-meta.xml'] = files['My_Agent.bundle-meta.xml']!.replace(
+      '</AiAuthoringBundle>',
+      '    <target>My_Agent.v2</target>\n</AiAuthoringBundle>',
+    );
+    const withTarget = analyzeChanges(dbAdd, storeNone, conn, [env('My_Agent', files)], []);
+    expect(withTarget.changes[0]!.warnings.join(' ')).toMatch(/TARGET LINK, NOT A COMPILE/);
+    expect(withTarget.changes[0]!.warnings.join(' ')).toContain('My_Agent.v2');
+
+    const noTarget = analyzeChanges(dbAdd, storeNone, conn, [env('My_Agent', okFiles('My_Agent'))], []);
+    expect(noTarget.changes[0]!.warnings.join(' ')).not.toMatch(/TARGET LINK/);
+  });
+
+  it('D3: a version-suffixed name warns PUBLISHED-SNAPSHOT; naked names stay silent', () => {
+    const dbAdd = { getArtifact: () => null } as unknown as ContrailDb;
+    const storeNone = { readCurrentFile: () => null, listCurrentFiles: () => [] } as unknown as SnapshotStore;
+    const suffixed = analyzeChanges(
+      dbAdd,
+      storeNone,
+      conn,
+      [env('My_Agent_2', okFiles('My_Agent_2'))],
+      [],
+    );
+    expect(suffixed.changes[0]!.warnings.join(' ')).toMatch(/PUBLISHED-SNAPSHOT NAME/);
+    const naked = analyzeChanges(dbAdd, storeNone, conn, [env('My_Agent', okFiles('My_Agent'))], []);
+    expect(naked.changes[0]!.warnings.join(' ')).not.toMatch(/PUBLISHED-SNAPSHOT/);
   });
 });

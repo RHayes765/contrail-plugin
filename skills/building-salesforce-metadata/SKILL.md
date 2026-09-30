@@ -163,14 +163,17 @@ directory** and give `validate_deploy` the path:
   standalone as a dotted child (`MyBot.v1`). Topic/planner changes against an
   **active** agent version fail: the human deactivates in Agent Builder
   first, then reactivates after (check state with `soql_query` on
-  `BotVersion.Status`; Contrail cannot activate/deactivate — nor publish,
-  preview, or run evals: see `agentforce-metadata-generate` for the full
-  lifecycle boundary). `GenAiPromptTemplate.activeVersionIdentifier` is an
-  org-generated token — retrieve-first, never hand-typed. Version-suffixed
-  planner bundles (`Agent_v3`) are published snapshots: modified deploys
-  fail, unmodified ones "succeed" as misleading no-ops. Bundle types
-  (GenAiFunction, GenAiPlannerBundle, AiAuthoringBundle) read and diff but
-  do not deploy yet.
+  `BotVersion.Status`; activate/deactivate goes through
+  `agent_activation_propose/execute`, each flip its own ritual — publish,
+  preview, and eval runs stay human: see `agentforce-metadata-generate` for
+  the full lifecycle boundary). `GenAiPromptTemplate.activeVersionIdentifier`
+  is an org-generated token — retrieve-first, never hand-typed.
+  Version-suffixed planner bundles (`Agent_v3`) are published snapshots:
+  modified deploys fail, unmodified ones "succeed" as misleading no-ops.
+  Bundle types (GenAiFunction, GenAiPlannerBundle, AiAuthoringBundle) deploy
+  via the Contrail bundle envelope — AiAuthoringBundle as a DRAFT stage only
+  (the script lands in Studio uncompiled; the running agent is unchanged
+  until a human publishes).
 - **LeadConvertSettings is a whole-org singleton.** api_name is literally
   `LeadConvertSettings` (one component per org; it does not exist until the
   org saves custom lead mappings). A modify **replaces every lead field

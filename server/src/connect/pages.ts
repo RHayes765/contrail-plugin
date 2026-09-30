@@ -189,7 +189,7 @@ export function renderSuccessPage(opts: {
 }
 
 export interface ApprovalPageOptions {
-  kind: 'deploy' | 'dml' | 'apex' | 'bulk';
+  kind: 'deploy' | 'dml' | 'apex' | 'bulk' | 'activation';
   code: string;
   expiresAt: string;
   org: { alias: string; orgName: string | null; orgType: string; instanceUrl: string };
@@ -220,7 +220,9 @@ export function renderApprovalPage(opts: ApprovalPageOptions): string {
         ? 'Approve this anonymous Apex script'
         : opts.kind === 'bulk'
           ? 'Approve this bulk data load'
-          : 'Approve this data change';
+          : opts.kind === 'activation'
+            ? 'Approve this agent activation change'
+            : 'Approve this data change';
 
   // `detail` carries file provenance for components read from disk. The human
   // is approving bytes they did not type, so the page has to say which file

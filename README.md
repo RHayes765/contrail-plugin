@@ -12,7 +12,23 @@ install, see [Getting Started](Getting%20Started.md).
 P0.1–P0.6 Phase 0 surface. `npm run mcpb` builds `contrail-<version>.mcpb`, a
 single MCP Bundle that installs into Claude Desktop via Settings → Extensions
 (no Node install, no npm, no config editing on the target machine) and covers
-Windows x64/ARM and macOS Intel/Apple Silicon from one file. 35 tools.
+Windows x64/ARM and macOS Intel/Apple Silicon from one file. 37 tools.
+
+**Agent Script lifecycle (S34).** The honest slice of the agent lifecycle a
+tool can own: `AiAuthoringBundle` (Agent Script source) now deploys as a
+**draft stage** — exactly `<Name>.agent` (plaintext) +
+`<Name>.bundle-meta.xml` through the bundle envelope, with the approval page
+stating plainly that nothing compiles and the running agent is unchanged
+until a human publishes the draft (compiling stays with Agentforce Studio /
+Salesforce's Agentforce DX tooling — the undocumented publish endpoints are
+a permanent non-goal). And **agent activation moved behind the ritual**:
+`agent_activation_propose` / `agent_activation_execute` flip a published
+BotVersion Active/Inactive through the documented Connect REST resource —
+live-behavior warning on the page, org-confirmed status in the result, and
+the S30 deactivate-gate workflow becomes three small approvals instead of
+two human handoffs. Default API version is now **v67** (probed healthy for
+the whole agent family; Winter '27's v68 `AiAgentDefinition` model lands in
+a later release once it reaches real orgs).
 
 **The credential family (S33).** `NamedCredential` and `ExternalCredential`
 (deployable since S17) got their sharp edges covered, and `AuthProvider`
@@ -35,18 +51,17 @@ Testing Center definitions (`AiEvaluationDefinition`),
 `BotTemplate`/`BotBlock` deploy through the ritual, and the bundle types
 (`GenAiFunction`, `GenAiPlannerBundle` — one component = a directory of
 files) deploy via a Contrail bundle envelope with file-by-file change
-classification on the approval page (`AiAuthoringBundle` stays read-only: a
-Metadata API deploy of Agent Script silently skips reasoning actions, and a
-deploy that lies is not one Contrail offers). Contrail is the
+classification on the approval page (`AiAuthoringBundle` deploys as a draft stage
+since S34 — see above). Contrail is the
 first tool in this ecosystem to author the runtime GenAI XML directly — with
 the honesty to match: the approval page warns about the deactivate-first
 gate, org-generated prompt-template version tokens, and Bot version deletes,
 and the **lifecycle boundary** is stated everywhere it matters (publish,
-activate/deactivate, preview, and eval runs are human steps in Agentforce
-Studio / Agent Builder — Contrail verifies from outside via
-`BotVersion.Status`). Requires API v66+ (now the default) and Agentforce
-licensing; unlicensed orgs degrade per-type with a warning, never a broken
-refresh. `soql_query` gained `tooling: true` (metadata_read-gated) for the
+preview, and eval runs are human steps in Agentforce Studio / Agent Builder;
+activate/deactivate moved behind Contrail's own ritual in S34 — and Contrail
+still verifies from outside via `BotVersion.Status`). Requires API v66+
+(default is v67 since S34) and Agentforce licensing; unlicensed orgs degrade
+per-type with a warning, never a broken refresh. `soql_query` gained `tooling: true` (metadata_read-gated) for the
 Tooling-only agent-graph sObjects. Four new skills:
 `agentforce-metadata-generate`, `agentforce-architecture-analyze`,
 `platform-prompt-template-generate`, `agentforce-eval-generate`.

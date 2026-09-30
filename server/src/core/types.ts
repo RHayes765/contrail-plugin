@@ -61,7 +61,7 @@ export interface DependencyEdge {
  * What a deploy_requests row proposes. The claim machinery (supersede,
  * single-use, expiry, lockout) is kind-agnostic — new kinds ride it for free.
  */
-export type DeployRequestKind = 'deploy' | 'dml' | 'apex' | 'bulk';
+export type DeployRequestKind = 'deploy' | 'dml' | 'apex' | 'bulk' | 'activation';
 
 /** A validated write awaiting (or past) human approval — deploys, DML, anonymous Apex, and bulk loads share the table. */
 export interface DeployRequestRecord {

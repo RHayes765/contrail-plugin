@@ -1,6 +1,6 @@
 # Contrail Reference — tools, features, configuration
 
-Everything Contrail can do, in one place. Current as of **v0.25.0** (35 tools).
+Everything Contrail can do, in one place. Current as of **v0.26.0** (37 tools).
 The same tool surface is available in all three installs — the Claude Desktop
 extension (`.mcpb`), the Claude Code plugin, and the Contrail desktop app —
 with a few desktop-app differences [noted at the end](#the-desktop-app).
@@ -46,6 +46,8 @@ with a few desktop-app differences [noted at the end](#the-desktop-app).
 | [`validate_deploy`](#validate_deploy) | metadata_write | Build + checkOnly-validate a package; code goes to the human |
 | [`execute_deploy`](#execute_deploy) | metadata_write | Execute a validated deploy with the human's code |
 | [`deactivate_flow`](#deactivate_flow) | metadata_write | Turn off a flow, through the same ritual |
+| [`agent_activation_propose`](#agent_activation_propose) | metadata_write | Stage activating/deactivating a published agent version (live behavior) |
+| [`agent_activation_execute`](#agent_activation_execute) | metadata_write | Apply the approved flip; result reports the org-confirmed status |
 | [`dml_propose`](#dml_propose) | data_write | Stage a data change (flat ≤200 rows, or a 2–25-step plan) |
 | [`dml_execute`](#dml_execute) | data_write | Execute a proposed data change with the human's code |
 | [`apex_propose`](#apex_propose) | data_write | Stage an anonymous Apex script (shown verbatim to the human) |
@@ -66,7 +68,7 @@ management page (and only there); the server re-checks them on every call.
 | Grant | Allows |
 |---|---|
 | `metadata_read` | Retrieve flows, Apex, objects/fields; search, diff, dependency analysis. |
-| `metadata_write` | Validate and execute metadata deploys. Requires `metadata_read`. |
+| `metadata_write` | Validate and execute metadata deploys, and activate/deactivate Agentforce agent versions (live behavior). Requires `metadata_read`. |
 | `diagnostics_read` | Debug logs, flow errors, standalone Apex test runs, trace flags. May expose incidental record data present in logs. |
 | `data_read` | SOQL queries and record reads (row-capped). |
 | `data_write` | DML, anonymous Apex, and bulk loads — propose and execute. Requires `data_read`. |
@@ -498,14 +500,18 @@ validation issues **no** code.
   `AiEvaluationDefinition`, `BotTemplate`, `BotBlock`, and child types
   `CustomField` / `ValidationRule` / `CustomLabel` / `ListView` /
   `RecordType` / `BotVersion` (dotted API names — `MyBot.v1`). Bundle types
-  `GenAiFunction` / `GenAiPlannerBundle` (one component = a directory of
-  files) deploy via a **Contrail bundle envelope** — content is JSON
+  `GenAiFunction` / `GenAiPlannerBundle` / `AiAuthoringBundle` (one
+  component = a directory of files) deploy via a **Contrail bundle
+  envelope** — content is JSON
   `{"contrail_bundle":1, "files": {"<relative path>": "<body>", …}}`
   carrying the whole file set (main file included); the approval page
-  classifies file-by-file. **Read/diff-only**: `AiAuthoringBundle` (a
-  Metadata API deploy of Agent Script silently skips reasoning actions);
-  and agent **publish / activate / deactivate / preview / eval runs** are
-  org-side human steps Contrail cannot perform (the
+  classifies file-by-file. `AiAuthoringBundle` deploys as a **DRAFT
+  STAGE**: exactly `<Name>.agent` (plaintext Agent Script) +
+  `<Name>.bundle-meta.xml`; nothing compiles — the page says the running
+  agent is unchanged until a human publishes the draft. Agent
+  **publish / preview / eval runs** stay org-side human steps;
+  **activate / deactivate** goes through
+  `agent_activation_propose`/`execute` behind its own ritual (the
   `agentforce-metadata-generate` skill carries the full boundary).
 - `destructive` *(≤50)* — `{type, api_name}` to DELETE; led prominently on
   the page. Deletions are accepted for **any** metadata type, including
@@ -570,6 +576,28 @@ not data.
 
 Executes the proposed change with the human's code. Returns per-row/per-step
 outcomes and created ids.
+
+- `connection`, `confirmation_code`.
+
+### `agent_activation_propose`
+
+Stages activating or deactivating a **published** Agentforce agent version
+behind the ritual (S34). Resolution happens at propose: the BotVersion Id and
+its current status are frozen into the request, a version already in the
+requested state is refused without burning an approval, and the page carries
+the LIVE-BEHAVIOR warning — this is not a metadata deploy; there is no draft
+in between. Publishing/compiling Agent Script is deliberately NOT this tool.
+
+- `connection`, `agent` (Bot DeveloperName), `version` (e.g. `v2`),
+  `status` (`Active` | `Inactive`).
+
+### `agent_activation_execute`
+
+One documented Connect REST call
+(`POST /connect/bot-versions/{id}/activation`), then a re-read: the result
+reports the org's **confirmed** status, never the requested one, with the
+platform's `messages[]` verbatim when it refuses (e.g. an unpublished
+version). Single-use code, ~1h expiry, superseded by a new propose.
 
 - `connection`, `confirmation_code`.
 
@@ -678,7 +706,7 @@ sections' defaults automatically.
 | Section | Key | Default | Meaning |
 |---|---|---|---|
 | `salesforce` | `clientId` | `PlatformCLI` | OAuth client (public, PKCE). Swap in your own connected app. |
-| | `apiVersion` | `v66.0` | REST/Tooling/Metadata API version. v66 is the floor for the Agentforce types; a config.json pinning an older version keeps it until edited. |
+| | `apiVersion` | `v67.0` | REST/Tooling/Metadata API version. v66 is the floor for the Agentforce types (default raised to v67 in S34, probed healthy live); a config.json pinning an older version keeps it until edited. |
 | | `scopes` | `refresh_token, api, web` | OAuth scopes requested. |
 | `oauth` | `callbackPort` / `callbackPath` | `1717` / `/OauthRedirect` | Must match the connected app's registered callback. |
 | | `flowTimeoutMs` | 10 min | Browser-flow hard limit. |
@@ -705,7 +733,7 @@ Env overrides: `CONTRAIL_SF_CLIENT_ID`, `CONTRAIL_SF_API_VERSION`,
 ## The desktop app
 
 The [Contrail desktop app](https://github.com/RHayes765/contrail-desktop)
-runs the same engine and the same 35 capabilities under an embedded agent
+runs the same engine and the same 37 capabilities under an embedded agent
 runtime, and adds:
 
 - **Projects as context silos.** Each project binds its own org connections

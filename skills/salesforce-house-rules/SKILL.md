@@ -134,6 +134,15 @@ rather than inventing what the skill would have said.
   Bulk steps are separate org-side jobs with **no cross-job rollback** (loaded
   steps stay), and bulk deletes are SOFT (Recycle Bin). Load the
   `salesforce-data-migration` skill before planning one.
+- **Agent activation rides the same ritual — and changes live behavior.**
+  `agent_activation_propose` flips a PUBLISHED Agentforce agent version
+  Active/Inactive after the human reads that page's code to
+  `agent_activation_execute`. No draft in between: the moment it executes,
+  users see the change. Each flip is its own approval — never ask the human
+  to pre-approve a reactivation before the intervening deploy's outcome
+  exists. The result's `confirmed_status` is the org's answer (the tool
+  re-reads after the write); relay `messages[]` verbatim when the org
+  refuses. Publishing/compiling agents stays human, always.
 - **Anonymous Apex rides the same ritual and commits.** `apex_propose` stages a
   script (max 32k chars); the approval page shows it **verbatim** with the
   warning that it runs with the human's permissions — so present the script in

@@ -1236,6 +1236,280 @@ export class DeployEngine {
     return result;
   }
 
+  // ── agent activation (S34) ─────────────────────────────────────────────
+
+  /**
+   * Stage an agent activation change behind the ritual (kind 'activation').
+   * The documented Connect REST resource (/connect/bot-versions/{id}/
+   * activation, v50+) flips a PUBLISHED BotVersion Active/Inactive — live
+   * behavior, immediately, so it rides the same two-step approval as every
+   * write. Resolution happens AT PROPOSE TIME: the BotVersion Id and its
+   * current status are frozen into the payload, and execute re-GETs after
+   * the POST so the result reports what the org confirms, never what was
+   * requested. Compiling/publishing Agent Script remains out of scope — this
+   * flips existing published versions only, and the org's own messages[]
+   * explain refusals (e.g. an unpublished version) verbatim.
+   */
+  async proposeActivation(
+    conn: ConnectionRecord,
+    input: { agent: string; version: string; status: 'Active' | 'Inactive' },
+  ): Promise<Record<string, unknown>> {
+    const rest = new RestClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
+    const esc = (s: string) => s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const rows = await rest.query<{
+      Id: string;
+      DeveloperName: string;
+      Status: string;
+    }>(
+      `SELECT Id, DeveloperName, Status FROM BotVersion ` +
+        `WHERE BotDefinition.DeveloperName = '${esc(input.agent)}' ORDER BY DeveloperName`,
+    );
+    if (rows.length === 0) {
+      throw new ContrailError(
+        `No agent named "${input.agent}" in "${conn.alias}" — enumerate agents with ` +
+          `soql_query on BotDefinition (SELECT DeveloperName FROM BotDefinition) or ` +
+          `list_metadata type Bot.`,
+        'not_found',
+      );
+    }
+    const version = rows.find((r) => r.DeveloperName === input.version);
+    if (!version) {
+      throw new ContrailError(
+        `Agent "${input.agent}" has no version "${input.version}". Its versions: ` +
+          rows.map((r) => `${r.DeveloperName} (${r.Status})`).join(', ') +
+          '.',
+        'not_found',
+      );
+    }
+    if (version.Status === input.status) {
+      // No ritual burned — there is nothing to approve.
+      return {
+        connection: conn.alias,
+        agent: input.agent,
+        version: input.version,
+        status: version.Status,
+        proposed: false,
+        note: `BotVersion ${input.version} of ${input.agent} is already ${version.Status} — nothing to approve.`,
+      };
+    }
+
+    const superseded = this.db.supersedePendingRequests(conn.id, 'activation');
+    if (superseded > 0) {
+      this.audit.record('activation.superseded', {
+        connectionId: conn.id,
+        tool: 'agent_activation_propose',
+        detail: { count: superseded },
+      });
+    }
+    const code = generateConfirmationCode();
+    const expiresAt = new Date(Date.now() + this.config.deploy.codeTtlMs).toISOString();
+    const verb = input.status === 'Active' ? 'ACTIVATE' : 'DEACTIVATE';
+    const label = `${verb} ${input.agent} ${input.version} (currently ${version.Status})`;
+    const request = this.db.insertDeployRequest({
+      connectionId: conn.id,
+      kind: 'activation',
+      confirmationCode: code,
+      expiresAt,
+      payloadJson: JSON.stringify({
+        activation: true,
+        version: 1,
+        bot_developer_name: input.agent,
+        bot_version_developer_name: input.version,
+        bot_version_id: version.Id,
+        from_status: version.Status,
+        to_status: input.status,
+      }),
+      summaryJson: JSON.stringify({ rows: [{ label, warnings: [] }] }),
+    });
+
+    const approval = await this.approvals.present(
+      renderApprovalPage({
+        kind: 'activation',
+        code,
+        expiresAt,
+        org: {
+          alias: conn.alias,
+          orgName: conn.orgName,
+          orgType: conn.orgType,
+          instanceUrl: conn.instanceUrl,
+        },
+        changes: [
+          {
+            label,
+            warnings: [],
+            detail:
+              `BotVersion ${version.Id}\n` +
+              `status ${version.Status} → ${input.status}\n` +
+              `POST /connect/bot-versions/${version.Id}/activation`,
+          },
+        ],
+        destructive: [],
+        results: [
+          {
+            label: 'Validation',
+            value: 'none — the org accepts or refuses the change only when you approve',
+          },
+        ],
+        blast: [],
+        warnings: [
+          'LIVE AGENT BEHAVIOR — this changes what users experience IMMEDIATELY. ' +
+            'Deactivating takes the agent version offline on every channel it serves; ' +
+            'activating puts this version in front of users. This is not a metadata ' +
+            'deploy: there is no draft in between.',
+        ],
+      }),
+      this.requestStatusCheck(request.id),
+      this.config.deploy.codeTtlMs + 60_000,
+    );
+
+    this.audit.record('activation.proposed', {
+      connectionId: conn.id,
+      tool: 'agent_activation_propose',
+      detail: {
+        requestId: request.id,
+        agent: input.agent,
+        version: input.version,
+        from: version.Status,
+        to: input.status,
+      },
+    });
+    return {
+      connection: conn.alias,
+      org_type: conn.orgType,
+      request_id: request.id,
+      agent: input.agent,
+      version: input.version,
+      bot_version_id: version.Id,
+      current_status: version.Status,
+      requested_status: input.status,
+      proposed: true,
+      expires_at: expiresAt,
+      approval_page: approvalForAgent('activation', approval),
+    };
+  }
+
+  async executeActivation(conn: ConnectionRecord, code: string): Promise<Record<string, unknown>> {
+    const claim = this.claimCode(conn, 'activation', code, 'agent_activation_execute');
+    if (claim.kind === 'terminal') return claim.result;
+    if (claim.kind === 'running') {
+      return {
+        connection: conn.alias,
+        executed: false,
+        note: 'This activation change is already being executed by a concurrent call — not re-run.',
+      };
+    }
+    const request = claim.request;
+    const payload = JSON.parse(request.payloadJson ?? '{}') as {
+      activation?: boolean;
+      bot_developer_name?: string;
+      bot_version_developer_name?: string;
+      bot_version_id?: string;
+      from_status?: string;
+      to_status?: string;
+    };
+    if (payload.activation !== true || !payload.bot_version_id || !payload.to_status) {
+      const result = {
+        connection: conn.alias,
+        executed: false,
+        error_message: 'The approved activation change is missing from the request payload.',
+        note: 'Propose again for a fresh code.',
+      };
+      this.db.finishDeployRequest(request.id, 'execution_failed', JSON.stringify(result));
+      this.audit.record('activation.execution_failed', {
+        connectionId: conn.id,
+        tool: 'agent_activation_execute',
+        outcome: 'error',
+        detail: { requestId: request.id, reason: 'payload_missing' },
+      });
+      return result;
+    }
+
+    const rest = new RestClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
+    const resource =
+      `/services/data/${this.config.salesforce.apiVersion}` +
+      `/connect/bot-versions/${payload.bot_version_id}/activation`;
+    let posted: { isActivated?: boolean; messages?: unknown[]; success?: boolean };
+    let confirmed: { isActivated?: boolean } = {};
+    try {
+      const res = await rest.request(resource, {
+        method: 'POST',
+        body: JSON.stringify({ status: payload.to_status }),
+      });
+      posted = (await res.json()) as typeof posted;
+      // The re-GET is the truth: the result reports what the org CONFIRMS,
+      // never what was requested.
+      const check = await rest.request(resource);
+      confirmed = (await check.json()) as typeof confirmed;
+    } catch (err) {
+      const message = String(err instanceof Error ? err.message : err);
+      const result = {
+        connection: conn.alias,
+        executed: false,
+        agent: payload.bot_developer_name,
+        version: payload.bot_version_developer_name,
+        error_message: message,
+        note:
+          'The request did not complete cleanly — the change may or may not have applied. ' +
+          'The confirmation code is spent; check BotVersion.Status (soql_query) before ' +
+          'proposing again.',
+      };
+      this.db.finishDeployRequest(request.id, 'execution_failed', JSON.stringify(result));
+      this.audit.record('activation.execution_failed', {
+        connectionId: conn.id,
+        tool: 'agent_activation_execute',
+        outcome: 'error',
+        detail: { requestId: request.id, error: message },
+      });
+      return result;
+    }
+
+    // A confirm body missing isActivated is UNCONFIRMED, never a match —
+    // executed:true requires the org positively reporting the requested state.
+    const confirmedStatus =
+      confirmed.isActivated === true
+        ? 'Active'
+        : confirmed.isActivated === false
+          ? 'Inactive'
+          : 'unconfirmed';
+    const executed = confirmedStatus === payload.to_status;
+    const result = {
+      connection: conn.alias,
+      executed,
+      agent: payload.bot_developer_name,
+      version: payload.bot_version_developer_name,
+      bot_version_id: payload.bot_version_id,
+      requested_status: payload.to_status,
+      confirmed_status: confirmedStatus,
+      is_activated: confirmed.isActivated === true,
+      // The platform explains refusals (e.g. an unpublished version) here.
+      messages: posted.messages ?? [],
+      note: executed
+        ? `${payload.bot_developer_name} ${payload.bot_version_developer_name} is now ` +
+          `${confirmedStatus}. This changed live behavior — no deploy or refresh follows.`
+        : `The org did not confirm the change: requested ${payload.to_status}, org reports ` +
+          `${confirmedStatus}. Read messages[] — the code is spent either way.`,
+    };
+    this.db.finishDeployRequest(
+      request.id,
+      executed ? 'executed' : 'execution_failed',
+      JSON.stringify(result),
+    );
+    if (executed) this.notifyExecuted(request, result);
+    this.audit.record(executed ? 'activation.executed' : 'activation.execution_failed', {
+      connectionId: conn.id,
+      tool: 'agent_activation_execute',
+      outcome: executed ? 'success' : 'error',
+      detail: {
+        requestId: request.id,
+        agent: payload.bot_developer_name,
+        version: payload.bot_version_developer_name,
+        to: payload.to_status,
+        confirmed: confirmedStatus,
+      },
+    });
+    return result;
+  }
+
   // ── bulk data loads ────────────────────────────────────────────────────
 
   /**
@@ -2252,7 +2526,9 @@ function kindNoun(kind: DeployRequestKind): string {
       ? 'Apex script'
       : kind === 'bulk'
         ? 'bulk data load'
-        : 'change';
+        : kind === 'activation'
+          ? 'agent activation change'
+          : 'change';
 }
 
 function safeUnlink(filePath: string): void {

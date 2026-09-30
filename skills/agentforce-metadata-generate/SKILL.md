@@ -1,6 +1,6 @@
 ---
 name: agentforce-metadata-generate
-description: "Use this skill when users need to create or modify Agentforce agent metadata through the Contrail engine — agent topics (GenAiPlugin), Bot and BotVersion metadata, planner bundles, or an agent metadata deploy that failed. Trigger on requests like 'add a topic to my agent', 'add an instruction to my agent', editing topic instructions or action wiring, changing bot versions or channel surfaces, or promoting agent metadata between orgs. DO NOT TRIGGER for Agent Script / .agent / AiAuthoringBundle authoring (no Contrail path exists — say so and stop), for running, previewing, publishing, or activating agents (human-only lifecycle operations), for prompt templates (platform-prompt-template-generate), for agent evals (agentforce-eval-generate), or for documenting an existing agent (agentforce-architecture-analyze)."
+description: "Use this skill when users need to create or modify Agentforce agent metadata through the Contrail engine — agent topics (GenAiPlugin), Bot and BotVersion metadata, planner bundles, Agent Script draft staging (AiAuthoringBundle), or activating/deactivating agent versions, or when an agent metadata deploy failed. Trigger on requests like 'add a topic to my agent', 'stage this agent script', 'deactivate the agent so we can deploy', editing topic instructions or action wiring, changing bot versions or channel surfaces, or promoting agent metadata between orgs. DO NOT TRIGGER for running, previewing, or PUBLISHING agents (human-only lifecycle operations — Contrail stages drafts and flips activation, it never compiles or publishes), for prompt templates (platform-prompt-template-generate), for agent evals (agentforce-eval-generate), or for documenting an existing agent (agentforce-architecture-analyze)."
 metadata:
   domains: ["Agentforce"]
   minApiVersion: "66.0"
@@ -19,6 +19,8 @@ Use this skill to:
 
 - Add or modify agent topics (`GenAiPlugin`) on classic Builder agents
 - Edit `Bot` / `BotVersion` metadata — versions, planner wiring, surfaces
+- Stage Agent Script as a DRAFT (`AiAuthoringBundle` — §3a; compiling stays human)
+- Activate/deactivate agent versions (`agent_activation_propose/execute` — §2, §5)
 - Apply the two documented runtime patches (`plannerSurfaces`, `surfacesEnabled`)
 - Promote retrieved agent metadata between orgs
 - Troubleshoot agent metadata deploy failures
@@ -35,7 +37,9 @@ Agentforce metadata splits into two domains:
 
 - **Authoring domain** — `AiAuthoringBundle` (`.agent` Agent Script source),
   compiled by Salesforce's publish pipeline into the runtime graph. Contrail
-  reads and diffs it, never deploys it (§3 says why that is permanent).
+  reads, diffs, and deploys it as a DRAFT STAGE (§3a) — compiling and
+  publishing stay with Agentforce Studio or Salesforce's Agentforce DX
+  publish command, always.
 - **Runtime domain** — `Bot` → `BotVersion` → `GenAiPlannerBundle` →
   `GenAiPlugin` → `GenAiFunction`. What the org actually executes.
 
@@ -55,20 +59,26 @@ publish. Detect which kind of agent you have before editing — retrieve its
 artifact rather than a source file. When you can't tell, **ask the human how
 the agent is maintained** before proposing any edit.
 
-## 2. The lifecycle boundary — five operations only a human performs
+## 2. The lifecycle boundary — what stays human, what Contrail now does
 
-Contrail deploys metadata. It does not operate agents. These five operations
-have **no Contrail path** and are handed to the human, every time:
+Contrail deploys metadata and (since S34) flips activation behind its own
+ritual. These operations remain **human-only**, handed off every time:
 
 | Operation | Where the human does it |
 |---|---|
-| Publish an Agent Script agent | Agentforce Studio |
-| Activate / deactivate a version | Setup → Agent Builder (or Agentforce Studio) |
+| Publish/compile an Agent Script agent | Agentforce Studio, or Salesforce's Agentforce DX publish command |
 | Preview a conversation | Agent Builder preview panel |
 | Run evaluations | Testing Center |
 | Create a new draft version | Agentforce Studio, on a published version |
 
-What Contrail **can** verify from outside: activation state via `soql_query`
+**Activate / deactivate moved to Contrail**: `agent_activation_propose` →
+human reads the code from the approval page → `agent_activation_execute` —
+one documented Connect REST call on a PUBLISHED version, each flip its own
+ritual (the page warns it changes live behavior immediately). The org refuses
+drafts and explains refusals in the result's `messages[]` — relay them
+verbatim.
+
+What Contrail verifies from outside: activation state via `soql_query`
 — `SELECT Id, DeveloperName, Status FROM BotVersion WHERE
 BotDefinition.DeveloperName = 'Support_Agent'` (`Status` is the activation
 check; Data API, no tooling flag) — and what the org actually holds, via
@@ -76,9 +86,9 @@ check; Data API, no tooling flag) — and what the org actually holds, via
 
 **The rule: never present a successful deploy as an activated, published, or
 tested agent.** A green `execute_deploy` means the org accepted metadata —
-nothing more. End every agent deploy summary by naming the remaining
-lifecycle steps and who performs them ("deployed to **dev-org**; the topic is
-live only after you re-activate v3 in Agent Builder").
+nothing more (a staged Agent Script draft compiles NOTHING — §3a). End every
+agent deploy summary by naming the remaining lifecycle steps and who — or
+which ritual — performs them.
 
 ## 3. Type map and fullName shapes
 
@@ -94,17 +104,54 @@ What Contrail can deploy today, and the shapes live-verified in a real org:
 | `BotTemplate`, `BotBlock` | **Deploy** (single file) | Flat |
 | `GenAiFunction` | **Deploy** (bundle ENVELOPE — §8) | `Name` dir: `Name.genAiFunction-meta.xml` + `input/schema.json` + `output/schema.json` |
 | `GenAiPlannerBundle` | **Deploy** (bundle ENVELOPE — §8; promotion of retrieved bytes, not hand-authoring) | Underscore-versioned: `Support_Agent_v2`, one component per published version |
-| `AiAuthoringBundle` | **Read only, permanently** | Naked name = highest draft; `_1`, `_2`… = published snapshots |
+| `AiAuthoringBundle` | **Deploy (DRAFT-stage envelope — §3a)** | Naked name = editable draft; `_1`, `_2`… = published snapshots (platform-owned) |
 
-- `AiAuthoringBundle` stays read-only **by design, permanently**: Metadata API
-  deploys of Agent Script **silently skip reasoning actions** — the deploy
-  "succeeds" and produces an agent missing its reasoning wiring. There is no
-  Contrail path for Agent Script authoring; say so and stop.
+- A Metadata API deploy of Agent Script **never compiles it** — at any API
+  version. Without `<target>` it lands as a documented DRAFT in Agentforce
+  Studio (what Contrail's deploy does); pretending a deploy publishes an
+  agent was the lie S30 guarded against, and the approval page now carries
+  that honesty on every draft deploy instead.
 - Salesforce's CLI has an `Agent:` convenience pseudo-type; **Contrail has no
   pseudo-type** — address each real type by name (`Bot` and its `GenAiPlugin`s
   are separate retrieves).
 - Apex, Flows, and Named Credentials backing agent actions are ordinary
   metadata — they deploy separately, before the agent metadata (§10).
+
+## 3a. Agent Script draft staging (AiAuthoringBundle)
+
+The one Contrail path for Agent Script: deploy the source as a **draft**.
+The envelope is exactly two files — live-confirmed:
+
+```jsonc
+{ "type": "AiAuthoringBundle", "api_name": "Support_Agent", "content": "{\"contrail_bundle\":1, \"files\": {
+    \"Support_Agent.agent\": \"<plaintext Agent Script — system:/config:/topic blocks>\",
+    \"Support_Agent.bundle-meta.xml\": \"<AiAuthoringBundle…><bundleType>AGENT</bundleType></AiAuthoringBundle>\" } }" }
+```
+
+- The `.agent` body is **plaintext Agent Script**, not base64 (the base64
+  `.agent` you may see inside a planner bundle's `agentScript/` dir is the
+  COMPILED artifact — a different animal; never deploy that here).
+- **Author against the NAKED bundle name only** — `_1`, `_2`… suffixed names
+  are published snapshots the platform owns (the approval page warns if you
+  target one). Retrieve-first for any modify: the deploy replaces the whole
+  bundle.
+- `.bundle-meta.xml` carries `bundleType` (always `AGENT`) and optionally
+  `versionDescription`/`versionTag`. **Omit `<target>`** unless deliberately
+  linking already-deployed runtime metadata — a `<target>` deploy fails when
+  that Bot/BotVersion doesn't exist, and it still compiles nothing.
+- **What the green deploy means**: the draft exists in Agentforce Studio.
+  The RUNNING AGENT IS UNCHANGED — topics, actions, and behavior go live
+  only when a human publishes the draft (Studio, or Salesforce's Agentforce
+  DX publish command). Say this in every summary; the approval page says it
+  too. Also warn: the next Studio publish can overwrite a staged draft —
+  coordinate with whoever owns the agent in Studio.
+- Naked drafts carry **no fileProperties dates** in listMetadata, so the
+  local index can't detect staleness for them (suffixed snapshots DO carry
+  dates). Re-retrieve before editing rather than trusting the snapshot's age.
+- Verify a staged draft: `refresh_snapshot types:["AiAuthoringBundle"]` →
+  `retrieve_metadata` round-trip, and have the human eyeball the draft in
+  Studio. `soql_query` on BotVersion proves the runtime is untouched (no new
+  version rows).
 
 ## 4. Ground before you author
 
@@ -119,20 +166,26 @@ House rules first (`list_connections`, `get_permissions`). Then:
 | Action targets exist (Apex / Flow / prompt template) | `list_metadata` / `search_metadata` for each `invocationTarget` before wiring a `functionName` |
 | Agent-graph internals | `soql_query` with `tooling: true` — the agent-graph sObjects (`GenAiPluginDefinition` and kin) are **Tooling-only**; the flag needs both `metadata_read` and `data_read` grants. `BotDefinition`/`BotVersion` are ordinary Data-API objects — no flag |
 
-## 5. The deactivate gate
+## 5. The deactivate gate — now a three-ritual workflow
 
-The platform refuses modifies to an active agent's topics and planner. The
-workflow, every step:
+The platform refuses modifies to an active agent's topics and planner. Since
+S34 every step runs through Contrail, each behind its OWN approval:
 
 1. **Query status** (§4 SOQL). No `Active` version → deploy normally.
-2. A version is **Active** → stop and hand off: "deactivate the agent in
-   Agent Builder and tell me when done." Never queue the deploy speculatively.
-3. **Re-query** when the human says done — trust the org, not the chat.
-4. Deploy (house-rules §3 ritual).
-5. Hand back — "re-activate in Agent Builder."
-6. **Re-query** to confirm the end state, and report it.
+2. A version is **Active** → **ritual 1**: `agent_activation_propose`
+   `status: "Inactive"` — the human approves the flip on its own page.
+   Never queue the deploy speculatively; the agent goes offline the moment
+   this executes, so say when.
+3. **Re-query** — trust the org (`confirmed_status` in the execute result IS
+   the org's answer, but re-query before the deploy anyway).
+4. Deploy the topic/planner change (**ritual 2** — house-rules §3).
+5. **Ritual 3**: `agent_activation_propose` `status: "Active"` to restore.
+6. **Re-query** to confirm the end state, and report all three outcomes.
 
-`validate_deploy` flags the gate automatically on `GenAiPlugin` /
+Three separate codes, deliberately: never ask the human to pre-approve the
+reactivation before the deploy's outcome exists. If the deploy fails, the
+human decides whether to reactivate the OLD state (usually yes — propose it)
+or hold. `validate_deploy` flags the gate automatically on `GenAiPlugin` /
 `GenAiPlannerBundle` modifies — treat that warning as step 2 arriving late,
 not as noise.
 
@@ -254,9 +307,10 @@ genAiPlannerBundles/Support_Agent_v2/
   **published snapshots**: modified deploys fail ("content cannot be changed
   on a locked version"); unmodified deploys "succeed" as misleading no-ops;
   the approval page repeats this on every planner-bundle modify.
-  (One `AiAuthoringBundle` quirk: retrieve returns no fileProperties rows, so
-  the local index has no last-modified dates for it — staleness detection is
-  limited there.)
+  (One `AiAuthoringBundle` quirk: NAKED draft names return no fileProperties
+  rows — the local index has no last-modified dates for drafts, so staleness
+  detection is limited exactly there; suffixed published snapshots DO carry
+  dates.)
 
 GenAiFunction grammar (live-confirmed against a platform-generated action):
 
@@ -288,9 +342,12 @@ GenAiFunction grammar (live-confirmed against a platform-generated action):
   ```
 
   Without it, Agent Builder Preview shows "Something went wrong" and the
-  Agent Runtime API returns `500 UNKNOWN_EXCEPTION` on session creation. On
-  Agent-Script agents the publish pipeline only generates a `Messaging`
-  surface — the patch must be **re-applied after every publish**. Apply it
+  Agent Runtime API returns `500 UNKNOWN_EXCEPTION` on session creation.
+  **Check before patching (fix landed upstream 2026-07-23):** current
+  publishes compile a `connection customer_web_client:` block in the Agent
+  Script into this surface automatically — retrieve the freshly published
+  bundle and look; only pre-fix orgs (or scripts without the connection
+  block) still need the patch, re-applied after every publish. Apply it
   through the envelope: retrieve the bundle, add the block to the main XML,
   carry every other file unchanged, deploy through the ritual (the
   deactivate gate applies — §5).
@@ -357,11 +414,9 @@ Agent Builder preview can check — say so in every summary.
 - **The v66 floor is a hard cutover, not a preference.** At v63 the legacy
   `GenAiPlanner` type is valid and the bundle types are `INVALID_TYPE`; at
   v64+ that inverts. Mixed-version reasoning about planner metadata produces
-  confident nonsense — pin v66 and stay there.
-- **Staged-capability honesty.** When a request needs a `GenAiFunction` or
-  `GenAiPlannerBundle` deploy, say plainly that Contrail reads and diffs
-  these today and cannot deploy them yet. Offer what is real — retrieved XML,
-  the diff, the patch text for the human — never a pretend deploy path.
+  confident nonsense — Contrail defaults to v67 since S34; never go below
+  v66 for agent work. (Winter '27's v68 `AiAgentDefinition` model is not yet
+  supported — say so if asked.)
 
 ---
-*Adapted for Contrail from [forcedotcom/sf-skills](https://github.com/forcedotcom/sf-skills) @ 49064f7 (agent-deployment-guide.md, agent-metadata-and-lifecycle.md, and the Metadata API catalog entries for Bot, BotVersion, GenAiPlugin, GenAiFunction, and GenAiPlannerBundle; Apache-2.0, © Salesforce, Inc.). Modified: mechanism retargeted from the Salesforce CLI to the Contrail engine tools and the human-approval write contract; fullName shapes and file layouts live-verified against an Agentforce Developer Edition org (2026-09).*
+*Adapted for Contrail from [forcedotcom/sf-skills](https://github.com/forcedotcom/sf-skills) @ 49064f7 (agent-deployment-guide.md, agent-metadata-and-lifecycle.md, and the Metadata API catalog entries for Bot, BotVersion, GenAiPlugin, GenAiFunction, and GenAiPlannerBundle; Apache-2.0, © Salesforce, Inc.). Modified: mechanism retargeted from the Salesforce CLI to the Contrail engine tools and the human-approval write contract; fullName shapes and file layouts live-verified against an Agentforce Developer Edition org (2026-09); S34 (2026-09-30): Agent Script draft staging and the activation ritual added, lifecycle boundary updated.*

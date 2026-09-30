@@ -79,6 +79,13 @@ interface FileSpec {
    * MUST contain `<apiName><envelopeMainSuffix>`.
    */
   envelopeMainSuffix?: string;
+  /**
+   * S34: additional files `<apiName><suffix>` the envelope MUST also carry
+   * beyond the main file (AiAuthoringBundle's `.bundle-meta.xml` is real
+   * required content, not generated). No upper cap on extras — the org is
+   * the authority there, and the approval page lists every file anyway.
+   */
+  requiredSuffixes?: string[];
 }
 
 const FILE_TYPES: Record<string, FileSpec> = {
@@ -153,12 +160,9 @@ const FILE_TYPES: Record<string, FileSpec> = {
   DashboardFolder: { dir: 'dashboards', ext: '', metaOnly: true, manifestType: 'Dashboard' },
   // S30: Agentforce types (v66+ — see the config apiVersion note). The Bot
   // document carries its versions INLINE (<botVersions>) in metadata format
-  // — BotVersion deploys as a dotted-name child (see CHILD_TYPES). The two
+  // — BotVersion deploys as a dotted-name child (see CHILD_TYPES). The
   // deployable bundle types carry a Contrail bundle ENVELOPE as content
-  // (see FileSpec.envelope). AiAuthoringBundle stays read-only permanently:
-  // a plain Metadata API deploy of Agent Script silently does not apply
-  // reasoning actions (only Salesforce's publish pipeline compiles them) —
-  // a deploy that validates and then lies is not a deploy Contrail offers.
+  // (see FileSpec.envelope).
   Bot: { dir: 'bots', ext: '.bot' },
   GenAiFunction: {
     dir: 'genAiFunctions',
@@ -181,6 +185,22 @@ const FILE_TYPES: Record<string, FileSpec> = {
   AiEvaluationDefinition: { dir: 'aiEvaluationDefinitions', ext: '.aiEvaluationDefinition' },
   BotTemplate: { dir: 'botTemplates', ext: '.botTemplate' },
   BotBlock: { dir: 'botBlocks', ext: '.botBlock' },
+  // S34: Agent Script deploys as a DRAFT STAGE (reversing S30's read-only
+  // stance, which guarded against a real lie — pretending a deploy compiles.
+  // It never does, at any API version: a no-<target> deploy lands the script
+  // as a DRAFT in Agentforce Studio, documented and runtime-inert, and the
+  // D1 warning in analyzeChanges says exactly that on every approval page.
+  // Compiling/publishing stays human — Studio or Salesforce's Agentforce DX
+  // publish command; the undocumented publish endpoints are a permanent
+  // non-goal). Exactly two files, live-confirmed: <Name>.agent (PLAINTEXT
+  // Agent Script) + <Name>.bundle-meta.xml.
+  AiAuthoringBundle: {
+    dir: 'aiAuthoringBundles',
+    ext: '.agent',
+    envelope: true,
+    envelopeMainSuffix: '.agent',
+    requiredSuffixes: ['.bundle-meta.xml'],
+  },
 };
 
 const XMLNS_META = 'http://soap.sforce.com/2006/04/metadata';
@@ -273,6 +293,7 @@ export function parseBundleEnvelope(
   apiName: string,
   content: string,
   mainFile: string,
+  alsoRequired: string[] = [],
 ): Record<string, string> {
   let parsed: unknown;
   try {
@@ -334,6 +355,18 @@ export function parseBundleEnvelope(
       'bad_component',
     );
   }
+  // S34: some bundles have more than one REQUIRED file (an AiAuthoringBundle
+  // is exactly <Name>.agent + <Name>.bundle-meta.xml) — missing one would
+  // fail org-side with a worse message, or worse, deploy a half bundle.
+  for (const name of alsoRequired) {
+    if (!(name in out)) {
+      throw new ContrailError(
+        `${type} ${apiName}: envelope is missing required file "${name}" — this bundle ` +
+          `type requires ${[mainFile, ...alsoRequired].join(' + ')}.`,
+        'bad_component',
+      );
+    }
+  }
   return out;
 }
 const XMLNS = 'http://soap.sforce.com/2006/04/metadata';
@@ -370,7 +403,8 @@ export function buildDeployZip(
     const fileSpec = FILE_TYPES[c.type];
     if (fileSpec?.envelope) {
       const mainFile = `${c.api_name}${fileSpec.envelopeMainSuffix ?? fileSpec.ext}`;
-      const bundleFiles = parseBundleEnvelope(c.type, c.api_name, c.content, mainFile);
+      const alsoRequired = (fileSpec.requiredSuffixes ?? []).map((s) => `${c.api_name}${s}`);
+      const bundleFiles = parseBundleEnvelope(c.type, c.api_name, c.content, mainFile, alsoRequired);
       const dirPrefix = `${fileSpec.dir}/${fileSafeSegment(c.api_name)}/`;
       for (const [rel, body] of Object.entries(bundleFiles)) {
         files.set(`${dirPrefix}${rel}`, strToU8(body));
@@ -650,7 +684,13 @@ export function analyzeChanges(
     const envSpec = FILE_TYPES[c.type];
     if (envSpec?.envelope) {
       const mainFile = `${c.api_name}${envSpec.envelopeMainSuffix ?? envSpec.ext}`;
-      const proposed = parseBundleEnvelope(c.type, c.api_name, c.content, mainFile);
+      const proposed = parseBundleEnvelope(
+        c.type,
+        c.api_name,
+        c.content,
+        mainFile,
+        (envSpec.requiredSuffixes ?? []).map((s) => `${c.api_name}${s}`),
+      );
       const existingBundle = db.getArtifact(conn.id, c.type, c.api_name);
       const warnings: string[] = [];
       let change: ComponentChange['change'];
@@ -686,11 +726,46 @@ export function analyzeChanges(
           `AGENT MUST BE DEACTIVATED FIRST — deploying GenAiPlannerBundle changes for an ` +
             `ACTIVE agent version fails, and version-suffixed bundles are PUBLISHED ` +
             `SNAPSHOTS: a modified deploy of one fails org-side even deactivated ` +
-            `(unmodified re-deploys "succeed" as no-ops). Deactivate in Agent Builder, ` +
-            `deploy, then reactivate (Contrail cannot do those steps; verify with ` +
-            `BotVersion.Status). On Agent-Script agents the next publish overwrites ` +
-            `hand-edits.`,
+            `(unmodified re-deploys "succeed" as no-ops). Deactivate first ` +
+            `(agent_activation_propose/execute, or Agent Builder), deploy, then ` +
+            `reactivate; verify with BotVersion.Status. On Agent-Script agents the ` +
+            `next publish overwrites hand-edits.`,
         );
+      }
+      if (c.type === 'AiAuthoringBundle') {
+        // S34 D1: fires on EVERY draft deploy by design — it IS the honesty
+        // contract that made Agent Script deployable at all.
+        warnings.push(
+          `DRAFT STAGE ONLY — this deploy stages Agent Script as a draft in Agentforce ` +
+            `Studio. Nothing is compiled and the RUNNING AGENT IS UNCHANGED: topics, ` +
+            `actions, and behavior go live only when a human publishes the draft ` +
+            `(Agentforce Studio, or Salesforce's Agentforce DX publish command). A green ` +
+            `deploy here is a staged draft, not a shipped agent.`,
+        );
+        // S34 D2: <target> links the bundle to an existing runtime version.
+        // Known limitation: a CDATA-wrapped or namespace-prefixed target (or
+        // a commented-out one) evades/false-positives this regex — bounded,
+        // since linking never compiles anything, D1 always fires, and the
+        // org fails a bad target itself.
+        const target = proposed[`${c.api_name}.bundle-meta.xml`]?.match(
+          /<target>\s*([^<]+?)\s*<\/target>/,
+        )?.[1];
+        if (target) {
+          warnings.push(
+            `TARGET LINK, NOT A COMPILE — <target> pins this bundle to runtime version ` +
+              `"${target}"; the deploy FAILS unless that Bot/BotVersion already exists in ` +
+              `the org or ships in this same package. Linking never compiles or publishes ` +
+              `anything.`,
+          );
+        }
+        // S34 D3: version-suffixed names are platform-owned published snapshots.
+        if (/_\d+$/.test(c.api_name)) {
+          warnings.push(
+            `PUBLISHED-SNAPSHOT NAME — "${c.api_name}" is a version-suffixed published ` +
+              `snapshot; the platform owns those. The editable draft is the NAKED bundle ` +
+              `name — deploy a suffixed name only when promoting retrieved bytes.`,
+          );
+        }
       }
       changes.push({ type: c.type, api_name: c.api_name, change, warnings, ...sourceOf(c) });
       continue;
@@ -811,18 +886,17 @@ export function analyzeChanges(
           `retrieve-first if this template already exists under another name.`,
       );
     }
-    // S30: the deactivate gate. Topic/action/instruction changes against an
-    // ACTIVE agent version fail org-side — the human deactivates in Agent
-    // Builder first, then reactivates after the deploy. Contrail has no
-    // activate/deactivate path (that lifecycle is org-side, not Metadata
-    // API); check state with soql_query on BotVersion.Status. (The
-    // GenAiPlannerBundle flavor of this warning lives in the envelope
-    // branch above.)
+    // S30/S34: the deactivate gate. Topic/action/instruction changes against
+    // an ACTIVE agent version fail org-side — since S34, each flip rides its
+    // own Contrail ritual (agent_activation_propose/execute); check state
+    // with soql_query on BotVersion.Status. (The GenAiPlannerBundle flavor
+    // of this warning lives in the envelope branch above.)
     if (c.type === 'GenAiPlugin' && change === 'modify') {
       warnings.push(
         `AGENT MUST BE DEACTIVATED FIRST — deploying ${c.type} changes for an ACTIVE ` +
-          `agent version fails. Deactivate the agent in Agent Builder, deploy, then ` +
-          `reactivate (Contrail cannot do those steps; verify with BotVersion.Status).`,
+          `agent version fails. Deactivate first (agent_activation_propose/execute, ` +
+          `or Agent Builder), deploy, then reactivate — each flip its own approval; ` +
+          `verify with BotVersion.Status.`,
       );
     }
     // S33: a NEW external credential defines principals but carries NO secret

@@ -172,15 +172,17 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
                     'AiEvaluationDefinition (Testing Center test definitions), BotTemplate, ' +
                     'BotBlock, or child types CustomField / ValidationRule / ' +
                     'CustomLabel / ListView / RecordType / BotVersion (dotted MyBot.v1). ' +
-                    'Bundle types GenAiFunction / GenAiPlannerBundle (one component = a ' +
-                    'directory of files) take a Contrail bundle ENVELOPE as content: JSON ' +
-                    '{"contrail_bundle":1, "files": {"<relative path>": "<body>", ...}} — ' +
-                    'the file set retrieve_metadata\'s bundle_files listing shows, main ' +
-                    'file included (e.g. "My_Fn.genAiFunction-meta.xml"). ' +
-                    'NOT deployable (read/diff only): AiAuthoringBundle — a Metadata API ' +
-                    'deploy of Agent Script silently skips reasoning actions; and agent ' +
-                    'publish/activate/deactivate are org-side human steps Contrail ' +
-                    'cannot perform.',
+                    'Bundle types GenAiFunction / GenAiPlannerBundle / AiAuthoringBundle ' +
+                    '(one component = a directory of files) take a Contrail bundle ' +
+                    'ENVELOPE as content: JSON {"contrail_bundle":1, "files": ' +
+                    '{"<relative path>": "<body>", ...}} — the file set retrieve_metadata\'s ' +
+                    'bundle_files listing shows, main file included (e.g. ' +
+                    '"My_Fn.genAiFunction-meta.xml"). AiAuthoringBundle deploys as a DRAFT ' +
+                    'STAGE: exactly <Name>.agent (plaintext Agent Script) + ' +
+                    '<Name>.bundle-meta.xml; nothing compiles and the running agent is ' +
+                    'unchanged until a human publishes the draft. Agent publish/preview/' +
+                    'eval runs stay human; activate/deactivate goes through ' +
+                    'agent_activation_propose/execute (its own ritual).',
                 ),
               api_name: z.string().describe('Full API name; children dotted (Account.MyField__c).'),
               content: z
@@ -630,6 +632,76 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
       guarded(async () => {
         const conn = requireConnection(args.connection, 'apex_execute');
         const result = await deploys.executeApex(conn, args.confirmation_code);
+        return ok(result);
+      }),
+  );
+
+  server.registerTool(
+    'agent_activation_propose',
+    {
+      title: 'Propose an agent activation change (two-step)',
+      description:
+        'Stage activating or deactivating a PUBLISHED Agentforce agent version behind ' +
+        'the approval ritual. This changes LIVE behavior immediately on execute — no ' +
+        'draft in between — so nothing happens until the human reads the confirmation ' +
+        'code from the approval page and you pass it to agent_activation_execute. The ' +
+        'BotVersion is resolved and its current status frozen at propose; a version ' +
+        'already in the requested state is refused without burning an approval. Only ' +
+        'published versions can flip (the org refuses drafts, verbatim in messages[]). ' +
+        'Publishing/compiling Agent Script is NOT this tool — that stays human.',
+      inputSchema: {
+        connection: z
+          .string()
+          .describe('Target connection alias (or id) — name it unmissably to the human.'),
+        agent: z
+          .string()
+          .describe("The agent's Bot DeveloperName (soql_query BotDefinition to enumerate)."),
+        version: z
+          .string()
+          .describe("The BotVersion DeveloperName, e.g. 'v2'."),
+        status: z
+          .enum(['Active', 'Inactive'])
+          .describe('The state to put the version in.'),
+      },
+    },
+    async (args: { connection: string; agent: string; version: string; status: 'Active' | 'Inactive' }) =>
+      guarded(async () => {
+        const conn = requireConnection(args.connection, 'agent_activation_propose');
+        const preview = await deploys.proposeActivation(conn, {
+          agent: args.agent,
+          version: args.version,
+          status: args.status,
+        });
+        if (preview.proposed !== true) return ok(preview);
+        return ok(
+          preview,
+          `Proposed — nothing changed yet. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`,
+        );
+      }),
+  );
+
+  server.registerTool(
+    'agent_activation_execute',
+    {
+      title: 'Execute a proposed agent activation change',
+      description:
+        'Apply the agent activation change the given confirmation code approves — one ' +
+        'documented Connect REST call, then a re-read so the result reports what the org ' +
+        "CONFIRMS. The code exists only on the human's approval page — only pass a code " +
+        'the human just gave you. Single-use, ~1h expiry, invalidated by a new ' +
+        'agent_activation_propose on the same connection. Changes live agent behavior ' +
+        'immediately on success.',
+      inputSchema: {
+        connection: z.string().describe('Target connection alias (or id).'),
+        confirmation_code: z
+          .string()
+          .describe('The code the human read from the approval page (format XXXX-XXXX).'),
+      },
+    },
+    async (args: { connection: string; confirmation_code: string }) =>
+      guarded(async () => {
+        const conn = requireConnection(args.connection, 'agent_activation_execute');
+        const result = await deploys.executeActivation(conn, args.confirmation_code);
         return ok(result);
       }),
   );
