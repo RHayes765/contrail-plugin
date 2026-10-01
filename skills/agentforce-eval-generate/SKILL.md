@@ -226,13 +226,15 @@ Honest limits: reply TEXT only — no topic/action trace (routing assertions
 belong to evals, §6); active agents only; not available to the Platform
 Integration User; cannot be wrapped in an Apex test; version `'1.1.0'` adds a
 `structuredAgentResponse` output. Multi-turn conversations keep passing the
-returned `sessionId`. **Two cautions:** (1) this pattern is not yet
-live-verified from anonymous Apex — if the invocable refuses that context,
-deploy a thin wrapper class through the normal ritual and call the wrapper
-instead; (2) the utterance lands inside an Apex string literal — escape `'`
-and `\` per Apex string rules before embedding it, and never paste untrusted
-text verbatim into the script (the human reads the script on the approval
-page; keep it readable and inert). (The Agent API proper — `api.salesforce.com` sessions —
+returned `sessionId`. **Live-confirmed from anonymous Apex (2026-10-01,
+~5s round trip, zero Apex limits consumed):** the invocable works in the
+executeAnonymous context — no wrapper class needed — and `agentResponse`
+comes back as a **JSON envelope** `{"type":"Text","value":"…"}`, so read the
+`value` field, not the raw string. **One caution stands:** the utterance
+lands inside an Apex string literal — escape `'` and `\` per Apex string
+rules before embedding it, and never paste untrusted text verbatim into the
+script (the human reads the script on the approval page; keep it readable
+and inert). (The Agent API proper — `api.salesforce.com` sessions —
 needs a JWT from a specially configured External Client App; that setup is a
 documented alternative Contrail deliberately does not automate.)
 
