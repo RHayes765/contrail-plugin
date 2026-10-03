@@ -26302,7 +26302,17 @@ var DEFAULT_CONFIG = {
       // S31: the lead-conversion singleton — one small file, and lead
       // routing/conversion work reads it constantly. Absent-until-configured
       // orgs return nothing for it (harmless).
-      "LeadConvertSettings"
+      "LeadConvertSettings",
+      // S36: permissions & UI-action types — small core-config documents
+      // plus LWC source (the ApexClass precedent: component code belongs in
+      // the default index). Package-installed bundles (managed OR unlocked)
+      // are excluded from wildcard retrieves by the platform and from
+      // staleness noise by the isManaged guard.
+      "CustomPermission",
+      "PermissionSetGroup",
+      "MutingPermissionSet",
+      "QuickAction",
+      "LightningComponentBundle"
     ],
     pollIntervalMs: 2e3,
     retrieveTimeoutMs: 10 * 60 * 1e3,
@@ -29580,7 +29590,15 @@ var SIMPLE_DIR_TYPES = [
   },
   { dir: "aiEvaluationDefinitions", ext: ".aiEvaluationDefinition", type: "AiEvaluationDefinition" },
   { dir: "botTemplates", ext: ".botTemplate", type: "BotTemplate" },
-  { dir: "botBlocks", ext: ".botBlock", type: "BotBlock" }
+  { dir: "botBlocks", ext: ".botBlock", type: "BotBlock" },
+  // S36: permissions & UI-action types. QuickAction file names carry the
+  // literal dotted fullName ("quickActions/Account.New_X.quickAction",
+  // live-confirmed) — fileBaseName strips only the FINAL extension, so the
+  // dot survives into api_name exactly like CustomMetadata's Type.Record.
+  { dir: "customPermissions", ext: ".customPermission", type: "CustomPermission" },
+  { dir: "permissionsetgroups", ext: ".permissionsetgroup", type: "PermissionSetGroup" },
+  { dir: "mutingpermissionsets", ext: ".mutingpermissionset", type: "MutingPermissionSet" },
+  { dir: "quickActions", ext: ".quickAction", type: "QuickAction" }
 ];
 var FOLDERED_DIR_TYPES = [
   { dir: "reports", ext: ".report", type: "Report", folderType: "ReportFolder" },
@@ -29589,7 +29607,12 @@ var FOLDERED_DIR_TYPES = [
 var BUNDLE_DIR_TYPES = [
   { dir: "genAiFunctions", type: "GenAiFunction", mainExt: ".genAiFunction" },
   { dir: "genAiPlannerBundles", type: "GenAiPlannerBundle", mainExt: ".genAiPlannerBundle" },
-  { dir: "aiAuthoringBundles", type: "AiAuthoringBundle", mainExt: ".agent" }
+  { dir: "aiAuthoringBundles", type: "AiAuthoringBundle", mainExt: ".agent" },
+  // S36: LWC bundles MUST ride this branch — as a simple type the generic
+  // -meta.xml skip would swallow every <n>.js-meta.xml (which carries
+  // isExposed/targets). Subdirectories are real (templates/x.html secondary
+  // templates, live-confirmed).
+  { dir: "lwc", type: "LightningComponentBundle", mainExt: ".js" }
 ];
 function indexSnapshotFiles(files, fileProps, retrievedAt) {
   const props = /* @__PURE__ */ new Map();
@@ -29787,6 +29810,9 @@ function extractFlowRefs(xml) {
   for (const m of xml.matchAll(/\$Label\.(\w+)/g)) {
     refs.add("CustomLabel", m[1]);
   }
+  for (const m of xml.matchAll(/\$Permission\.(\w+)/g)) {
+    refs.add("CustomPermission", m[1]);
+  }
   return refs.list();
 }
 function collectFieldRefs(node, object3, refs) {
@@ -29836,6 +29862,11 @@ function extractApexRefs(body, known, selfName) {
   for (const m of body.matchAll(/callout:([A-Za-z0-9_]+)/gi)) {
     refs.add("NamedCredential", m[1]);
   }
+  for (const m of body.matchAll(
+    /FeatureManagement\s*\.\s*checkPermission\s*\(\s*'([A-Za-z0-9_]+)'/gi
+  )) {
+    refs.add("CustomPermission", m[1]);
+  }
   return refs.list();
 }
 function extractObjectXmlRefs(xml, objectName, known) {
@@ -29853,6 +29884,9 @@ function extractObjectXmlRefs(xml, objectName, known) {
   }
   for (const m of xml.matchAll(/\$Label\.(\w+)/g)) {
     refs.add("CustomLabel", m[1]);
+  }
+  for (const m of xml.matchAll(/\$Permission\.(\w+)/g)) {
+    refs.add("CustomPermission", m[1]);
   }
   return refs.list();
 }
@@ -29878,6 +29912,11 @@ function extractPermissionSetRefs(xml) {
   for (const node of asArray(ps.classAccesses)) {
     if (node && typeof node === "object" && typeof node.apexClass === "string") {
       refs.add("ApexClass", node.apexClass);
+    }
+  }
+  for (const node of asArray(ps.customPermissions)) {
+    if (node && typeof node === "object" && typeof node.name === "string") {
+      refs.add("CustomPermission", node.name);
     }
   }
   return refs.list();
@@ -29933,6 +29972,54 @@ function extractExternalCredentialRefs(xml) {
   const refs = new RefSet();
   for (const m of xml.matchAll(/<authProvider>([^<]+)<\/authProvider>/g)) {
     refs.add("AuthProvider", m[1]);
+  }
+  return refs.list();
+}
+function extractPermissionSetGroupRefs(xml) {
+  const refs = new RefSet();
+  for (const m of xml.matchAll(/<permissionSets>([^<]+)<\/permissionSets>/g)) {
+    refs.add("PermissionSet", m[1]);
+  }
+  for (const m of xml.matchAll(/<mutedPermissionSets>([^<]+)<\/mutedPermissionSets>/g)) {
+    refs.add("MutingPermissionSet", m[1]);
+  }
+  return refs.list();
+}
+function extractQuickActionRefs(xml, apiName) {
+  const refs = new RefSet();
+  const flow = xml.match(/<flowDefinition>([^<]+)<\/flowDefinition>/)?.[1];
+  if (flow) refs.add("Flow", flow);
+  const lwc = xml.match(/<lightningWebComponent>([^<]+)<\/lightningWebComponent>/)?.[1];
+  if (lwc) refs.add("LightningComponentBundle", lwc);
+  const page2 = xml.match(/<page>([^<]+)<\/page>/)?.[1];
+  if (page2) refs.add("ApexPage", page2);
+  const parent = apiName.includes(".") ? apiName.split(".")[0] : "";
+  if (/__c$/i.test(parent)) refs.add("CustomObject", parent);
+  return refs.list();
+}
+function extractLwcRefs(content) {
+  const refs = new RefSet();
+  for (const m of content.matchAll(/['"]c\/([A-Za-z][A-Za-z0-9_]*)['"]/g)) {
+    refs.add("LightningComponentBundle", m[1]);
+  }
+  for (const m of content.matchAll(/<c-([a-z][a-z0-9_-]*)/g)) {
+    const camel = m[1].replace(/-([a-z0-9])/g, (_, ch) => ch.toUpperCase());
+    refs.add("LightningComponentBundle", camel);
+  }
+  for (const m of content.matchAll(/@salesforce\/apex\/([A-Za-z0-9_.]+)/g)) {
+    const token = m[1];
+    refs.add("ApexClass", token.includes(".") ? token.slice(0, token.lastIndexOf(".")) : token);
+  }
+  for (const m of content.matchAll(/@salesforce\/customPermission\/([A-Za-z0-9_]+)/g)) {
+    refs.add("CustomPermission", m[1]);
+  }
+  for (const m of content.matchAll(/@salesforce\/schema\/([A-Za-z0-9_]+)((?:\.[A-Za-z0-9_]+)*)/g)) {
+    refs.add("CustomObject", m[1]);
+    const tail = m[2].split(".").filter(Boolean);
+    if (tail.length === 1) refs.add("CustomField", `${m[1]}.${tail[0]}`);
+  }
+  for (const m of content.matchAll(/@salesforce\/label\/c\.([A-Za-z0-9_]+)/g)) {
+    refs.add("CustomLabel", m[1]);
   }
   return refs.list();
 }
@@ -29998,6 +30085,12 @@ function extractAllEdges(connectionId, artifacts, known = buildKnownArtifacts(ar
       add(a.type, a.apiName, extractNamedCredentialRefs(a.content));
     } else if (a.type === "ExternalCredential") {
       add(a.type, a.apiName, extractExternalCredentialRefs(a.content));
+    } else if (a.type === "PermissionSetGroup") {
+      add(a.type, a.apiName, extractPermissionSetGroupRefs(a.content));
+    } else if (a.type === "QuickAction") {
+      add(a.type, a.apiName, extractQuickActionRefs(a.content, a.apiName));
+    } else if (a.type === "LightningComponentBundle") {
+      add(a.type, a.apiName, extractLwcRefs(a.content));
     }
   }
   return edges;
@@ -30271,7 +30364,7 @@ var SnapshotEngine = class {
     const stale = [];
     let missing = 0;
     for (const p of props) {
-      if (isManaged(p)) continue;
+      if (isPackageOwned(p)) continue;
       const artifact = this.db.getArtifact(conn.id, p.type, p.fullName);
       if (!artifact) {
         missing += 1;
@@ -30337,8 +30430,11 @@ function buildRetrieveMembers(types, listedProps, warnings) {
   }
   return members;
 }
+function isPackageOwned(p) {
+  return p.manageableState === "installed" || p.manageableState === "released";
+}
 function isManaged(p) {
-  return p.manageableState === "installed" || p.manageableState === "released" ? p.namespacePrefix !== void 0 && p.namespacePrefix !== "" : false;
+  return isPackageOwned(p) ? p.namespacePrefix !== void 0 && p.namespacePrefix !== "" : false;
 }
 function withChildTypes(types) {
   const all = new Set(types);
@@ -30388,7 +30484,13 @@ var TYPE_DIRS = {
   GenAiPromptTemplateActv: "genAiPromptTemplateActivations",
   AiEvaluationDefinition: "aiEvaluationDefinitions",
   BotTemplate: "botTemplates",
-  BotBlock: "botBlocks"
+  BotBlock: "botBlocks",
+  // S36: permissions & UI-action types (default-manifest members).
+  CustomPermission: "customPermissions",
+  PermissionSetGroup: "permissionsetgroups",
+  MutingPermissionSet: "mutingpermissionsets",
+  QuickAction: "quickActions",
+  LightningComponentBundle: "lwc"
 };
 function ownedDirsForTypes(types) {
   const dirs = /* @__PURE__ */ new Set();
@@ -30952,6 +31054,33 @@ var FILE_TYPES = {
     envelope: true,
     envelopeMainSuffix: ".agent",
     requiredSuffixes: [".bundle-meta.xml"]
+  },
+  // S36: permissions & UI-action types. CustomPermission pairs with a
+  // permission set's customPermissions block (coverage arm below).
+  CustomPermission: { dir: "customPermissions", ext: ".customPermission" },
+  // S36: permission set groups recalculate ASYNCHRONOUSLY after deploy
+  // (Status Updating → Updated — retrieves carry <status>, live-confirmed);
+  // the analyzeChanges arms say so on every approval page. Dir casing
+  // live-confirmed all-lowercase (S33 authproviders precedent held).
+  PermissionSetGroup: { dir: "permissionsetgroups", ext: ".permissionsetgroup" },
+  MutingPermissionSet: { dir: "mutingpermissionsets", ext: ".mutingpermissionset" },
+  // S36: quick actions. Object-scoped actions have DOTTED fullNames
+  // ("Account.New_X") that are NOT parent.child fragments — QuickAction is a
+  // plain top-level type (CustomMetadata precedent): NAME_RE admits the dot,
+  // fileSafeName keeps it literal, and the retrieve file is the literal
+  // "quickActions/Account.New_X.quickAction" (live-confirmed). Global
+  // actions are undotted. '*' retrieves BOTH shapes (live-confirmed).
+  QuickAction: { dir: "quickActions", ext: ".quickAction" },
+  // S36: Lightning web components. A bundle: <n>.js (main) + <n>.js-meta.xml
+  // (required — carries isExposed/targets) + optional .html/.css/.svg and
+  // subdirectories (secondary templates like templates/x.html are real,
+  // live-confirmed). JS-only service components are normal (no .html).
+  LightningComponentBundle: {
+    dir: "lwc",
+    ext: ".js",
+    envelope: true,
+    envelopeMainSuffix: ".js",
+    requiredSuffixes: [".js-meta.xml"]
   }
 };
 var XMLNS_META = "http://soap.sforce.com/2006/04/metadata";
@@ -31051,6 +31180,12 @@ function parseBundleEnvelope(type, apiName, content, mainFile, alsoRequired = []
     if (segs.length === 0 || segs.length > BUNDLE_MAX_DEPTH || segs.some((s) => !BUNDLE_REL_SEGMENT_RE.test(s))) {
       throw new ContrailError(
         `${type} ${apiName}: invalid envelope path "${rel}"`,
+        "bad_component"
+      );
+    }
+    if (segs.some((s) => s.toLowerCase() === "__tests__")) {
+      throw new ContrailError(
+        `${type} ${apiName}: envelope path "${rel}" \u2014 local test files never deploy. Carry only the files a retrieve shows.`,
         "bad_component"
       );
     }
@@ -31334,9 +31469,9 @@ function analyzeChanges(db, store, conn, components, deletions) {
           );
         }
       }
-      if ((c.type === "FlexiPage" || c.type === "CustomApplication" || c.type === "Layout" || c.type === "Report" || c.type === "Dashboard" || c.type === "GenAiPlugin" || c.type === "GenAiPromptTemplate" || c.type === "Bot" || c.type === "LeadConvertSettings" || c.type === "NamedCredential" || c.type === "ExternalCredential" || c.type === "AuthProvider") && change === "modify") {
+      if ((c.type === "FlexiPage" || c.type === "CustomApplication" || c.type === "Layout" || c.type === "Report" || c.type === "Dashboard" || c.type === "GenAiPlugin" || c.type === "GenAiPromptTemplate" || c.type === "Bot" || c.type === "LeadConvertSettings" || c.type === "NamedCredential" || c.type === "ExternalCredential" || c.type === "AuthProvider" || c.type === "PermissionSetGroup" || c.type === "MutingPermissionSet") && change === "modify") {
         warnings.push(
-          `WHOLE-DOCUMENT REPLACE \u2014 this deploy fully replaces the org's ${c.type}; anything not present in the proposed content is removed.` + (c.type === "Bot" ? " A <botVersions> block omitted from a Bot document is a VERSION DELETE." : c.type === "LeadConvertSettings" ? " An <objectMapping> omitted here is a lead field mapping DELETED org-wide." : c.type === "ExternalCredential" ? " A principal parameter omitted here is DELETED org-side \u2014 along with the credential values a human entered for it in Setup." : "")
+          `WHOLE-DOCUMENT REPLACE \u2014 this deploy fully replaces the org's ${c.type}; anything not present in the proposed content is removed.` + (c.type === "Bot" ? " A <botVersions> block omitted from a Bot document is a VERSION DELETE." : c.type === "LeadConvertSettings" ? " An <objectMapping> omitted here is a lead field mapping DELETED org-wide." : c.type === "ExternalCredential" ? " A principal parameter omitted here is DELETED org-side \u2014 along with the credential values a human entered for it in Setup." : c.type === "PermissionSetGroup" ? " A <permissionSets> member omitted here is DETACHED from the group org-side \u2014 users assigned the group lose that permission set." : c.type === "MutingPermissionSet" ? " A muted permission omitted here is UN-MUTED org-side, silently RESTORING it to every user assigned the group." : "")
         );
       }
       if (c.type === "GenAiPromptTemplate" && change === "modify") {
@@ -31358,6 +31493,16 @@ function analyzeChanges(db, store, conn, components, deletions) {
           `FULL-RECORD REPLACE \u2014 fields omitted from this content are reset to null/default on the deployed record.`
         );
       }
+    }
+    if (c.type === "PermissionSetGroup") {
+      warnings.push(
+        `PERMISSION SET GROUP RECALCULATES ASYNCHRONOUSLY \u2014 after this deploy the org rebuilds the group's aggregated permissions (Status: Updating \u2192 Updated). Verify with soql_query (SELECT Status FROM PermissionSetGroup WHERE DeveloperName = '${c.api_name}') before relying on the grants.`
+      );
+    }
+    if (c.type === "QuickAction" && change === "add") {
+      warnings.push(
+        `NEW QUICK ACTION is surfaced NOWHERE until a page layout, a global publisher layout, or a Lightning record page using dynamic actions includes it \u2014 this deploy creates the action but places it on no UI.`
+      );
     }
     if (c.type === "Layout" && change === "add") {
       warnings.push(
@@ -31465,6 +31610,10 @@ function isGranted(containerText, need) {
       return permissionBlocks(containerText, "externalCredentialPrincipalAccesses").some(
         (b) => named(b, "externalCredentialPrincipal", need.api_name) && flagOn(b, "enabled")
       );
+    case "customPermission":
+      return permissionBlocks(containerText, "customPermissions").some(
+        (b) => named(b, "name", need.api_name) && flagOn(b, "enabled")
+      );
     case "tab": {
       const blocks = [
         ...permissionBlocks(containerText, "tabVisibilities"),
@@ -31498,6 +31647,13 @@ function analyzePermissionCoverage(components) {
       needs.push({ type: "CustomApplication", api_name: c.api_name, permission: "app visibility", kind: "application" });
     } else if (c.type === "Bot") {
       needs.push({ type: "Bot", api_name: c.api_name, permission: "agent access (agentAccesses)", kind: "agent" });
+    } else if (c.type === "CustomPermission") {
+      needs.push({
+        type: "CustomPermission",
+        api_name: c.api_name,
+        permission: "custom permission access (customPermissions)",
+        kind: "customPermission"
+      });
     } else if (c.type === "ExternalCredential") {
       for (const principal of externalCredentialPrincipals(c.content)) {
         needs.push({
@@ -33477,7 +33633,7 @@ function getUpdateNotice(installedVersion, repo, enabled) {
 }
 
 // src/core/version.ts
-var ENGINE_VERSION = "0.27.0";
+var ENGINE_VERSION = "0.28.0";
 
 // src/tools/register.ts
 var UPDATE_REPO = "RHayes765/contrail-plugin";
@@ -33853,7 +34009,7 @@ function registerMetadataTools(server, deps) {
       inputSchema: {
         connection: external_exports.string().describe("Connection alias (or id)."),
         type: external_exports.string().describe(
-          "Metadata type: ApexClass, ApexTrigger, Flow, CustomObject, CustomField, ValidationRule, CustomLabel, PermissionSet."
+          "Metadata type: ApexClass, ApexTrigger, Flow, CustomObject, CustomField, ValidationRule, CustomLabel, PermissionSet, CustomPermission, PermissionSetGroup, QuickAction (dotted Account.New_X for object actions), and any other indexed type. Bundle types (LightningComponentBundle, GenAiFunction, \u2026) return the main file plus a bundle_files listing of every sibling with snapshot paths for direct reading."
         ),
         names: external_exports.array(external_exports.string()).min(1).max(10).describe("Full API names; children dotted (Account.MyField__c)."),
         max_bytes: external_exports.number().int().min(1e3).max(MAX_CONTENT_BYTES).optional().describe(
@@ -34214,14 +34370,20 @@ function registerMetadataTools(server, deps) {
     })
   );
 }
-var BUNDLE_TYPES = /* @__PURE__ */ new Set(["GenAiFunction", "GenAiPlannerBundle", "AiAuthoringBundle"]);
+var BUNDLE_TYPES = /* @__PURE__ */ new Set([
+  "GenAiFunction",
+  "GenAiPlannerBundle",
+  "AiAuthoringBundle",
+  // S36
+  "LightningComponentBundle"
+]);
 async function fetchArtifactContent(deps, conn, type, name) {
   const { db, store, tokenMgr, config: config2 } = deps;
   if (BUNDLE_TYPES.has(type)) {
     const artifact = db.getArtifact(conn.id, type, name);
     if (!artifact?.filePath) {
       throw new ContrailError(
-        `${type} ${name} is not in the local snapshot \u2014 run refresh_snapshot with types:["${type}"] (bundle types are explicit-refresh-only).`,
+        `${type} ${name} is not in the local snapshot \u2014 run refresh_snapshot with types:["${type}"].`,
         "artifact_not_found"
       );
     }
@@ -34366,6 +34528,20 @@ function readArtifactFromSnapshot(deps, conn, type, name) {
     if (!parentXml) return null;
     return findChildBlock(parentXml, child.tag, childName);
   }
+  if (BUNDLE_TYPES.has(type)) {
+    const artifact = deps.db.getArtifact(conn.id, type, name);
+    if (!artifact?.filePath) return null;
+    const dirPrefix = artifact.filePath.split("/").slice(0, 2).join("/");
+    const files = deps.store.listCurrentFiles(conn.id, dirPrefix).sort((x, y) => x.localeCompare(y));
+    if (files.length === 0) return null;
+    const parts = [];
+    for (const rel of files) {
+      const text = deps.store.readCurrentFile(conn.id, rel);
+      if (text !== null) parts.push(`<!-- contrail:file ${rel} -->
+${text}`);
+    }
+    return parts.length > 0 ? parts.join("\n") : null;
+  }
   return readSnapshotArtifact(deps, conn, type, name);
 }
 function splitNamespace(name) {
@@ -34422,7 +34598,9 @@ function semanticDiff(aContent, bContent) {
   return { format: "text", identical: text.identical, text };
 }
 function looksLikeXml(content) {
-  return content.trimStart().startsWith("<");
+  const t = content.trimStart();
+  if (t.startsWith("<!-- contrail:file ")) return false;
+  return t.startsWith("<");
 }
 function diffXml(aXml, bXml) {
   let aDoc;
@@ -35895,7 +36073,7 @@ function registerDeployTools(server, deps) {
         components: external_exports.array(
           external_exports.object({
             type: external_exports.string().describe(
-              `ApexClass, ApexTrigger, ApexPage, Flow, CustomObject, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, GlobalValueSet, ConnectedApp, NamedCredential / ExternalCredential / AuthProvider (credential metadata NEVER carries working secrets: per-principal values are entered in Setup after deploy, retrieves return placeholders, and principals need externalCredentialPrincipalAccesses on a permission set), PlatformEventChannel(Member), ManagedEventSubscription, Layout, CustomMetadata (records, dotted Type.Record names), LeadConvertSettings (SINGLETON \u2014 api_name is literally "LeadConvertSettings"; a modify replaces ALL lead field mappings, retrieve-first), Report / Dashboard (folder-qualified "FolderDevName/Name" api_names; deploy the ReportFolder/DashboardFolder component first or in the same package for a new folder), ReportFolder / DashboardFolder (content = the whole <ReportFolder> doc with folderShares \u2014 folder sharing is what makes reports visible), Agentforce types Bot, GenAiPlugin (agent topics \u2014 modifying one on an ACTIVE agent needs the human to deactivate it first), GenAiPromptTemplate (activeVersionIdentifier is org-generated: retrieve-first, never hand-type it), GenAiPromptTemplateActv, AiEvaluationDefinition (Testing Center test definitions), BotTemplate, BotBlock, or child types CustomField / ValidationRule / CustomLabel / ListView / RecordType / BotVersion (dotted MyBot.v1). Bundle types GenAiFunction / GenAiPlannerBundle / AiAuthoringBundle (one component = a directory of files) take a Contrail bundle ENVELOPE as content: JSON {"contrail_bundle":1, "files": {"<relative path>": "<body>", ...}} \u2014 the file set retrieve_metadata's bundle_files listing shows, main file included (e.g. "My_Fn.genAiFunction-meta.xml"). AiAuthoringBundle deploys as a DRAFT STAGE: exactly <Name>.agent (plaintext Agent Script) + <Name>.bundle-meta.xml; nothing compiles and the running agent is unchanged until a human publishes the draft. Agent publish/preview stay human; activate/deactivate goes through agent_activation_propose/execute (its own ritual), and eval runs through run_agent_eval.`
+              `ApexClass, ApexTrigger, ApexPage, Flow, CustomObject, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, GlobalValueSet, ConnectedApp, NamedCredential / ExternalCredential / AuthProvider (credential metadata NEVER carries working secrets: per-principal values are entered in Setup after deploy, retrieves return placeholders, and principals need externalCredentialPrincipalAccesses on a permission set), PlatformEventChannel(Member), ManagedEventSubscription, Layout, CustomMetadata (records, dotted Type.Record names), LeadConvertSettings (SINGLETON \u2014 api_name is literally "LeadConvertSettings"; a modify replaces ALL lead field mappings, retrieve-first), Report / Dashboard (folder-qualified "FolderDevName/Name" api_names; deploy the ReportFolder/DashboardFolder component first or in the same package for a new folder), ReportFolder / DashboardFolder (content = the whole <ReportFolder> doc with folderShares \u2014 folder sharing is what makes reports visible), Agentforce types Bot, GenAiPlugin (agent topics \u2014 modifying one on an ACTIVE agent needs the human to deactivate it first), GenAiPromptTemplate (activeVersionIdentifier is org-generated: retrieve-first, never hand-type it), GenAiPromptTemplateActv, AiEvaluationDefinition (Testing Center test definitions), BotTemplate, BotBlock, CustomPermission (pairs with a customPermissions grant on a permission set \u2014 ungranted it does nothing), PermissionSetGroup (members DETACH if omitted on modify; the org recalculates grants ASYNCHRONOUSLY after deploy \u2014 verify Status via soql_query), MutingPermissionSet (a muted permission omitted on modify is UN-MUTED \u2014 silently restored to every assigned user), QuickAction (object actions dotted "Account.New_X", global actions bare; surfaced by page layouts, global publisher layouts, or Lightning record pages with dynamic actions \u2014 never by the deploy itself), or child types CustomField / ValidationRule / CustomLabel / ListView / RecordType / BotVersion (dotted MyBot.v1). Bundle types GenAiFunction / GenAiPlannerBundle / AiAuthoringBundle / LightningComponentBundle (one component = a directory of files) take a Contrail bundle ENVELOPE as content: JSON {"contrail_bundle":1, "files": {"<relative path>": "<body>", ...}} \u2014 the file set retrieve_metadata's bundle_files listing shows, main file included (e.g. "My_Fn.genAiFunction-meta.xml"). LightningComponentBundle (LWC) requires <Name>.js + <Name>.js-meta.xml; .html/.css/.svg and subdirectories (e.g. secondary templates) are normal, __tests__ and dot-files never deploy, and the org compiles on deploy. Refresh the snapshot before modifying an org-existing bundle \u2014 the whole directory is replaced. AiAuthoringBundle deploys as a DRAFT STAGE: exactly <Name>.agent (plaintext Agent Script) + <Name>.bundle-meta.xml; nothing compiles and the running agent is unchanged until a human publishes the draft. Agent publish/preview stay human; activate/deactivate goes through agent_activation_propose/execute (its own ritual), and eval runs through run_agent_eval.`
             ),
             api_name: external_exports.string().describe("Full API name; children dotted (Account.MyField__c)."),
             content: external_exports.string().optional().describe(
