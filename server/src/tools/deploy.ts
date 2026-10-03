@@ -170,14 +170,28 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
                     'GenAiPromptTemplate (activeVersionIdentifier is org-generated: ' +
                     'retrieve-first, never hand-type it), GenAiPromptTemplateActv, ' +
                     'AiEvaluationDefinition (Testing Center test definitions), BotTemplate, ' +
-                    'BotBlock, or child types CustomField / ValidationRule / ' +
-                    'CustomLabel / ListView / RecordType / BotVersion (dotted MyBot.v1). ' +
-                    'Bundle types GenAiFunction / GenAiPlannerBundle / AiAuthoringBundle ' +
-                    '(one component = a directory of files) take a Contrail bundle ' +
-                    'ENVELOPE as content: JSON {"contrail_bundle":1, "files": ' +
-                    '{"<relative path>": "<body>", ...}} — the file set retrieve_metadata\'s ' +
-                    'bundle_files listing shows, main file included (e.g. ' +
-                    '"My_Fn.genAiFunction-meta.xml"). AiAuthoringBundle deploys as a DRAFT ' +
+                    'BotBlock, CustomPermission (pairs with a customPermissions grant on a ' +
+                    'permission set — ungranted it does nothing), PermissionSetGroup ' +
+                    '(members DETACH if omitted on modify; the org recalculates grants ' +
+                    'ASYNCHRONOUSLY after deploy — verify Status via soql_query), ' +
+                    'MutingPermissionSet (a muted permission omitted on modify is UN-MUTED ' +
+                    '— silently restored to every assigned user), QuickAction (object ' +
+                    'actions dotted "Account.New_X", global actions bare; surfaced by page ' +
+                    'layouts, global publisher layouts, or Lightning record pages with ' +
+                    'dynamic actions — never by the deploy itself), or child types CustomField / ' +
+                    'ValidationRule / CustomLabel / ListView / RecordType / BotVersion ' +
+                    '(dotted MyBot.v1). ' +
+                    'Bundle types GenAiFunction / GenAiPlannerBundle / AiAuthoringBundle / ' +
+                    'LightningComponentBundle (one component = a directory of files) take a ' +
+                    'Contrail bundle ENVELOPE as content: JSON {"contrail_bundle":1, ' +
+                    '"files": {"<relative path>": "<body>", ...}} — the file set ' +
+                    "retrieve_metadata's bundle_files listing shows, main file included " +
+                    '(e.g. "My_Fn.genAiFunction-meta.xml"). LightningComponentBundle (LWC) ' +
+                    'requires <Name>.js + <Name>.js-meta.xml; .html/.css/.svg and ' +
+                    'subdirectories (e.g. secondary templates) are normal, __tests__ and ' +
+                    'dot-files never deploy, and the org compiles on deploy. Refresh the ' +
+                    'snapshot before modifying an org-existing bundle — the whole directory ' +
+                    'is replaced. AiAuthoringBundle deploys as a DRAFT ' +
                     'STAGE: exactly <Name>.agent (plaintext Agent Script) + ' +
                     '<Name>.bundle-meta.xml; nothing compiles and the running agent is ' +
                     'unchanged until a human publishes the draft. Agent publish/preview ' +

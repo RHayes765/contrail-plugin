@@ -140,10 +140,12 @@ Give admins and integrations an escape hatch — wrap the rule body:
   `CustomField` `User.Bypass_Validation__c` and a `PermissionSet` granting its
   `fieldPermissions` ship in the same package as the rule.
 - **Profile check (no new metadata):** `$Profile.Name <> "System Administrator"`.
-- **`$Permission.X` (custom permission):** the cleanest pattern on-platform, but
-  `CustomPermission` is **not a Contrail-deployable type** — if the human wants
-  it, they create the custom permission in Setup first; the rule referencing it
-  deploys fine afterwards. Say this rather than attempting the type.
+- **`$Permission.X` (custom permission):** the cleanest pattern on-platform,
+  and fully deployable: ship the `CustomPermission` component, the rule
+  referencing `$Permission.X`, and a `PermissionSet` enabling it (the
+  `customPermissions` block — see platform-permission-set-generate) in ONE
+  package. Users holding the permission bypass the rule; everyone else is
+  gated.
 
 ## XML escaping — the most common deploy error
 

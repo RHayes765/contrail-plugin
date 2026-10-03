@@ -210,7 +210,11 @@ export function registerMetadataTools(server: McpServer, deps: ToolDeps): void {
           .string()
           .describe(
             'Metadata type: ApexClass, ApexTrigger, Flow, CustomObject, CustomField, ' +
-              'ValidationRule, CustomLabel, PermissionSet.',
+              'ValidationRule, CustomLabel, PermissionSet, CustomPermission, ' +
+              'PermissionSetGroup, QuickAction (dotted Account.New_X for object actions), ' +
+              'and any other indexed type. Bundle types (LightningComponentBundle, ' +
+              'GenAiFunction, …) return the main file plus a bundle_files listing of ' +
+              'every sibling with snapshot paths for direct reading.',
           ),
         names: z
           .array(z.string())
@@ -737,7 +741,13 @@ export function registerMetadataTools(server: McpServer, deps: ToolDeps): void {
  * bundle_files listing of every sibling (path + size + snapshot_path) so
  * callers with file tools read the rest directly.
  */
-const BUNDLE_TYPES = new Set(['GenAiFunction', 'GenAiPlannerBundle', 'AiAuthoringBundle']);
+const BUNDLE_TYPES = new Set([
+  'GenAiFunction',
+  'GenAiPlannerBundle',
+  'AiAuthoringBundle',
+  // S36
+  'LightningComponentBundle',
+]);
 
 async function fetchArtifactContent(
   deps: ToolDeps,
@@ -757,7 +767,7 @@ async function fetchArtifactContent(
     if (!artifact?.filePath) {
       throw new ContrailError(
         `${type} ${name} is not in the local snapshot — run refresh_snapshot with ` +
-          `types:["${type}"] (bundle types are explicit-refresh-only).`,
+          `types:["${type}"].`,
         'artifact_not_found',
       );
     }
@@ -952,6 +962,24 @@ export function readArtifactFromSnapshot(
     const parentXml = readSnapshotArtifact(deps, conn, child.parentType, parentName);
     if (!parentXml) return null;
     return findChildBlock(parentXml, child.tag, childName);
+  }
+  // S36: bundles diff as their WHOLE directory, framed exactly like the
+  // indexer's FTS content — diff_orgs hashes the concatenation, so a
+  // main-file-only read here made the two tools contradict each other on
+  // sibling-file drift (an LWC whose .html changed showed "changed" in
+  // diff_orgs and "identical" in diff_artifact).
+  if (BUNDLE_TYPES.has(type)) {
+    const artifact = deps.db.getArtifact(conn.id, type, name);
+    if (!artifact?.filePath) return null;
+    const dirPrefix = artifact.filePath.split('/').slice(0, 2).join('/');
+    const files = deps.store.listCurrentFiles(conn.id, dirPrefix).sort((x, y) => x.localeCompare(y));
+    if (files.length === 0) return null;
+    const parts: string[] = [];
+    for (const rel of files) {
+      const text = deps.store.readCurrentFile(conn.id, rel);
+      if (text !== null) parts.push(`<!-- contrail:file ${rel} -->\n${text}`);
+    }
+    return parts.length > 0 ? parts.join('\n') : null;
   }
   return readSnapshotArtifact(deps, conn, type, name);
 }

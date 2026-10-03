@@ -201,6 +201,33 @@ const FILE_TYPES: Record<string, FileSpec> = {
     envelopeMainSuffix: '.agent',
     requiredSuffixes: ['.bundle-meta.xml'],
   },
+  // S36: permissions & UI-action types. CustomPermission pairs with a
+  // permission set's customPermissions block (coverage arm below).
+  CustomPermission: { dir: 'customPermissions', ext: '.customPermission' },
+  // S36: permission set groups recalculate ASYNCHRONOUSLY after deploy
+  // (Status Updating → Updated — retrieves carry <status>, live-confirmed);
+  // the analyzeChanges arms say so on every approval page. Dir casing
+  // live-confirmed all-lowercase (S33 authproviders precedent held).
+  PermissionSetGroup: { dir: 'permissionsetgroups', ext: '.permissionsetgroup' },
+  MutingPermissionSet: { dir: 'mutingpermissionsets', ext: '.mutingpermissionset' },
+  // S36: quick actions. Object-scoped actions have DOTTED fullNames
+  // ("Account.New_X") that are NOT parent.child fragments — QuickAction is a
+  // plain top-level type (CustomMetadata precedent): NAME_RE admits the dot,
+  // fileSafeName keeps it literal, and the retrieve file is the literal
+  // "quickActions/Account.New_X.quickAction" (live-confirmed). Global
+  // actions are undotted. '*' retrieves BOTH shapes (live-confirmed).
+  QuickAction: { dir: 'quickActions', ext: '.quickAction' },
+  // S36: Lightning web components. A bundle: <n>.js (main) + <n>.js-meta.xml
+  // (required — carries isExposed/targets) + optional .html/.css/.svg and
+  // subdirectories (secondary templates like templates/x.html are real,
+  // live-confirmed). JS-only service components are normal (no .html).
+  LightningComponentBundle: {
+    dir: 'lwc',
+    ext: '.js',
+    envelope: true,
+    envelopeMainSuffix: '.js',
+    requiredSuffixes: ['.js-meta.xml'],
+  },
 };
 
 const XMLNS_META = 'http://soap.sforce.com/2006/04/metadata';
@@ -338,6 +365,17 @@ export function parseBundleEnvelope(
     ) {
       throw new ContrailError(
         `${type} ${apiName}: invalid envelope path "${rel}"`,
+        'bad_component',
+      );
+    }
+    // S36: local test trees never deploy (the org would refuse an LWC
+    // bundle carrying __tests__ with a worse message) — and the same goes
+    // for every bundle type, so the reject is generic (and case-blind:
+    // "__Tests__" would just fail org-side instead).
+    if (segs.some((s) => s.toLowerCase() === '__tests__')) {
+      throw new ContrailError(
+        `${type} ${apiName}: envelope path "${rel}" — local test files never deploy. ` +
+          `Carry only the files a retrieve shows.`,
         'bad_component',
       );
     }
@@ -806,7 +844,9 @@ export function analyzeChanges(
           c.type === 'LeadConvertSettings' ||
           c.type === 'NamedCredential' ||
           c.type === 'ExternalCredential' ||
-          c.type === 'AuthProvider') &&
+          c.type === 'AuthProvider' ||
+          c.type === 'PermissionSetGroup' ||
+          c.type === 'MutingPermissionSet') &&
         change === 'modify'
       ) {
         warnings.push(
@@ -819,7 +859,13 @@ export function analyzeChanges(
                 : c.type === 'ExternalCredential'
                   ? ' A principal parameter omitted here is DELETED org-side — along with the' +
                     ' credential values a human entered for it in Setup.'
-                  : ''),
+                  : c.type === 'PermissionSetGroup'
+                    ? ' A <permissionSets> member omitted here is DETACHED from the group' +
+                      ' org-side — users assigned the group lose that permission set.'
+                    : c.type === 'MutingPermissionSet'
+                      ? ' A muted permission omitted here is UN-MUTED org-side, silently' +
+                        ' RESTORING it to every user assigned the group.'
+                      : ''),
         );
       }
       // S30: the activeVersionIdentifier is an org-generated token. Altering
@@ -853,6 +899,25 @@ export function analyzeChanges(
             `null/default on the deployed record.`,
         );
       }
+    }
+    // S36: PSG grants are rebuilt asynchronously — fires on add AND modify
+    // (S34 D1 precedent: the honesty rides every deploy, by design).
+    if (c.type === 'PermissionSetGroup') {
+      warnings.push(
+        `PERMISSION SET GROUP RECALCULATES ASYNCHRONOUSLY — after this deploy the org ` +
+          `rebuilds the group's aggregated permissions (Status: Updating → Updated). ` +
+          `Verify with soql_query (SELECT Status FROM PermissionSetGroup WHERE ` +
+          `DeveloperName = '${c.api_name}') before relying on the grants.`,
+      );
+    }
+    // S36: a quick action deploys into a vacuum — surfacing is a layout
+    // concern (Layout-assignment precedent below).
+    if (c.type === 'QuickAction' && change === 'add') {
+      warnings.push(
+        `NEW QUICK ACTION is surfaced NOWHERE until a page layout, a global publisher ` +
+          `layout, or a Lightning record page using dynamic actions includes it — this ` +
+          `deploy creates the action but places it on no UI.`,
+      );
     }
     // A layout deploy never assigns the layout: assignment lives in Profile
     // metadata (layoutAssignments) or Setup. Say so for NEW layouts, which
@@ -969,7 +1034,16 @@ interface PermissionNeed {
   type: string;
   api_name: string;
   permission: string;
-  kind: 'field' | 'object' | 'class' | 'tab' | 'page' | 'application' | 'agent' | 'credentialPrincipal';
+  kind:
+    | 'field'
+    | 'object'
+    | 'class'
+    | 'tab'
+    | 'page'
+    | 'application'
+    | 'agent'
+    | 'credentialPrincipal'
+    | 'customPermission';
 }
 
 /**
@@ -1053,6 +1127,13 @@ function isGranted(containerText: string, need: PermissionNeed): boolean {
       return permissionBlocks(containerText, 'externalCredentialPrincipalAccesses').some(
         (b) => named(b, 'externalCredentialPrincipal', need.api_name) && flagOn(b, 'enabled'),
       );
+    case 'customPermission':
+      // S36: custom permissions grant via <customPermissions><enabled>true
+      // </enabled><name>X</name></customPermissions> (live-confirmed from a
+      // real org's permission set; Profiles use the identical block shape).
+      return permissionBlocks(containerText, 'customPermissions').some(
+        (b) => named(b, 'name', need.api_name) && flagOn(b, 'enabled'),
+      );
     case 'tab': {
       const blocks = [
         ...permissionBlocks(containerText, 'tabVisibilities'),
@@ -1102,6 +1183,25 @@ export function analyzePermissionCoverage(components: ProposedComponent[]): Perm
     } else if (c.type === 'Bot') {
       // S30: users reach an agent through agentAccesses on a permission set.
       needs.push({ type: 'Bot', api_name: c.api_name, permission: 'agent access (agentAccesses)', kind: 'agent' });
+    } else if (c.type === 'CustomPermission') {
+      // S36: a custom permission grants nobody anything until a permission
+      // set (or profile) enables it. Deliberately NO arm for QuickAction
+      // (surfacing is a layout concern — no permission-set block exists),
+      // LightningComponentBundle (visibility is isExposed/targets inside its
+      // own js-meta.xml), or PermissionSetGroup (it's a CONTAINER of
+      // permission sets; who holds it is a data question, PermissionSetAssignment).
+      // And PSGs are never counted as grant CONTAINERS here either: coverage
+      // scans in-package PermissionSet/Profile content only — a PSG whose
+      // org-side member grants the permission still warns, correctly, because
+      // the advisory can only see the package. Never "fix" that by counting
+      // PSG or MutingPermissionSet blocks: a muting set uses the SAME tag
+      // names with INVERTED semantics (enabled=true means REVOKED).
+      needs.push({
+        type: 'CustomPermission',
+        api_name: c.api_name,
+        permission: 'custom permission access (customPermissions)',
+        kind: 'customPermission',
+      });
     } else if (c.type === 'ExternalCredential') {
       // S33: every principal an external credential defines needs an
       // externalCredentialPrincipalAccesses grant before anyone's callouts

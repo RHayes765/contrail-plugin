@@ -152,6 +152,16 @@ export const DEFAULT_CONFIG: ContrailConfig = {
       // routing/conversion work reads it constantly. Absent-until-configured
       // orgs return nothing for it (harmless).
       'LeadConvertSettings',
+      // S36: permissions & UI-action types — small core-config documents
+      // plus LWC source (the ApexClass precedent: component code belongs in
+      // the default index). Package-installed bundles (managed OR unlocked)
+      // are excluded from wildcard retrieves by the platform and from
+      // staleness noise by the isManaged guard.
+      'CustomPermission',
+      'PermissionSetGroup',
+      'MutingPermissionSet',
+      'QuickAction',
+      'LightningComponentBundle',
     ],
     pollIntervalMs: 2000,
     retrieveTimeoutMs: 10 * 60 * 1000,

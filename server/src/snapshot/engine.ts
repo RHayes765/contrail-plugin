@@ -323,9 +323,9 @@ export class SnapshotEngine {
     }> = [];
     let missing = 0;
     for (const p of props) {
-      // Managed-package components are excluded from wildcard retrieves by
+      // Package-owned components are excluded from wildcard retrieves by
       // the platform; counting them as "missing" would be permanent noise.
-      if (isManaged(p)) continue;
+      if (isPackageOwned(p)) continue;
       const artifact = this.db.getArtifact(conn.id, p.type, p.fullName);
       if (!artifact) {
         missing += 1;
@@ -423,10 +423,24 @@ function buildRetrieveMembers(
   return members;
 }
 
+/**
+ * S36: two predicates, deliberately split. Wildcard retrieves exclude
+ * package-owned components whether or not they carry a namespace — UNLOCKED
+ * packages install namespace-free with manageableState 'installed'
+ * (live-confirmed: an org's installed LWC library listed 50 bundles and a
+ * wildcard retrieved zero) — so STALENESS missing-counting keys on state
+ * alone (isPackageOwned; get_org_changes skips the 'installed' arm the same
+ * way). NAMED-member expansion keeps the namespace-keyed test (isManaged):
+ * the platform DOES return namespace-free installed components to a
+ * by-name retrieve, and dropping them there would silently shrink
+ * long-standing CustomObject/Report snapshots.
+ */
+function isPackageOwned(p: FileProperties): boolean {
+  return p.manageableState === 'installed' || p.manageableState === 'released';
+}
+
 function isManaged(p: FileProperties): boolean {
-  return p.manageableState === 'installed' || p.manageableState === 'released'
-    ? p.namespacePrefix !== undefined && p.namespacePrefix !== ''
-    : false;
+  return isPackageOwned(p) ? p.namespacePrefix !== undefined && p.namespacePrefix !== '' : false;
 }
 
 function withChildTypes(types: string[]): string[] {
@@ -480,6 +494,12 @@ const TYPE_DIRS: Record<string, string> = {
   AiEvaluationDefinition: 'aiEvaluationDefinitions',
   BotTemplate: 'botTemplates',
   BotBlock: 'botBlocks',
+  // S36: permissions & UI-action types (default-manifest members).
+  CustomPermission: 'customPermissions',
+  PermissionSetGroup: 'permissionsetgroups',
+  MutingPermissionSet: 'mutingpermissionsets',
+  QuickAction: 'quickActions',
+  LightningComponentBundle: 'lwc',
 };
 
 /** The refreshed types' own directories — null if any requested type has no known mapping. */

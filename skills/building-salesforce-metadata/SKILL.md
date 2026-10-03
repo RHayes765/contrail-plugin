@@ -200,6 +200,45 @@ directory** and give `validate_deploy` the path:
   in `integration-connectivity-generate`. All three types are
   explicit-refresh-only (`refresh_snapshot
   types:["NamedCredential","ExternalCredential","AuthProvider"]`).
+- **Custom permissions do nothing alone.** A `CustomPermission` component grants
+  nobody anything until a permission set (or profile) enables it via
+  `<customPermissions><enabled>true</enabled><name>X</name></customPermissions>`
+  — ship the grant in the same package (the coverage checker warns when you
+  don't). Code and config check it with `FeatureManagement.checkPermission('X')`
+  (Apex) and `$Permission.X` (validation rules, flows) — both feed the
+  dependency graph.
+- **Permission set groups recalculate ASYNCHRONOUSLY.** After any
+  `PermissionSetGroup` deploy the org rebuilds the aggregated grants
+  (`Status`: `Updating` → `Updated` — verify with `soql_query` before relying
+  on them). A modify is a whole-document replace: a `<permissionSets>` member
+  you omit is **detached**, and assigned users lose that permission set.
+  `MutingPermissionSet` (the group's subtractive companion) is sharper still:
+  a muted permission omitted on modify is **un-muted** — silently restored to
+  every assigned user. Retrieves carry `<status>`; retrieve-first and edit the
+  whole document. Who HOLDS a group is data (`PermissionSetAssignment`), not
+  metadata.
+- **Quick actions deploy into a vacuum.** Object-scoped actions have dotted
+  api_names (`Account.New_Case` — the dot is part of the fullName, not a
+  child separator); global actions are bare (`New_Global_Note`). A new
+  QuickAction is surfaced **nowhere** until a page layout (object actions), a
+  global publisher layout (global actions), or a Lightning record page using
+  dynamic actions includes it. Flow/LWC-typed
+  actions reference their targets (`<flowDefinition>`,
+  `<lightningWebComponent>`); an LWC used as a quick action must declare the
+  `lightning__RecordAction` target in its own `js-meta.xml`.
+- **LWC bundles deploy via the Contrail bundle envelope** (one component = the
+  whole `lwc/<name>/` directory). `<name>.js` + `<name>.js-meta.xml` are
+  required — the meta file carries `apiVersion`, `isExposed`, and `targets`,
+  which are what make the component appear anywhere; `.html`/`.css`/`.svg`
+  and subdirectories (secondary templates) are normal, and a JS-only service
+  component has no `.html` at all. Never include `__tests__/` or dot-files
+  (`.eslintrc`) — local tooling never deploys, and Contrail refuses it
+  locally. The org **compiles on deploy** (template errors fail there), and a
+  modify replaces the whole directory — `refresh_snapshot` before modifying
+  an org-existing bundle, and carry every file `bundle_files` shows.
+  `@salesforce/messageChannel` and `@salesforce/resourceUrl` imports point at
+  types Contrail doesn't deploy yet (LightningMessageChannel,
+  StaticResource) — those stay human.
 - **Namespaces** can contain single underscores (`sales_channel__Foo`), so split a
   qualified API name at the **first** `__`, never with a greedy pattern.
 - **Names**: components deploy under `type/Name.ext`; the tools reject names with

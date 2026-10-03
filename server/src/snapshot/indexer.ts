@@ -62,6 +62,14 @@ const SIMPLE_DIR_TYPES: Array<{ dir: string; ext: string; type: string }> = [
   { dir: 'aiEvaluationDefinitions', ext: '.aiEvaluationDefinition', type: 'AiEvaluationDefinition' },
   { dir: 'botTemplates', ext: '.botTemplate', type: 'BotTemplate' },
   { dir: 'botBlocks', ext: '.botBlock', type: 'BotBlock' },
+  // S36: permissions & UI-action types. QuickAction file names carry the
+  // literal dotted fullName ("quickActions/Account.New_X.quickAction",
+  // live-confirmed) — fileBaseName strips only the FINAL extension, so the
+  // dot survives into api_name exactly like CustomMetadata's Type.Record.
+  { dir: 'customPermissions', ext: '.customPermission', type: 'CustomPermission' },
+  { dir: 'permissionsetgroups', ext: '.permissionsetgroup', type: 'PermissionSetGroup' },
+  { dir: 'mutingpermissionsets', ext: '.mutingpermissionset', type: 'MutingPermissionSet' },
+  { dir: 'quickActions', ext: '.quickAction', type: 'QuickAction' },
 ];
 
 /**
@@ -94,6 +102,11 @@ const BUNDLE_DIR_TYPES: Array<{ dir: string; type: string; mainExt: string }> = 
   { dir: 'genAiFunctions', type: 'GenAiFunction', mainExt: '.genAiFunction' },
   { dir: 'genAiPlannerBundles', type: 'GenAiPlannerBundle', mainExt: '.genAiPlannerBundle' },
   { dir: 'aiAuthoringBundles', type: 'AiAuthoringBundle', mainExt: '.agent' },
+  // S36: LWC bundles MUST ride this branch — as a simple type the generic
+  // -meta.xml skip would swallow every <n>.js-meta.xml (which carries
+  // isExposed/targets). Subdirectories are real (templates/x.html secondary
+  // templates, live-confirmed).
+  { dir: 'lwc', type: 'LightningComponentBundle', mainExt: '.js' },
 ];
 
 export function indexSnapshotFiles(

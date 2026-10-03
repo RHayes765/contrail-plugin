@@ -243,6 +243,45 @@ or `PerUserPrincipal` is a principal, named by its `parameterName` — never gue
 one. Credential metadata itself is `integration-connectivity-generate`'s
 territory.
 
+## customPermissions — custom permission grants (S36)
+
+Custom permissions gate features in Apex (`FeatureManagement.checkPermission`),
+validation rules and flows (`$Permission.X`). The grant block (live-confirmed
+shape — real orgs emit `enabled` first):
+
+```xml
+<customPermissions>
+    <enabled>true</enabled>
+    <name>Can_Approve_Refunds</name>
+</customPermissions>
+```
+
+A `CustomPermission` component deploys through Contrail like any single-file
+type, but it does **nothing** until a permission set (or profile — identical
+block shape) enables it. Ship the grant in the same package; the coverage
+checker warns when you don't.
+
+## Permission set groups and muting (S36)
+
+`PermissionSetGroup` bundles permission sets (`<permissionSets>` members, one
+per line) and optionally subtracts via `<mutedPermissionSets>` naming a
+`MutingPermissionSet` — a separate component whose blocks reuse permission-set
+tag names with **inverted** semantics: `enabled=true` there means *revoked for
+the group*. Three sharp edges:
+
+- The org recalculates a group's aggregated grants **asynchronously** after
+  every deploy — `SELECT Status FROM PermissionSetGroup WHERE DeveloperName =
+  '…'` runs `Updating` → `Updated`; don't call the grants live until it does.
+- Modifies are whole-document replaces: an omitted `<permissionSets>` member is
+  **detached** (assigned users lose it), and an omitted mute is **un-muted**
+  (the permission silently returns to every assigned user). Retrieve-first —
+  retrieves carry a `<status>` element; leave it alone.
+- Group membership for USERS is data (`PermissionSetAssignment` with
+  `PermissionSetGroupId`), not metadata — seed it with `dml_propose`, not a
+  deploy. And a PSG is NOT a coverage container: the checker counts only
+  in-package PermissionSet/Profile grants, so a package pairing a
+  CustomPermission with only a PSG still warns, correctly.
+
 ## What Contrail's coverage checker counts as a grant
 
 `validate_deploy` cross-checks new components against any PermissionSet/Profile
@@ -260,6 +299,7 @@ AND the enabling flag is on** — a mention with the flag off is NOT coverage:
 | CustomTab | `tabSettings` (or profile `tabVisibilities`) | `<tab>` | `<visibility>` anything except `Hidden`/`None` |
 | Bot (Agentforce agent) | `agentAccesses` | `<agentName>` | `<enabled>true</enabled>` |
 | ExternalCredential (one need per principal it defines) | `externalCredentialPrincipalAccesses` | `<externalCredentialPrincipal>` (dash-joined `Cred-Principal`) | `<enabled>true</enabled>` |
+| CustomPermission | `customPermissions` | `<name>` | `<enabled>true</enabled>` |
 
 Notes that matter in practice:
 - Standard objects need no `objectPermissions` entry to silence the checker —

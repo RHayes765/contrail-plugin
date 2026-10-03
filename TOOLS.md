@@ -525,21 +525,36 @@ validation issues **no** code.
   to deactivate it first; the page warns), `GenAiPromptTemplate`
   (`activeVersionIdentifier` is org-generated — retrieve-first, and the page
   warns on hand-typed/altered tokens), `GenAiPromptTemplateActv`,
-  `AiEvaluationDefinition`, `BotTemplate`, `BotBlock`, and child types
+  `AiEvaluationDefinition`, `BotTemplate`, `BotBlock`, `CustomPermission`
+  (grants nothing until a permission set's `customPermissions` block enables
+  it — the coverage checker counts that grant), `PermissionSetGroup` (a
+  modify DETACHES omitted members, and the org recalculates grants
+  ASYNCHRONOUSLY after every deploy — the page says both),
+  `MutingPermissionSet` (an omitted mute is UN-MUTED — silently restored to
+  every assigned user; the page says so), `QuickAction` (object actions
+  dotted `Account.New_X`, global actions bare; a NEW action is surfaced by
+  nothing until a layout or a dynamic-actions record page includes it, and
+  the page says so), and child types
   `CustomField` / `ValidationRule` / `CustomLabel` / `ListView` /
   `RecordType` / `BotVersion` (dotted API names — `MyBot.v1`). Bundle types
-  `GenAiFunction` / `GenAiPlannerBundle` / `AiAuthoringBundle` (one
+  `GenAiFunction` / `GenAiPlannerBundle` / `AiAuthoringBundle` /
+  `LightningComponentBundle` (one
   component = a directory of files) deploy via a **Contrail bundle
   envelope** — content is JSON
   `{"contrail_bundle":1, "files": {"<relative path>": "<body>", …}}`
   carrying the whole file set (main file included); the approval page
-  classifies file-by-file. `AiAuthoringBundle` deploys as a **DRAFT
+  classifies file-by-file. `LightningComponentBundle` (LWC) requires
+  `<Name>.js` + `<Name>.js-meta.xml` (`.html`/`.css`/`.svg` and
+  subdirectories are normal; `__tests__` and dot-files are refused locally —
+  local tooling never deploys); the org compiles on deploy.
+  `AiAuthoringBundle` deploys as a **DRAFT
   STAGE**: exactly `<Name>.agent` (plaintext Agent Script) +
   `<Name>.bundle-meta.xml`; nothing compiles — the page says the running
   agent is unchanged until a human publishes the draft. Agent
-  **publish / preview / eval runs** stay org-side human steps;
+  **publish / preview** stay org-side human steps;
   **activate / deactivate** goes through
-  `agent_activation_propose`/`execute` behind its own ritual (the
+  `agent_activation_propose`/`execute` behind its own ritual, and eval runs
+  through `run_agent_eval` (the
   `agentforce-metadata-generate` skill carries the full boundary).
 - `destructive` *(≤50)* — `{type, api_name}` to DELETE; led prominently on
   the page. Deletions are accepted for **any** metadata type, including
@@ -738,7 +753,7 @@ sections' defaults automatically.
 | | `scopes` | `refresh_token, api, web` | OAuth scopes requested. |
 | `oauth` | `callbackPort` / `callbackPath` | `1717` / `/OauthRedirect` | Must match the connected app's registered callback. |
 | | `flowTimeoutMs` | 10 min | Browser-flow hard limit. |
-| `snapshot` | `types` | 15 types | The default retrieve manifest (ApexClass, ApexTrigger, Flow, CustomObject, CustomLabels, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, ApexPage, GlobalValueSet, Layout, CustomMetadata, LeadConvertSettings). Report/Dashboard (+ their folders), the Agentforce types, and the integration group (ConnectedApp, NamedCredential, ExternalCredential, AuthProvider, PlatformEventChannel[Member], ManagedEventSubscription) are deployable and indexable but deliberately OUT of the default — `refresh_snapshot types:[…]` pulls them explicitly. |
+| `snapshot` | `types` | 20 types | The default retrieve manifest (ApexClass, ApexTrigger, Flow, CustomObject, CustomLabels, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, ApexPage, GlobalValueSet, Layout, CustomMetadata, LeadConvertSettings, and the S36 five: CustomPermission, PermissionSetGroup, MutingPermissionSet, QuickAction, LightningComponentBundle). Report/Dashboard (+ their folders), the Agentforce types, and the integration group (ConnectedApp, NamedCredential, ExternalCredential, AuthProvider, PlatformEventChannel[Member], ManagedEventSubscription) are deployable and indexable but deliberately OUT of the default — `refresh_snapshot types:[…]` pulls them explicitly. Package-installed components (managed OR unlocked) are platform-excluded from wildcard retrieves and never counted as snapshot staleness. |
 | | `pollIntervalMs` / `retrieveTimeoutMs` | 2 s / 10 min | Retrieve polling. |
 | `updates` | `checkEnabled` | `true` | Daily anonymous release check — the only phone-home; `false` disables it entirely. |
 | `localDiagnostics` | `enabled` | `true` | `check_apex`/`check_soql`; `false` makes them report honestly unavailable. |

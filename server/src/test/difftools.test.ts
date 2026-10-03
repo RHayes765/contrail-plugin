@@ -259,3 +259,152 @@ describe('diff_artifact', () => {
     expect(refusal).toBeTruthy();
   });
 });
+
+describe('S36: diff_artifact on bundles', () => {
+  // S36 fix pin: diff_orgs hashes the CONCATENATED bundle content, so
+  // diff_artifact must read the same concatenation — a main-file-only read
+  // made an html-only LWC change show "changed" in diff_orgs and
+  // "identical" in diff_artifact.
+  function seedLwc(connId: string, html: string, hashSuffix: string): void {
+    store.writeCurrent(
+      connId,
+      new Map([
+        ['lwc/navCard/navCard.js', strToU8('export default class NavCard {}')],
+        ['lwc/navCard/navCard.html', strToU8(html)],
+        ['lwc/navCard/navCard.js-meta.xml', strToU8('<LightningComponentBundle/>')],
+      ]),
+      { clearDirs: ['lwc'] },
+    );
+    db.replaceArtifactsForTypes(connId, ['LightningComponentBundle'], [
+      {
+        connectionId: connId,
+        type: 'LightningComponentBundle',
+        apiName: 'navCard',
+        filePath: 'lwc/navCard/navCard.js',
+        contentHash: `lwc-${hashSuffix}`,
+        lastModifiedDate: null,
+        lastModifiedBy: null,
+        retrievedAt: '2026-10-02T00:00:00.000Z',
+        content: '',
+      },
+    ]);
+  }
+
+  it('sees js-meta-only drift (the lenient-XML trap): isExposed flip diffs as changed TEXT', async () => {
+    // The concatenation starts with an XML comment; the lenient parser used
+    // to "parse" it (dropping all JS/CSS) and compare only the first root —
+    // making exactly this change invisible. Pinned as TEXT format.
+    store.writeCurrent(
+      connA,
+      new Map([
+        ['lwc/navCard/navCard.js', strToU8('export default class NavCard {}')],
+        [
+          'lwc/navCard/navCard.js-meta.xml',
+          strToU8('<LightningComponentBundle><isExposed>true</isExposed></LightningComponentBundle>'),
+        ],
+      ]),
+      { clearDirs: ['lwc'] },
+    );
+    store.writeCurrent(
+      connB,
+      new Map([
+        ['lwc/navCard/navCard.js', strToU8('export default class NavCard {}')],
+        [
+          'lwc/navCard/navCard.js-meta.xml',
+          strToU8('<LightningComponentBundle><isExposed>false</isExposed></LightningComponentBundle>'),
+        ],
+      ]),
+      { clearDirs: ['lwc'] },
+    );
+    for (const [connId, suffix] of [
+      [connA, 'a'],
+      [connB, 'b'],
+    ] as const) {
+      db.replaceArtifactsForTypes(connId, ['LightningComponentBundle'], [
+        {
+          connectionId: connId,
+          type: 'LightningComponentBundle',
+          apiName: 'navCard',
+          filePath: 'lwc/navCard/navCard.js',
+          contentHash: `lwc-${suffix}`,
+          lastModifiedDate: null,
+          lastModifiedBy: null,
+          retrievedAt: '2026-10-02T00:00:00.000Z',
+          content: '',
+        },
+      ]);
+    }
+    const result = await client.callTool({
+      name: 'diff_artifact',
+      arguments: {
+        connection_a: 'acme-uat',
+        connection_b: 'acme-prod',
+        type: 'LightningComponentBundle',
+        name: 'navCard',
+      },
+    });
+    const parsed = JSON.parse(textOf(result)) as Record<string, unknown>;
+    expect(parsed.status).toBe('changed');
+    expect(parsed.format).toBe('text');
+  });
+
+  it('reads bundles byte-identically to what the indexer hashed (parity pin)', async () => {
+    seedLwc(connA, '<template>v1</template>', 'a');
+    const { indexSnapshotFiles } = await import('../snapshot/indexer.js');
+    const { readArtifactFromSnapshot } = await import('../tools/metadata.js');
+    const indexed = indexSnapshotFiles(
+      new Map([
+        ['lwc/navCard/navCard.js', strToU8('export default class NavCard {}')],
+        ['lwc/navCard/navCard.html', strToU8('<template>v1</template>')],
+        ['lwc/navCard/navCard.js-meta.xml', strToU8('<LightningComponentBundle/>')],
+      ]),
+      [],
+      '2026-10-02T00:00:00.000Z',
+    ).find((a) => a.type === 'LightningComponentBundle')!;
+    const read = readArtifactFromSnapshot(
+      { db, store } as never,
+      db.getConnection(connA)!,
+      'LightningComponentBundle',
+      'navCard',
+    );
+    // A framing/sort/join divergence between the indexer and the diff read
+    // would silently re-split diff_orgs from diff_artifact — byte parity is
+    // the contract.
+    expect(read).toBe(indexed.content);
+  });
+
+  it('sees sibling-file drift: an html-only change diffs as changed with the html in hunks', async () => {
+    seedLwc(connA, '<template>v1</template>', 'a');
+    seedLwc(connB, '<template>v2</template>', 'b');
+    const result = await client.callTool({
+      name: 'diff_artifact',
+      arguments: {
+        connection_a: 'acme-uat',
+        connection_b: 'acme-prod',
+        type: 'LightningComponentBundle',
+        name: 'navCard',
+      },
+    });
+    const parsed = JSON.parse(textOf(result)) as Record<string, unknown>;
+    expect(parsed.status).toBe('changed');
+    const text = JSON.stringify(parsed);
+    expect(text).toContain('v1');
+    expect(text).toContain('v2');
+  });
+
+  it('identical bundles diff identical (the concatenation is deterministic)', async () => {
+    seedLwc(connA, '<template>same</template>', 'a');
+    seedLwc(connB, '<template>same</template>', 'b');
+    const result = await client.callTool({
+      name: 'diff_artifact',
+      arguments: {
+        connection_a: 'acme-uat',
+        connection_b: 'acme-prod',
+        type: 'LightningComponentBundle',
+        name: 'navCard',
+      },
+    });
+    const parsed = JSON.parse(textOf(result)) as Record<string, unknown>;
+    expect(parsed.status).toBe('identical');
+  });
+});

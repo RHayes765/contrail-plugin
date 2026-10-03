@@ -21,7 +21,7 @@ const skillsRoot = path.resolve(
 
 /** Actuator references that must not appear in any shipped SKILL.md. */
 const banned = [
-  { re: /\bsf\s+(org|apex|project|data|config|code-analyzer|api|force)\b/i, why: 'sf CLI command — Contrail has no CLI' },
+  { re: /\bsf\s+(org|apex|project|data|config|code-analyzer|api|force|lightning)\b/i, why: 'sf CLI command — Contrail has no CLI' },
   { re: /\bsfdx\b/i, why: 'sfdx CLI/project reference' },
   { re: /force-app/i, why: 'SFDX project layout — Contrail uses snapshot/staging paths' },
   { re: /sfdx-project\.json/i, why: 'SFDX project file' },

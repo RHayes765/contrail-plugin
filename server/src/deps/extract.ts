@@ -69,6 +69,10 @@ export function extractFlowRefs(xml: string): Ref[] {
   for (const m of xml.matchAll(/\$Label\.(\w+)/g)) {
     refs.add('CustomLabel', m[1]!);
   }
+  // S36: decision/formula references to custom permissions.
+  for (const m of xml.matchAll(/\$Permission\.(\w+)/g)) {
+    refs.add('CustomPermission', m[1]!);
+  }
   return refs.list();
 }
 
@@ -136,6 +140,13 @@ export function extractApexRefs(
   for (const m of body.matchAll(/callout:([A-Za-z0-9_]+)/gi)) {
     refs.add('NamedCredential', m[1]!);
   }
+  // S36: custom permission checks — the name is a string literal too, so
+  // this is a RAW-body scan for the same reason as callout: above.
+  for (const m of body.matchAll(
+    /FeatureManagement\s*\.\s*checkPermission\s*\(\s*'([A-Za-z0-9_]+)'/gi,
+  )) {
+    refs.add('CustomPermission', m[1]!);
+  }
   return refs.list();
 }
 
@@ -157,6 +168,10 @@ export function extractObjectXmlRefs(xml: string, objectName: string, known: Kno
   }
   for (const m of xml.matchAll(/\$Label\.(\w+)/g)) {
     refs.add('CustomLabel', m[1]!);
+  }
+  // S36: validation-rule formulas gate on custom permissions.
+  for (const m of xml.matchAll(/\$Permission\.(\w+)/g)) {
+    refs.add('CustomPermission', m[1]!);
   }
   return refs.list();
 }
@@ -188,6 +203,13 @@ export function extractPermissionSetRefs(xml: string): Ref[] {
   for (const node of asArray(ps.classAccesses as Record<string, unknown>[])) {
     if (node && typeof node === 'object' && typeof node.apexClass === 'string') {
       refs.add('ApexClass', node.apexClass);
+    }
+  }
+  // S36: custom permission grants (edge regardless of enabled — the
+  // dependency exists either way).
+  for (const node of asArray(ps.customPermissions as Record<string, unknown>[])) {
+    if (node && typeof node === 'object' && typeof node.name === 'string') {
+      refs.add('CustomPermission', node.name);
     }
   }
   return refs.list();
@@ -286,6 +308,88 @@ export function extractExternalCredentialRefs(xml: string): Ref[] {
   return refs.list();
 }
 
+/**
+ * S36: PermissionSetGroup → its member permission sets and muting sets.
+ * NOTE: a PSG document parses to doc.PermissionSetGroup, not
+ * doc.PermissionSet — regex-matchAll sidesteps the root-name trap entirely.
+ */
+export function extractPermissionSetGroupRefs(xml: string): Ref[] {
+  const refs = new RefSet();
+  for (const m of xml.matchAll(/<permissionSets>([^<]+)<\/permissionSets>/g)) {
+    refs.add('PermissionSet', m[1]!);
+  }
+  for (const m of xml.matchAll(/<mutedPermissionSets>([^<]+)<\/mutedPermissionSets>/g)) {
+    refs.add('MutingPermissionSet', m[1]!);
+  }
+  return refs.list();
+}
+
+/**
+ * S36: QuickAction → its target flow / LWC / Visualforce page, plus the
+ * parent object of a dotted object-scoped action when it's a custom entity
+ * (standard parents like Account would never join the index).
+ */
+export function extractQuickActionRefs(xml: string, apiName: string): Ref[] {
+  const refs = new RefSet();
+  const flow = xml.match(/<flowDefinition>([^<]+)<\/flowDefinition>/)?.[1];
+  if (flow) refs.add('Flow', flow);
+  const lwc = xml.match(/<lightningWebComponent>([^<]+)<\/lightningWebComponent>/)?.[1];
+  if (lwc) refs.add('LightningComponentBundle', lwc);
+  const page = xml.match(/<page>([^<]+)<\/page>/)?.[1];
+  if (page) refs.add('ApexPage', page);
+  const parent = apiName.includes('.') ? apiName.split('.')[0]! : '';
+  if (/__c$/i.test(parent)) refs.add('CustomObject', parent);
+  return refs.list();
+}
+
+/**
+ * S36: LWC bundle → everything its source names. Runs over the bundle's RAW
+ * concatenated index content (js + html + css + js-meta.xml under
+ * contrail:file headers) — every token below lives inside a string literal
+ * or markup, so there is deliberately NO comment/literal stripping (the
+ * callout: precedent; recall over precision, per the module header).
+ */
+export function extractLwcRefs(content: string): Ref[] {
+  const refs = new RefSet();
+  // JS module imports, static or dynamic, either quote style: 'c/childCmp'.
+  for (const m of content.matchAll(/['"]c\/([A-Za-z][A-Za-z0-9_]*)['"]/g)) {
+    refs.add('LightningComponentBundle', m[1]!);
+  }
+  // HTML composition — the dominant form in real orgs (live-confirmed):
+  // <c-child-comp> kebab-case maps back to the camelCase bundle name.
+  // Underscores are legal in component names (fsc_flowPicker) and pass
+  // through the camel join untouched.
+  for (const m of content.matchAll(/<c-([a-z][a-z0-9_-]*)/g)) {
+    const camel = m[1]!.replace(/-([a-z0-9])/g, (_, ch: string) => ch.toUpperCase());
+    refs.add('LightningComponentBundle', camel);
+  }
+  // @salesforce/apex/Class.method — the class is everything before the final
+  // dot. A namespaced ns.Class.method yields 'ns.Class', which simply won't
+  // join a local index row (managed code; accepted).
+  for (const m of content.matchAll(/@salesforce\/apex\/([A-Za-z0-9_.]+)/g)) {
+    const token = m[1]!;
+    refs.add('ApexClass', token.includes('.') ? token.slice(0, token.lastIndexOf('.')) : token);
+  }
+  for (const m of content.matchAll(/@salesforce\/customPermission\/([A-Za-z0-9_]+)/g)) {
+    refs.add('CustomPermission', m[1]!);
+  }
+  // @salesforce/schema/Obj or Obj.Field — a field edge ONLY for exactly-two-
+  // segment paths; longer ones traverse relationships (Obj.Rel__r.Name,
+  // live-confirmed in a real bundle) and pin only the object.
+  for (const m of content.matchAll(/@salesforce\/schema\/([A-Za-z0-9_]+)((?:\.[A-Za-z0-9_]+)*)/g)) {
+    refs.add('CustomObject', m[1]!);
+    const tail = m[2]!.split('.').filter(Boolean);
+    if (tail.length === 1) refs.add('CustomField', `${m[1]}.${tail[0]}`);
+  }
+  for (const m of content.matchAll(/@salesforce\/label\/c\.([A-Za-z0-9_]+)/g)) {
+    refs.add('CustomLabel', m[1]!);
+  }
+  // @salesforce/messageChannel and @salesforce/resourceUrl are real (seen
+  // live) but LightningMessageChannel/StaticResource aren't registered
+  // types — no edge until they are.
+  return refs.list();
+}
+
 /** Case-insensitive lookup maps from the freshly indexed artifact set. */
 export interface KnownArtifacts {
   classes: Map<string, string>;
@@ -372,6 +476,12 @@ export function extractAllEdges(
       add(a.type, a.apiName, extractNamedCredentialRefs(a.content));
     } else if (a.type === 'ExternalCredential') {
       add(a.type, a.apiName, extractExternalCredentialRefs(a.content));
+    } else if (a.type === 'PermissionSetGroup') {
+      add(a.type, a.apiName, extractPermissionSetGroupRefs(a.content));
+    } else if (a.type === 'QuickAction') {
+      add(a.type, a.apiName, extractQuickActionRefs(a.content, a.apiName));
+    } else if (a.type === 'LightningComponentBundle') {
+      add(a.type, a.apiName, extractLwcRefs(a.content));
     }
   }
   return edges;

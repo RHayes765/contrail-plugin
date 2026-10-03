@@ -71,7 +71,14 @@ export function semanticDiff(aContent: string, bContent: string): ArtifactSemant
 }
 
 function looksLikeXml(content: string): boolean {
-  return content.trimStart().startsWith('<');
+  const t = content.trimStart();
+  // S36: a bundle concatenation ("<!-- contrail:file … -->" framing) starts
+  // with '<' and the lenient XML parser accepts it WITHOUT throwing — while
+  // silently dropping every non-XML file (JS, CSS, JSON) and comparing only
+  // the first root element's subtree. That made sibling-file drift
+  // invisible to diff_artifact, so bundle content diffs as TEXT, always.
+  if (t.startsWith('<!-- contrail:file ')) return false;
+  return t.startsWith('<');
 }
 
 // ── XML structural diff ──────────────────────────────────────────────────

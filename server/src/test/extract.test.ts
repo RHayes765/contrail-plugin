@@ -286,3 +286,171 @@ describe('S33: credential-family extractors', () => {
     expect(keys).toContain('ExternalCredential:Billing_Auth>AuthProvider:Acme_SSO');
   });
 });
+
+describe('S36: permission & UI-action extractors', () => {
+  it('PermissionSet customPermissions blocks → CustomPermission edges', async () => {
+    const { extractPermissionSetRefs } = await import('../deps/extract.js');
+    const refs = extractPermissionSetRefs(
+      '<PermissionSet><customPermissions><enabled>true</enabled>' +
+        '<name>Can_Approve_Refunds</name></customPermissions>' +
+        '<customPermissions><enabled>false</enabled><name>Can_See_Costs</name>' +
+        '</customPermissions></PermissionSet>',
+    );
+    const keys = refs.map((r) => `${r.toType}:${r.toName}`);
+    // The dependency exists whether or not the grant is enabled.
+    expect(keys).toContain('CustomPermission:Can_Approve_Refunds');
+    expect(keys).toContain('CustomPermission:Can_See_Costs');
+  });
+
+  it('PermissionSetGroup → member and muted permission sets (its own root element)', async () => {
+    const { extractPermissionSetGroupRefs } = await import('../deps/extract.js');
+    const refs = extractPermissionSetGroupRefs(
+      '<PermissionSetGroup><label>Support</label>' +
+        '<permissionSets>Support_Base</permissionSets>' +
+        '<permissionSets>Refund_Access</permissionSets>' +
+        '<mutedPermissionSets>Support_Mutes</mutedPermissionSets>' +
+        '<status>Updated</status></PermissionSetGroup>',
+    );
+    const keys = refs.map((r) => `${r.toType}:${r.toName}`).sort();
+    expect(keys).toEqual([
+      'MutingPermissionSet:Support_Mutes',
+      'PermissionSet:Refund_Access',
+      'PermissionSet:Support_Base',
+    ]);
+  });
+
+  it('QuickAction → flow / LWC / page targets and its dotted __c parent', async () => {
+    const { extractQuickActionRefs } = await import('../deps/extract.js');
+    const flowAction = extractQuickActionRefs(
+      '<QuickAction><type>Flow</type><flowDefinition>Refund_Wizard</flowDefinition></QuickAction>',
+      'Invoice__c.Start_Refund',
+    );
+    const flowKeys = flowAction.map((r) => `${r.toType}:${r.toName}`).sort();
+    expect(flowKeys).toEqual(['CustomObject:Invoice__c', 'Flow:Refund_Wizard']);
+
+    const lwcAction = extractQuickActionRefs(
+      '<QuickAction><type>LightningWebComponent</type>' +
+        '<lightningWebComponent>refundPanel</lightningWebComponent></QuickAction>',
+      'Account.Open_Refunds',
+    );
+    // Standard parents (Account) never join the index — object edge only
+    // for __c parents.
+    expect(lwcAction.map((r) => `${r.toType}:${r.toName}`)).toEqual([
+      'LightningComponentBundle:refundPanel',
+    ]);
+
+    const vfAction = extractQuickActionRefs(
+      '<QuickAction><type>VisualforcePage</type><page>Refund_Portal</page></QuickAction>',
+      'Global_Refund',
+    );
+    expect(vfAction.map((r) => `${r.toType}:${r.toName}`)).toEqual(['ApexPage:Refund_Portal']);
+  });
+
+  it('LWC bundle content → imports, composition tags, and @salesforce module refs', async () => {
+    const { extractLwcRefs } = await import('../deps/extract.js');
+    // Shaped like the indexer's concatenated bundle content; every pattern
+    // below was observed in a real org's bundles (live corpus, 2026-10-02).
+    const content =
+      '<!-- contrail:file lwc/refundPanel/refundPanel.js -->\n' +
+      "import { LightningElement } from 'lwc';\n" +
+      "import { reduceErrors } from 'c/ldsUtils';\n" +
+      'import getRefunds from "@salesforce/apex/RefundController.getRefunds";\n' +
+      "import CAN_APPROVE from '@salesforce/customPermission/Can_Approve_Refunds';\n" +
+      "import NAME_FIELD from '@salesforce/schema/Invoice__c.Name__c';\n" +
+      // Relationship traversal pins the OBJECT only — never a bogus
+      // Invoice__c.Account__r "field".
+      'import ACCT_NAME from "@salesforce/schema/Invoice__c.Account__r.Name";\n' +
+      "import greeting from '@salesforce/label/c.Refund_Greeting';\n" +
+      "import channel from '@salesforce/messageChannel/RefundSelected__c';\n" +
+      'const dyn = import("c/refundChart");\n' +
+      '<!-- contrail:file lwc/refundPanel/refundPanel.html -->\n' +
+      '<template><c-error-panel></c-error-panel><c-paginator></c-paginator>' +
+      '<c-fsc_flow-picker3></c-fsc_flow-picker3></template>\n';
+    const keys = extractLwcRefs(content).map((r) => `${r.toType}:${r.toName}`);
+    expect(keys).toContain('LightningComponentBundle:ldsUtils');
+    // Underscores are legal in component names and survive the kebab→camel
+    // join (digits too).
+    expect(keys).toContain('LightningComponentBundle:fsc_flowPicker3');
+    expect(keys).toContain('LightningComponentBundle:refundChart');
+    expect(keys).toContain('LightningComponentBundle:errorPanel');
+    expect(keys).toContain('LightningComponentBundle:paginator');
+    expect(keys).toContain('ApexClass:RefundController');
+    expect(keys).toContain('CustomPermission:Can_Approve_Refunds');
+    expect(keys).toContain('CustomObject:Invoice__c');
+    expect(keys).toContain('CustomField:Invoice__c.Name__c');
+    expect(keys).toContain('CustomLabel:Refund_Greeting');
+    expect(keys.some((k) => k.includes('Account__r'))).toBe(false);
+    // messageChannel/resourceUrl types are unregistered — no edges.
+    expect(keys.some((k) => k.includes('RefundSelected'))).toBe(false);
+  });
+
+  it('checkPermission and $Permission references resolve from the RAW bodies', async () => {
+    const { extractApexRefs, extractObjectXmlRefs, extractFlowRefs, buildKnownArtifacts } =
+      await import('../deps/extract.js');
+    // The permission name is a string literal — blanked by the Apex noise
+    // stripper, so the scan runs on the raw body (callout: precedent).
+    const apex = extractApexRefs(
+      'public class RefundService {\n' +
+        '  Boolean ok = FeatureManagement.checkPermission(\'Can_Approve_Refunds\');\n' +
+        '}',
+      buildKnownArtifacts([]),
+      'RefundService',
+    );
+    expect(apex.map((r) => `${r.toType}:${r.toName}`)).toContain(
+      'CustomPermission:Can_Approve_Refunds',
+    );
+
+    const vr = extractObjectXmlRefs(
+      '<ValidationRule><errorConditionFormula>NOT($Permission.Can_Approve_Refunds)' +
+        '</errorConditionFormula></ValidationRule>',
+      'Invoice__c',
+      buildKnownArtifacts([]),
+    );
+    expect(vr.map((r) => `${r.toType}:${r.toName}`)).toContain(
+      'CustomPermission:Can_Approve_Refunds',
+    );
+
+    const flow = extractFlowRefs(
+      '<Flow><decisions><rules><conditions><leftValueReference>' +
+        '$Permission.Can_Approve_Refunds</leftValueReference></conditions></rules>' +
+        '</decisions></Flow>',
+    );
+    expect(flow.map((r) => `${r.toType}:${r.toName}`)).toContain(
+      'CustomPermission:Can_Approve_Refunds',
+    );
+  });
+
+  it('indexed S36 artifacts produce joinable edges through extractAllEdges', () => {
+    const files = new Map(
+      Object.entries({
+        'permissionsets/Refund_Access.permissionset': strToU8(
+          '<PermissionSet><customPermissions><enabled>true</enabled>' +
+            '<name>Can_Approve_Refunds</name></customPermissions></PermissionSet>',
+        ),
+        'permissionsetgroups/Support_Agents.permissionsetgroup': strToU8(
+          '<PermissionSetGroup><permissionSets>Refund_Access</permissionSets></PermissionSetGroup>',
+        ),
+        'customPermissions/Can_Approve_Refunds.customPermission': strToU8('<CustomPermission/>'),
+        'quickActions/Account.Open_Refunds.quickAction': strToU8(
+          '<QuickAction><lightningWebComponent>refundPanel</lightningWebComponent></QuickAction>',
+        ),
+        'lwc/refundPanel/refundPanel.js': strToU8("import { reduceErrors } from 'c/ldsUtils';"),
+        'lwc/refundPanel/refundPanel.js-meta.xml': strToU8('<LightningComponentBundle/>'),
+        'lwc/ldsUtils/ldsUtils.js': strToU8('export function reduceErrors() {}'),
+        'lwc/ldsUtils/ldsUtils.js-meta.xml': strToU8('<LightningComponentBundle/>'),
+      }),
+    );
+    const artifacts = indexSnapshotFiles(files, [], '2026-10-02T00:00:00.000Z');
+    const edges = extractAllEdges('conn1', artifacts);
+    const keys = edges.map((e) => `${e.fromType}:${e.fromName}>${e.toType}:${e.toName}`);
+    expect(keys).toContain('PermissionSet:Refund_Access>CustomPermission:Can_Approve_Refunds');
+    expect(keys).toContain('PermissionSetGroup:Support_Agents>PermissionSet:Refund_Access');
+    // Dotted QuickAction fromName joins the dotted index key.
+    expect(keys).toContain(
+      'QuickAction:Account.Open_Refunds>LightningComponentBundle:refundPanel',
+    );
+    expect(keys).toContain(
+      'LightningComponentBundle:refundPanel>LightningComponentBundle:ldsUtils',
+    );
+  });
+});

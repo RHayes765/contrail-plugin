@@ -1354,3 +1354,279 @@ describe('S34: AiAuthoringBundle draft-stage deploys', () => {
     expect(naked.changes[0]!.warnings.join(' ')).not.toMatch(/PUBLISHED-SNAPSHOT/);
   });
 });
+
+describe('S36: permissions & UI-action types', () => {
+  const conn = { id: 'conn-1', alias: 'dev' } as ConnectionRecord;
+  const dbAdd = { getArtifact: () => null } as unknown as ContrailDb;
+  const storeNone = {
+    readCurrentFile: () => null,
+    listCurrentFiles: () => [],
+  } as unknown as SnapshotStore;
+  const lwcEnv = (name: string, files: Record<string, string>) =>
+    comp('LightningComponentBundle', name, JSON.stringify({ contrail_bundle: 1, files }));
+  const lwcFiles = (name: string): Record<string, string> => ({
+    [`${name}.js`]:
+      "import { LightningElement } from 'lwc';\nexport default class X extends LightningElement {}\n",
+    [`${name}.html`]: '<template>hi</template>\n',
+    [`${name}.js-meta.xml`]:
+      '<?xml version="1.0" encoding="UTF-8"?>\n<LightningComponentBundle xmlns="http://soap.sforce.com/2006/04/metadata">\n    <apiVersion>61.0</apiVersion>\n    <isExposed>false</isExposed>\n</LightningComponentBundle>\n',
+  });
+
+  it('places the single-file types — dotted QuickActions literal, dot intact', () => {
+    const cases: Array<[string, string, string]> = [
+      [
+        'CustomPermission',
+        'Can_Approve_Refunds',
+        'customPermissions/Can_Approve_Refunds.customPermission',
+      ],
+      [
+        'PermissionSetGroup',
+        'Support_Agents',
+        'permissionsetgroups/Support_Agents.permissionsetgroup',
+      ],
+      [
+        'MutingPermissionSet',
+        'Support_Mutes',
+        'mutingpermissionsets/Support_Mutes.mutingpermissionset',
+      ],
+      ['QuickAction', 'New_Global_Note', 'quickActions/New_Global_Note.quickAction'],
+      // The first standalone dotted fullName that is NOT a child type
+      // (CustomMetadata precedent) — live-confirmed file shape.
+      ['QuickAction', 'Account.New_Case', 'quickActions/Account.New_Case.quickAction'],
+    ];
+    for (const [type, name, path] of cases) {
+      const built = buildDeployZip([comp(type, name, `<${type}/>`)], [], V, noMeta);
+      expect(built.files, `${type} file placement`).toContain(path);
+      expect(built.packageXml).toContain(`<name>${type}</name>`);
+      expect(built.packageXml).toContain(`<members>${name}</members>`);
+    }
+  });
+
+  it('expands an LWC envelope under lwc/<name>/ with ONE member; JS-only and subdirs allowed', () => {
+    const built = buildDeployZip([lwcEnv('navCard', lwcFiles('navCard'))], [], V, noMeta);
+    expect(built.files).toContain('lwc/navCard/navCard.js');
+    expect(built.files).toContain('lwc/navCard/navCard.html');
+    expect(built.files).toContain('lwc/navCard/navCard.js-meta.xml');
+    expect(built.packageXml).toContain('<name>LightningComponentBundle</name>');
+    expect(built.packageXml.match(/<members>navCard<\/members>/g)).toHaveLength(1);
+
+    // A service component is just <n>.js + <n>.js-meta.xml (live-confirmed
+    // shape: ldsUtils) — nothing requires .html.
+    const files = lwcFiles('ldsUtils');
+    delete files['ldsUtils.html'];
+    const svc = buildDeployZip([lwcEnv('ldsUtils', files)], [], V, noMeta);
+    expect(svc.files).toContain('lwc/ldsUtils/ldsUtils.js');
+
+    // Subdirectories are real bundle content (secondary templates,
+    // live-confirmed) — the envelope carries them.
+    const withTpl = lwcFiles('codeBlock');
+    withTpl['templates/inlineMessage.html'] = '<template>alt</template>\n';
+    const tpl = buildDeployZip([lwcEnv('codeBlock', withTpl)], [], V, noMeta);
+    expect(tpl.files).toContain('lwc/codeBlock/templates/inlineMessage.html');
+  });
+
+  it('refuses an envelope missing .js-meta.xml, and __tests__ trees everywhere', () => {
+    const files = lwcFiles('navCard');
+    delete files['navCard.js-meta.xml'];
+    expect(() => buildDeployZip([lwcEnv('navCard', files)], [], V, noMeta)).toThrow(
+      /missing required file "navCard\.js-meta\.xml".*navCard\.js \+ navCard\.js-meta\.xml/,
+    );
+    const withTests = lwcFiles('navCard');
+    withTests['__tests__/navCard.test.js'] = 'jest\n';
+    expect(() => buildDeployZip([lwcEnv('navCard', withTests)], [], V, noMeta)).toThrow(
+      /local test files never deploy/,
+    );
+  });
+
+  it('PSG: recalc note on add AND modify; whole-doc replace carries the member-detach suffix', () => {
+    const psg =
+      '<?xml version="1.0" encoding="UTF-8"?>\n<PermissionSetGroup>\n' +
+      '    <label>Support</label>\n    <permissionSets>Support_Base</permissionSets>\n' +
+      '</PermissionSetGroup>\n';
+    const add = analyzeChanges(
+      dbAdd,
+      storeNone,
+      conn,
+      [comp('PermissionSetGroup', 'Support_Agents', psg)],
+      [],
+    );
+    expect(add.changes[0]!.change).toBe('add');
+    const addText = add.changes[0]!.warnings.join(' ');
+    expect(addText).toMatch(/RECALCULATES ASYNCHRONOUSLY/);
+    expect(addText).toContain("DeveloperName = 'Support_Agents'");
+    expect(addText).not.toMatch(/WHOLE-DOCUMENT REPLACE/);
+
+    const dbMod = {
+      getArtifact: () => ({ filePath: 'permissionsetgroups/Support_Agents.permissionsetgroup' }),
+    } as unknown as ContrailDb;
+    const storeMod = {
+      readCurrentFile: () => '<PermissionSetGroup>old</PermissionSetGroup>',
+    } as unknown as SnapshotStore;
+    const mod = analyzeChanges(
+      dbMod,
+      storeMod,
+      conn,
+      [comp('PermissionSetGroup', 'Support_Agents', psg)],
+      [],
+    );
+    expect(mod.changes[0]!.change).toBe('modify');
+    const modText = mod.changes[0]!.warnings.join(' ');
+    expect(modText).toMatch(/RECALCULATES ASYNCHRONOUSLY/);
+    expect(modText).toMatch(/WHOLE-DOCUMENT REPLACE/);
+    expect(modText).toMatch(/DETACHED from the group/);
+  });
+
+  it('MutingPermissionSet modify warns that an omitted mute RESTORES the permission', () => {
+    const dbMod = {
+      getArtifact: () => ({ filePath: 'mutingpermissionsets/Support_Mutes.mutingpermissionset' }),
+    } as unknown as ContrailDb;
+    const storeMod = {
+      readCurrentFile: () => '<MutingPermissionSet>old</MutingPermissionSet>',
+    } as unknown as SnapshotStore;
+    const mod = analyzeChanges(
+      dbMod,
+      storeMod,
+      conn,
+      [comp('MutingPermissionSet', 'Support_Mutes', '<MutingPermissionSet>new</MutingPermissionSet>')],
+      [],
+    );
+    const text = mod.changes[0]!.warnings.join(' ');
+    expect(text).toMatch(/WHOLE-DOCUMENT REPLACE/);
+    expect(text).toMatch(/UN-MUTED org-side, silently RESTORING/);
+  });
+
+  it('a NEW QuickAction warns it is surfaced nowhere; a modify does not', () => {
+    const add = analyzeChanges(
+      dbAdd,
+      storeNone,
+      conn,
+      [comp('QuickAction', 'Account.New_Case', '<QuickAction/>')],
+      [],
+    );
+    expect(add.changes[0]!.warnings.join(' ')).toMatch(/surfaced NOWHERE/);
+
+    const dbMod = {
+      getArtifact: () => ({ filePath: 'quickActions/Account.New_Case.quickAction' }),
+    } as unknown as ContrailDb;
+    const storeMod = {
+      readCurrentFile: () => '<QuickAction>old</QuickAction>',
+    } as unknown as SnapshotStore;
+    const mod = analyzeChanges(
+      dbMod,
+      storeMod,
+      conn,
+      [comp('QuickAction', 'Account.New_Case', '<QuickAction/>')],
+      [],
+    );
+    expect(mod.changes[0]!.warnings.join(' ')).not.toMatch(/surfaced NOWHERE/);
+  });
+
+  it('CustomPermission coverage: uncovered without a grant, covered only when enabled', () => {
+    const perm = comp('CustomPermission', 'Can_Approve_Refunds', '<CustomPermission/>');
+    const bare = analyzePermissionCoverage([perm]);
+    expect(bare.uncovered).toEqual([
+      {
+        type: 'CustomPermission',
+        api_name: 'Can_Approve_Refunds',
+        permission: 'custom permission access (customPermissions)',
+      },
+    ]);
+
+    // Live-confirmed block shape (enabled-first ordering as real orgs emit it).
+    const granted = comp(
+      'PermissionSet',
+      'Refund_Access',
+      '<PermissionSet><customPermissions><enabled>true</enabled>' +
+        '<name>Can_Approve_Refunds</name></customPermissions></PermissionSet>',
+    );
+    expect(analyzePermissionCoverage([perm, granted]).uncovered).toHaveLength(0);
+
+    const mentionedOff = comp(
+      'PermissionSet',
+      'Refund_Access',
+      '<PermissionSet><customPermissions><enabled>false</enabled>' +
+        '<name>Can_Approve_Refunds</name></customPermissions></PermissionSet>',
+    );
+    expect(analyzePermissionCoverage([perm, mentionedOff]).uncovered).toHaveLength(1);
+
+    // Profiles use the identical block shape.
+    const profile = comp(
+      'Profile',
+      'Support',
+      '<Profile><customPermissions><enabled>true</enabled>' +
+        '<name>Can_Approve_Refunds</name></customPermissions></Profile>',
+    );
+    expect(analyzePermissionCoverage([perm, profile]).uncovered).toHaveLength(0);
+  });
+
+  it('QuickAction, PSG, MutingPermissionSet, and LWC deliberately produce NO permission needs', () => {
+    const cov = analyzePermissionCoverage([
+      comp('QuickAction', 'Account.New_Case', '<QuickAction/>'),
+      comp('PermissionSetGroup', 'Support_Agents', '<PermissionSetGroup/>'),
+      comp('MutingPermissionSet', 'Support_Mutes', '<MutingPermissionSet/>'),
+      lwcEnv('navCard', lwcFiles('navCard')),
+    ]);
+    expect(cov.uncovered).toHaveLength(0);
+  });
+
+  it('a PSG is NOT a grant container — coverage still warns beside one', () => {
+    const perm = comp('CustomPermission', 'Can_Approve_Refunds', '<CustomPermission/>');
+    const psg = comp(
+      'PermissionSetGroup',
+      'Support_Agents',
+      '<PermissionSetGroup><permissionSets>Refund_Access</permissionSets></PermissionSetGroup>',
+    );
+    const cov = analyzePermissionCoverage([perm, psg]);
+    expect(cov.has_permission_container).toBe(false);
+    expect(cov.uncovered).toHaveLength(1);
+  });
+
+  it('deployZipEntryPath matches the builder for dotted QuickActions and LWC bundles', async () => {
+    const { deployZipEntryPath } = await import('../deploy/package.js');
+    expect(deployZipEntryPath('QuickAction', 'Account.New_Case')).toEqual({
+      path: 'quickActions/Account.New_Case.quickAction',
+      child: false,
+    });
+    expect(deployZipEntryPath('LightningComponentBundle', 'navCard')).toEqual({
+      path: 'lwc/navCard/navCard.js',
+      child: false,
+      bundleDir: 'lwc/navCard/',
+    });
+  });
+
+  it('indexes the new dirs: dotted names survive, LWC bundles are ONE row keeping js-meta.xml', () => {
+    const files = new Map(
+      Object.entries({
+        'customPermissions/Can_Approve_Refunds.customPermission': strToU8('<CustomPermission/>'),
+        'permissionsetgroups/Support_Agents.permissionsetgroup': strToU8('<PermissionSetGroup/>'),
+        'mutingpermissionsets/Support_Mutes.mutingpermissionset': strToU8('<MutingPermissionSet/>'),
+        'quickActions/Account.New_Case.quickAction': strToU8('<QuickAction/>'),
+        'quickActions/New_Global_Note.quickAction': strToU8('<QuickAction/>'),
+        'lwc/navCard/navCard.js': strToU8('export default class NavCard {}'),
+        'lwc/navCard/navCard.html': strToU8('<template>hi</template>'),
+        'lwc/navCard/navCard.js-meta.xml': strToU8(
+          '<LightningComponentBundle><isExposed>true</isExposed></LightningComponentBundle>',
+        ),
+        'lwc/navCard/templates/alt.html': strToU8('<template>alt</template>'),
+      }),
+    );
+    const artifacts = indexSnapshotFiles(files, [], '2026-10-02T00:00:00.000Z');
+    const keys = new Set(artifacts.map((a) => `${a.type}:${a.apiName}`));
+    expect(keys.has('CustomPermission:Can_Approve_Refunds')).toBe(true);
+    expect(keys.has('PermissionSetGroup:Support_Agents')).toBe(true);
+    expect(keys.has('MutingPermissionSet:Support_Mutes')).toBe(true);
+    // The dot is part of the name — only the FINAL extension strips.
+    expect(keys.has('QuickAction:Account.New_Case')).toBe(true);
+    expect(keys.has('QuickAction:New_Global_Note')).toBe(true);
+
+    const lwc = artifacts.filter((a) => a.type === 'LightningComponentBundle');
+    expect(lwc).toHaveLength(1);
+    expect(lwc[0]!.apiName).toBe('navCard');
+    expect(lwc[0]!.filePath).toBe('lwc/navCard/navCard.js');
+    // The js-meta.xml is bundle CONTENT (isExposed/targets live there), not
+    // a skippable sidecar — and subdir templates ride along.
+    expect(lwc[0]!.content).toContain('contrail:file lwc/navCard/navCard.js-meta.xml');
+    expect(lwc[0]!.content).toContain('<isExposed>true</isExposed>');
+    expect(lwc[0]!.content).toContain('contrail:file lwc/navCard/templates/alt.html');
+  });
+});

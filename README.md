@@ -14,6 +14,27 @@ single MCP Bundle that installs into Claude Desktop via Settings → Extensions
 (no Node install, no npm, no config editing on the target machine) and covers
 Windows x64/ARM and macOS Intel/Apple Silicon from one file. 38 tools.
 
+**Permissions & UI-action types (S36).** Five more deployable types, every
+sharp edge on the approval page: `CustomPermission` (paired with a new
+`customPermissions` coverage arm — ungranted permissions warn like ungranted
+fields), `PermissionSetGroup` + `MutingPermissionSet` (whole-document
+replaces with detach/un-mute honesty, plus the async-recalculation note —
+`Status: Updating → Updated`), `QuickAction` (the first standalone dotted
+fullNames, `Account.New_X`, riding the CustomMetadata precedent for free;
+new actions warn that no layout surfaces them), and **Lightning web
+components** — `LightningComponentBundle` deploys whole bundles through the
+envelope (`<Name>.js` + `<Name>.js-meta.xml` required, subdirectories
+normal, `__tests__` refused locally), indexes them searchable, and feeds
+the dependency graph from real usage: `<c-child>` composition,
+`@salesforce/apex|schema|customPermission|label` imports, plus
+`FeatureManagement.checkPermission` and `$Permission` scans in Apex,
+validation rules, and flows. All five join the default snapshot manifest
+(15 → 20 types). Two long-standing honesty bugs fixed along the way:
+`diff_artifact` now diffs a bundle's **whole directory** (sibling-file
+drift was visible to `diff_orgs` but invisible to `diff_artifact`), and
+unlocked-package components no longer count as permanently-missing
+snapshot staleness.
+
 **The agent testing loop (S35).** The full test cycle runs in-conversation:
 author an `AiEvaluationDefinition` (since S30), deploy it through the
 ritual, then **`run_agent_eval`** executes it in Testing Center via the
