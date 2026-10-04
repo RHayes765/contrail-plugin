@@ -212,14 +212,22 @@ directory** and give `validate_deploy` the path:
   (`Status`: `Updating` → `Updated` — verify with `soql_query` before relying
   on them). A modify is a whole-document replace: a `<permissionSets>` member
   you omit is **detached**, and assigned users lose that permission set.
-  `MutingPermissionSet` (the group's subtractive companion) is sharper still:
+  `MutingPermissionSet` (the group's subtractive companion, referenced via
+  `<mutingPermissionSets>` — NOT "muted…"; element order follows the WSDL
+  sequence, muting before members) is sharper still:
   a muted permission omitted on modify is **un-muted** — silently restored to
-  every assigned user. Retrieves carry `<status>`; retrieve-first and edit the
+  every assigned user. Retrieves carry `<status>` and redeploying it
+  unchanged is accepted; retrieve-first and edit the
   whole document. Who HOLDS a group is data (`PermissionSetAssignment`), not
   metadata.
 - **Quick actions deploy into a vacuum.** Object-scoped actions have dotted
   api_names (`Account.New_Case` — the dot is part of the fullName, not a
-  child separator); global actions are bare (`New_Global_Note`). A new
+  child separator); global actions are bare (`New_Global_Note`). An
+  object-scoped **Create** action additionally REQUIRES `<targetParentField>`
+  (the deploy fails with "Required fields are missing: [TargetField]"
+  without it); the org accepts the lookup field name (`AccountId`) but
+  normalizes it to the RELATIONSHIP name (`Account`) on retrieve — both
+  live-confirmed 2026-10-03. A new
   QuickAction is surfaced **nowhere** until a page layout (object actions), a
   global publisher layout (global actions), or a Lightning record page using
   dynamic actions includes it. Flow/LWC-typed

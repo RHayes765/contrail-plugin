@@ -312,13 +312,16 @@ export function extractExternalCredentialRefs(xml: string): Ref[] {
  * S36: PermissionSetGroup → its member permission sets and muting sets.
  * NOTE: a PSG document parses to doc.PermissionSetGroup, not
  * doc.PermissionSet — regex-matchAll sidesteps the root-name trap entirely.
+ * The muting tag is <mutingPermissionSets> (live-confirmed: the org REJECTS
+ * "mutedPermissionSets" at deploy and emits mutingPermissionSets on
+ * retrieve).
  */
 export function extractPermissionSetGroupRefs(xml: string): Ref[] {
   const refs = new RefSet();
   for (const m of xml.matchAll(/<permissionSets>([^<]+)<\/permissionSets>/g)) {
     refs.add('PermissionSet', m[1]!);
   }
-  for (const m of xml.matchAll(/<mutedPermissionSets>([^<]+)<\/mutedPermissionSets>/g)) {
+  for (const m of xml.matchAll(/<mutingPermissionSets>([^<]+)<\/mutingPermissionSets>/g)) {
     refs.add('MutingPermissionSet', m[1]!);
   }
   return refs.list();

@@ -429,14 +429,22 @@ function buildRetrieveMembers(
  * packages install namespace-free with manageableState 'installed'
  * (live-confirmed: an org's installed LWC library listed 50 bundles and a
  * wildcard retrieved zero) — so STALENESS missing-counting keys on state
- * alone (isPackageOwned; get_org_changes skips the 'installed' arm the same
- * way). NAMED-member expansion keeps the namespace-keyed test (isManaged):
+ * alone (isPackageOwned; get_org_changes skips the same states). NAMED-member
+ * expansion keeps the namespace-keyed test (isManaged):
  * the platform DOES return namespace-free installed components to a
  * by-name retrieve, and dropping them there would silently shrink
  * long-standing CustomObject/Report snapshots.
  */
 function isPackageOwned(p: FileProperties): boolean {
-  return p.manageableState === 'installed' || p.manageableState === 'released';
+  // 'installedEditable' included (live-confirmed): an unmanaged-package
+  // install carries it, and the platform still excludes those components
+  // from wildcard retrieves (an org's 44 installedEditable LWC bundles
+  // listed but zero retrieved).
+  return (
+    p.manageableState === 'installed' ||
+    p.manageableState === 'installedEditable' ||
+    p.manageableState === 'released'
+  );
 }
 
 function isManaged(p: FileProperties): boolean {

@@ -304,11 +304,13 @@ describe('S36: permission & UI-action extractors', () => {
 
   it('PermissionSetGroup → member and muted permission sets (its own root element)', async () => {
     const { extractPermissionSetGroupRefs } = await import('../deps/extract.js');
+    // Live-confirmed tag and element order: mutingPermissionSets (not
+    // "muted…") precedes permissionSets in the WSDL sequence.
     const refs = extractPermissionSetGroupRefs(
       '<PermissionSetGroup><label>Support</label>' +
+        '<mutingPermissionSets>Support_Mutes</mutingPermissionSets>' +
         '<permissionSets>Support_Base</permissionSets>' +
         '<permissionSets>Refund_Access</permissionSets>' +
-        '<mutedPermissionSets>Support_Mutes</mutedPermissionSets>' +
         '<status>Updated</status></PermissionSetGroup>',
     );
     const keys = refs.map((r) => `${r.toType}:${r.toName}`).sort();

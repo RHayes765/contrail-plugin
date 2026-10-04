@@ -551,7 +551,10 @@ export function registerMetadataTools(server: McpServer, deps: ToolDeps): void {
         let managedSkipped = 0;
         const orgByType = new Map<string, Map<string, (typeof props)[number]>>();
         for (const p of props) {
-          if (p.manageableState === 'installed') {
+          // S36: 'installedEditable' (unmanaged-package installs) joins the
+          // skip — those components never land in wildcard-based snapshots
+          // (live-confirmed), so they'd read as permanent new_in_org noise.
+          if (p.manageableState === 'installed' || p.manageableState === 'installedEditable') {
             managedSkipped += 1;
             continue;
           }

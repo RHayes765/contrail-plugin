@@ -264,18 +264,25 @@ checker warns when you don't.
 ## Permission set groups and muting (S36)
 
 `PermissionSetGroup` bundles permission sets (`<permissionSets>` members, one
-per line) and optionally subtracts via `<mutedPermissionSets>` naming a
+per line) and optionally subtracts via `<mutingPermissionSets>` naming a
 `MutingPermissionSet` — a separate component whose blocks reuse permission-set
 tag names with **inverted** semantics: `enabled=true` there means *revoked for
-the group*. Three sharp edges:
+the group*. The tag is `mutingPermissionSets`, NOT "mutedPermissionSets" (the
+org rejects the latter with "invalid at this location" — live-confirmed
+2026-10-03), and element order follows the WSDL sequence: `description`,
+`hasActivationRequired`, `label`, `mutingPermissionSets`, `permissionSets`,
+`status` — a muting element placed after the members is rejected with the
+same message. Three sharp edges:
 
 - The org recalculates a group's aggregated grants **asynchronously** after
   every deploy — `SELECT Status FROM PermissionSetGroup WHERE DeveloperName =
   '…'` runs `Updating` → `Updated`; don't call the grants live until it does.
 - Modifies are whole-document replaces: an omitted `<permissionSets>` member is
-  **detached** (assigned users lose it), and an omitted mute is **un-muted**
+  **detached** (assigned users lose it — live-confirmed via
+  PermissionSetGroupComponent), and an omitted mute is **un-muted**
   (the permission silently returns to every assigned user). Retrieve-first —
-  retrieves carry a `<status>` element; leave it alone.
+  retrieves carry a `<status>` element, and redeploying it unchanged is
+  accepted (live-confirmed); leave it alone.
 - Group membership for USERS is data (`PermissionSetAssignment` with
   `PermissionSetGroupId`), not metadata — seed it with `dml_propose`, not a
   deploy. And a PSG is NOT a coverage container: the checker counts only
