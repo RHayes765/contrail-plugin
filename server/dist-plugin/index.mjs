@@ -25414,7 +25414,7 @@ var GRANT_DEPENDENCIES = {
 var GRANT_DESCRIPTIONS = {
   metadata_read: "Read metadata: retrieve flows, Apex, objects/fields; search, diff, and dependency analysis.",
   metadata_write: "Validate and execute metadata deploys, and activate/deactivate Agentforce agent versions (live behavior). Requires metadata_read. Every change requires explicit human confirmation.",
-  diagnostics_read: "Read debug logs and flow error details, run Apex tests (test transactions always roll back), poll Agentforce agent evaluation runs and read their results, and set trace flags. May expose incidental record data present in logs.",
+  diagnostics_read: "Read debug logs and flow error details, run Apex tests (test transactions always roll back), poll Agentforce agent evaluation runs and read their results, and set trace flags (for the connected user or any named user, e.g. the Platform Integration User). May expose incidental record data present in logs.",
   data_read: "Run SOQL queries, read records, and run reports for their data (row-capped).",
   data_write: "Propose and execute DML and anonymous Apex scripts, and start Agentforce agent evaluation runs (the agent under test executes its REAL actions \u2014 no rollback). Requires data_read. DML, Apex, and bulk writes each require explicit human confirmation; an evaluation run executes only a definition a human already approved through the deploy ritual."
 };
@@ -29980,7 +29980,7 @@ function extractPermissionSetGroupRefs(xml) {
   for (const m of xml.matchAll(/<permissionSets>([^<]+)<\/permissionSets>/g)) {
     refs.add("PermissionSet", m[1]);
   }
-  for (const m of xml.matchAll(/<mutedPermissionSets>([^<]+)<\/mutedPermissionSets>/g)) {
+  for (const m of xml.matchAll(/<mutingPermissionSets>([^<]+)<\/mutingPermissionSets>/g)) {
     refs.add("MutingPermissionSet", m[1]);
   }
   return refs.list();
@@ -30431,7 +30431,7 @@ function buildRetrieveMembers(types, listedProps, warnings) {
   return members;
 }
 function isPackageOwned(p) {
-  return p.manageableState === "installed" || p.manageableState === "released";
+  return p.manageableState === "installed" || p.manageableState === "installedEditable" || p.manageableState === "released";
 }
 function isManaged(p) {
   return isPackageOwned(p) ? p.namespacePrefix !== void 0 && p.namespacePrefix !== "" : false;
@@ -33633,7 +33633,7 @@ function getUpdateNotice(installedVersion, repo, enabled) {
 }
 
 // src/core/version.ts
-var ENGINE_VERSION = "0.28.0";
+var ENGINE_VERSION = "0.29.0";
 
 // src/tools/register.ts
 var UPDATE_REPO = "RHayes765/contrail-plugin";
@@ -34240,7 +34240,7 @@ function registerMetadataTools(server, deps) {
       let managedSkipped = 0;
       const orgByType = /* @__PURE__ */ new Map();
       for (const p of props) {
-        if (p.manageableState === "installed") {
+        if (p.manageableState === "installed" || p.manageableState === "installedEditable") {
           managedSkipped += 1;
           continue;
         }
@@ -35494,10 +35494,13 @@ function registerDataTools(server, deps) {
     "set_trace_flag",
     {
       title: "Turn on debug logging (trace flag)",
-      description: `Turn on debug logging for the connected user for a bounded window (default 30 minutes, max 60), so anonymous Apex, test runs, and flows executed by that user produce logs readable via get_debug_logs. Side effects, honestly: writes a self-expiring TraceFlag row and (first use) a reusable "Contrail_Debug" DebugLevel to the org, and generated logs consume the org's shared debug-log allocation until the flag expires. If the user already has a trace flag, its expiry is extended rather than stacking a second one.`,
+      description: `Turn on debug logging for a bounded window (default 30 minutes, max 60) \u2014 for the connected user, or with user: for ANY user (a User Id, exact Username, or Name \u2014 e.g. "Platform Integration User" to capture Agentforce agent conversations and autolaunched-flow runs, which execute as that user and are invisible to a self-trace). Activity by the traced user then produces logs readable via get_debug_logs. Side effects, honestly: writes a self-expiring TraceFlag row and (first use) a reusable "Contrail_Debug" DebugLevel to the org, and generated logs consume the org's shared debug-log allocation until the flag expires. If the traced user already has a trace flag, its expiry is extended rather than stacking a second one \u2014 and NEVER shortened: a longer human-configured window is left untouched.`,
       inputSchema: {
         connection: external_exports.string().describe("Connection alias (or id)."),
-        minutes: external_exports.number().int().min(1).max(60).optional().describe("How long logging stays on (default 30).")
+        minutes: external_exports.number().int().min(1).max(60).optional().describe("How long logging stays on (default 30)."),
+        user: external_exports.string().min(1).max(240).optional().describe(
+          "Who to trace instead of the connected user: a User Id (005\u2026), an exact Username, or a Name to search for (exact match first, then SOQL LIKE \u2014 % and _ wildcards work). Ambiguous matches are listed, never guessed."
+        )
       }
     },
     async (args) => guarded(async () => {
@@ -35506,32 +35509,92 @@ function registerDataTools(server, deps) {
       const version2 = config2.salesforce.apiVersion;
       const minutes = args.minutes ?? 30;
       const expiresAt = new Date(Date.now() + minutes * 6e4).toISOString();
-      let userId = conn.userId && SF_ID_RE.test(conn.userId) ? conn.userId : null;
-      if (!userId && conn.username) {
-        const users = await client.query(
-          `SELECT Id FROM User WHERE Username = '${conn.username.replace(/'/g, "\\'")}' LIMIT 1`,
-          1
-        );
-        userId = users[0]?.Id ?? null;
-      }
-      if (!userId) {
+      let userId = null;
+      let tracedUser;
+      const requested = args.user?.trim();
+      if (args.user !== void 0 && !requested) {
         return fail(
-          `Cannot determine which user to trace on "${conn.alias}" \u2014 the stored connection has no user id or username. Re-connect the org (connect_org) to refresh it.`
+          "user was blank \u2014 pass a User Id, Username, or Name, or omit it entirely to trace the connected user."
         );
+      }
+      if (requested) {
+        const esc3 = requested.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+        const fields = "SELECT Id, Username, Name, IsActive FROM User";
+        const byId = SF_ID_RE.test(requested) && requested.startsWith("005");
+        let rows;
+        let fuzzyCapped = false;
+        if (byId) {
+          rows = await client.query(`${fields} WHERE Id = '${esc3}' LIMIT 1`, 1);
+        } else {
+          rows = await client.query(`${fields} WHERE Username = '${esc3}' LIMIT 2`, 2);
+          if (rows.length === 0) {
+            rows = await client.query(`${fields} WHERE Name = '${esc3}' LIMIT 2`, 2);
+          }
+          if (rows.length === 0) {
+            rows = await client.query(
+              `${fields} WHERE Name LIKE '%${esc3}%' ORDER BY Name LIMIT 7`,
+              7
+            );
+            fuzzyCapped = rows.length > 6;
+          }
+        }
+        if (rows.length === 0) {
+          return fail(
+            byId ? `No user on "${conn.alias}" has Id "${requested}". Find the right one with soql_query (SELECT Id, Username, Name FROM User WHERE \u2026).` : `No user on "${conn.alias}" matches "${requested}" \u2014 tried the exact Username and Name, then a Name search. Find the right one with soql_query (SELECT Id, Username, Name FROM User WHERE \u2026).`
+          );
+        }
+        if (rows.length > 1) {
+          const list = rows.slice(0, 6).map((r) => `${r.Name} <${r.Username}>${r.IsActive ? "" : " (INACTIVE)"}`).join("; ");
+          return fail(
+            `"${requested}" matches ${fuzzyCapped ? "at least 7" : rows.length} users on "${conn.alias}" \u2014 name one exactly (Username or Id): ${list}.`
+          );
+        }
+        const row = rows[0];
+        if (!row.IsActive) {
+          return fail(
+            `User ${row.Name} <${row.Username}> is INACTIVE on "${conn.alias}" \u2014 an inactive user runs nothing, so a trace flag on them would capture nothing. Trace the active user actually executing the automation.`
+          );
+        }
+        userId = row.Id;
+        tracedUser = `${row.Name} <${row.Username}>`;
+      } else {
+        userId = conn.userId && SF_ID_RE.test(conn.userId) ? conn.userId : null;
+        if (!userId && conn.username) {
+          const users = await client.query(
+            `SELECT Id FROM User WHERE Username = '${conn.username.replace(/'/g, "\\'")}' LIMIT 1`,
+            1
+          );
+          userId = users[0]?.Id ?? null;
+        }
+        if (!userId) {
+          return fail(
+            `Cannot determine which user to trace on "${conn.alias}" \u2014 the stored connection has no user id or username. Re-connect the org (connect_org) to refresh it.`
+          );
+        }
+        tracedUser = conn.username ?? userId;
       }
       const existing = await client.toolingQuery(
-        `SELECT Id, ExpirationDate FROM TraceFlag WHERE TracedEntityId = '${userId}' AND LogType = 'USER_DEBUG' ORDER BY ExpirationDate DESC LIMIT 1`,
+        `SELECT Id, ExpirationDate, DebugLevel.DeveloperName FROM TraceFlag WHERE TracedEntityId = '${userId}' AND LogType = 'USER_DEBUG' ORDER BY ExpirationDate DESC LIMIT 1`,
         1
       );
       let action;
       let debugLevel;
+      let effectiveExpiry = expiresAt;
       if (existing.length > 0) {
-        await client.request(
-          `/services/data/${version2}/tooling/sobjects/TraceFlag/${existing[0].Id}`,
-          { method: "PATCH", body: JSON.stringify({ ExpirationDate: expiresAt }) }
-        );
-        action = "extended";
-        debugLevel = "the existing flag's own debug level";
+        const row = existing[0];
+        const existingLevel = row.DebugLevel?.DeveloperName;
+        debugLevel = existingLevel ? `the existing flag's own debug level (${existingLevel})` : "the existing flag's own debug level";
+        const existingMs = row.ExpirationDate ? Date.parse(row.ExpirationDate) : 0;
+        if (existingMs >= Date.parse(expiresAt)) {
+          action = "already-on";
+          effectiveExpiry = row.ExpirationDate;
+        } else {
+          await client.request(
+            `/services/data/${version2}/tooling/sobjects/TraceFlag/${row.Id}`,
+            { method: "PATCH", body: JSON.stringify({ ExpirationDate: expiresAt }) }
+          );
+          action = "extended";
+        }
       } else {
         const levels = await client.toolingQuery(
           `SELECT Id FROM DebugLevel WHERE DeveloperName = 'Contrail_Debug' LIMIT 1`,
@@ -35573,12 +35636,13 @@ function registerDataTools(server, deps) {
       }
       return ok({
         connection: conn.alias,
-        traced_user: conn.username ?? userId,
+        traced_user: tracedUser,
+        traced_user_id: userId,
         action,
         minutes,
-        expires_at: expiresAt,
+        expires_at: effectiveExpiry,
         debug_level: debugLevel,
-        note: `Debug logging is on until ${expiresAt} \u2014 activity by this user now writes debug logs (consuming the org's shared log allocation until the flag expires). Read them with get_debug_logs.`
+        note: (action === "already-on" ? `A trace flag on this user already runs PAST the requested window \u2014 left untouched (never shortened). Debug logging is on until ${effectiveExpiry}` : `Debug logging is on until ${effectiveExpiry}`) + ` \u2014 activity by ${tracedUser} now writes debug logs (consuming the org's shared log allocation until the flag expires). Read them with get_debug_logs.` + (requested ? " Logs appear under that user, not the connected one \u2014 get_debug_logs lists logs org-wide." : "")
       });
     })
   );
