@@ -1,6 +1,6 @@
 --- a/SKILL.md
 +++ b/SKILL.md
-@@ -1,184 +1,397 @@
+@@ -1,184 +1,428 @@
  ---
  name: platform-apex-logs-debug
 -description: "Salesforce debug log analysis and troubleshooting with 100-point scoring. TRIGGER when: user analyzes debug logs, hits governor limits, reads stack traces, or touches .log files from Salesforce orgs. DO NOT TRIGGER when: running Apex tests (use platform-apex-test-run), generating or fixing Apex code (use platform-apex-generate), or Agentforce session tracing (use agentforce-observe)."
@@ -107,23 +107,31 @@
 +WHERE LogUser.Name = 'Jane Admin' AND StartTime > 2026-08-26T14:00:00Z
 +ORDER BY StartTime DESC LIMIT 20
 +```
- 
--## Recommended Workflow
++
 +### Hard boundaries — state them plainly, don't improvise around them
  
--### 1. Retrieve logs
+-## Recommended Workflow
 +- **No live tailing.** Nothing in Contrail streams logs. The loop is: human
 +  reproduces → you list logs again → fetch the new log id.
-+- **No trace-flag or debug-level management.** TraceFlag/DebugLevel are Tooling
-+  objects and are **neither readable nor writable** through Contrail —
-+  `soql_query` speaks the data API only, not Tooling, so `SELECT … FROM
-+  TraceFlag` fails with INVALID_TYPE. **The human enables debug logging in
-+  Setup** (§2); you tell them exactly what to set.
-+- **No anonymous Apex** — no benchmark harness, no ad-hoc repro snippets, no
-+  ad-hoc `Limits.get*()` probes run outside a real transaction (instrumenting a
-+  deployed class with `Limits.get*()` guards is fine — see
-+  `assets/cpu-heap-optimization.cls`). Evidence comes from logs of real
-+  transactions (or test runs inside `validate_deploy`).
++- **Trace flags: any user, but only the standard level.** `set_trace_flag`
++  (`diagnostics_read`) turns on debug logging for up to 60 minutes — for the
++  **connected user** by default, or for **any named user** via `user:` (a User
++  Id, exact Username, or Name — "Platform Integration User" is the headline
++  case: Agentforce agent conversations and autolaunched flows run as it, so a
++  self-trace never sees them). It find-or-creates a reusable `Contrail_Debug`
++  debug level and extends an existing flag rather than stacking one; ambiguous
++  name matches are listed, never guessed. Picking **custom per-goal levels** is
++  still Setup work (§2). And
++  `soql_query` still cannot read TraceFlag/DebugLevel — they are Tooling
++  objects, so `SELECT … FROM TraceFlag` fails with INVALID_TYPE.
++- **Anonymous Apex is not a free probe.** It exists ONLY behind the full
++  `apex_propose` → human code → `apex_execute` ritual, and DML it performs
++  **commits** — so an ad-hoc repro snippet or benchmark harness costs one human
++  approval per run and can change real data. Prefer evidence from logs of real
++  transactions or test runs (which roll back); reach for ritualized anonymous
++  Apex only when the human agrees a committed, one-off script is the right
++  diagnostic (instrumenting a deployed class with `Limits.get*()` guards is
++  still fine — see `assets/cpu-heap-optimization.cls`).
 +- **No query-plan tool.** Selectivity is argued from row counts in the log plus
 +  schema knowledge (`describe_schema` for field/relationship shape). If a definitive
 +  plan is needed, the human runs Query Plan in Developer Console and pastes the result.
@@ -135,31 +143,37 @@
 +If a needed capability is missing, attempt the check, then record it fail-closed —
 +e.g. `log-retrieval=unavailable: diagnostics_read not granted on uat` — and offer
 +`manage_connection` so the human can set the grant.
- 
--Use the commands in [references/cli-commands.md](references/cli-commands.md) to list, download, or stream logs for the target org.
++
 +---
- 
--### 2. Analyze in this order
--1. entry point and transaction type
--2. exceptions / fatal errors
--3. governor limits
--4. repeated SOQL / DML patterns
--5. CPU / heap hotspots
--6. callout timing and external failures
-+## 2. Getting logs to exist (the human's part, in Setup)
++
++## 2. Getting logs to exist
 +
 +No rows in listing mode usually means logging is off, the trace flag expired, or
 +the logs aged out — ApexLog rows are retained about 24 hours by default, so old
 +failures must be reproduced fresh.
-+Direct the human: **Setup → Debug Logs → New Trace Flag** on the affected user,
-+with an expiration in the future, attached to a debug level. The traced user
-+also needs the **API Enabled** and **Author Apex** permissions, or no logs are
-+written. Suggest levels by goal:
++
++**For the connected user's own activity** (anonymous Apex runs,
++`run_apex_tests`, flows the connected user triggers): call `set_trace_flag`
++(default 30 min, max 60) and say so — it writes a self-expiring TraceFlag plus a
++reusable `Contrail_Debug` level (ApexCode DEBUG, System DEBUG, Database/Callout/
++Validation/Workflow INFO), and the logs it produces consume the org's shared log
++allocation until it expires.
++
++**For a different user's activity** (agent conversations and autolaunched flows
++run as the **Platform Integration User**; integrations run as their integration
++user): call `set_trace_flag` with `user:` — a User Id, exact Username, or a Name
++to search ("Platform Integration User" resolves by name). Logs then appear under
++that user in `get_debug_logs`, which lists org-wide. Caution: a traced user
++without the **API Enabled** permission may write no logs — if nothing appears
++after a reproduce, say so rather than re-flagging in a loop.
++
++**When the goal needs custom levels** (the
++table below), that is still Setup work — direct the human: **Setup → Debug Logs
++→ New Trace Flag** on the
++affected user, with an expiration in the future, attached to a debug level.
++Suggest levels by goal:
  
--### 3. Classify severity
--- **Critical** — runtime failure, hard limit, corruption risk
--- **Warning** — near-limit, non-selective query, slow path
--- **Info** — optimization opportunity or hygiene issue
+-### 1. Retrieve logs
 +| Goal | Debug level to set |
 +|---|---|
 +| Performance / limits | ApexCode FINE, ApexProfiling FINEST, Database FINE, System DEBUG |
@@ -173,15 +187,16 @@
 +oversized log bodies, and Contrail slices anything over 60,000 chars to head+tail —
 +noisier levels mean less usable evidence, not more.
  
--### 4. Recommend the smallest correct fix
--Prefer fixes that are:
--- root-cause oriented
--- bulk-safe
--- testable
--- easy to verify with a rerun
+-Use the commands in [references/cli-commands.md](references/cli-commands.md) to list, download, or stream logs for the target org.
 +---
  
--Expanded workflow: [references/analysis-playbook.md](references/analysis-playbook.md)
+-### 2. Analyze in this order
+-1. entry point and transaction type
+-2. exceptions / fatal errors
+-3. governor limits
+-4. repeated SOQL / DML patterns
+-5. CPU / heap hotspots
+-6. callout timing and external failures
 +## 3. Workflow
 +
 +1. **Context**: target org by alias (`list_connections` first — never guess an
@@ -189,8 +204,10 @@
 +   ids if known, and whether the goal is diagnosis only or diagnosis + fix.
 +2. **Grants**: `get_permissions` → need `diagnostics_read` (plus `data_read` for
 +   SOQL narrowing; `metadata_read` to read the implicated Apex source).
-+3. **Capture**: ask the human to confirm an active trace flag in Setup (§2) —
-+   you cannot query TraceFlag; the only agent-visible evidence is a new row
++3. **Capture**: `set_trace_flag` — bare for the connected user's own activity,
++   `user:` for anyone else (the Platform Integration User for agent/flow runs);
++   Setup is only needed for custom debug levels (§2). You cannot
++   query TraceFlag — the agent-visible evidence a flag is live is a new row
 +   appearing in `get_debug_logs` listing mode. Then have the human reproduce,
 +   list logs, fetch the candidate body.
 +4. **Analyze in this order** — earlier findings explain later ones:
@@ -211,40 +228,55 @@
 +8. **Fix loop**: one consolidated `validate_deploy` carrying the fixed class(es) and
 +   test class, with `test_level: "RunSpecifiedTests"` and `run_tests` naming the
 +   relevant test classes (prefer `RunLocalTests` for production targets).
-+   Verification = the validation's test results — there is no standalone test
-+   runner. Then the approval ritual: the human reads the code from the approval
-+   page and you pass it to `execute_deploy`, then `refresh_snapshot` — see
-+   **salesforce-house-rules §3**. Final confirmation is a fresh log from a human
++   Verification = the validation's test results. Then the approval ritual: the
++   human reads the code from the approval page and you pass it to
++   `execute_deploy`, then `refresh_snapshot` — see **salesforce-house-rules §3**.
++   After the fix lands, re-run the relevant tests standalone with
++   `run_apex_tests` (rolls back, no approval) instead of spending another
++   validate cycle — and if a trace flag is active, that run also produces fresh
++   debug logs to confirm against. Final confirmation is a fresh log from a human
 +   reproduction showing the pattern gone.
 +   If the fix introduces a **new** Apex class, ship a permission set granting
 +   `classAccesses` in the same package (see **building-salesforce-metadata**).
  
- ---
+-### 3. Classify severity
+-- **Critical** — runtime failure, hard limit, corruption risk
+-- **Warning** — near-limit, non-selective query, slow path
+-- **Info** — optimization opportunity or hygiene issue
++---
  
--## High-Signal Issue Patterns
+-### 4. Recommend the smallest correct fix
+-Prefer fixes that are:
+-- root-cause oriented
+-- bulk-safe
+-- testable
+-- easy to verify with a rerun
 +## 4. Log line grammar
  
+-Expanded workflow: [references/analysis-playbook.md](references/analysis-playbook.md)
++```text
++TIMESTAMP (elapsed-ns)|EVENT_IDENTIFIER|[PARAMS]|DETAILS
++14:32:54.123 (123456789)|SOQL_EXECUTE_BEGIN|[45]|SELECT Id FROM Account
++```
+ 
+----
++`[45]` is the source line number. The parenthesized value is elapsed nanoseconds
++since transaction start — subtract between events to get durations.
+ 
+-## High-Signal Issue Patterns
++### Event catalog
+ 
 -| Issue | Primary signal | Default fix direction |
--|---|---|---|
++| Category | Events | What to read from them |
+ |---|---|---|
 -| SOQL in loop | repeating `SOQL_EXECUTE_BEGIN` in a repeated call path | query once, use maps / grouped collections |
 -| DML in loop | repeated `DML_BEGIN` patterns | collect rows, bulk DML once |
 -| Non-selective query | high rows scanned / poor selectivity | add indexed filters, reduce scope |
 -| CPU pressure | CPU usage approaching sync limit | reduce algorithmic complexity, cache, async where valid |
 -| Heap pressure | heap usage approaching sync limit | stream with SOQL for-loops, reduce in-memory data |
 -| Null pointer / fatal error | `EXCEPTION_THROWN` / `FATAL_ERROR` | guard null assumptions, fix empty-query handling |
-+```text
-+TIMESTAMP (elapsed-ns)|EVENT_IDENTIFIER|[PARAMS]|DETAILS
-+14:32:54.123 (123456789)|SOQL_EXECUTE_BEGIN|[45]|SELECT Id FROM Account
-+```
-+
-+`[45]` is the source line number. The parenthesized value is elapsed nanoseconds
-+since transaction start — subtract between events to get durations.
-+
-+### Event catalog
- 
+-
 -Expanded examples: [references/common-issues.md](references/common-issues.md)
-+| Category | Events | What to read from them |
-+|---|---|---|
 +| Execution | `EXECUTION_STARTED/FINISHED`, `CODE_UNIT_STARTED/FINISHED` | transaction type, total time, call stack |
 +| SOQL | `SOQL_EXECUTE_BEGIN` (line, query text), `SOQL_EXECUTE_END` (`[N rows]`) | repetition → loop; huge N → non-selective |
 +| DML | `DML_BEGIN` (line, `Op:`, `Type:`), `DML_END` (rows) | repetition → loop; DML after each SOQL → unbulkified |
@@ -281,7 +313,8 @@
  
 -## Output Format
 +## 5. Diagnostic log patterns
-+
+ 
+-When finishing analysis, report in this order:
 +**SOQL in loop** — same line number repeating, one small result per query:
 +```text
 +|LOOP_BEGIN| … |ITERATION_BEGIN|
@@ -293,13 +326,18 @@
 +|LIMIT_USAGE|SOQL_QUERIES|100|100
 +|FATAL_ERROR|System.LimitException: Too many SOQL queries: 101
 +```
- 
--When finishing analysis, report in this order:
++
 +**DML in loop** — `DML_BEGIN` repeating with `[1 rows]` each:
 +```text
 +|DML_BEGIN|[78]|Op:Insert|Type:Contact| … repeats …
 +|LIMIT_USAGE|DML_STATEMENTS|150|150
 +|FATAL_ERROR|System.LimitException: Too many DML statements: 151
++```
++
++**Non-selective query** — huge result set, or a WHERE-less query:
++```text
++|SOQL_EXECUTE_BEGIN|[23]|SELECT Id FROM Lead WHERE Status = 'Open'
++|SOQL_EXECUTE_END|[250000 rows]
 +```
  
 -1. **What failed**
@@ -308,16 +346,19 @@
 -4. **How severe it is**
 -5. **Recommended fix**
 -6. **Verification step**
-+**Non-selective query** — huge result set, or a WHERE-less query:
-+```text
-+|SOQL_EXECUTE_BEGIN|[23]|SELECT Id FROM Lead WHERE Status = 'Open'
-+|SOQL_EXECUTE_END|[250000 rows]
-+```
- 
--Suggested shape:
 +**CPU pressure** — `CUMULATIVE_LIMIT_USAGE` showing `CPU_TIME|9500|10000`.
  
+-Suggested shape:
 +**Null pointer from an empty query** — `[0 rows]` then the throw two lines later:
++```text
++|SOQL_EXECUTE_BEGIN|[45]|SELECT Id FROM Account WHERE Id = '001xxx'
++|SOQL_EXECUTE_END|[0 rows]
++|EXCEPTION_THROWN|[47]|System.NullPointerException|Attempt to de-reference a null object
++```
+ 
++**Stack traces**: `FATAL_ERROR` prints innermost frame first. Walk **up** past
++trigger-framework/handler frames to the originating user code — the fix belongs at
++the first frame you own, not at the framework line:
  ```text
 -Issue: <summary>
 -Location: <class / line / transaction>
@@ -325,15 +366,6 @@
 -Severity: Critical | Warning | Info
 -Fix: <specific action>
 -Verify: <test or rerun step>
-+|SOQL_EXECUTE_BEGIN|[45]|SELECT Id FROM Account WHERE Id = '001xxx'
-+|SOQL_EXECUTE_END|[0 rows]
-+|EXCEPTION_THROWN|[47]|System.NullPointerException|Attempt to de-reference a null object
-+```
-+
-+**Stack traces**: `FATAL_ERROR` prints innermost frame first. Walk **up** past
-+trigger-framework/handler frames to the originating user code — the fix belongs at
-+the first frame you own, not at the framework line:
-+```text
 +Class.ContactService.processContacts: line 67   ← fix here
 +Class.AccountTriggerHandler.afterUpdate: line 34
 +Trigger.AccountTrigger: line 5
@@ -449,7 +481,7 @@
 +| Report all six fields per issue | complete, actionable findings |
 +| Classify every finding | lets the user prioritize |
 +| Diagnosis here; code authoring per platform-apex-generate | separation of concerns |
-+| Tests exist only inside `validate_deploy` | no standalone runner — never promise a test run outside it |
++| New/edited code executes only via `validate_deploy` | already-deployed tests re-run standalone via `run_apex_tests` (rolls back; also regenerates logs under an active trace flag) |
 +| Read `LIMIT_USAGE` before declaring limits safe | earlier consumers may own the budget |
  
  ---

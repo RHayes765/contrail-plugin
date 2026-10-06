@@ -442,14 +442,23 @@ debug logs (`get_debug_logs` around the failure time).
 
 ### `set_trace_flag`
 
-Turns on debug logging for the connected user for a bounded window so Apex
-runs, test runs, and flows produce logs readable via `get_debug_logs`. Side
+Turns on debug logging for a bounded window so Apex runs, test runs, and
+flows produce logs readable via `get_debug_logs` — for the connected user,
+or for **any named user** via `user:` (a User Id, exact Username, or a Name
+to search; "Platform Integration User" is the headline case — Agentforce
+agent conversations and autolaunched flows execute as it, invisible to a
+self-trace). Ambiguous name matches are listed, never guessed; inactive
+users are refused (they run nothing, so the flag would capture nothing).
+Side
 effects, honestly: writes a self-expiring TraceFlag row and (first use) a
 reusable `Contrail_Debug` DebugLevel; generated logs consume the org's
-shared log allocation. An existing flag gets its expiry extended — its own
+shared log allocation. An existing flag gets its expiry extended — never
+shortened (a longer human-configured window is left untouched and reported
+as `already-on`) — its own
 (possibly human-configured) debug level is preserved, and flags never stack.
 
-- `connection`; `minutes` *(optional, 1–60, default 30)*.
+- `connection`; `minutes` *(optional, 1–60, default 30)*; `user`
+  *(optional — Id, Username, or Name of the user to trace)*.
 
 ---
 

@@ -75,11 +75,15 @@ ORDER BY StartTime DESC LIMIT 20
 
 - **No live tailing.** Nothing in Contrail streams logs. The loop is: human
   reproduces → you list logs again → fetch the new log id.
-- **Trace flags: only your own, only the standard level.** `set_trace_flag`
-  (`diagnostics_read`) turns on debug logging for the **connected user** for up
-  to 60 minutes — it find-or-creates a reusable `Contrail_Debug` debug level and
-  extends an existing flag rather than stacking one. Tracing a **different**
-  user, or picking custom per-goal levels, is still Setup work (§2). And
+- **Trace flags: any user, but only the standard level.** `set_trace_flag`
+  (`diagnostics_read`) turns on debug logging for up to 60 minutes — for the
+  **connected user** by default, or for **any named user** via `user:` (a User
+  Id, exact Username, or Name — "Platform Integration User" is the headline
+  case: Agentforce agent conversations and autolaunched flows run as it, so a
+  self-trace never sees them). It find-or-creates a reusable `Contrail_Debug`
+  debug level and extends an existing flag rather than stacking one; ambiguous
+  name matches are listed, never guessed. Picking **custom per-goal levels** is
+  still Setup work (§2). And
   `soql_query` still cannot read TraceFlag/DebugLevel — they are Tooling
   objects, so `SELECT … FROM TraceFlag` fails with INVALID_TYPE.
 - **Anonymous Apex is not a free probe.** It exists ONLY behind the full
@@ -110,18 +114,26 @@ No rows in listing mode usually means logging is off, the trace flag expired, or
 the logs aged out — ApexLog rows are retained about 24 hours by default, so old
 failures must be reproduced fresh.
 
-**When the activity to trace is the connected user's own** (anonymous Apex runs,
+**For the connected user's own activity** (anonymous Apex runs,
 `run_apex_tests`, flows the connected user triggers): call `set_trace_flag`
 (default 30 min, max 60) and say so — it writes a self-expiring TraceFlag plus a
 reusable `Contrail_Debug` level (ApexCode DEBUG, System DEBUG, Database/Callout/
 Validation/Workflow INFO), and the logs it produces consume the org's shared log
 allocation until it expires.
 
-**When a different user must be traced, or the goal needs custom levels** (the
-table below), direct the human: **Setup → Debug Logs → New Trace Flag** on the
-affected user, with an expiration in the future, attached to a debug level. The
-traced user also needs the **API Enabled** and **Author Apex** permissions, or
-no logs are written. Suggest levels by goal:
+**For a different user's activity** (agent conversations and autolaunched flows
+run as the **Platform Integration User**; integrations run as their integration
+user): call `set_trace_flag` with `user:` — a User Id, exact Username, or a Name
+to search ("Platform Integration User" resolves by name). Logs then appear under
+that user in `get_debug_logs`, which lists org-wide. Caution: a traced user
+without the **API Enabled** permission may write no logs — if nothing appears
+after a reproduce, say so rather than re-flagging in a loop.
+
+**When the goal needs custom levels** (the
+table below), that is still Setup work — direct the human: **Setup → Debug Logs
+→ New Trace Flag** on the
+affected user, with an expiration in the future, attached to a debug level.
+Suggest levels by goal:
 
 | Goal | Debug level to set |
 |---|---|
@@ -145,8 +157,9 @@ noisier levels mean less usable evidence, not more.
    ids if known, and whether the goal is diagnosis only or diagnosis + fix.
 2. **Grants**: `get_permissions` → need `diagnostics_read` (plus `data_read` for
    SOQL narrowing; `metadata_read` to read the implicated Apex source).
-3. **Capture**: for the connected user's own activity, `set_trace_flag` and say
-   so; for anyone else, ask the human to set the flag in Setup (§2). You cannot
+3. **Capture**: `set_trace_flag` — bare for the connected user's own activity,
+   `user:` for anyone else (the Platform Integration User for agent/flow runs);
+   Setup is only needed for custom debug levels (§2). You cannot
    query TraceFlag — the agent-visible evidence a flag is live is a new row
    appearing in `get_debug_logs` listing mode. Then have the human reproduce,
    list logs, fetch the candidate body.

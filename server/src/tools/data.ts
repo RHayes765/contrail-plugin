@@ -774,13 +774,17 @@ export function registerDataTools(server: McpServer, deps: ToolDeps): void {
     {
       title: 'Turn on debug logging (trace flag)',
       description:
-        'Turn on debug logging for the connected user for a bounded window (default 30 ' +
-        'minutes, max 60), so anonymous Apex, test runs, and flows executed by that user ' +
-        'produce logs readable via get_debug_logs. Side effects, honestly: writes a ' +
+        'Turn on debug logging for a bounded window (default 30 minutes, max 60) — for the ' +
+        'connected user, or with user: for ANY user (a User Id, exact Username, or Name — ' +
+        'e.g. "Platform Integration User" to capture Agentforce agent conversations and ' +
+        'autolaunched-flow runs, which execute as that user and are invisible to a ' +
+        'self-trace). Activity by the traced user then produces logs readable via ' +
+        'get_debug_logs. Side effects, honestly: writes a ' +
         'self-expiring TraceFlag row and (first use) a reusable "Contrail_Debug" DebugLevel ' +
         "to the org, and generated logs consume the org's shared debug-log allocation until " +
-        'the flag expires. If the user already has a trace flag, its expiry is extended ' +
-        'rather than stacking a second one.',
+        'the flag expires. If the traced user already has a trace flag, its expiry is ' +
+        'extended rather than stacking a second one — and NEVER shortened: a longer ' +
+        'human-configured window is left untouched.',
       inputSchema: {
         connection: z.string().describe('Connection alias (or id).'),
         minutes: z
@@ -790,9 +794,19 @@ export function registerDataTools(server: McpServer, deps: ToolDeps): void {
           .max(60)
           .optional()
           .describe('How long logging stays on (default 30).'),
+        user: z
+          .string()
+          .min(1)
+          .max(240)
+          .optional()
+          .describe(
+            'Who to trace instead of the connected user: a User Id (005…), an exact ' +
+              'Username, or a Name to search for (exact match first, then SOQL LIKE — ' +
+              '% and _ wildcards work). Ambiguous matches are listed, never guessed.',
+          ),
       },
     },
-    async (args: { connection: string; minutes?: number }) =>
+    async (args: { connection: string; minutes?: number; user?: string }) =>
       guarded(async () => {
         const conn = requireConnection(args.connection, 'set_trace_flag');
         const client = rest(conn);
@@ -800,41 +814,138 @@ export function registerDataTools(server: McpServer, deps: ToolDeps): void {
         const minutes = args.minutes ?? 30;
         const expiresAt = new Date(Date.now() + minutes * 60_000).toISOString();
 
-        // Whose activity gets traced: the stored user id, else a lookup by the
-        // stored username. A connection with neither has lost its identity.
-        let userId = conn.userId && SF_ID_RE.test(conn.userId) ? conn.userId : null;
-        if (!userId && conn.username) {
-          const users = await client.query<{ Id: string }>(
-            `SELECT Id FROM User WHERE Username = '${conn.username.replace(/'/g, "\\'")}' LIMIT 1`,
-            1,
-          );
-          userId = users[0]?.Id ?? null;
-        }
-        if (!userId) {
+        let userId: string | null = null;
+        let tracedUser: string;
+        const requested = args.user?.trim();
+        if (args.user !== undefined && !requested) {
           return fail(
-            `Cannot determine which user to trace on "${conn.alias}" — the stored connection ` +
-              'has no user id or username. Re-connect the org (connect_org) to refresh it.',
+            'user was blank — pass a User Id, Username, or Name, or omit it entirely to ' +
+              'trace the connected user.',
           );
+        }
+        if (requested) {
+          // S37: trace a NAMED user — the Platform Integration User case:
+          // agent conversations and autolaunched flows run as users the
+          // connected identity can never self-trace. Resolution is exact
+          // (Id, then Username, then exact Name) before it is fuzzy (Name
+          // contains), and an ambiguous or inactive match refuses instead
+          // of guessing.
+          interface UserRow {
+            Id: string;
+            Username: string;
+            Name: string;
+            IsActive: boolean;
+          }
+          const esc = requested.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+          const fields = 'SELECT Id, Username, Name, IsActive FROM User';
+          const byId = SF_ID_RE.test(requested) && requested.startsWith('005');
+          let rows: UserRow[];
+          let fuzzyCapped = false;
+          if (byId) {
+            rows = await client.query<UserRow>(`${fields} WHERE Id = '${esc}' LIMIT 1`, 1);
+          } else {
+            rows = await client.query<UserRow>(`${fields} WHERE Username = '${esc}' LIMIT 2`, 2);
+            if (rows.length === 0) {
+              rows = await client.query<UserRow>(`${fields} WHERE Name = '${esc}' LIMIT 2`, 2);
+            }
+            if (rows.length === 0) {
+              rows = await client.query<UserRow>(
+                `${fields} WHERE Name LIKE '%${esc}%' ORDER BY Name LIMIT 7`,
+                7,
+              );
+              fuzzyCapped = rows.length > 6;
+            }
+          }
+          if (rows.length === 0) {
+            return fail(
+              byId
+                ? `No user on "${conn.alias}" has Id "${requested}". Find the right one ` +
+                    'with soql_query (SELECT Id, Username, Name FROM User WHERE …).'
+                : `No user on "${conn.alias}" matches "${requested}" — tried the exact ` +
+                    'Username and Name, then a Name search. Find the right one with ' +
+                    'soql_query (SELECT Id, Username, Name FROM User WHERE …).',
+            );
+          }
+          if (rows.length > 1) {
+            const list = rows
+              .slice(0, 6)
+              .map((r) => `${r.Name} <${r.Username}>${r.IsActive ? '' : ' (INACTIVE)'}`)
+              .join('; ');
+            return fail(
+              `"${requested}" matches ${fuzzyCapped ? 'at least 7' : rows.length} users on ` +
+                `"${conn.alias}" — name one exactly (Username or Id): ${list}.`,
+            );
+          }
+          const row = rows[0]!;
+          if (!row.IsActive) {
+            return fail(
+              `User ${row.Name} <${row.Username}> is INACTIVE on "${conn.alias}" — an ` +
+                'inactive user runs nothing, so a trace flag on them would capture nothing. ' +
+                'Trace the active user actually executing the automation.',
+            );
+          }
+          userId = row.Id;
+          tracedUser = `${row.Name} <${row.Username}>`;
+        } else {
+          // Whose activity gets traced: the stored user id, else a lookup by
+          // the stored username. A connection with neither has lost its
+          // identity.
+          userId = conn.userId && SF_ID_RE.test(conn.userId) ? conn.userId : null;
+          if (!userId && conn.username) {
+            const users = await client.query<{ Id: string }>(
+              `SELECT Id FROM User WHERE Username = '${conn.username.replace(/'/g, "\\'")}' LIMIT 1`,
+              1,
+            );
+            userId = users[0]?.Id ?? null;
+          }
+          if (!userId) {
+            return fail(
+              `Cannot determine which user to trace on "${conn.alias}" — the stored connection ` +
+                'has no user id or username. Re-connect the org (connect_org) to refresh it.',
+            );
+          }
+          tracedUser = conn.username ?? userId;
         }
 
-        const existing = await client.toolingQuery<{ Id: string; ExpirationDate: string | null }>(
-          `SELECT Id, ExpirationDate FROM TraceFlag WHERE TracedEntityId = '${userId}' ` +
+        const existing = await client.toolingQuery<{
+          Id: string;
+          ExpirationDate: string | null;
+          DebugLevel?: { DeveloperName?: string } | null;
+        }>(
+          `SELECT Id, ExpirationDate, DebugLevel.DeveloperName FROM TraceFlag ` +
+            `WHERE TracedEntityId = '${userId}' ` +
             `AND LogType = 'USER_DEBUG' ORDER BY ExpirationDate DESC LIMIT 1`,
           1,
         );
 
-        let action: 'created' | 'extended';
+        let action: 'created' | 'extended' | 'already-on';
         let debugLevel: string;
+        let effectiveExpiry = expiresAt;
         if (existing.length > 0) {
-          // Extending beats stacking: orgs cap concurrent trace flags per
-          // entity, and the human may have configured their own debug level —
-          // which stays in force (only the expiry moves).
-          await client.request(
-            `/services/data/${version}/tooling/sobjects/TraceFlag/${existing[0]!.Id}`,
-            { method: 'PATCH', body: JSON.stringify({ ExpirationDate: expiresAt }) },
-          );
-          action = 'extended';
-          debugLevel = "the existing flag's own debug level";
+          const row = existing[0]!;
+          const existingLevel = row.DebugLevel?.DeveloperName;
+          debugLevel = existingLevel
+            ? `the existing flag's own debug level (${existingLevel})`
+            : "the existing flag's own debug level";
+          const existingMs = row.ExpirationDate ? Date.parse(row.ExpirationDate) : 0;
+          if (existingMs >= Date.parse(expiresAt)) {
+            // NEVER shorten a live flag: a human may have configured a long
+            // window (common on the Platform Integration User) — clamping it
+            // to our default and calling that "extended" would be a lie that
+            // kills their diagnostic session.
+            action = 'already-on';
+            effectiveExpiry = row.ExpirationDate!;
+          } else {
+            // Extending beats stacking: orgs cap concurrent trace flags per
+            // entity, and the human may have configured their own debug
+            // level — which stays in force (only the expiry moves, and only
+            // FORWARD).
+            await client.request(
+              `/services/data/${version}/tooling/sobjects/TraceFlag/${row.Id}`,
+              { method: 'PATCH', body: JSON.stringify({ ExpirationDate: expiresAt }) },
+            );
+            action = 'extended';
+          }
         } else {
           const levels = await client.toolingQuery<{ Id: string }>(
             `SELECT Id FROM DebugLevel WHERE DeveloperName = 'Contrail_Debug' LIMIT 1`,
@@ -877,15 +988,24 @@ export function registerDataTools(server: McpServer, deps: ToolDeps): void {
 
         return ok({
           connection: conn.alias,
-          traced_user: conn.username ?? userId,
+          traced_user: tracedUser,
+          traced_user_id: userId,
           action,
           minutes,
-          expires_at: expiresAt,
+          expires_at: effectiveExpiry,
           debug_level: debugLevel,
           note:
-            `Debug logging is on until ${expiresAt} — activity by this user now writes debug ` +
-            "logs (consuming the org's shared log allocation until the flag expires). Read " +
-            'them with get_debug_logs.',
+            (action === 'already-on'
+              ? `A trace flag on this user already runs PAST the requested window — left ` +
+                `untouched (never shortened). Debug logging is on until ${effectiveExpiry}`
+              : `Debug logging is on until ${effectiveExpiry}`) +
+            ` — activity by ${tracedUser} now writes ` +
+            "debug logs (consuming the org's shared log allocation until the flag expires). " +
+            'Read them with get_debug_logs.' +
+            (requested
+              ? ' Logs appear under that user, not the connected one — get_debug_logs lists ' +
+                'logs org-wide.'
+              : ''),
         });
       }),
   );

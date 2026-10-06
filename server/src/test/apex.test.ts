@@ -40,6 +40,12 @@ let executeCalls: number;
 let traceFlagRows: Array<{ Id: string; ExpirationDate: string | null }>;
 let debugLevelRows: Array<{ Id: string }>;
 let userRows: Array<{ Id: string }>;
+type NamedUserRow = { Id: string; Username: string; Name: string; IsActive: boolean };
+let idLookupRows: NamedUserRow[];
+let usernameLookupRows: NamedUserRow[];
+let exactNameRows: NamedUserRow[];
+let nameLookupRows: NamedUserRow[];
+let userLookupQueries: string[];
 let postedDebugLevel: Record<string, unknown> | null;
 let postedTraceFlag: Record<string, unknown> | null;
 let patchedTraceFlag: { id: string; body: Record<string, unknown> } | null;
@@ -89,6 +95,19 @@ function stubSalesforce(): void {
     if (url.includes('/query?q=')) {
       const q = decodeURIComponent(url);
       if (q.includes('FROM User')) {
+        // S37 named-user resolution selects IsActive; the self-trace
+        // fallback does not — route the stub rows accordingly.
+        if (q.includes('IsActive')) {
+          userLookupQueries.push(q);
+          const rows = q.includes("WHERE Id = '")
+            ? idLookupRows
+            : q.includes('Name LIKE')
+              ? nameLookupRows
+              : q.includes("WHERE Name = '")
+                ? exactNameRows
+                : usernameLookupRows;
+          return new Response(JSON.stringify({ totalSize: rows.length, done: true, records: rows }));
+        }
         return new Response(JSON.stringify({ totalSize: userRows.length, done: true, records: userRows }));
       }
       return new Response(JSON.stringify({ totalSize: 0, done: true, records: [] }));
@@ -137,6 +156,11 @@ beforeEach(async () => {
   traceFlagRows = [];
   debugLevelRows = [];
   userRows = [{ Id: '005000000000009AAA' }];
+  idLookupRows = [];
+  usernameLookupRows = [];
+  exactNameRows = [];
+  nameLookupRows = [];
+  userLookupQueries = [];
   postedDebugLevel = null;
   postedTraceFlag = null;
   patchedTraceFlag = null;
@@ -442,5 +466,90 @@ describe('set_trace_flag', () => {
     const noGrant = await setFlag('no-writes');
     expect(noGrant.isError).toBe(true);
     expect(textOf(noGrant)).toContain('diagnostics_read');
+  });
+
+  // S37: trace a NAMED user (the Platform Integration User case — agent
+  // conversations and autolaunched flows run as users a self-trace can
+  // never see).
+  async function setFlagFor(user: string) {
+    return client.callTool({
+      name: 'set_trace_flag',
+      arguments: { connection: 'apex-org', user },
+    });
+  }
+  const PIU: NamedUserRow = {
+    Id: '005000000000PIUAAA',
+    Username: 'integration@00d1.ext',
+    Name: 'Platform Integration User',
+    IsActive: true,
+  };
+
+  it('traces a named user by Id, Username, or Name — flag lands on THAT user', async () => {
+    idLookupRows = [PIU];
+    const byId = JSON.parse(textOf(await setFlagFor('005000000000PIUAAA'))) as Record<string, unknown>;
+    expect(postedTraceFlag).toMatchObject({ TracedEntityId: '005000000000PIUAAA' });
+    expect(byId.traced_user).toBe('Platform Integration User <integration@00d1.ext>');
+    expect(byId.traced_user_id).toBe('005000000000PIUAAA');
+    expect(String(byId.note)).toContain('Logs appear under that user');
+
+    postedTraceFlag = null;
+    usernameLookupRows = [PIU];
+    await setFlagFor('integration@00d1.ext');
+    expect(postedTraceFlag).toMatchObject({ TracedEntityId: '005000000000PIUAAA' });
+
+    // A Name search runs only after the exact-Username pass finds nothing.
+    postedTraceFlag = null;
+    usernameLookupRows = [];
+    nameLookupRows = [PIU];
+    userLookupQueries = [];
+    await setFlagFor('Platform Integration');
+    expect(postedTraceFlag).toMatchObject({ TracedEntityId: '005000000000PIUAAA' });
+    expect(userLookupQueries.some((q) => q.includes('Name LIKE'))).toBe(true);
+  });
+
+  it('ambiguous, unknown, and inactive named users refuse instead of guessing', async () => {
+    nameLookupRows = [
+      PIU,
+      { Id: '005000000000SECAAA', Username: 'second@00d1.ext', Name: 'Platform Second', IsActive: false },
+    ];
+    const ambiguous = await setFlagFor('Platform');
+    expect(ambiguous.isError).toBe(true);
+    expect(textOf(ambiguous)).toContain('integration@00d1.ext');
+    expect(textOf(ambiguous)).toContain('(INACTIVE)');
+
+    nameLookupRows = [];
+    const unknown = await setFlagFor('Nobody Here');
+    expect(unknown.isError).toBe(true);
+    expect(textOf(unknown)).toContain('No user');
+
+    usernameLookupRows = [{ ...PIU, IsActive: false }];
+    const inactive = await setFlagFor('integration@00d1.ext');
+    expect(inactive.isError).toBe(true);
+    expect(textOf(inactive)).toContain('INACTIVE');
+    expect(postedTraceFlag).toBeNull();
+
+    const blank = await setFlagFor('   ');
+    expect(blank.isError).toBe(true);
+    expect(textOf(blank)).toContain('blank');
+  });
+
+  it('an exact Name match wins without falling to the fuzzy search', async () => {
+    exactNameRows = [PIU];
+    // The LIKE pass would be ambiguous — it must never run.
+    nameLookupRows = [PIU, { ...PIU, Id: '005000000000OTHAAA', Username: 'other@00d1.ext' }];
+    await setFlagFor('Platform Integration User');
+    expect(postedTraceFlag).toMatchObject({ TracedEntityId: '005000000000PIUAAA' });
+    expect(userLookupQueries.some((q) => q.includes('Name LIKE'))).toBe(false);
+  });
+
+  it('NEVER shortens an existing longer flag — reports already-on instead', async () => {
+    usernameLookupRows = [PIU];
+    traceFlagRows = [{ Id: '7tf00000000000eAAA', ExpirationDate: '2999-01-01T00:00:00.000Z' }];
+    const result = JSON.parse(textOf(await setFlagFor('integration@00d1.ext'))) as Record<string, unknown>;
+    expect(result.action).toBe('already-on');
+    expect(result.expires_at).toBe('2999-01-01T00:00:00.000Z');
+    expect(String(result.note)).toContain('never shortened');
+    expect(patchedTraceFlag).toBeNull();
+    expect(postedTraceFlag).toBeNull();
   });
 });

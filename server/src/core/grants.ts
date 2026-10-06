@@ -32,7 +32,8 @@ export const GRANT_DESCRIPTIONS: Readonly<Record<Grant, string>> = {
   diagnostics_read:
     'Read debug logs and flow error details, run Apex tests (test transactions always ' +
     'roll back), poll Agentforce agent evaluation runs and read their results, and set ' +
-    'trace flags. May expose incidental record data present in logs.',
+    'trace flags (for the connected user or any named user, e.g. the Platform ' +
+    'Integration User). May expose incidental record data present in logs.',
   data_read: 'Run SOQL queries, read records, and run reports for their data (row-capped).',
   data_write:
     'Propose and execute DML and anonymous Apex scripts, and start Agentforce agent ' +
