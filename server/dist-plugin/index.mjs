@@ -31755,17 +31755,20 @@ var DeployEngine = class {
   }
   // ── deploys ────────────────────────────────────────────────────────────
   async validateDeploy(conn, input) {
-    return this.runJob(`${conn.id}:deploy-validate`, () => this.doValidate(conn, input));
+    const jobKey = `${conn.id}:deploy-validate${input.dryRun ? ":dry" : ""}`;
+    return this.runJob(jobKey, () => this.doValidate(conn, input));
   }
   async doValidate(conn, input, job) {
-    const superseded = this.db.supersedePendingRequests(conn.id, "deploy");
-    if (superseded > 0) {
-      for (const p of this.db.takeSupersededPayloadPaths(conn.id, "deploy")) safeUnlink(p);
-      this.audit.record("deploy.superseded", {
-        connectionId: conn.id,
-        tool: "validate_deploy",
-        detail: { count: superseded }
-      });
+    if (!input.dryRun) {
+      const superseded = this.db.supersedePendingRequests(conn.id, "deploy");
+      if (superseded > 0) {
+        for (const p of this.db.takeSupersededPayloadPaths(conn.id, "deploy")) safeUnlink(p);
+        this.audit.record("deploy.superseded", {
+          connectionId: conn.id,
+          tool: "validate_deploy",
+          detail: { count: superseded }
+        });
+      }
     }
     const versionNumber = this.config.salesforce.apiVersion.replace(/^v/, "");
     const built = buildDeployZip(
@@ -31817,7 +31820,7 @@ var DeployEngine = class {
         }
       });
       const deletingFlow = input.destructive.some((d) => d.type === "Flow");
-      const note = deletingFlow ? 'Validation failed \u2014 no confirmation code was issued. Deleting a flow via the Metadata API is unreliable: an ACTIVE flow must be turned off first with deactivate_flow, and even an INACTIVE flow often fails validation with "insufficient access rights on cross-reference id". If it does, delete the flow in Setup \u2192 Flows (its objects can be deleted here once the flow is gone). Fix any other failures and re-validate.' : "Validation failed \u2014 no confirmation code was issued. Fix the failures and validate again.";
+      const note = input.dryRun ? "Dry run: validation FAILED. Fix the failures and check again (dry_run), or validate for approval once the package is final." : deletingFlow ? 'Validation failed \u2014 no confirmation code was issued. Deleting a flow via the Metadata API is unreliable: an ACTIVE flow must be turned off first with deactivate_flow, and even an INACTIVE flow often fails validation with "insufficient access rights on cross-reference id". If it does, delete the flow in Setup \u2192 Flows (its objects can be deleted here once the flow is gone). Fix any other failures and re-validate.' : "Validation failed \u2014 no confirmation code was issued. Fix the failures and validate again.";
       return {
         summary: null,
         validation_passed: false,
@@ -31832,6 +31835,38 @@ var DeployEngine = class {
         },
         approval: null
       };
+    }
+    if (input.dryRun) {
+      this.audit.record("deploy.validated", {
+        connectionId: conn.id,
+        tool: "validate_deploy",
+        detail: {
+          dryRun: true,
+          validationId,
+          components: input.components.length,
+          deletions: input.destructive.length,
+          testLevel: input.testLevel
+        }
+      });
+      const drySummary = {
+        connection: conn.alias,
+        org_type: conn.orgType,
+        request_id: null,
+        validation_id: validationId,
+        test_level: input.testLevel ?? null,
+        changes,
+        destructive,
+        components_total: result.numberComponentsTotal,
+        component_errors: result.numberComponentErrors,
+        tests_run: result.numberTestsTotal,
+        test_failures: result.numberTestErrors,
+        test_failure_detail: this.gateTestDetail(conn, result),
+        code_coverage_warnings: result.codeCoverageWarnings.slice(0, 10),
+        blast_radius: blast,
+        permission_warning: permCoverage.warning,
+        expires_at: null
+      };
+      return { summary: drySummary, validation_passed: true, approval: null };
     }
     const code = generateConfirmationCode();
     const expiresAt = new Date(Date.now() + this.config.deploy.codeTtlMs).toISOString();
@@ -33633,7 +33668,7 @@ function getUpdateNotice(installedVersion, repo, enabled) {
 }
 
 // src/core/version.ts
-var ENGINE_VERSION = "0.29.0";
+var ENGINE_VERSION = "0.30.0";
 
 // src/tools/register.ts
 var UPDATE_REPO = "RHayes765/contrail-plugin";
@@ -36131,7 +36166,7 @@ function registerDeployTools(server, deps) {
     "validate_deploy",
     {
       title: "Validate a metadata deploy (checkOnly)",
-      description: "Build a deploy package and validate it against the org with checkOnly=true \u2014 nothing is committed. Returns the change summary (destructive changes flagged), validation/test results, and blast radius; puts a confirmation code on the human-only approval page. Normally OMIT test_level \u2014 the org then applies its own default (production runs local tests for Apex packages automatically and refuses an explicit NoTestRun). An in-progress result means call validate_deploy again to check on it. For anything large \u2014 flows especially \u2014 write the source to a file and pass content_file instead of content: retyping tens of KB of XML risks a silent one-character corruption, and a file is read byte-exactly.",
+      description: "Build a deploy package and validate it against the org with checkOnly=true \u2014 nothing is committed. Returns the change summary (destructive changes flagged), validation/test results, and blast radius; puts a confirmation code on the human-only approval page. Checking work-in-progress mid-build? Pass dry_run: true \u2014 same validation, NO approval request or code is created (save the human from pages that were never meant to be approved). Normally OMIT test_level \u2014 the org then applies its own default (production runs local tests for Apex packages automatically and refuses an explicit NoTestRun). An in-progress result means call validate_deploy again to check on it. For anything large \u2014 flows especially \u2014 write the source to a file and pass content_file instead of content: retyping tens of KB of XML risks a silent one-character corruption, and a file is read byte-exactly.",
       inputSchema: {
         connection: external_exports.string().describe("Target connection alias (or id) \u2014 name it unmissably to the human."),
         components: external_exports.array(
@@ -36152,7 +36187,10 @@ function registerDeployTools(server, deps) {
         test_level: external_exports.enum(["NoTestRun", "RunLocalTests", "RunSpecifiedTests", "RunAllTestsInOrg"]).optional().describe(
           "OMIT unless you have a reason: the org then applies its own default \u2014 sandboxes run no tests; production runs local tests when the package carries Apex and none otherwise. Production REFUSES an explicit NoTestRun, so never send it there (a no-Apex prod deploy just omits this). RunSpecifiedTests needs run_tests."
         ),
-        run_tests: external_exports.array(external_exports.string()).max(50).optional().describe("Test classes for RunSpecifiedTests.")
+        run_tests: external_exports.array(external_exports.string()).max(50).optional().describe("Test classes for RunSpecifiedTests."),
+        dry_run: external_exports.boolean().optional().describe(
+          "true = SILENT org-side validation for mid-build checks: full results (errors, warnings, permission coverage, tests), but NO approval request, code, or page is created, nothing becomes executable, and a pending approval on this connection is left untouched (a normal validate supersedes it). Use freely while iterating; the FINAL validate omits it so the human sees exactly one meaningful approval."
+        )
       }
     },
     async (args) => guarded(async () => {
@@ -36195,20 +36233,30 @@ function registerDeployTools(server, deps) {
         // org's default behavior is the only choice production accepts for
         // a no-Apex package (it rejects an explicit NoTestRun).
         testLevel: args.test_level,
-        runTests: args.run_tests ?? []
+        runTests: args.run_tests ?? [],
+        dryRun: args.dry_run === true
       });
       switch (outcome.status) {
         case "in_progress":
           return ok(
             { progress: outcome.progress, started_at: outcome.started_at },
-            "Validation is still running \u2014 call validate_deploy again with the same connection to check on it."
+            "Validation is still running \u2014 call validate_deploy again with the same connection AND the same arguments (including dry_run) to check on it."
           );
         case "failed":
           return fail(`Validation errored: ${outcome.error}`);
         case "complete": {
           const r = outcome.result;
           if (!r.validation_passed) {
-            return ok(r.failure ?? {}, "Validation FAILED \u2014 no confirmation code was issued.");
+            return ok(
+              r.failure ?? {},
+              args.dry_run === true ? "Dry run: validation FAILED." : "Validation FAILED \u2014 no confirmation code was issued."
+            );
+          }
+          if (r.summary?.request_id === null) {
+            return ok(
+              { ...r.summary, dry_run: true },
+              "DRY RUN passed \u2014 no approval request or code exists, and nothing can be executed from this through Contrail. When the package is final, validate again without dry_run to propose it for approval."
+            );
           }
           return ok(
             { ...r.summary, approval_page: r.approval },
@@ -36266,7 +36314,7 @@ function registerDeployTools(server, deps) {
     "execute_deploy",
     {
       title: "Execute a validated deploy",
-      description: "Execute the deploy that the given confirmation code approves. The code exists only on the human's approval page: never guess, never fabricate, never reuse one \u2014 only pass a code the human just gave you. Codes are single-use, expire in ~1h, and are invalidated by any new validation on the same connection.",
+      description: "Execute the deploy that the given confirmation code approves. The code exists only on the human's approval page: never guess, never fabricate, never reuse one \u2014 only pass a code the human just gave you. Codes are single-use, expire in ~1h, and are invalidated by any new REAL validation on the same connection (a dry_run check leaves them untouched).",
       inputSchema: {
         connection: external_exports.string().describe("Target connection alias (or id)."),
         confirmation_code: external_exports.string().describe("The code the human read from the approval page (format XXXX-XXXX).")
