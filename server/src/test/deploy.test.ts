@@ -631,6 +631,50 @@ describe('validate_deploy', () => {
   });
 });
 
+describe('S38: dry-run validation (no approval request)', () => {
+  it('returns full results but presents NO page, mints NO code, and says so', async () => {
+    const result = await validate({ dry_run: true });
+    const text = textOf(result);
+    expect(result.isError).not.toBe(true);
+    expect(text).toContain('DRY RUN passed');
+    expect(text).toContain('nothing can be executed');
+    // The summary is complete — this is still a real org validation…
+    expect(text).toContain('blast_radius');
+    expect(text).toContain('Send_Invoice');
+    expect(text).toContain('"request_id": null');
+    // …but nothing approvable exists: no page, no opened browser, no code.
+    expect(presentedPages).toHaveLength(0);
+    expect(openedUrls).toHaveLength(0);
+    expect(text).not.toContain('approval_page');
+  });
+
+  it('leaves a PENDING real approval untouched — its code still executes afterwards', async () => {
+    await validate(); // real propose
+    expect(presentedPages).toHaveLength(1);
+    const code = codeFromPage(presentedPages[0]!);
+
+    const dry = await validate({ dry_run: true }); // mid-build check
+    expect(textOf(dry)).toContain('DRY RUN passed');
+    expect(presentedPages).toHaveLength(1); // no second page
+
+    const exec = await client.callTool({
+      name: 'execute_deploy',
+      arguments: { connection: 'deploy-org', confirmation_code: code },
+    });
+    expect(exec.isError).not.toBe(true);
+    expect(textOf(exec)).toContain('"status": "Succeeded"');
+  });
+
+  it('a failed dry run reports the failure without implying a code existed', async () => {
+    failNextValidation = true;
+    const result = await validate({ dry_run: true });
+    const text = textOf(result);
+    expect(text).toContain('Dry run: validation FAILED');
+    expect(text).not.toContain('no confirmation code was issued');
+    expect(presentedPages).toHaveLength(0);
+  });
+});
+
 describe('execute_deploy code lifecycle', () => {
   it('executes with the human-read code exactly once', async () => {
     await validate();

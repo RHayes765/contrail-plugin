@@ -149,7 +149,8 @@ import { log } from '../core/log.js';
 export interface DeployValidationSummary {
   connection: string;
   org_type: string;
-  request_id: string;
+  /** null on a dry run — no approval request exists, nothing is executable. */
+  request_id: string | null;
   validation_id: string;
   /** null = unspecified — the org applied its own default test behavior. */
   test_level: TestLevel | null;
@@ -164,7 +165,8 @@ export interface DeployValidationSummary {
   blast_radius: string[];
   /** Advisory: new components that will be invisible/inaccessible without permissions. */
   permission_warning: string | null;
-  expires_at: string;
+  /** null on a dry run — there is no code to expire. */
+  expires_at: string | null;
 }
 
 type JobOutcome<T> =
@@ -243,6 +245,14 @@ export class DeployEngine {
       /** Omitted = the ORG's default behavior (prod refuses an explicit NoTestRun). */
       testLevel?: TestLevel;
       runTests: string[];
+      /**
+       * S38: true = org-side validation ONLY. No approval request, code,
+       * payload, or page is created, nothing becomes executable, and any
+       * PENDING request on the connection is left untouched (a normal
+       * validate supersedes it). Mid-build checks use this; the final
+       * validate omits it so the human sees exactly one meaningful approval.
+       */
+      dryRun?: boolean;
     },
   ): Promise<
     JobOutcome<{
@@ -252,7 +262,12 @@ export class DeployEngine {
       approval: Record<string, unknown> | null;
     }>
   > {
-    return this.runJob(`${conn.id}:deploy-validate`, () => this.doValidate(conn, input));
+    // S38: dry runs and real validations NEVER share a job — a second call
+    // with the other mode must not attach to the first's in-flight result
+    // and mislabel it (a dry check reading a real validate's summary would
+    // claim "nothing can be executed" about a live approval, and vice versa).
+    const jobKey = `${conn.id}:deploy-validate${input.dryRun ? ':dry' : ''}`;
+    return this.runJob(jobKey, () => this.doValidate(conn, input));
   }
 
   private async doValidate(
@@ -262,17 +277,22 @@ export class DeployEngine {
       destructive: ProposedDeletion[];
       testLevel?: TestLevel;
       runTests: string[];
+      dryRun?: boolean;
     },
     job?: Job<unknown>,
   ) {
-    const superseded = this.db.supersedePendingRequests(conn.id, 'deploy');
-    if (superseded > 0) {
-      for (const p of this.db.takeSupersededPayloadPaths(conn.id, 'deploy')) safeUnlink(p);
-      this.audit.record('deploy.superseded', {
-        connectionId: conn.id,
-        tool: 'validate_deploy',
-        detail: { count: superseded },
-      });
+    // A dry run must NOT supersede: an agent checking work-in-progress
+    // mid-build would otherwise silently kill a real pending approval.
+    if (!input.dryRun) {
+      const superseded = this.db.supersedePendingRequests(conn.id, 'deploy');
+      if (superseded > 0) {
+        for (const p of this.db.takeSupersededPayloadPaths(conn.id, 'deploy')) safeUnlink(p);
+        this.audit.record('deploy.superseded', {
+          connectionId: conn.id,
+          tool: 'validate_deploy',
+          detail: { count: superseded },
+        });
+      }
     }
 
     const versionNumber = this.config.salesforce.apiVersion.replace(/^v/, '');
@@ -340,7 +360,10 @@ export class DeployEngine {
         },
       });
       const deletingFlow = input.destructive.some((d) => d.type === 'Flow');
-      const note = deletingFlow
+      const note = input.dryRun
+        ? 'Dry run: validation FAILED. Fix the failures and check again (dry_run), or ' +
+          'validate for approval once the package is final.'
+        : deletingFlow
         ? 'Validation failed — no confirmation code was issued. Deleting a flow via the ' +
           'Metadata API is unreliable: an ACTIVE flow must be turned off first with ' +
           'deactivate_flow, and even an INACTIVE flow often fails validation with ' +
@@ -362,6 +385,42 @@ export class DeployEngine {
         },
         approval: null,
       };
+    }
+
+    if (input.dryRun) {
+      // S38: validation passed, and that is the WHOLE result — no code is
+      // generated, no request row exists, no payload is frozen, no page is
+      // presented. Nothing from this call can ever be executed.
+      this.audit.record('deploy.validated', {
+        connectionId: conn.id,
+        tool: 'validate_deploy',
+        detail: {
+          dryRun: true,
+          validationId,
+          components: input.components.length,
+          deletions: input.destructive.length,
+          testLevel: input.testLevel,
+        },
+      });
+      const drySummary: DeployValidationSummary = {
+        connection: conn.alias,
+        org_type: conn.orgType,
+        request_id: null,
+        validation_id: validationId,
+        test_level: input.testLevel ?? null,
+        changes,
+        destructive,
+        components_total: result.numberComponentsTotal,
+        component_errors: result.numberComponentErrors,
+        tests_run: result.numberTestsTotal,
+        test_failures: result.numberTestErrors,
+        test_failure_detail: this.gateTestDetail(conn, result),
+        code_coverage_warnings: result.codeCoverageWarnings.slice(0, 10),
+        blast_radius: blast,
+        permission_warning: permCoverage.warning,
+        expires_at: null,
+      };
+      return { summary: drySummary, validation_passed: true, approval: null };
     }
 
     const code = generateConfirmationCode();

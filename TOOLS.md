@@ -507,7 +507,13 @@ Builds a deploy package and validates it against the org with
 (destructive changes flagged), validation/test results, permission warnings
 for components deploying without access, and blast radius from the
 dependency graph; puts the confirmation code on the approval page. A failed
-validation issues **no** code.
+validation issues **no** code. With `dry_run: true` a PASSED validation
+issues no code either: same full results, but no approval request, page, or
+payload is created, nothing becomes executable through Contrail, and a
+pending approval on
+the connection is left untouched (a normal validate supersedes it) — the
+mid-build check that stops half-finished work from piling up approval
+pages that were never meant to be used.
 
 - `connection` — target, named unmissably to the human.
 - `components` *(≤50)* — each `{type, api_name, content | content_file}`.

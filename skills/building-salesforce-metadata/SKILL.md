@@ -259,5 +259,7 @@ directory** and give `validate_deploy` the path:
 Follow the **salesforce-house-rules** skill for the approval ritual. In short:
 `validate_deploy` first (checkOnly), lead the summary with destructive changes and
 any `permission_warning`, and only `execute_deploy` with a code the human reads back
-from the approval page. After a successful deploy, `refresh_snapshot` so the local
+from the approval page. While a package is still work-in-progress, validate with
+`dry_run: true` — full results, no approval request — and save the real validate
+for the final package. After a successful deploy, `refresh_snapshot` so the local
 index and dependency graph reflect the org's new state.

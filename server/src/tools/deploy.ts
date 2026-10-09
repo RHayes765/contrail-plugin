@@ -135,7 +135,10 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
         'Build a deploy package and validate it against the org with checkOnly=true — ' +
         'nothing is committed. Returns the change summary (destructive changes flagged), ' +
         'validation/test results, and blast radius; puts a confirmation code on the ' +
-        'human-only approval page. Normally OMIT test_level — the org then applies its ' +
+        'human-only approval page. Checking work-in-progress mid-build? Pass ' +
+        'dry_run: true — same validation, NO approval request or code is created ' +
+        '(save the human from pages that were never meant to be approved). ' +
+        'Normally OMIT test_level — the org then applies its ' +
         'own default (production runs local tests for Apex packages automatically and ' +
         'refuses an explicit NoTestRun). ' +
         'An in-progress result means call validate_deploy again to check on it. ' +
@@ -248,6 +251,17 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
           .max(50)
           .optional()
           .describe('Test classes for RunSpecifiedTests.'),
+        dry_run: z
+          .boolean()
+          .optional()
+          .describe(
+            'true = SILENT org-side validation for mid-build checks: full results ' +
+              '(errors, warnings, permission coverage, tests), but NO approval request, ' +
+              'code, or page is created, nothing becomes executable, and a pending ' +
+              'approval on this connection is left untouched (a normal validate ' +
+              'supersedes it). Use freely while iterating; the FINAL validate omits it ' +
+              'so the human sees exactly one meaningful approval.',
+          ),
       },
     },
     async (args: {
@@ -261,6 +275,7 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
       destructive?: Array<{ type: string; api_name: string }>;
       test_level?: TestLevel;
       run_tests?: string[];
+      dry_run?: boolean;
     }) =>
       guarded(async () => {
         const conn = requireConnection(args.connection, 'validate_deploy');
@@ -308,19 +323,37 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
           // a no-Apex package (it rejects an explicit NoTestRun).
           testLevel: args.test_level,
           runTests: args.run_tests ?? [],
+          dryRun: args.dry_run === true,
         });
         switch (outcome.status) {
           case 'in_progress':
             return ok(
               { progress: outcome.progress, started_at: outcome.started_at },
-              'Validation is still running — call validate_deploy again with the same connection to check on it.',
+              'Validation is still running — call validate_deploy again with the same ' +
+                'connection AND the same arguments (including dry_run) to check on it.',
             );
           case 'failed':
             return fail(`Validation errored: ${outcome.error}`);
           case 'complete': {
             const r = outcome.result;
             if (!r.validation_passed) {
-              return ok(r.failure ?? {}, 'Validation FAILED — no confirmation code was issued.');
+              return ok(
+                r.failure ?? {},
+                args.dry_run === true
+                  ? 'Dry run: validation FAILED.'
+                  : 'Validation FAILED — no confirmation code was issued.',
+              );
+            }
+            // Label from the RESULT, not the caller's args: a dry run is
+            // whatever the engine actually produced (request_id null), so a
+            // mislabel is impossible even if job attachment ever regresses.
+            if (r.summary?.request_id === null) {
+              return ok(
+                { ...r.summary, dry_run: true },
+                'DRY RUN passed — no approval request or code exists, and nothing can be ' +
+                  'executed from this through Contrail. When the package is final, ' +
+                  'validate again without dry_run to propose it for approval.',
+              );
             }
             return ok(
               { ...r.summary, approval_page: r.approval },
@@ -392,7 +425,8 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
         'Execute the deploy that the given confirmation code approves. The code exists only ' +
         'on the human\'s approval page: never guess, never fabricate, never reuse one — only ' +
         'pass a code the human just gave you. Codes are single-use, expire in ~1h, and are ' +
-        'invalidated by any new validation on the same connection.',
+        'invalidated by any new REAL validation on the same connection (a dry_run ' +
+        'check leaves them untouched).',
       inputSchema: {
         connection: z.string().describe('Target connection alias (or id).'),
         confirmation_code: z

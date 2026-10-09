@@ -67,6 +67,18 @@ rather than inventing what the skill would have said.
 - Deploy discipline: `validate_deploy` (checkOnly) first, always. Present its result
   to the human before anything else: the **target connection** first and unmissable,
   the component change list, test results, and blast radius.
+- **Mid-build checks are dry runs.** While iterating on a package, validate with
+  `dry_run: true` — the same org-side validation and full results, but **no**
+  approval request, code, or page is created and any pending approval survives.
+  Only the FINAL validate omits `dry_run`, so the human sees exactly one
+  meaningful approval page per deploy, never a trail of half-finished ones.
+  Nothing from a dry run can be executed **through Contrail** — no request or
+  code exists. (Org-side, like any passed checkOnly validation, it remains
+  quick-deployable from Setup → Deployment Status for a while — a human-only
+  path; never present it as one Contrail can use.) And because a dry run does
+  NOT supersede, a pending approval page from before your dry-run edits shows
+  the OLD frozen package — once the package has changed, treat that page as
+  stale and re-validate for real before involving the human.
 - **Where deploy bytes live.** Author large components into Contrail's staging
   directory **from the start** — `staging/<project>/` under the data dir:
   `%USERPROFILE%\.contrail\staging\<project>\` on Windows, and on other
@@ -165,7 +177,8 @@ rather than inventing what the skill would have said.
   committed work: data fixes, kicking off batches, scheduled-job surgery. Call
   `set_trace_flag` first when you will need the run's debug log.
 - If validation results change or time passes (codes expire in ~1 hour and are
-  invalidated by re-validation), re-validate rather than reusing a stale code.
+  invalidated by a REAL re-validation — dry runs leave them alone),
+  re-validate rather than reusing a stale code.
 - After a successful deploy, run `refresh_snapshot` so the local index and
   dependency graph reflect the org's new state.
 
