@@ -4,8 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
-import { createDeps, createServer, SERVER_NAME, SERVER_VERSION } from './server.js';
-import { refreshUpdateCache } from './core/updateCheck.js';
+import { createStartupErrorServer } from './failsafe.js';
+import { ENGINE_VERSION, SERVER_NAME } from './core/version.js';
 
 const UPDATE_CHECK_REPO = 'RHayes765/contrail-plugin';
 import { log } from './core/log.js';
@@ -14,17 +14,37 @@ import { log } from './core/log.js';
  * Entry point. stdio transport by default (the Phase 0 plugin path);
  * streamable HTTP behind --http for the future self-hosted Docker step —
  * same codebase, different flag (spec §2).
+ *
+ * The engine modules load via dynamic import INSIDE the startup try: a
+ * failure anywhere in startup — the native better-sqlite3 binding failing to
+ * dlopen, the DB lineage guard refusing a forked file, a data-dir migration
+ * throwing — must still leave a connectable stdio server, or hosts that show
+ * no server stderr (the .mcpb channel) see only an unexplained
+ * "Server disconnected" crash loop. A static `import './server.js'` would put
+ * those failures before main() ever runs.
  */
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const httpFlagIndex = args.indexOf('--http');
 
   if (httpFlagIndex === -1) {
-    const deps = createDeps();
-    const server = createServer(deps);
-    await server.connect(new StdioServerTransport());
-    log('info', `${SERVER_NAME} ${SERVER_VERSION} listening on stdio`);
-    if (deps.config.updates.checkEnabled) void refreshUpdateCache(UPDATE_CHECK_REPO);
+    try {
+      const { createDeps, createServer } = await import('./server.js');
+      const deps = createDeps();
+      const server = createServer(deps);
+      await server.connect(new StdioServerTransport());
+      log('info', `${SERVER_NAME} ${ENGINE_VERSION} listening on stdio`);
+      if (deps.config.updates.checkEnabled) {
+        const { refreshUpdateCache } = await import('./core/updateCheck.js');
+        void refreshUpdateCache(UPDATE_CHECK_REPO);
+      }
+    } catch (err) {
+      log('error', 'engine startup failed; serving the error over MCP instead', {
+        err: String(err),
+      });
+      const server = createStartupErrorServer(err);
+      await server.connect(new StdioServerTransport());
+    }
     return;
   }
 
@@ -35,6 +55,11 @@ async function main(): Promise<void> {
 }
 
 async function startHttpServer(port: number, host: string): Promise<void> {
+  // No failsafe here: the self-hosted channel runs in a terminal or under a
+  // process manager, where stderr is visible and exit-on-failure is the
+  // expected contract. The dynamic import just keeps module-load errors
+  // inside main()'s catch.
+  const { createDeps, createServer } = await import('./server.js');
   const deps = createDeps();
   const transports = new Map<string, StreamableHTTPServerTransport>();
 
@@ -134,7 +159,7 @@ async function startHttpServer(port: number, host: string): Promise<void> {
     server.once('error', reject);
     server.listen(port, host, () => resolve());
   });
-  log('info', `${SERVER_NAME} ${SERVER_VERSION} listening on http://${host}:${port}/mcp`);
+  log('info', `${SERVER_NAME} ${ENGINE_VERSION} listening on http://${host}:${port}/mcp`);
 }
 
 const MAX_HTTP_BODY = 4 * 1024 * 1024;

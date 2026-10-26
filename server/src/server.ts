@@ -20,9 +20,9 @@ import type { LocalDiagRunner } from './localdiag/types.js';
 import { dataDir, vendorDir } from './core/paths.js';
 import path from 'node:path';
 
-import { ENGINE_VERSION } from './core/version.js';
+import { ENGINE_VERSION, SERVER_NAME } from './core/version.js';
 
-export const SERVER_NAME = 'contrail-engine';
+export { SERVER_NAME };
 export const SERVER_VERSION = ENGINE_VERSION;
 
 export function createDeps(overrides?: {
