@@ -1,0 +1,735 @@
+<title>Flow Diff Viewer</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: sticky status header, twin layered flow canvases (stack <900px), shared inspector below. */
+:root {
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --ink: #1c2430;
+  --muted: #5d6b7e;
+  --line: #d7dde6;
+  --accent: #0b5cab;
+  --add: #2e7d32;      --add-soft: #e3f2e5;
+  --del: #c62828;      --del-soft: #fbe7e7;
+  --chg: #9a6700;      --chg-soft: #fdf3d7;
+  --canvas-dot: #c9d2dd;
+  --pill-bg: #eef1f5;
+  /* Flow Builder's own grouping: logic orange, data pink, interaction blue, start green. */
+  --sf-orange: #dd7a01; --sf-pink: #ff538a; --sf-blue: #1b96ff; --sf-green: #2e844a;
+  --font-ui: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #11161d; --surface: #1a2129; --ink: #e5eaf1; --muted: #93a1b3;
+  --line: #2d3845; --accent: #6aa8e8;
+  --add: #5fb46a; --add-soft: #1c2f20; --del: #e57373; --del-soft: #33201f;
+  --chg: #d9a73f; --chg-soft: #332a17; --canvas-dot: #28313c; --pill-bg: #232c36;
+  color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bg: #11161d; --surface: #1a2129; --ink: #e5eaf1; --muted: #93a1b3;
+  --line: #2d3845; --accent: #6aa8e8;
+  --add: #5fb46a; --add-soft: #1c2f20; --del: #e57373; --del-soft: #33201f;
+  --chg: #d9a73f; --chg-soft: #332a17; --canvas-dot: #28313c; --pill-bg: #232c36;
+  color-scheme: dark;
+}
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--font-ui);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 24px;
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+header.bar {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 9;
+  background: var(--bg); padding-block: 14px 10px;
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 18px;
+  border-bottom: 1px solid var(--line);
+}
+header.bar h1 { font-size: 18px; font-weight: 600; margin: 0; }
+header.bar .sub { color: var(--muted); font-size: 12.5px; }
+.counts { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+.pill { font-size: 11.5px; font-weight: 600; padding: 2px 9px; border-radius: 99px; border: 1px solid; font-variant-numeric: tabular-nums; }
+.pill.add { color: var(--add); border-color: var(--add); background: var(--add-soft); }
+.pill.del { color: var(--del); border-color: var(--del); background: var(--del-soft); }
+.pill.chg { color: var(--chg); border-color: var(--chg); background: var(--chg-soft); }
+.pill.same { color: var(--muted); border-color: var(--line); background: var(--surface); }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted); padding-block: 8px 0; }
+.legend .k { display: inline-flex; align-items: center; gap: 5px; }
+.legend .sw { width: 14px; height: 9px; border-radius: 3px; border: 2px solid; display: inline-block; }
+.panes { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
+.panes.single { grid-template-columns: 1fr; }
+@media (max-width: 900px) { .panes { grid-template-columns: 1fr; } }
+.pane { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; min-width: 0; }
+.pane .head {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  border-bottom: 1px solid var(--line); font-size: 13px;
+}
+.pane .head .org { font-weight: 600; }
+.pane .head .hint { color: var(--muted); font-size: 11.5px; margin-left: auto; }
+.pane .head button {
+  font: 500 11.5px var(--font-ui); color: var(--accent); background: none;
+  border: 1px solid var(--line); border-radius: 5px; padding: 3px 10px; cursor: pointer;
+}
+.pane .head button:hover { border-color: var(--accent); }
+button:focus-visible, .goto:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.canvas { height: 520px; touch-action: none; cursor: grab; background:
+  radial-gradient(var(--canvas-dot) 1px, transparent 1.2px) 0 0 / 22px 22px; }
+.canvas:active { cursor: grabbing; }
+.canvas svg { width: 100%; height: 100%; display: block; }
+.node { cursor: pointer; }
+.node rect.body { fill: var(--surface); stroke-width: 1.6; rx: 8; }
+.node text.lbl { font: 500 12px var(--font-ui); fill: var(--ink); }
+.node text.kind { font: 400 9.5px var(--font-ui); fill: var(--muted); }
+.node rect.mark { fill: none; stroke-width: 2.5; rx: 11; opacity: .9; }
+.node.chg rect.mark { stroke: var(--chg); stroke-dasharray: 6 4; }
+.node.add rect.mark { stroke: var(--add); }
+.node.del rect.mark { stroke: var(--del); stroke-dasharray: 6 4; }
+.node.sel rect.body { stroke-width: 3.2; filter: drop-shadow(0 0 4px var(--accent)); animation: pulse 1.1s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .node.sel rect.body { animation: none; } }
+.edge { stroke: var(--muted); stroke-width: 1.3; fill: none; opacity: .8; }
+.edge.fault { stroke: var(--del); stroke-dasharray: 5 4; }
+.edge.eadd { stroke: var(--add); stroke-width: 1.8; }
+.edge.edel { stroke: var(--del); stroke-width: 1.8; stroke-dasharray: 5 4; }
+.lblpill { fill: var(--pill-bg); stroke: var(--line); }
+.lbltext { font: 400 10px var(--font-ui); fill: var(--muted); }
+.goto { cursor: pointer; }
+.goto rect { fill: var(--pill-bg); stroke: var(--line); }
+.goto.fault rect { stroke: var(--del); }
+.goto.eadd rect { stroke: var(--add); } .goto.edel rect { stroke: var(--del); stroke-dasharray: 4 3; }
+.goto text { font: 500 10.5px var(--font-ui); fill: var(--accent); }
+.resources { margin-top: 12px; font-size: 12.5px; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.resources .chip { font: 500 11.5px var(--font-ui); border: 1px solid var(--line); background: var(--surface);
+  border-radius: 99px; padding: 2px 10px; cursor: pointer; }
+.resources .chip.add { color: var(--add); border-color: var(--add); }
+.resources .chip.del { color: var(--del); border-color: var(--del); }
+.resources .chip.chg { color: var(--chg); border-color: var(--chg); }
+.inspector { margin-top: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.inspector .head { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid var(--line);
+  font-size: 13px; flex-wrap: wrap; }
+.inspector .head .name { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.inspector .head .close { margin-left: auto; font: 500 12px var(--font-ui); color: var(--muted);
+  background: none; border: 1px solid var(--line); border-radius: 5px; padding: 2px 9px; cursor: pointer; }
+.inspector .empty { padding: 18px 14px; color: var(--muted); font-size: 13px; }
+.sidegrid { display: grid; grid-template-columns: 1fr 1fr; }
+.sidegrid.single { grid-template-columns: 1fr; }
+@media (max-width: 900px) { .sidegrid { grid-template-columns: 1fr; } }
+.sidecol { min-width: 0; padding: 10px 12px 14px; }
+.sidecol + .sidecol { border-left: 1px solid var(--line); }
+@media (max-width: 900px) { .sidecol + .sidecol { border-left: none; border-top: 1px solid var(--line); } }
+.sidecol h3 { margin: 0 0 8px; font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.props { width: 100%; border-collapse: collapse; font-size: 12px; }
+.props td { padding: 4px 8px; vertical-align: top; border-bottom: 1px solid var(--line); }
+.props td.n { color: var(--muted); font-family: var(--font-mono); font-size: 11px; white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.props td.v { font-family: var(--font-mono); font-size: 11.5px; overflow-wrap: anywhere; }
+.props tr.delta td { background: var(--chg-soft); }
+.props tr.delta td.n { color: var(--chg); }
+.sidecol .absent { color: var(--muted); font-style: italic; font-size: 12px; }
+.xmltoggle { font: 500 11.5px var(--font-ui); color: var(--accent); background: none; border: none;
+  padding: 8px 0 0; cursor: pointer; }
+.sidecol pre { margin: 6px 0 0; overflow: auto; font: 11px/1.55 var(--font-mono); max-height: 300px; }
+.sidecol .ln { display: block; white-space: pre; padding: 0 6px; border-radius: 3px; }
+.sidecol .ln.add { background: var(--add-soft); }
+.sidecol .ln.del { background: var(--del-soft); }
+footer.note { margin-top: 14px; color: var(--muted); font-size: 11.5px; }
+.toobig { padding: 30px 16px; color: var(--muted); font-size: 13px; }
+</style>
+
+<header class="bar">
+  <h1 id="flow-title">Flow diff</h1>
+  <span class="sub" id="flow-sub"></span>
+  <div class="counts" id="counts"></div>
+</header>
+<div class="legend">
+  <span id="legend-diff">
+    <span class="k"><span class="sw" style="border-color:var(--add)"></span>added (right only)</span>
+    <span class="k"><span class="sw" style="border-color:var(--del);border-style:dashed"></span>removed (left only)</span>
+    <span class="k"><span class="sw" style="border-color:var(--chg);border-style:dashed"></span>changed</span>
+  </span>
+  <span class="k">click a node for details · “→” pills jump to off-screen targets · drag pans, scroll zooms</span>
+</div>
+
+<div class="panes">
+  <section class="pane">
+    <div class="head"><span class="org" id="label-a"></span><span class="hint" id="meta-a"></span><button type="button" id="fit-a">Fit</button></div>
+    <div class="canvas" id="canvas-a"></div>
+  </section>
+  <section class="pane" id="pane-b">
+    <div class="head"><span class="org" id="label-b"></span><span class="hint" id="meta-b"></span><button type="button" id="fit-b">Fit</button></div>
+    <div class="canvas" id="canvas-b"></div>
+  </section>
+</div>
+
+<div class="resources" id="resources" hidden></div>
+
+<section class="inspector" id="inspector">
+  <div class="empty" id="insp-empty">Select a node on either canvas to compare it across the two versions — parsed attributes first, element XML on demand.</div>
+  <div id="insp-body" hidden>
+    <div class="head">
+      <strong id="insp-label"></strong>
+      <span class="name" id="insp-name"></span>
+      <span class="pill" id="insp-status"></span>
+      <button type="button" class="close" id="insp-close">Close</button>
+    </div>
+    <div class="sidegrid">
+      <div class="sidecol" id="side-a"></div>
+      <div class="sidecol" id="side-b"></div>
+    </div>
+  </div>
+</section>
+<footer class="note" id="footnote"></footer>
+
+<script>
+'use strict';
+const FLOW_A_XML = __FLOW_A__;
+const FLOW_B_XML = __FLOW_B__;
+const META = __META__;
+
+/* ================= parsing — port of the desktop engine's parseFlowGraph ================= */
+const ELEMENT_KINDS = [
+  ['assignments','assignment'],['decisions','decision'],['recordLookups','recordLookup'],
+  ['recordCreates','recordCreate'],['recordUpdates','recordUpdate'],['recordDeletes','recordDelete'],
+  ['screens','screen'],['loops','loop'],['subflows','subflow'],['actionCalls','action'],
+  ['apexPluginCalls','action'],['waits','wait'],['transforms','transform'],
+  ['collectionProcessors','collection'],['customErrors','customError'],
+  ['recordRollbacks','rollback'],['orchestratedStages','stage'],
+];
+const KIND_LABELS = {
+  recordLookup:'Get Records', recordCreate:'Create Records', recordUpdate:'Update Records',
+  recordDelete:'Delete Records', action:'Action', subflow:'Subflow', decision:'Decision',
+  assignment:'Assignment', screen:'Screen', loop:'Loop', wait:'Wait', transform:'Transform',
+  collection:'Collection', customError:'Custom Error', rollback:'Roll Back Records',
+  stage:'Stage', start:'Start',
+};
+const KIND_COLOR_VAR = {
+  start:'--sf-green',
+  decision:'--sf-orange', assignment:'--sf-orange', transform:'--sf-orange', loop:'--sf-orange',
+  collection:'--sf-orange', wait:'--sf-orange', customError:'--sf-orange', stage:'--sf-orange',
+  recordLookup:'--sf-pink', recordCreate:'--sf-pink', recordUpdate:'--sf-pink',
+  recordDelete:'--sf-pink', rollback:'--sf-pink',
+  action:'--sf-blue', subflow:'--sf-blue', screen:'--sf-blue',
+};
+const RESOURCE_KINDS = ['variables','constants','formulas','textTemplates','choices','dynamicChoiceSets','stages'];
+
+const kids = (el, n) => [...el.children].filter((c) => c.localName === n);
+const txt = (el, n) => { const k = kids(el, n)[0]; return k ? k.textContent.trim() : null; };
+const connectorTarget = (el, tag) => { const c = kids(el, tag)[0]; return c ? txt(c, 'targetReference') : null; };
+function prettyXml(el) {
+  if (!el) return null;
+  return new XMLSerializer().serializeToString(el).replace(/ xmlns="[^"]*"/g, '');
+}
+function valueText(el) {
+  const ref = txt(el, 'elementReference');
+  if (ref != null) return '{!' + ref + '}';
+  for (const t of ['stringValue','numberValue','booleanValue','dateValue','dateTimeValue','apexValue']) {
+    const v = txt(el, t); if (v != null) return v;
+  }
+  return '';
+}
+function conditionText(el) {
+  const left = txt(el, 'leftValueReference') ?? txt(el, 'field') ?? '?';
+  const op = txt(el, 'operator') ?? '=';
+  const rv = kids(el, 'rightValue')[0] ?? kids(el, 'value')[0];
+  const right = rv ? valueText(rv) : '';
+  return left + ' ' + op + (right ? ' ' + right : '');
+}
+function extractProps(el, kind) {
+  const props = [];
+  const push = (name, value) => { if (value) props.push({ name, value }); };
+  if (kind === 'decision') {
+    for (const rule of kids(el, 'rules')) {
+      const conditions = kids(rule, 'conditions').map(conditionText);
+      const logic = txt(rule, 'conditionLogic');
+      push(txt(rule, 'label') ?? txt(rule, 'name') ?? 'rule',
+        conditions.join(logic === 'or' ? ' OR ' : ' AND ') || '(no conditions)');
+    }
+    push('default', txt(el, 'defaultConnectorLabel'));
+  } else if (kind === 'recordLookup' || kind === 'recordUpdate' || kind === 'recordDelete') {
+    push('object', txt(el, 'object'));
+    const filters = kids(el, 'filters').map(conditionText);
+    if (filters.length) push('filters', filters.join(txt(el, 'filterLogic') === 'or' ? ' OR ' : ' AND '));
+    push('sort', txt(el, 'sortField'));
+    push('first record only', txt(el, 'getFirstRecordOnly'));
+    for (const a of kids(el, 'inputAssignments')) push(txt(a, 'field') ?? 'field', valueText(a));
+  } else if (kind === 'recordCreate') {
+    push('object', txt(el, 'object'));
+    push('input', txt(el, 'inputReference'));
+    for (const a of kids(el, 'inputAssignments')) push(txt(a, 'field') ?? 'field', valueText(a));
+  } else if (kind === 'assignment') {
+    for (const item of kids(el, 'assignmentItems')) {
+      props.push({ name: txt(item, 'assignToReference') ?? '?',
+        value: ((txt(item, 'operator') ?? 'Assign') + ' ' + valueText(item)).trim() });
+    }
+  } else if (kind === 'action') {
+    push('action', txt(el, 'actionName'));
+    push('type', txt(el, 'actionType'));
+    for (const p of kids(el, 'inputParameters')) push(txt(p, 'name') ?? 'param', valueText(p));
+  } else if (kind === 'subflow') {
+    push('flow', txt(el, 'flowName'));
+    for (const a of kids(el, 'inputAssignments')) push(txt(a, 'name') ?? 'input', valueText(a));
+  } else if (kind === 'loop') {
+    push('collection', txt(el, 'collectionReference'));
+    push('order', txt(el, 'iterationOrder'));
+  } else if (kind === 'start') {
+    push('object', txt(el, 'object'));
+    push('trigger', txt(el, 'triggerType'));
+    push('on', txt(el, 'recordTriggerType'));
+    const filters = kids(el, 'filters').map(conditionText);
+    if (filters.length) push('entry criteria', filters.join(txt(el, 'filterLogic') === 'or' ? ' OR ' : ' AND '));
+    for (const p of kids(el, 'scheduledPaths')) {
+      const offset = [txt(p, 'offsetNumber'), txt(p, 'offsetUnit')].filter(Boolean).join(' ');
+      push('path: ' + (txt(p, 'label') ?? txt(p, 'name') ?? 'scheduled'), offset || 'immediate');
+    }
+  } else if (kind === 'collection') {
+    push('type', txt(el, 'collectionProcessorType'));
+    push('collection', txt(el, 'collectionReference'));
+  }
+  return props;
+}
+function parseFlowGraph(xmlStr) {
+  const doc = new DOMParser().parseFromString(xmlStr, 'text/xml');
+  if (doc.getElementsByTagName('parsererror').length) throw new Error('flow XML failed to parse');
+  const root = doc.documentElement;
+  const nodes = [], edges = [], defined = new Set(), resources = new Map();
+  for (const [tag, kind] of ELEMENT_KINDS) {
+    for (const el of kids(root, tag)) {
+      const name = txt(el, 'name'); if (!name) continue;
+      defined.add(name);
+      let detail = null;
+      if (kind === 'action') detail = txt(el, 'actionName') ?? txt(el, 'apexClass');
+      else if (['recordLookup','recordCreate','recordUpdate','recordDelete'].includes(kind)) detail = txt(el, 'object');
+      else if (kind === 'subflow') detail = txt(el, 'flowName');
+      else if (kind === 'collection') detail = txt(el, 'collectionProcessorType');
+      nodes.push({ name, label: txt(el, 'label') ?? name, kind, detail,
+        props: extractProps(el, kind), el });
+      if (kind === 'decision') {
+        for (const rule of kids(el, 'rules')) {
+          const t = connectorTarget(rule, 'connector');
+          if (t) edges.push({ from: name, to: t, kind: 'decision', label: txt(rule, 'label') ?? txt(rule, 'name') });
+        }
+        const def = connectorTarget(el, 'defaultConnector');
+        if (def) edges.push({ from: name, to: def, kind: 'decision', label: txt(el, 'defaultConnectorLabel') ?? 'default' });
+      } else if (kind === 'loop') {
+        const next = connectorTarget(el, 'nextValueConnector');
+        if (next) edges.push({ from: name, to: next, kind: 'loop_next', label: 'each item' });
+        const done = connectorTarget(el, 'noMoreValuesConnector');
+        if (done) edges.push({ from: name, to: done, kind: 'loop_end', label: 'after last' });
+      } else {
+        if (kind === 'wait') {
+          for (const ev of kids(el, 'waitEvents')) {
+            const t = connectorTarget(ev, 'connector');
+            if (t) edges.push({ from: name, to: t, kind: 'normal', label: txt(ev, 'label') ?? txt(ev, 'name') });
+          }
+        }
+        const t = connectorTarget(el, 'connector');
+        if (t) edges.push({ from: name, to: t, kind: 'normal', label: null });
+      }
+      const fault = connectorTarget(el, 'faultConnector');
+      if (fault) edges.push({ from: name, to: fault, kind: 'fault', label: 'fault' });
+    }
+  }
+  const startEl = kids(root, 'start')[0] ?? null;
+  defined.add('__start');
+  nodes.unshift({ name: '__start', label: 'Start', kind: 'start', detail: null,
+    props: startEl ? extractProps(startEl, 'start') : [], el: startEl });
+  let trigger = null;
+  if (startEl) {
+    const object = txt(startEl, 'object'), tt = txt(startEl, 'triggerType'), rtt = txt(startEl, 'recordTriggerType');
+    trigger = [tt, rtt && 'on ' + rtt, object && 'of ' + object].filter(Boolean).join(' ') || null;
+    const direct = connectorTarget(startEl, 'connector');
+    if (direct) edges.push({ from: '__start', to: direct, kind: 'normal', label: null });
+    for (const p of kids(startEl, 'scheduledPaths')) {
+      const t = connectorTarget(p, 'connector');
+      if (t) edges.push({ from: '__start', to: t, kind: 'normal', label: txt(p, 'label') ?? txt(p, 'name') ?? 'scheduled' });
+    }
+  } else {
+    const legacy = txt(root, 'startElementReference');
+    if (legacy) edges.push({ from: '__start', to: legacy, kind: 'normal', label: null });
+  }
+  for (const tag of RESOURCE_KINDS) {
+    for (const el of kids(root, tag)) {
+      const name = txt(el, 'name');
+      if (name) resources.set(name, { name, kind: tag, label: name, props: [], el });
+    }
+  }
+  const unresolved = [...new Set(edges.map((e) => e.to).filter((t) => !defined.has(t)))];
+  return { label: txt(root, 'label'), processType: txt(root, 'processType'),
+    trigger, nodes, edges, unresolved, resources,
+    byName: new Map(nodes.map((n) => [n.name, n])) };
+}
+
+/* ================= diff ================= */
+function normalize(el) {
+  if (!el) return '';
+  const walk = (n) => {
+    const ch = [...n.children];
+    if (!ch.length) return '<' + n.localName + '>' + n.textContent.trim() + '</' + n.localName + '>';
+    return '<' + n.localName + '>' + ch.map(walk).join('') + '</' + n.localName + '>';
+  };
+  return walk(el);
+}
+// Single-version mode: FLOW_B_XML null views one flow with no diff treatment.
+const A = parseFlowGraph(FLOW_A_XML);
+const B = FLOW_B_XML ? parseFlowGraph(FLOW_B_XML) : null;
+const DIFF = B !== null;
+const nodeStatus = new Map();
+for (const name of A.byName.keys()) nodeStatus.set(name, 'same');
+if (DIFF) for (const name of new Set([...A.byName.keys(), ...B.byName.keys()])) {
+  const a = A.byName.get(name), b = B.byName.get(name);
+  nodeStatus.set(name, !a ? 'add' : !b ? 'del' : normalize(a.el) !== normalize(b.el) ? 'chg' : 'same');
+}
+const edgeKey = (e) => e.from + '\u0000' + e.to + '\u0000' + (e.label || '');
+const edgesA = new Set(A.edges.map(edgeKey));
+const edgesB = DIFF ? new Set(B.edges.map(edgeKey)) : edgesA;
+const resStatus = new Map();
+if (DIFF) for (const name of new Set([...A.resources.keys(), ...B.resources.keys()])) {
+  const a = A.resources.get(name), b = B.resources.get(name);
+  const s = !a ? 'add' : !b ? 'del' : normalize(a.el) !== normalize(b.el) ? 'chg' : 'same';
+  if (s !== 'same') resStatus.set(name, s);
+}
+
+/* ========== layout — port of the desktop FlowDiagram's layered algorithm ========== */
+// Static SVG affords a higher node cap than the desktop's live React canvas.
+const NODE_W = 176, NODE_H = 50, GAP_X = 208, MIN_ROW_GAP = 78, PILL_H = 20, LABEL_STEP = 20, MAX_NODES = 250;
+const truncate = (s, m) => (s.length > m ? s.slice(0, m - 1) + '…' : s);
+function layout(graph) {
+  const depth = new Map();
+  const bfs = (root, d0) => {
+    const q = [{ name: root, d: d0 }];
+    depth.set(root, d0);
+    while (q.length) {
+      const { name, d } = q.shift();
+      for (const e of graph.edges) {
+        if (e.from !== name || depth.has(e.to)) continue;
+        depth.set(e.to, d + 1); q.push({ name: e.to, d: d + 1 });
+      }
+    }
+  };
+  bfs('__start', 0);
+  for (;;) {
+    const unplaced = graph.nodes.filter((n) => !depth.has(n.name));
+    if (!unplaced.length) break;
+    const names = new Set(unplaced.map((n) => n.name));
+    const root = unplaced.find((n) => !graph.edges.some((e) => e.to === n.name && names.has(e.from))) ?? unplaced[0];
+    bfs(root.name, Math.max(0, ...depth.values()) + 1);
+  }
+  // Per-source attachment stacks (go-to pills + branch labels) size the row
+  // gap, so nothing hanging under a node can collide with the next row.
+  const stackFor = (g, l) => (g > 0 ? 6 + g * (PILL_H + 3) : 6) + (l > 0 ? 14 + l * LABEL_STEP : 0);
+  const stacks = new Map();
+  let maxStack = 0;
+  for (const node of graph.nodes) {
+    const out = graph.edges.filter((e) => e.from === node.name);
+    const drawable = out.filter((e) => (depth.get(e.to) ?? -99) === (depth.get(node.name) ?? 0) + 1);
+    const gotoCount = out.length - drawable.length;
+    const labeledCount = drawable.filter((e) => e.label).length;
+    const px = stackFor(gotoCount, labeledCount);
+    stacks.set(node.name, px);
+    maxStack = Math.max(maxStack, px);
+  }
+  const rowGap = Math.max(MIN_ROW_GAP + 30, maxStack + 2 * LABEL_STEP + 26);
+  const gapY = NODE_H + rowGap;
+  const rows = new Map();
+  for (const n of graph.nodes) {
+    const d = depth.get(n.name) ?? 0;
+    (rows.get(d) ?? rows.set(d, []).get(d)).push(n.name);
+  }
+  // Barycenter sweep: order each row by mean parent position above.
+  const rowIndex = new Map();
+  const depths = [...rows.keys()].sort((a, b) => a - b);
+  for (const d of depths) {
+    const row = rows.get(d);
+    if (d === depths[0]) { row.forEach((n, i) => rowIndex.set(n, i)); continue; }
+    const scored = row.map((name) => {
+      const parents = graph.edges.filter((e) => e.to === name && rowIndex.has(e.from)).map((e) => rowIndex.get(e.from));
+      return { name, score: parents.length ? parents.reduce((a, b) => a + b, 0) / parents.length : 1e9 };
+    });
+    scored.sort((a, b) => a.score - b.score);
+    scored.forEach((s, i) => rowIndex.set(s.name, i));
+    rows.set(d, scored.map((s) => s.name));
+  }
+  const widest = Math.max(...[...rows.values()].map((r) => r.length));
+  const width = 40 + widest * GAP_X;
+  const placed = new Map();
+  let height = 0;
+  for (const n of graph.nodes) {
+    const d = depth.get(n.name) ?? 0, row = rows.get(d);
+    const x = (width - row.length * GAP_X) / 2 + row.indexOf(n.name) * GAP_X + (GAP_X - NODE_W) / 2;
+    const y = 20 + d * gapY;
+    placed.set(n.name, { x, y });
+    height = Math.max(height, y + NODE_H + 20);
+  }
+  return { placed, width, height: height + 60, depth, stacks };
+}
+/* Right-angle edges between ADJACENT rows only; everything longer, backward or
+   sideways becomes a go-to pill under its source (Flow Builder's own trick). */
+function planEdges(graph, placed, depth, stacks, ownEdges, otherEdges) {
+  const drawn = [], pills = [];
+  const bySource = new Map(), inboundCount = new Map(), inboundSeen = new Map();
+  for (const e of graph.edges) {
+    (bySource.get(e.from) ?? bySource.set(e.from, []).get(e.from)).push(e);
+    if ((depth.get(e.to) ?? -99) === (depth.get(e.from) ?? 0) + 1)
+      inboundCount.set(e.to, (inboundCount.get(e.to) ?? 0) + 1);
+  }
+  for (const [from, edges] of bySource) {
+    const a = placed.get(from); if (!a) continue;
+    const drawable = edges.filter((e) => (depth.get(e.to) ?? -99) === (depth.get(from) ?? 0) + 1);
+    const gotos = edges.filter((e) => !drawable.includes(e));
+    gotos.forEach((e, i) => {
+      const target = graph.byName.get(e.to);
+      pills.push({ x: a.x, y: a.y + NODE_H + 6 + i * (PILL_H + 3),
+        text: (e.label ? e.label + ' ' : '') + '→ ' + truncate(target?.label ?? e.to, 20),
+        target: e.to, fault: e.kind === 'fault', delta: deltaOf(e, ownEdges, otherEdges) });
+    });
+    const stackPx = stacks.get(from) ?? 0;
+    drawable.forEach((e, i) => {
+      const b = placed.get(e.to);
+      const spread = (i - (drawable.length - 1) / 2) * 22;
+      const x1 = a.x + NODE_W / 2 + spread, y1 = a.y + NODE_H;
+      const arrivals = inboundCount.get(e.to) ?? 1;
+      const slot = inboundSeen.get(e.to) ?? 0;
+      inboundSeen.set(e.to, slot + 1);
+      const arrivalSpread = arrivals > 1 ? (slot - (arrivals - 1) / 2) * Math.min(34, (NODE_W - 24) / arrivals) : 0;
+      const x2 = b.x + NODE_W / 2 + arrivalSpread, y2 = b.y;
+      const jogY = Math.min(y2 - LABEL_STEP - 12, y1 + stackPx + 18);
+      drawn.push({
+        path: Math.abs(x1 - x2) < 2 ? `M ${x1} ${y1} L ${x2} ${y2}`
+          : `M ${x1} ${y1} L ${x1} ${jogY} L ${x2} ${jogY} L ${x2} ${y2}`,
+        fault: e.kind === 'fault', label: e.label,
+        labelX: x2, labelY: y2 - 10 - (slot % 2) * LABEL_STEP,
+        delta: deltaOf(e, ownEdges, otherEdges),
+      });
+    });
+  }
+  return { drawn, pills };
+}
+function deltaOf(e, ownEdges, otherEdges) {
+  return otherEdges.has(edgeKey(e)) ? '' : ownEdges === edgesA ? 'edel' : 'eadd';
+}
+
+/* ================= render ================= */
+const SVGNS = 'http://www.w3.org/2000/svg';
+function mk(tag, attrs, parent) {
+  const el = document.createElementNS(SVGNS, tag);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  if (parent) parent.appendChild(el);
+  return el;
+}
+function renderPane(host, graph, side, ownEdges, otherEdges) {
+  if (graph.nodes.length > MAX_NODES) {
+    host.classList.remove('canvas');
+    host.innerHTML = '<div class="toobig">This version has ' + graph.nodes.length +
+      ' elements — too many for the diagram view.</div>';
+    return { fit: () => {}, jump: () => {} };
+  }
+  const { placed, width, height, depth, stacks } = layout(graph);
+  const { drawn, pills } = planEdges(graph, placed, depth, stacks, ownEdges, otherEdges);
+  const svg = mk('svg', { viewBox: `0 0 ${width} ${height}` }, host);
+  const defs = mk('defs', {}, svg);
+  for (const [id, color] of [['n', 'var(--muted)'], ['f', 'var(--del)'], ['g', 'var(--add)']]) {
+    const m = mk('marker', { id: 'arr-' + id + '-' + side, viewBox: '0 0 10 10', refX: 9, refY: 5,
+      markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' }, defs);
+    mk('path', { d: 'M0,0 L10,5 L0,10 z', fill: color }, m);
+  }
+  const world = mk('g', {}, svg);
+  for (const e of drawn) {
+    const cls = 'edge' + (e.fault ? ' fault' : '') + (e.delta ? ' ' + e.delta : '');
+    const marker = e.fault || e.delta === 'edel' ? 'f' : e.delta === 'eadd' ? 'g' : 'n';
+    mk('path', { d: e.path, class: cls, 'marker-end': `url(#arr-${marker}-${side})` }, world);
+    if (e.label) {
+      const w = Math.min(e.label.length, 24) * 6.2 + 12;
+      mk('rect', { x: e.labelX - w / 2, y: e.labelY - 11, width: w, height: 16, rx: 8, class: 'lblpill' }, world);
+      mk('text', { x: e.labelX, y: e.labelY, 'text-anchor': 'middle', class: 'lbltext' }, world)
+        .textContent = truncate(e.label, 24);
+    }
+  }
+  const paneApi = {};
+  for (const p of pills) {
+    const g = mk('g', { class: 'goto' + (p.fault ? ' fault' : '') + (p.delta ? ' ' + p.delta : '') }, world);
+    const w = Math.min(p.text.length, 34) * 6.1 + 14;
+    mk('rect', { x: p.x, y: p.y, width: w, height: PILL_H, rx: 10 }, g);
+    mk('text', { x: p.x + 8, y: p.y + 14 }, g).textContent = truncate(p.text, 34);
+    g.addEventListener('click', (ev) => { ev.stopPropagation(); if (!moved) { paneApi.jump(p.target); select(p.target); } });
+  }
+  for (const n of graph.nodes) {
+    const pos = placed.get(n.name);
+    const st = nodeStatus.get(n.name);
+    const g = mk('g', { class: 'node' + (st !== 'same' ? ' ' + st : ''),
+      transform: `translate(${pos.x},${pos.y})` }, world);
+    g.dataset.name = n.name;
+    if (st !== 'same') mk('rect', { class: 'mark', x: -5, y: -5, width: NODE_W + 10, height: NODE_H + 10, rx: 11 }, g);
+    const body = mk('rect', { class: 'body', width: NODE_W, height: NODE_H, rx: 8 }, g);
+    body.style.stroke = `var(${KIND_COLOR_VAR[n.kind] ?? '--line'})`;
+    mk('text', { x: 10, y: 21, class: 'lbl' }, g).textContent = truncate(n.label, 22);
+    mk('text', { x: 10, y: 38, class: 'kind' }, g).textContent =
+      truncate([KIND_LABELS[n.kind] ?? n.kind, n.detail].filter(Boolean).join(' · '), 27);
+    g.addEventListener('click', (ev) => { ev.stopPropagation(); if (!moved) select(n.name); });
+  }
+  // Pan/zoom with a drag threshold, so clicks still reach the nodes.
+  const view = { k: 1, tx: 0, ty: 0 };
+  const apply = () => world.setAttribute('transform', `translate(${view.tx},${view.ty}) scale(${view.k})`);
+  // viewBox renders with preserveAspectRatio 'meet': the on-screen scale is
+  // governed by the LONGER axis, and the content is centered (letterboxed)
+  // on the other — both matter for converting cursor px to viewBox units.
+  const metrics = () => {
+    const r = host.getBoundingClientRect();
+    const s = Math.max(width / r.width, height / r.height); // viewBox units per screen px
+    return { r, s, offX: (r.width - width / s) / 2, offY: (r.height - height / s) / 2 };
+  };
+  let drag = null, moved = false;
+  host.addEventListener('pointerdown', (ev) => {
+    if (ev.pointerType === 'mouse' && ev.button !== 0) return;
+    drag = { x: ev.clientX, y: ev.clientY, id: ev.pointerId }; moved = false;
+  });
+  host.addEventListener('pointermove', (ev) => {
+    if (!drag || ev.pointerId !== drag.id) return;
+    // Self-heal: if the release was swallowed (capture lost, pointer left the
+    // window), the first buttonless move ends the drag instead of panning.
+    if (ev.pointerType === 'mouse' && ev.buttons === 0) { drag = null; return; }
+    const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
+    if (!moved && Math.hypot(dx, dy) < 4) return;
+    if (!moved) { moved = true; try { host.setPointerCapture(drag.id); } catch { /* capture is best-effort */ } }
+    const { s } = metrics();
+    view.tx += dx * s; view.ty += dy * s; // translate sits outside the scale
+    drag.x = ev.clientX; drag.y = ev.clientY; apply();
+  });
+  const endDrag = (ev) => {
+    if (!drag || ev.pointerId !== drag.id) return;
+    try { host.releasePointerCapture(drag.id); } catch { /* already released */ }
+    drag = null; setTimeout(() => { moved = false; }, 0);
+  };
+  host.addEventListener('pointerup', endDrag);
+  host.addEventListener('pointercancel', endDrag);
+  host.addEventListener('lostpointercapture', () => { drag = null; setTimeout(() => { moved = false; }, 0); });
+  host.addEventListener('wheel', (ev) => {
+    ev.preventDefault();
+    const f = ev.deltaY < 0 ? 1.12 : 1 / 1.12;
+    const { r, s, offX, offY } = metrics();
+    const px = (ev.clientX - r.left - offX) * s, py = (ev.clientY - r.top - offY) * s;
+    view.tx = px - (px - view.tx) * f; view.ty = py - (py - view.ty) * f; view.k *= f; apply();
+  }, { passive: false });
+  host.addEventListener('click', (ev) => { if (!moved && (ev.target === host || ev.target === svg)) select(null); });
+  paneApi.fit = () => { view.k = 1; view.tx = 0; view.ty = 0; apply(); };
+  paneApi.jump = (name) => {
+    const pos = placed.get(name); if (!pos) return;
+    view.k = Math.max(view.k, 1);
+    view.tx = width / 2 - (pos.x + NODE_W / 2) * view.k;
+    view.ty = height / 2 - (pos.y + NODE_H / 2) * view.k;
+    apply();
+  };
+  return paneApi;
+}
+
+/* ================= inspector + selection ================= */
+const STATUS_LABEL = { add: 'added', del: 'removed', chg: 'changed', same: 'unchanged' };
+function propKey(p) { return p.name + '\u0000' + p.value; }
+function renderSide(hostId, title, node, otherNode) {
+  const host = document.getElementById(hostId);
+  host.textContent = '';
+  const h = document.createElement('h3'); h.textContent = title; host.appendChild(h);
+  if (!node) {
+    const p = document.createElement('p'); p.className = 'absent';
+    p.textContent = 'not present in this version'; host.appendChild(p);
+    return;
+  }
+  const otherProps = new Set((otherNode?.props ?? []).map(propKey));
+  if (node.props.length) {
+    const table = document.createElement('table'); table.className = 'props';
+    for (const p of node.props) {
+      const tr = document.createElement('tr');
+      if (otherNode && !otherProps.has(propKey(p))) tr.className = 'delta';
+      const tn = document.createElement('td'); tn.className = 'n'; tn.textContent = p.name;
+      const tv = document.createElement('td'); tv.className = 'v'; tv.textContent = p.value;
+      tr.append(tn, tv); table.appendChild(tr);
+    }
+    host.appendChild(table);
+  } else {
+    const p = document.createElement('p'); p.className = 'absent';
+    p.textContent = 'no parsed attributes for this element kind'; host.appendChild(p);
+  }
+  const xml = prettyXml(node.el);
+  if (!xml) return;
+  const btn = document.createElement('button');
+  btn.type = 'button'; btn.className = 'xmltoggle'; btn.textContent = 'Element XML';
+  const pre = document.createElement('pre'); pre.hidden = true;
+  const otherLines = new Set((prettyXml(otherNode?.el) ?? '').split('\n').map((l) => l.trim()));
+  for (const line of xml.split('\n')) {
+    const span = document.createElement('span');
+    span.className = 'ln' + (otherNode && !otherLines.has(line.trim())
+      ? (hostId === 'side-a' ? ' del' : ' add') : '');
+    span.textContent = line;
+    pre.appendChild(span);
+  }
+  btn.addEventListener('click', () => { pre.hidden = !pre.hidden;
+    btn.textContent = pre.hidden ? 'Element XML' : 'Hide element XML'; });
+  host.append(btn, pre);
+}
+function select(name) {
+  document.querySelectorAll('.node.sel').forEach((n) => n.classList.remove('sel'));
+  const empty = document.getElementById('insp-empty'), body = document.getElementById('insp-body');
+  if (!name) { empty.hidden = false; body.hidden = true; return; }
+  document.querySelectorAll('.node').forEach((n) => { if (n.dataset.name === name) n.classList.add('sel'); });
+  const a = A.byName.get(name) ?? A.resources.get(name) ?? null;
+  const b = DIFF ? (B.byName.get(name) ?? B.resources.get(name) ?? null) : null;
+  const st = nodeStatus.get(name) ?? resStatus.get(name) ?? 'same';
+  empty.hidden = true; body.hidden = false;
+  const any = a ?? b;
+  document.getElementById('insp-label').textContent = any.label ?? name;
+  document.getElementById('insp-name').textContent =
+    name + ' · ' + (KIND_LABELS[any.kind] ?? any.kind) + (any.detail ? ' · ' + any.detail : '');
+  const pill = document.getElementById('insp-status');
+  pill.textContent = DIFF ? STATUS_LABEL[st] : KIND_LABELS[any.kind] ?? any.kind;
+  pill.className = 'pill ' + (!DIFF || st === 'same' ? 'same' : st);
+  renderSide('side-a', META.aLabel, a, b);
+  if (DIFF) renderSide('side-b', META.bLabel, b, a);
+}
+document.getElementById('insp-close').addEventListener('click', () => select(null));
+
+/* ================= boot ================= */
+document.getElementById('flow-title').textContent = (B && B.label) || A.label || 'Flow';
+document.getElementById('flow-sub').textContent =
+  [META.subtitle, A.trigger && 'trigger: ' + A.trigger].filter(Boolean).join(' · ');
+document.getElementById('label-a').textContent = META.aLabel;
+document.getElementById('meta-a').textContent = A.nodes.length + ' nodes';
+if (DIFF) {
+  document.getElementById('label-b').textContent = META.bLabel;
+  document.getElementById('meta-b').textContent = B.nodes.length + ' nodes';
+  const tally = { add: 0, del: 0, chg: 0, same: 0 };
+  for (const s of nodeStatus.values()) tally[s]++;
+  document.getElementById('counts').innerHTML =
+    `<span class="pill add">+${tally.add} added</span><span class="pill del">−${tally.del} removed</span>` +
+    `<span class="pill chg">~${tally.chg} changed</span><span class="pill same">${tally.same} unchanged</span>`;
+} else {
+  document.getElementById('pane-b').hidden = true;
+  document.querySelector('.panes').classList.add('single');
+  document.getElementById('legend-diff').hidden = true;
+  document.getElementById('side-b').hidden = true;
+  document.querySelector('.sidegrid').classList.add('single');
+  document.getElementById('counts').innerHTML =
+    `<span class="pill same">${A.nodes.length} nodes</span>`;
+  document.getElementById('insp-empty').textContent =
+    'Select a node for its parsed attributes — element XML on demand.';
+}
+const paneA = renderPane(document.getElementById('canvas-a'), A, 'a', edgesA, edgesB);
+const paneB = DIFF ? renderPane(document.getElementById('canvas-b'), B, 'b', edgesB, edgesA) : null;
+document.getElementById('fit-a').addEventListener('click', paneA.fit);
+if (paneB) document.getElementById('fit-b').addEventListener('click', paneB.fit);
+if (resStatus.size) {
+  const host = document.getElementById('resources');
+  host.hidden = false;
+  host.insertAdjacentHTML('afterbegin', '<span>Resource changes (not on canvas):</span>');
+  for (const [name, st] of resStatus) {
+    const chip = document.createElement('button');
+    chip.type = 'button'; chip.className = 'chip ' + st;
+    chip.textContent = (st === 'add' ? '+ ' : st === 'del' ? '− ' : '~ ') + name;
+    chip.addEventListener('click', () => select(name));
+    host.appendChild(chip);
+  }
+}
+const unresolved = [...new Set([...A.unresolved, ...(B ? B.unresolved : [])])];
+document.getElementById('footnote').textContent =
+  [META.note, unresolved.length ? 'Unresolved connector targets: ' + unresolved.join(', ') : '']
+    .filter(Boolean).join(' · ');
+</script>

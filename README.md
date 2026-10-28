@@ -14,6 +14,18 @@ single MCP Bundle that installs into Claude Desktop via Settings → Extensions
 (no Node install, no npm, no config editing on the target machine) and covers
 Windows x64/ARM and macOS Intel/Apple Silicon from one file. 38 tools.
 
+**Flow visualization as artifacts (S39).** A nineteenth skill,
+`salesforce-flow-visualize`: agents render any flow — one version, or a
+two-version diff (cross-org, or before/after an edit) — as a private,
+self-contained interactive artifact. The bundled HTML template is a port of
+the desktop app's matured FlowDiagram: layered Flow-Builder-style layout
+(the flow's own canvas coordinates are deliberately ignored), right-angle
+connectors between adjacent rows with "Go To" pills for everything longer or
+backward, name-keyed added/removed/changed highlighting with cross-pane
+selection, and a parsed inspector (decision rules as readable conditions,
+lookup filters, assignment items) with element XML behind a toggle. No
+server, no libraries, live-verified on 40-node client flows.
+
 **Permissions & UI-action types (S36).** Five more deployable types, every
 sharp edge on the approval page: `CustomPermission` (paired with a new
 `customPermissions` coverage arm — ungranted permissions warn like ungranted

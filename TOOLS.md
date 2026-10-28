@@ -726,7 +726,7 @@ cause) — row data never enters the conversation in either direction.
 
 ## The skill pack
 
-Eighteen skills ship with Contrail (in `skills/`), encoding the judgment layer —
+Nineteen skills ship with Contrail (in `skills/`), encoding the judgment layer —
 the difference between an agent that has tools and one that uses them the
 way a careful practitioner would. In Claude Code they load automatically
 with the plugin; in Claude Desktop they are added once via the Skills UI; in
@@ -752,6 +752,7 @@ the desktop app they are bundled and selectable per project.
 | `agentforce-architecture-analyze` | Read-side agent analysis: architecture doc + Mermaid graph from design-time metadata; the Tooling object graph. |
 | `platform-prompt-template-generate` | Prompt Builder templates: grammar, merge-field language, the org-generated activeVersionIdentifier doctrine. |
 | `agentforce-eval-generate` | Testing Center definitions (AiEvaluationDefinition): expectation semantics, grounding against the real agent, test design. |
+| `salesforce-flow-visualize` | Interactive flow artifacts: a single version or a two-version diff — layered Flow-Builder-style canvas, go-to pills, parsed node inspector — built from a bundled, live-verified HTML template. |
 
 ---
 

@@ -36,6 +36,7 @@ deploy fails:
 | Documenting or diagramming an existing agent's architecture | `agentforce-architecture-analyze` |
 | Prompt templates — Prompt Builder metadata, merge fields, versions | `platform-prompt-template-generate` |
 | Agent tests — AiEvaluationDefinition authoring | `agentforce-eval-generate` |
+| Visualizing a flow, or diffing two flow versions, as an interactive artifact | `salesforce-flow-visualize` |
 
 Not every environment has every skill installed. One that will not load simply
 does not exist here — say so plainly and proceed on these house rules alone,
