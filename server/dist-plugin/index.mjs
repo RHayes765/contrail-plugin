@@ -21873,7 +21873,7 @@ var ENGINE_VERSION, SERVER_NAME;
 var init_version = __esm({
   "src/core/version.ts"() {
     "use strict";
-    ENGINE_VERSION = "0.32.0";
+    ENGINE_VERSION = "0.33.0";
     SERVER_NAME = "contrail-engine";
   }
 });
@@ -23051,6 +23051,7 @@ var init_config = __esm({
         ingestTimeoutMs: 30 * 60 * 1e3,
         maxFileBytes: 1e8,
         maxFilesPerPlan: 20,
+        resultsRetentionDays: 14,
         toolWaitMs: 25 * 1e3
       }
     };
@@ -29477,7 +29478,7 @@ async function createIngestJob(rest, apiVersion, opts) {
       operation: opts.operation,
       ...opts.externalIdFieldName ? { externalIdFieldName: opts.externalIdFieldName } : {},
       contentType: "CSV",
-      columnDelimiter: "COMMA",
+      columnDelimiter: opts.columnDelimiter ?? "COMMA",
       lineEnding: opts.lineEnding
     })
   });
@@ -29524,6 +29525,12 @@ async function fetchFailedResults(rest, apiVersion, jobId) {
   });
   return res.text();
 }
+async function fetchSuccessfulResults(rest, apiVersion, jobId) {
+  const res = await rest.request(`${jobsBase(apiVersion)}/${jobId}/successfulResults/`, {
+    headers: { Accept: "text/csv" }
+  });
+  return res.text();
+}
 async function fetchUnprocessedRecords(rest, apiVersion, jobId) {
   const res = await rest.request(`${jobsBase(apiVersion)}/${jobId}/unprocessedrecords/`, {
     headers: { Accept: "text/csv" }
@@ -29539,7 +29546,7 @@ var init_bulk = __esm({
 });
 
 // src/deploy/csv.ts
-function scanCsv(bytes) {
+function scanCsv(bytes, delimiter = ",") {
   const hadBom = bytes.length >= 3 && bytes.subarray(0, 3).equals(UTF8_BOM);
   const text = (hadBom ? bytes.subarray(3) : bytes).toString("utf8");
   if (text.trim().length === 0) throw new ContrailError("the CSV file is empty", "bad_csv");
@@ -29575,9 +29582,9 @@ function scanCsv(bytes) {
     if (dupe !== void 0) {
       throw new ContrailError(`duplicate column name in the header: ${dupe}`, "bad_csv");
     }
-    if (headers.length === 1 && /[;\t]/.test(headers[0])) {
+    if (headers.length === 1 && (delimiter === "," ? /[;\t]/ : /[;,]/).test(headers[0])) {
       warnOnce(
-        'the header parsed as a single column containing ";" or tabs \u2014 Bulk API 2.0 loads are comma-delimited; if this file is semicolon- or tab-delimited, re-export it with commas'
+        delimiter === "," ? 'the header parsed as a single comma-delimited column containing ";" or tabs \u2014 a TAB-delimited file must be NAMED .tsv; a semicolon-delimited one is re-exported with commas (Bulk API 2.0 takes commas or tabs only)' : 'the header parsed as a single TAB-delimited column containing "," or ";" \u2014 a comma-delimited file must be NAMED .csv; a semicolon-delimited one is re-exported with commas or tabs (Bulk API 2.0 takes commas or tabs only)'
       );
     }
   };
@@ -29642,7 +29649,7 @@ function scanCsv(bytes) {
       }
       continue;
     }
-    if (ch === ",") {
+    if (ch === delimiter) {
       if (headers === null) {
         headerFields.push(field);
         field = "";
@@ -31803,6 +31810,33 @@ POST /connect/bot-versions/${version2.Id}/activation`
       }
       // ── bulk data loads ────────────────────────────────────────────────────
       /**
+       * S40: delete bulk results directories older than
+       * bulkLoad.resultsRetentionDays (0 = keep forever). Best-effort by
+       * design — a sweep failure must never block a propose.
+       */
+      sweepBulkResultDirs() {
+        const days = this.config.bulkLoad.resultsRetentionDays;
+        if (!days || days <= 0) return;
+        const cutoff = Date.now() - days * 24 * 60 * 60 * 1e3;
+        try {
+          for (const name of fs10.readdirSync(deploysDir())) {
+            if (!name.endsWith("-results")) continue;
+            const full = path5.join(deploysDir(), name);
+            try {
+              const stat = fs10.statSync(full);
+              if (stat.isDirectory() && stat.mtimeMs < cutoff) {
+                fs10.rmSync(full, { recursive: true, force: true });
+                this.audit.record("bulk.results_swept", {
+                  detail: { dir: name, ageDays: Math.round((Date.now() - stat.mtimeMs) / 864e5) }
+                });
+              }
+            } catch {
+            }
+          }
+        } catch {
+        }
+      }
+      /**
        * Stage a bulk load plan behind the ritual (kind 'bulk'): scan and FREEZE
        * the CSVs now, show the whole plan on one approval page, and let the
        * human's code arm executeBulkLoad. Rows never transit the model — the
@@ -31843,6 +31877,7 @@ POST /connect/bot-versions/${version2.Id}/activation`
             throw new ContrailError(`${where}: invalid external_id_field`, "bad_bulk_plan");
           }
         }
+        this.sweepBulkResultDirs();
         const superseded = this.db.supersedePendingRequests(conn.id, "bulk");
         if (superseded > 0) {
           for (const p of this.db.takeSupersededPayloadPaths(conn.id, "bulk")) safeUnlink(p);
@@ -31882,9 +31917,10 @@ POST /connect/bot-versions/${version2.Id}/activation`
               );
             }
             const bytes = fs10.readFileSync(s.sourcePath);
+            const isTsv = s.sourcePath.toLowerCase().endsWith(".tsv");
             let scan;
             try {
-              scan = scanCsv(bytes);
+              scan = scanCsv(bytes, isTsv ? "	" : ",");
             } catch (err2) {
               throw new ContrailError(
                 `${label}: ${err2 instanceof Error ? err2.message : String(err2)}`,
@@ -31909,7 +31945,7 @@ POST /connect/bot-versions/${version2.Id}/activation`
               }
             }
             const frozen = scan.hadBom ? bytes.subarray(UTF8_BOM.length) : bytes;
-            const file = `step-${n}.csv`;
+            const file = `step-${n}.${isTsv ? "tsv" : "csv"}`;
             fs10.writeFileSync(path5.join(stageDir, file), frozen);
             manifest.steps.push({
               n,
@@ -31922,6 +31958,7 @@ POST /connect/bot-versions/${version2.Id}/activation`
               row_count: scan.rowCount,
               headers: scan.headers,
               line_ending: scan.lineEnding,
+              column_delimiter: isTsv ? "TAB" : "COMMA",
               bytes: frozen.length
             });
             scanWarnings.push(scan.warnings);
@@ -32127,7 +32164,8 @@ columns: ${columnsLabel(m.headers)}`,
                 object: m.object,
                 operation: m.operation,
                 ...m.external_id_field ? { externalIdFieldName: m.external_id_field } : {},
-                lineEnding: m.line_ending
+                lineEnding: m.line_ending,
+                columnDelimiter: m.column_delimiter ?? "COMMA"
               });
               if (job) {
                 job.progress = `${stepLabel} \u2014 uploading ${m.row_count.toLocaleString("en-US")} rows`;
@@ -32145,6 +32183,7 @@ columns: ${columnsLabel(m.headers)}`,
           totalFailed += failed;
           const stepFailed = failedHard !== null || !info || info.state !== "JobComplete" || failed > 0;
           if (stepFailed) anyFailure = true;
+          const resExt = (m.column_delimiter ?? "COMMA") === "TAB" ? "tsv" : "csv";
           const entry = {
             step: m.n,
             object: m.object,
@@ -32156,10 +32195,23 @@ columns: ${columnsLabel(m.headers)}`,
             failed,
             ...failedHard ? { error_message: failedHard } : info?.errorMessage ? { error_message: info.errorMessage } : {}
           };
+          if (info && jobId && processed - failed > 0) {
+            try {
+              const p = writeResultCsv(
+                `step-${m.n}-success.${resExt}`,
+                await fetchSuccessfulResults(rest, version2, jobId)
+              );
+              if (p) entry.success_rows_file = p;
+            } catch (err2) {
+              entry.success_rows_note = `could not fetch the success export: ${String(
+                err2 instanceof Error ? err2.message : err2
+              )}`;
+            }
+          }
           if (info && jobId && stepFailed) {
             try {
               const p = writeResultCsv(
-                `step-${m.n}-failed.csv`,
+                `step-${m.n}-failed.${resExt}`,
                 await fetchFailedResults(rest, version2, jobId)
               );
               if (p) entry.failed_rows_file = p;
@@ -32170,7 +32222,7 @@ columns: ${columnsLabel(m.headers)}`,
             }
             try {
               const p = writeResultCsv(
-                `step-${m.n}-unprocessed.csv`,
+                `step-${m.n}-unprocessed.${resExt}`,
                 await fetchUnprocessedRecords(rest, version2, jobId)
               );
               if (p) entry.unprocessed_rows_file = p;
@@ -32921,6 +32973,42 @@ var init_gate = __esm({
   }
 });
 
+// src/salesforce/flowversion.ts
+function escapeXml2(value) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function serializeValue(name, value, indent) {
+  if (value === null || value === void 0) return "";
+  if (Array.isArray(value)) {
+    return value.map((item) => serializeValue(name, item, indent)).join("");
+  }
+  if (typeof value === "object") {
+    const inner = serializeObject(value, indent + "    ");
+    if (inner === "") return `${indent}<${name}/>
+`;
+    return `${indent}<${name}>
+${inner}${indent}</${name}>
+`;
+  }
+  return `${indent}<${name}>${escapeXml2(String(value))}</${name}>
+`;
+}
+function serializeObject(obj, indent) {
+  return Object.keys(obj).sort().map((key2) => serializeValue(key2, obj[key2], indent)).join("");
+}
+function flowMetadataJsonToXml(metadata) {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<Flow xmlns="${XMLNS2}">
+` + serializeObject(metadata, "    ") + "</Flow>\n";
+}
+var XMLNS2;
+var init_flowversion = __esm({
+  "src/salesforce/flowversion.ts"() {
+    "use strict";
+    XMLNS2 = "http://soap.sforce.com/2006/04/metadata";
+  }
+});
+
 // src/tools/metadata.ts
 import fs12 from "node:fs";
 function registerMetadataTools(server, deps) {
@@ -33036,12 +33124,19 @@ function registerMetadataTools(server, deps) {
         max_bytes: external_exports.number().int().min(1e3).max(MAX_CONTENT_BYTES).optional().describe(
           `Per-artifact content budget. Default ${DEFAULT_CONTENT_BYTES} bytes, which fits a large flow whole; raise it up to ${MAX_CONTENT_BYTES} to read something bigger. Whenever content is cut, the result says so and gives bytes_total plus snapshot_path, so you can read the file directly instead of guessing.`
         ),
-        include_dependencies: external_exports.boolean().optional().describe("Attach one-hop uses/used_by summaries (default true).")
+        include_dependencies: external_exports.boolean().optional().describe("Attach one-hop uses/used_by summaries (default true)."),
+        flow_version: external_exports.number().int().min(1).optional().describe(
+          "Flow only, one name only: retrieve a HISTORICAL version by number via the Tooling API, converted from its JSON to flow XML \u2014 faithful for reading and diffing (two converted versions diff cleanly); element order is alphabetical, so it is not deploy-ready byte-for-byte. Discover version numbers with soql_query tooling:true \u2014 SELECT VersionNumber, Status FROM Flow WHERE Definition.DeveloperName = '<name>' ORDER BY VersionNumber."
+        )
       }
     },
     async (args) => guarded(async () => {
       const conn = requireConnection(args.connection, "retrieve_metadata");
       if (!TYPE_RE.test(args.type)) return fail("invalid metadata type");
+      if (args.flow_version !== void 0) {
+        if (args.type !== "Flow") return fail("flow_version applies only to type Flow.");
+        if (args.names.length !== 1) return fail("flow_version takes exactly one name.");
+      }
       const includeDeps = args.include_dependencies !== false;
       const perArtifact = Math.min(args.max_bytes ?? DEFAULT_CONTENT_BYTES, MAX_CONTENT_BYTES);
       let budgetLeft = CALL_CONTENT_BUDGET;
@@ -33052,7 +33147,7 @@ function registerMetadataTools(server, deps) {
           continue;
         }
         try {
-          const content = await fetchArtifactContent(deps, conn, args.type, name);
+          const content = args.flow_version !== void 0 ? await fetchFlowVersionContent(deps, conn, name, args.flow_version) : await fetchArtifactContent(deps, conn, args.type, name);
           const allowed = Math.max(0, Math.min(perArtifact, budgetLeft));
           const cut = clampContent(content.body, allowed);
           budgetLeft -= cut.body.length;
@@ -33067,9 +33162,13 @@ function registerMetadataTools(server, deps) {
           };
           if (cut.truncated) {
             entry.truncated_reason = allowed < perArtifact ? "call_budget" : "max_bytes";
-            const rec = db.getArtifact(conn.id, args.type, name);
-            const onDisk = rec?.filePath ? deps.store.currentFilePath(conn.id, rec.filePath) : null;
-            if (onDisk) entry.snapshot_path = onDisk;
+            if (args.flow_version !== void 0) {
+              entry.truncated_note = "No file on disk holds this historical version \u2014 retry with a larger max_bytes.";
+            } else {
+              const rec = db.getArtifact(conn.id, args.type, name);
+              const onDisk = rec?.filePath ? deps.store.currentFilePath(conn.id, rec.filePath) : null;
+              if (onDisk) entry.snapshot_path = onDisk;
+            }
           }
           if (content.note) entry.note = content.note;
           if (content.bundle_files) entry.bundle_files = content.bundle_files;
@@ -33391,6 +33490,40 @@ function registerMetadataTools(server, deps) {
     })
   );
 }
+async function fetchFlowVersionContent(deps, conn, name, version2) {
+  const { tokenMgr, config: config2 } = deps;
+  const rest = new RestClient(tokenMgr, conn, config2.salesforce.apiVersion);
+  const esc3 = name.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  const rows = await rest.toolingQuery(
+    `SELECT Id, Status FROM Flow WHERE Definition.DeveloperName = '${esc3}' AND VersionNumber = ${version2} LIMIT 1`,
+    1
+  );
+  if (rows.length === 0) {
+    const versions = await rest.toolingQuery(
+      `SELECT VersionNumber, Status FROM Flow WHERE Definition.DeveloperName = '${esc3}' ORDER BY VersionNumber DESC LIMIT 50`,
+      50
+    );
+    throw new ContrailError(
+      versions.length > 0 ? `Flow ${name} has no version ${version2} on "${conn.alias}" \u2014 available: ` + versions.map((v) => `${v.VersionNumber} (${v.Status ?? "?"})`).join(", ") + "." : `No flow named ${name} is visible to the Tooling API on "${conn.alias}".`,
+      "artifact_not_found"
+    );
+  }
+  const res = await rest.request(
+    `/services/data/${config2.salesforce.apiVersion}/tooling/sobjects/Flow/${rows[0].Id}?fields=Metadata,VersionNumber,Status`
+  );
+  const record2 = await res.json();
+  if (!record2.Metadata || typeof record2.Metadata !== "object") {
+    throw new ContrailError(
+      `Tooling returned no Metadata for ${name} version ${version2}.`,
+      "artifact_not_found"
+    );
+  }
+  return {
+    body: flowMetadataJsonToXml(record2.Metadata),
+    source: `tooling (version ${version2}, ${record2.Status ?? "status unknown"})`,
+    note: "Converted from the Tooling API's JSON. Faithful for reading and diffing \u2014 two converted versions diff cleanly against each other \u2014 but element order is alphabetical, so comparing against a Metadata API retrieve may show ordering-only noise, and the output is NOT guaranteed deploy-ready."
+  };
+}
 async function fetchArtifactContent(deps, conn, type, name) {
   const { db, store, tokenMgr, config: config2 } = deps;
   if (BUNDLE_TYPES.has(type)) {
@@ -33604,6 +33737,7 @@ var init_metadata = __esm({
     init_metadataSoap();
     init_indexer();
     init_graph();
+    init_flowversion();
     NAME_RE2 = /^[A-Za-z0-9_.\- ()'&$]+(\/[A-Za-z0-9_.\- ()'&$]+)?$/;
     nameOk = (name) => NAME_RE2.test(name) && !name.includes("..") && !name.includes("\\");
     TYPE_RE = /^[A-Za-z]+$/;
@@ -34562,6 +34696,9 @@ function registerDataTools(server, deps) {
         minutes: external_exports.number().int().min(1).max(60).optional().describe("How long logging stays on (default 30)."),
         user: external_exports.string().min(1).max(240).optional().describe(
           "Who to trace instead of the connected user: a User Id (005\u2026), an exact Username, or a Name to search for (exact match first, then SOQL LIKE \u2014 % and _ wildcards work). Ambiguous matches are listed, never guessed."
+        ),
+        level: external_exports.enum(["standard", "performance", "exception", "callout", "minimal"]).optional().describe(
+          "Debug-level preset for a NEW flag (default standard): performance = ApexCode FINE + profiling FINEST for limits/CPU work; exception = stack-trace focus; callout = Callout FINEST; minimal = small logs. An EXISTING flag keeps its own level (flags never stack and are never clobbered) \u2014 only the expiry moves."
         )
       }
     },
@@ -34658,8 +34795,9 @@ function registerDataTools(server, deps) {
           action = "extended";
         }
       } else {
+        const preset = TRACE_LEVEL_PRESETS[args.level ?? "standard"];
         const levels = await client.toolingQuery(
-          `SELECT Id FROM DebugLevel WHERE DeveloperName = 'Contrail_Debug' LIMIT 1`,
+          `SELECT Id FROM DebugLevel WHERE DeveloperName = '${preset.name}' LIMIT 1`,
           1
         );
         let levelId = levels[0]?.Id ?? null;
@@ -34669,16 +34807,9 @@ function registerDataTools(server, deps) {
             {
               method: "POST",
               body: JSON.stringify({
-                DeveloperName: "Contrail_Debug",
-                MasterLabel: "Contrail_Debug",
-                ApexCode: "DEBUG",
-                ApexProfiling: "INFO",
-                Callout: "INFO",
-                Database: "INFO",
-                System: "DEBUG",
-                Validation: "INFO",
-                Visualforce: "INFO",
-                Workflow: "INFO"
+                DeveloperName: preset.name,
+                MasterLabel: preset.name,
+                ...preset.body
               })
             }
           );
@@ -34694,7 +34825,7 @@ function registerDataTools(server, deps) {
           })
         });
         action = "created";
-        debugLevel = "Contrail_Debug";
+        debugLevel = preset.name;
       }
       return ok({
         connection: conn.alias,
@@ -34704,7 +34835,7 @@ function registerDataTools(server, deps) {
         minutes,
         expires_at: effectiveExpiry,
         debug_level: debugLevel,
-        note: (action === "already-on" ? `A trace flag on this user already runs PAST the requested window \u2014 left untouched (never shortened). Debug logging is on until ${effectiveExpiry}` : `Debug logging is on until ${effectiveExpiry}`) + ` \u2014 activity by ${tracedUser} now writes debug logs (consuming the org's shared log allocation until the flag expires). Read them with get_debug_logs.` + (requested ? " Logs appear under that user, not the connected one \u2014 get_debug_logs lists logs org-wide." : "")
+        note: (action === "already-on" ? `A trace flag on this user already runs PAST the requested window \u2014 left untouched (never shortened). Debug logging is on until ${effectiveExpiry}` : `Debug logging is on until ${effectiveExpiry}`) + ` \u2014 activity by ${tracedUser} now writes debug logs (consuming the org's shared log allocation until the flag expires). Read them with get_debug_logs.` + (requested ? " Logs appear under that user, not the connected one \u2014 get_debug_logs lists logs org-wide." : "") + (args.level && action !== "created" ? " The requested level preset was NOT applied \u2014 the existing flag keeps its own debug level." : "")
       });
     })
   );
@@ -35015,9 +35146,11 @@ async function pollAgentEvalRun(client, apiVersion, alias, runId, includeDetails
       error_code: row.errorCode ?? null,
       error_message: row.errorMessage ?? null
     }));
+    const verdict = expectations.some((e) => e.passed === false) ? "failed" : expectations.length > 0 && expectations.every((e) => e.passed === true) ? "passed" : "indeterminate";
     return {
       number: tc.testNumber ?? null,
       status: tc.status ?? null,
+      verdict,
       utterance: tc.inputs?.utterance ?? null,
       topic: tc.generatedData?.topic ?? null,
       actions_sequence: tc.generatedData?.actionsSequence ?? null,
@@ -35025,12 +35158,11 @@ async function pollAgentEvalRun(client, apiVersion, alias, runId, includeDetails
       expectations
     };
   });
-  const totals = { cases: cases.length, passed: 0, failed: 0, other: 0 };
+  const totals = { cases: cases.length, passed: 0, failed: 0, indeterminate: 0 };
   for (const c of cases) {
-    const s = String(c.status ?? "").toUpperCase();
-    if (s.startsWith("PASS")) totals.passed += 1;
-    else if (s.startsWith("FAIL")) totals.failed += 1;
-    else totals.other += 1;
+    if (c.verdict === "passed") totals.passed += 1;
+    else if (c.verdict === "failed") totals.failed += 1;
+    else totals.indeterminate += 1;
   }
   const { kept, dropped } = fitToBudget(cases.map((c) => truncateDeep(c)), MAX_RESPONSE_CHARS);
   return ok({
@@ -35047,7 +35179,7 @@ async function pollAgentEvalRun(client, apiVersion, alias, runId, includeDetails
     ...includeDetails ? { raw_test_cases: truncateDeep(rawCases) } : {}
   });
 }
-var GRANT_GATED_SOBJECTS, DEFAULT_ROWS, MAX_ROWS, MAX_RESPONSE_CHARS, LOG_SLICE, DEFAULT_REPORT_ROWS, MAX_REPORT_GROUPS, MAX_STRING_FIELD, SF_ID_RE;
+var GRANT_GATED_SOBJECTS, DEFAULT_ROWS, MAX_ROWS, MAX_RESPONSE_CHARS, LOG_SLICE, DEFAULT_REPORT_ROWS, MAX_REPORT_GROUPS, MAX_STRING_FIELD, SF_ID_RE, TRACE_LEVEL_PRESETS;
 var init_data = __esm({
   "src/tools/data.ts"() {
     "use strict";
@@ -35078,6 +35210,28 @@ var init_data = __esm({
     MAX_REPORT_GROUPS = 200;
     MAX_STRING_FIELD = 1e4;
     SF_ID_RE = /^[a-zA-Z0-9]{15}([a-zA-Z0-9]{3})?$/;
+    TRACE_LEVEL_PRESETS = {
+      standard: {
+        name: "Contrail_Debug",
+        body: { ApexCode: "DEBUG", ApexProfiling: "INFO", Callout: "INFO", Database: "INFO", System: "DEBUG", Validation: "INFO", Visualforce: "INFO", Workflow: "INFO" }
+      },
+      performance: {
+        name: "Contrail_Perf",
+        body: { ApexCode: "FINE", ApexProfiling: "FINEST", Callout: "INFO", Database: "FINE", System: "DEBUG", Validation: "INFO", Visualforce: "INFO", Workflow: "INFO" }
+      },
+      exception: {
+        name: "Contrail_Exception",
+        body: { ApexCode: "DEBUG", ApexProfiling: "FINE", Callout: "INFO", Database: "INFO", System: "DEBUG", Validation: "INFO", Visualforce: "INFO", Workflow: "INFO" }
+      },
+      callout: {
+        name: "Contrail_Callout",
+        body: { ApexCode: "DEBUG", ApexProfiling: "INFO", Callout: "FINEST", Database: "INFO", System: "DEBUG", Validation: "INFO", Visualforce: "INFO", Workflow: "INFO" }
+      },
+      minimal: {
+        name: "Contrail_Minimal",
+        body: { ApexCode: "INFO", ApexProfiling: "NONE", Callout: "INFO", Database: "INFO", System: "WARN", Validation: "INFO", Visualforce: "NONE", Workflow: "INFO" }
+      }
+    };
   }
 });
 
@@ -35582,7 +35736,7 @@ function registerDeployTools(server, deps) {
         steps: external_exports.array(
           external_exports.object({
             csv_file: external_exports.string().describe(
-              `Absolute path to this step's CSV. Same containment as content_file: under Contrail's staging directory (${stagingDir()} \u2014 stage CSVs there from the start; the session working folder is not a source root), snapshots, or a configured deploy.allowedSourceRoots entry. Read and frozen at propose time.`
+              `Absolute path to this step's CSV (or .tsv \u2014 a .tsv extension means TAB-delimited, scanned and loaded as such). Same containment as content_file: under Contrail's staging directory (${stagingDir()} \u2014 stage files there from the start; the session working folder is not a source root), snapshots, or a configured deploy.allowedSourceRoots entry. Read and frozen at propose time.`
             ),
             object: external_exports.string().describe("SObject API name, e.g. Account or Invoice__c."),
             operation: external_exports.enum(["insert", "upsert", "delete"]),
@@ -35625,7 +35779,7 @@ function registerDeployTools(server, deps) {
     "bulk_load_execute",
     {
       title: "Execute a proposed bulk data load",
-      description: "Run the bulk load plan that the given confirmation code approves: sequential Bulk API 2.0 ingest jobs from the CSVs frozen at propose. The code exists only on the human's approval page \u2014 only pass a code the human just gave you (single-use, ~1h expiry, invalidated by a new bulk_load_propose on the same connection). Large jobs take minutes: an in-progress result means call bulk_load_execute again with the SAME code to check on it. Failed and unprocessed rows come back as CSV file paths (never row data); rows loaded by completed steps are never rolled back.",
+      description: "Run the bulk load plan that the given confirmation code approves: sequential Bulk API 2.0 ingest jobs from the CSVs frozen at propose. The code exists only on the human's approval page \u2014 only pass a code the human just gave you (single-use, ~1h expiry, invalidated by a new bulk_load_propose on the same connection). Large jobs take minutes: an in-progress result means call bulk_load_execute again with the SAME code to check on it. Successful, failed, and unprocessed rows come back as file paths (never row data) \u2014 step-N-success carries the created/updated/deleted record ids; rows loaded by completed steps are never rolled back.",
       inputSchema: {
         connection: external_exports.string().describe("Target connection alias (or id)."),
         confirmation_code: external_exports.string().describe("The code the human read from the approval page (format XXXX-XXXX).")

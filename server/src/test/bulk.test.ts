@@ -87,6 +87,18 @@ function stubSalesforce(): void {
       });
       return new Response('', { status: 201 });
     }
+    const successRes = /\/jobs\/ingest\/([^/]+)\/successfulResults\/?$/.exec(url);
+    if (successRes) {
+      const idx = createdJobs.findIndex((j) => j.id === successRes[1]);
+      const uploaded = uploads.get(successRes[1]!);
+      const total = uploaded ? uploaded.body.trim().split(/\r?\n/).length - 1 : 0;
+      const n = Math.max(0, total - (failedRowsByJobIndex.get(idx) ?? 0));
+      const rows = Array.from(
+        { length: n },
+        (_, i) => `"005OK${i + 1}","true","okrow${i + 1}"`,
+      );
+      return new Response(['"sf__Id","sf__Created","Name"', ...rows, ''].join('\n'));
+    }
     const failedRes = /\/jobs\/ingest\/([^/]+)\/failedResults\/?$/.exec(url);
     if (failedRes) {
       const idx = createdJobs.findIndex((j) => j.id === failedRes[1]);
@@ -501,14 +513,56 @@ describe('execute: sequential jobs, honest outcomes', () => {
     expect(patches.filter((p) => p.state === 'UploadComplete')).toHaveLength(2);
     expect(patches.filter((p) => p.state === 'Aborted')).toHaveLength(0);
 
-    // Spent payload directory is gone; no results dir for a clean run.
+    // Spent payload directory is gone. S40: a clean run still leaves the
+    // results dir — the success exports (created IDs) live there as FILES,
+    // never as rows in the conversation.
     expect(fs.existsSync(payloadDir!)).toBe(false);
-    expect(fs.existsSync(`${payloadDir}-results`)).toBe(false);
+    expect(fs.existsSync(path.join(`${payloadDir}-results`, 'step-1-success.csv'))).toBe(true);
+    expect(text).toContain('step-1-success.csv');
+    expect(text).not.toContain('005OK1'); // IDs stay in the file
 
     // Replay with the same code returns the stored outcome, not a re-run.
     const replay = textOf(await execute(code));
     expect(replay).toContain('"already_completed": true');
     expect(createdJobs).toHaveLength(2);
+  });
+
+  it('S40: a .tsv step scans as TAB-delimited and declares TAB to the ingest job', async () => {
+    const tsv = 'Name\tIndustry\nAcme\tTech\nGlobex\tEnergy\n';
+    await propose({
+      connection: 'bulk-org',
+      steps: [
+        { csv_file: writeStagingCsv('accts.tsv', tsv), object: 'Account', operation: 'insert' },
+      ],
+    });
+    const page = presentedPages.at(-1)!;
+    expect(page).toContain('2'); // row count scanned with the TAB delimiter
+    // The frozen copy keeps the delimiter-declaring extension.
+    const [payloadDir] = payloadDirs();
+    expect(fs.existsSync(path.join(payloadDir!, 'step-1.tsv'))).toBe(true);
+    const code = codeFromPage(page);
+    const text = await executeToCompletion(code);
+    expect(createdJobs[0]!.body).toMatchObject({ columnDelimiter: 'TAB', lineEnding: 'LF' });
+    // Result exports follow the job's delimiter too — re-proposable as-is.
+    expect(text).toContain('step-1-success.tsv');
+  });
+
+  it('S40: result dirs older than the retention window are swept at the next propose', async () => {
+    const old = path.join(deploysDir(), 'ancient-results');
+    const fresh = path.join(deploysDir(), 'recent-results');
+    fs.mkdirSync(old, { recursive: true });
+    fs.mkdirSync(fresh, { recursive: true });
+    const past = new Date(Date.now() - 30 * 86_400_000);
+    fs.utimesSync(old, past, past);
+
+    await propose({
+      connection: 'bulk-org',
+      steps: [
+        { csv_file: writeStagingCsv('a.csv', ACCOUNTS_CSV), object: 'Account', operation: 'insert' },
+      ],
+    });
+    expect(fs.existsSync(old)).toBe(false); // beyond 14 days — swept
+    expect(fs.existsSync(fresh)).toBe(true); // recent — kept
   });
 
   it('failed rows: files by PATH (never row data), later steps skipped, request failed', async () => {

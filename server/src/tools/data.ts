@@ -804,9 +804,24 @@ export function registerDataTools(server: McpServer, deps: ToolDeps): void {
               'Username, or a Name to search for (exact match first, then SOQL LIKE — ' +
               '% and _ wildcards work). Ambiguous matches are listed, never guessed.',
           ),
+        level: z
+          .enum(['standard', 'performance', 'exception', 'callout', 'minimal'])
+          .optional()
+          .describe(
+            'Debug-level preset for a NEW flag (default standard): performance = ' +
+              'ApexCode FINE + profiling FINEST for limits/CPU work; exception = ' +
+              'stack-trace focus; callout = Callout FINEST; minimal = small logs. ' +
+              'An EXISTING flag keeps its own level (flags never stack and are ' +
+              'never clobbered) — only the expiry moves.',
+          ),
       },
     },
-    async (args: { connection: string; minutes?: number; user?: string }) =>
+    async (args: {
+      connection: string;
+      minutes?: number;
+      user?: string;
+      level?: keyof typeof TRACE_LEVEL_PRESETS;
+    }) =>
       guarded(async () => {
         const conn = requireConnection(args.connection, 'set_trace_flag');
         const client = rest(conn);
@@ -947,8 +962,9 @@ export function registerDataTools(server: McpServer, deps: ToolDeps): void {
             action = 'extended';
           }
         } else {
+          const preset = TRACE_LEVEL_PRESETS[args.level ?? 'standard']!;
           const levels = await client.toolingQuery<{ Id: string }>(
-            `SELECT Id FROM DebugLevel WHERE DeveloperName = 'Contrail_Debug' LIMIT 1`,
+            `SELECT Id FROM DebugLevel WHERE DeveloperName = '${preset.name}' LIMIT 1`,
             1,
           );
           let levelId = levels[0]?.Id ?? null;
@@ -958,16 +974,9 @@ export function registerDataTools(server: McpServer, deps: ToolDeps): void {
               {
                 method: 'POST',
                 body: JSON.stringify({
-                  DeveloperName: 'Contrail_Debug',
-                  MasterLabel: 'Contrail_Debug',
-                  ApexCode: 'DEBUG',
-                  ApexProfiling: 'INFO',
-                  Callout: 'INFO',
-                  Database: 'INFO',
-                  System: 'DEBUG',
-                  Validation: 'INFO',
-                  Visualforce: 'INFO',
-                  Workflow: 'INFO',
+                  DeveloperName: preset.name,
+                  MasterLabel: preset.name,
+                  ...preset.body,
                 }),
               },
             );
@@ -983,7 +992,7 @@ export function registerDataTools(server: McpServer, deps: ToolDeps): void {
             }),
           });
           action = 'created';
-          debugLevel = 'Contrail_Debug';
+          debugLevel = preset.name;
         }
 
         return ok({
@@ -1005,6 +1014,10 @@ export function registerDataTools(server: McpServer, deps: ToolDeps): void {
             (requested
               ? ' Logs appear under that user, not the connected one — get_debug_logs lists ' +
                 'logs org-wide.'
+              : '') +
+            (args.level && action !== 'created'
+              ? ' The requested level preset was NOT applied — the existing flag keeps its ' +
+                'own debug level.'
               : ''),
         });
       }),
@@ -1414,6 +1427,35 @@ async function pollApexTestRun(client: RestClient, alias: string, runId: string)
 }
 
 /**
+ * S40: goal-shaped debug levels — the logs-debug skill's per-goal table,
+ * each find-or-created under its own DeveloperName so presets never fight
+ * each other or a human's hand-built level. Applied only when CREATING a
+ * flag; an existing flag's level is never clobbered.
+ */
+const TRACE_LEVEL_PRESETS: Record<string, { name: string; body: Record<string, string> }> = {
+  standard: {
+    name: 'Contrail_Debug',
+    body: { ApexCode: 'DEBUG', ApexProfiling: 'INFO', Callout: 'INFO', Database: 'INFO', System: 'DEBUG', Validation: 'INFO', Visualforce: 'INFO', Workflow: 'INFO' },
+  },
+  performance: {
+    name: 'Contrail_Perf',
+    body: { ApexCode: 'FINE', ApexProfiling: 'FINEST', Callout: 'INFO', Database: 'FINE', System: 'DEBUG', Validation: 'INFO', Visualforce: 'INFO', Workflow: 'INFO' },
+  },
+  exception: {
+    name: 'Contrail_Exception',
+    body: { ApexCode: 'DEBUG', ApexProfiling: 'FINE', Callout: 'INFO', Database: 'INFO', System: 'DEBUG', Validation: 'INFO', Visualforce: 'INFO', Workflow: 'INFO' },
+  },
+  callout: {
+    name: 'Contrail_Callout',
+    body: { ApexCode: 'DEBUG', ApexProfiling: 'INFO', Callout: 'FINEST', Database: 'INFO', System: 'DEBUG', Validation: 'INFO', Visualforce: 'INFO', Workflow: 'INFO' },
+  },
+  minimal: {
+    name: 'Contrail_Minimal',
+    body: { ApexCode: 'INFO', ApexProfiling: 'NONE', Callout: 'INFO', Database: 'INFO', System: 'WARN', Validation: 'INFO', Visualforce: 'NONE', Workflow: 'INFO' },
+  },
+};
+
+/**
  * S35: poll an Agentforce Testing Center evaluation run and, when terminal,
  * fetch and map its results. Two schema realities are tolerated on the
  * pass/fail field — the docs say `metricScore: PASS|FAILED`, the official
@@ -1495,9 +1537,21 @@ async function pollAgentEvalRun(
       error_code: row.errorCode ?? null,
       error_message: row.errorMessage ?? null,
     }));
+    // S40: a case's verdict derives from its EXPECTATIONS — the org's case
+    // status is a completion marker ("COMPLETED", live-confirmed), not a
+    // pass. Any failed expectation fails the case; all-passed passes it;
+    // anything else (a null-verdict label metric, or no expectations at
+    // all) is indeterminate — read the rows, never assume.
+    const verdict =
+      expectations.some((e) => e.passed === false)
+        ? 'failed'
+        : expectations.length > 0 && expectations.every((e) => e.passed === true)
+          ? 'passed'
+          : 'indeterminate';
     return {
       number: tc.testNumber ?? null,
       status: tc.status ?? null,
+      verdict,
       utterance: tc.inputs?.utterance ?? null,
       topic: tc.generatedData?.topic ?? null,
       actions_sequence: tc.generatedData?.actionsSequence ?? null,
@@ -1505,12 +1559,11 @@ async function pollAgentEvalRun(
       expectations,
     };
   });
-  const totals = { cases: cases.length, passed: 0, failed: 0, other: 0 };
+  const totals = { cases: cases.length, passed: 0, failed: 0, indeterminate: 0 };
   for (const c of cases) {
-    const s = String(c.status ?? '').toUpperCase();
-    if (s.startsWith('PASS')) totals.passed += 1;
-    else if (s.startsWith('FAIL')) totals.failed += 1;
-    else totals.other += 1;
+    if (c.verdict === 'passed') totals.passed += 1;
+    else if (c.verdict === 'failed') totals.failed += 1;
+    else totals.indeterminate += 1;
   }
 
   const { kept, dropped } = fitToBudget(cases.map((c) => truncateDeep(c)), MAX_RESPONSE_CHARS);

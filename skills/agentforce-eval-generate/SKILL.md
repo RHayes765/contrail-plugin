@@ -171,6 +171,16 @@ every eval deploy summary: "deployed to **dev-org**; run it with
   judge's reasoning — quote it when explaining a failure. (The org's
   pass-field schema varies by release — the tool tolerates both; the raw
   rows are available via `include_details`.)
+- **Case verdicts and totals are expectation-derived**: each case carries a
+  `verdict` — `failed` if ANY expectation failed, `passed` only when every
+  expectation passed (and there was at least one), `indeterminate` when
+  label-only metrics leave no boolean verdict to derive OR the case carries
+  no expectation rows at all. `totals` counts those verdicts
+  (`cases/passed/failed/indeterminate`) — the org's own case `status`
+  (COMPLETED = ran, not passed) is still shown raw but never counted as a
+  pass. An `indeterminate` case with labels is "read the labels yourself";
+  one with no expectations means the org returned no judgments for it —
+  say so, never infer a pass or fail.
 - **Live-confirmed facts (personal-dev run, 2026-10-01, ~2 min for 2
   cases):** the org emitted the `result: PASS|FAILURE` + numeric `score`
   schema (no `metricScore` field); it RENAMES expectations in results —
@@ -182,8 +192,8 @@ every eval deploy summary: "deployed to **dev-org**; run it with
   `PENDING`; judge metrics (coherence/completeness) DO emit PASS/FAILURE
   verdicts with 0–4-ish scores; `actionsSequence` arrives as a string
   literal like `['Action_Name']`; case-level `status` is `COMPLETED`
-  (completion, not a verdict) — judge each case by its expectations, and
-  read the tool's `totals.other` accordingly.
+  (completion, not a verdict) — which is exactly why the tool derives each
+  case's `verdict` from its expectations rather than that status.
 - **Deploy-availability gate (live-confirmed 2026-10-01):** an org without
   Testing Center provisioned refuses the AiEvaluationDefinition deploy with
   "Not available for deploy for this organization" — a provisioning gap,

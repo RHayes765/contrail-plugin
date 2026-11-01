@@ -542,6 +542,40 @@ describe('set_trace_flag', () => {
     expect(userLookupQueries.some((q) => q.includes('Name LIKE'))).toBe(false);
   });
 
+  it('S40: level presets shape a NEW flag; an existing flag keeps its own level', async () => {
+    const result = JSON.parse(
+      textOf(
+        await client.callTool({
+          name: 'set_trace_flag',
+          arguments: { connection: 'apex-org', level: 'performance' },
+        }),
+      ),
+    ) as Record<string, unknown>;
+    expect(result.debug_level).toBe('Contrail_Perf');
+    expect(postedDebugLevel).toMatchObject({
+      DeveloperName: 'Contrail_Perf',
+      ApexCode: 'FINE',
+      ApexProfiling: 'FINEST',
+      Database: 'FINE',
+    });
+
+    // Existing flag: the preset is NOT applied — never clobber a (possibly
+    // human-configured) level; the result says so.
+    postedDebugLevel = null;
+    traceFlagRows = [{ Id: '7tf00000000000eAAA', ExpirationDate: '2020-01-01T00:00:00.000Z' }];
+    const extended = JSON.parse(
+      textOf(
+        await client.callTool({
+          name: 'set_trace_flag',
+          arguments: { connection: 'apex-org', level: 'callout' },
+        }),
+      ),
+    ) as Record<string, unknown>;
+    expect(extended.action).toBe('extended');
+    expect(postedDebugLevel).toBeNull();
+    expect(String(extended.note)).toContain('NOT applied');
+  });
+
   it('NEVER shortens an existing longer flag — reports already-on instead', async () => {
     usernameLookupRows = [PIU];
     traceFlagRows = [{ Id: '7tf00000000000eAAA', ExpirationDate: '2999-01-01T00:00:00.000Z' }];

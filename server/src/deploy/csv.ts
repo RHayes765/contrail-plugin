@@ -28,7 +28,7 @@ export interface CsvScan {
 
 export const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
 
-export function scanCsv(bytes: Buffer): CsvScan {
+export function scanCsv(bytes: Buffer, delimiter: ',' | '\t' = ','): CsvScan {
   const hadBom = bytes.length >= 3 && bytes.subarray(0, 3).equals(UTF8_BOM);
   const text = (hadBom ? bytes.subarray(3) : bytes).toString('utf8');
   if (text.trim().length === 0) throw new ContrailError('the CSV file is empty', 'bad_csv');
@@ -70,10 +70,18 @@ export function scanCsv(bytes: Buffer): CsvScan {
     if (dupe !== undefined) {
       throw new ContrailError(`duplicate column name in the header: ${dupe}`, 'bad_csv');
     }
-    if (headers.length === 1 && /[;\t]/.test(headers[0]!)) {
+    // S40: delimiter-aware mis-delimiter smell — a one-column header holding
+    // the OTHER delimiter usually means the file extension lied about the
+    // format (.tsv content under a .csv name, or vice versa).
+    if (headers.length === 1 && (delimiter === ',' ? /[;\t]/ : /[;,]/).test(headers[0]!)) {
       warnOnce(
-        'the header parsed as a single column containing ";" or tabs — Bulk API 2.0 loads are ' +
-          'comma-delimited; if this file is semicolon- or tab-delimited, re-export it with commas',
+        delimiter === ','
+          ? 'the header parsed as a single comma-delimited column containing ";" or tabs — a ' +
+            'TAB-delimited file must be NAMED .tsv; a semicolon-delimited one is re-exported ' +
+            'with commas (Bulk API 2.0 takes commas or tabs only)'
+          : 'the header parsed as a single TAB-delimited column containing "," or ";" — a ' +
+            'comma-delimited file must be NAMED .csv; a semicolon-delimited one is re-exported ' +
+            'with commas or tabs (Bulk API 2.0 takes commas or tabs only)',
       );
     }
   };
@@ -149,7 +157,7 @@ export function scanCsv(bytes: Buffer): CsvScan {
       }
       continue;
     }
-    if (ch === ',') {
+    if (ch === delimiter) {
       if (headers === null) {
         headerFields.push(field);
         field = '';

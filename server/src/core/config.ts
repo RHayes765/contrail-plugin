@@ -93,6 +93,9 @@ export interface ContrailConfig {
     maxFileBytes: number;
     /** Maximum steps (files) in one bulk plan. */
     maxFilesPerPlan: number;
+    /** S40: failed/success result dirs older than this are swept at the next
+     * bulk propose. 0 keeps them forever. */
+    resultsRetentionDays: number;
     /** Inline wait before bulk_load_execute returns an in-progress result. */
     toolWaitMs: number;
   };
@@ -189,6 +192,7 @@ export const DEFAULT_CONFIG: ContrailConfig = {
     ingestTimeoutMs: 30 * 60 * 1000,
     maxFileBytes: 100_000_000,
     maxFilesPerPlan: 20,
+    resultsRetentionDays: 14,
     toolWaitMs: 25 * 1000,
   },
 };

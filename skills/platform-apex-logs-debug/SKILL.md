@@ -75,17 +75,18 @@ ORDER BY StartTime DESC LIMIT 20
 
 - **No live tailing.** Nothing in Contrail streams logs. The loop is: human
   reproduces → you list logs again → fetch the new log id.
-- **Trace flags: any user, but only the standard level.** `set_trace_flag`
+- **Trace flags: any user, preset levels.** `set_trace_flag`
   (`diagnostics_read`) turns on debug logging for up to 60 minutes — for the
   **connected user** by default, or for **any named user** via `user:` (a User
   Id, exact Username, or Name — "Platform Integration User" is the headline
   case: Agentforce agent conversations and autolaunched flows run as it, so a
-  self-trace never sees them). It find-or-creates a reusable `Contrail_Debug`
-  debug level and extends an existing flag rather than stacking one; ambiguous
-  name matches are listed, never guessed. Picking **custom per-goal levels** is
-  still Setup work (§2). And
-  `soql_query` still cannot read TraceFlag/DebugLevel — they are Tooling
-  objects, so `SELECT … FROM TraceFlag` fails with INVALID_TYPE.
+  self-trace never sees them). A `level:` preset picks the debug level for a
+  NEW flag (§2); an **existing** flag is extended, never clobbered — its own
+  level stays, and the result says so. Ambiguous name matches are listed,
+  never guessed. Hand-picked category combos beyond the presets are still
+  Setup work (§2). And `soql_query` still cannot read TraceFlag/DebugLevel —
+  they are Tooling objects, so `SELECT … FROM TraceFlag` fails with
+  INVALID_TYPE.
 - **Anonymous Apex is not a free probe.** It exists ONLY behind the full
   `apex_propose` → human code → `apex_execute` ritual, and DML it performs
   **commits** — so an ad-hoc repro snippet or benchmark harness costs one human
@@ -129,18 +130,26 @@ that user in `get_debug_logs`, which lists org-wide. Caution: a traced user
 without the **API Enabled** permission may write no logs — if nothing appears
 after a reproduce, say so rather than re-flagging in a loop.
 
-**When the goal needs custom levels** (the
-table below), that is still Setup work — direct the human: **Setup → Debug Logs
-→ New Trace Flag** on the
-affected user, with an expiration in the future, attached to a debug level.
-Suggest levels by goal:
+**When the goal needs a sharper level**, pass a `level:` preset — each
+find-or-creates its own reusable DebugLevel (`Contrail_Perf`, …):
 
-| Goal | Debug level to set |
-|---|---|
-| Performance / limits | ApexCode FINE, ApexProfiling FINEST, Database FINE, System DEBUG |
-| Exception debugging | ApexCode DEBUG, ApexProfiling FINE, Database INFO, System DEBUG |
-| Callout issues | ApexCode DEBUG, Callout FINEST, System DEBUG |
-| Keep logs small | drop ApexCode to INFO, System to WARN, Workflow/Validation to INFO |
+| Goal | `level:` preset | What it sets |
+|---|---|---|
+| Performance / limits | `performance` | ApexCode FINE, ApexProfiling FINEST, Database FINE, System DEBUG; rest INFO |
+| Exception debugging | `exception` | ApexCode DEBUG, ApexProfiling FINE, System DEBUG; rest INFO |
+| Callout issues | `callout` | Callout FINEST, ApexCode DEBUG, System DEBUG; rest INFO |
+| Keep logs small | `minimal` | ApexCode INFO, System WARN, ApexProfiling/Visualforce NONE; rest INFO |
+| General (default) | `standard` | ApexCode DEBUG, System DEBUG; rest INFO |
+
+A preset applies only when the call CREATES a flag. If a flag already exists
+— **including an EXPIRED one**: the tool finds and extends expired flags too,
+it never replaces them — the expiry moves and the level stays, and the result
+says the preset was not applied. So to switch levels, waiting out the window
+does NOT work; the human deletes the existing flag (Setup → Debug Logs) and
+then a fresh `set_trace_flag` call applies the preset. A hand-picked category
+combo beyond these presets is still Setup work — direct the human:
+**Setup → Debug Logs → New Trace Flag** on the affected user, attached to a
+debug level they build there.
 
 Level order: NONE < ERROR < WARN < INFO < DEBUG < FINE < FINER < FINEST.
 Categories: Database, Workflow, Validation, Callout, Apex Code, Apex Profiling,
@@ -158,8 +167,9 @@ noisier levels mean less usable evidence, not more.
 2. **Grants**: `get_permissions` → need `diagnostics_read` (plus `data_read` for
    SOQL narrowing; `metadata_read` to read the implicated Apex source).
 3. **Capture**: `set_trace_flag` — bare for the connected user's own activity,
-   `user:` for anyone else (the Platform Integration User for agent/flow runs);
-   Setup is only needed for custom debug levels (§2). You cannot
+   `user:` for anyone else (the Platform Integration User for agent/flow runs),
+   `level:` to match the preset to the goal (§2); Setup is only needed for
+   hand-picked level combos beyond the presets. You cannot
    query TraceFlag — the agent-visible evidence a flag is live is a new row
    appearing in `get_debug_logs` listing mode. Then have the human reproduce,
    list logs, fetch the candidate body.

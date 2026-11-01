@@ -37,6 +37,8 @@ deploy fails:
 | Prompt templates — Prompt Builder metadata, merge fields, versions | `platform-prompt-template-generate` |
 | Agent tests — AiEvaluationDefinition authoring | `agentforce-eval-generate` |
 | Visualizing a flow, or diffing two flow versions, as an interactive artifact | `salesforce-flow-visualize` |
+| Lightning web components — bundles, base components, wire vs Apex, js-meta targets | `platform-lwc-generate` |
+| LWC security (LWS) and accessibility review of an existing bundle | `platform-lwc-review` |
 
 Not every environment has every skill installed. One that will not load simply
 does not exist here — say so plainly and proceed on these house rules alone,

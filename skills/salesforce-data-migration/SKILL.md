@@ -82,9 +82,12 @@ ids into child files). Salesforce resolves cross-object references natively:
 
 ## 4. Prepare the files
 
-- **UTF-8, comma-delimited, one header row of API names** (`Name`,
-  `External_Id__c` — never labels). Uniform line endings (all LF or all CRLF —
-  Contrail detects and declares them to the org; a mixed file is refused).
+- **UTF-8, one header row of API names** (`Name`, `External_Id__c` — never
+  labels). Comma-delimited `.csv` is the default; a file named `.tsv` is
+  treated as TAB-delimited and declared to the org as such — the extension IS
+  the declaration, so never hand a comma file a `.tsv` name or vice versa.
+  Uniform line endings (all LF or all CRLF — Contrail detects and declares
+  them to the org; a mixed file is refused).
 - Quote fields containing commas, quotes, or newlines with `"…"`; double
   embedded quotes (`"He said ""hi"""`).
 - Per operation:
@@ -140,15 +143,24 @@ ids into child files). Salesforce resolves cross-object references natively:
 
 ## 7. Triage failed rows
 
-The result reports per-step `processed / succeeded / failed` and writes two
-kinds of CSV files (referenced by PATH — do not read them into context unless
-they are small and the human asks):
+The result reports per-step `processed / succeeded / failed` and writes up to
+three kinds of CSV files (referenced by PATH — do not read them into context
+unless they are small and the human asks):
 
 - `step-N-failed.csv` — rows the org attempted and rejected. The trailing
   **`sf__Error`** column names each cause; the leading `sf__Id` is set when a
   record was created before a later error.
 - `step-N-unprocessed.csv` — rows never attempted (job died early, or the
   step was halted).
+- `step-N-success.csv` — rows the org accepted, with the created/updated
+  (or, for a delete step, deleted) record id in the leading `sf__Id` column.
+  This is where created IDs live: they are FILES, never rows in the
+  conversation. Point the human at the path; read it into context only for a
+  handful of rows the human asks about.
+
+For a `.tsv` step every export is `.tsv` too (the org returns results in the
+job's delimiter, and the extension keeps declaring it) — so a fixed
+failed-rows export re-proposes as-is, whichever delimiter the step used.
 
 The loop: read the ERROR COLUMN (a `soql_query`-free glance at the file's
 first lines is enough to classify), fix the underlying cause — a bad
@@ -170,16 +182,24 @@ those rows).
 - After a load, verify with aggregate `soql_query` counts (per object, per
   step), not by re-reading files. Spot-check a few cross-object references
   resolved (`SELECT Id, Account.External_Id__c FROM Contact WHERE …`).
-- Created IDs are deliberately not returned (that would be row data). When
-  you need them, query by external ID.
-- Keep the human's results directory path in your summary — the failed-row
-  files are theirs to keep.
+- Created IDs land in `step-N-success.csv`, not in tool results (that would
+  be row data). For verification, aggregate queries beat re-reading the file;
+  for wiring IDs into a later step, prefer external-ID resolution over
+  copying IDs around.
+- Keep the human's results directory path in your summary — the result files
+  are theirs to keep, but not forever: result directories older than the
+  configured retention (`bulkLoad.resultsRetentionDays`, default 14 days;
+  0 keeps them forever) are swept at the NEXT bulk-load propose — not by a
+  timer, so they linger if bulk loading stops. Tell the human to copy out
+  anything they need long-term, and never treat the sweep as client-data
+  hygiene on its own.
 
-## 9. Boundaries (v1)
+## 9. Boundaries
 
 - No `hardDelete` — bulk deletes go to the Recycle Bin.
-- Comma-delimited only (no tab/semicolon files — re-export them).
-- One CSV per step, up to the configured per-file and per-plan caps (the
+- Comma (`.csv`) and tab (`.tsv`) delimiters only — semicolon or other
+  delimiters get re-exported, not renamed.
+- One file per step, up to the configured per-file and per-plan caps (the
   refusal names the config knob when a plan exceeds them).
 - Serial steps only — no parallel jobs, by design: order is the reference
   strategy.

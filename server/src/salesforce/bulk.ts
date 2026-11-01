@@ -48,6 +48,8 @@ export async function createIngestJob(
     externalIdFieldName?: string;
     /** Must match the CSV's actual record delimiter or rows misparse org-side. */
     lineEnding: 'LF' | 'CRLF';
+    /** S40: TAB for .tsv files; must match the frozen file's actual delimiter. */
+    columnDelimiter?: 'COMMA' | 'TAB';
   },
 ): Promise<string> {
   const res = await rest.request(jobsBase(apiVersion), {
@@ -57,7 +59,7 @@ export async function createIngestJob(
       operation: opts.operation,
       ...(opts.externalIdFieldName ? { externalIdFieldName: opts.externalIdFieldName } : {}),
       contentType: 'CSV',
-      columnDelimiter: 'COMMA',
+      columnDelimiter: opts.columnDelimiter ?? 'COMMA',
       lineEnding: opts.lineEnding,
     }),
   });
@@ -138,6 +140,18 @@ export async function fetchFailedResults(
   jobId: string,
 ): Promise<string> {
   const res = await rest.request(`${jobsBase(apiVersion)}/${jobId}/failedResults/`, {
+    headers: { Accept: 'text/csv' },
+  });
+  return res.text();
+}
+
+/** S40: the succeeded rows as CSV (original columns + sf__Id / sf__Created). */
+export async function fetchSuccessfulResults(
+  rest: RestClient,
+  apiVersion: string,
+  jobId: string,
+): Promise<string> {
+  const res = await rest.request(`${jobsBase(apiVersion)}/${jobId}/successfulResults/`, {
     headers: { Accept: 'text/csv' },
   });
   return res.text();

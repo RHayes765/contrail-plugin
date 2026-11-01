@@ -240,6 +240,41 @@ describe('run_agent_eval', () => {
     expect(labeled.cases[0]!.expectations[0]!.metric_label).toBe('HIGH');
   });
 
+  it('S40: case verdicts derive from EXPECTATIONS, never the completion status', async () => {
+    runStatus = { status: 'COMPLETED', startTime: 't0', endTime: 't1' };
+    const mkCase = (n: number, rows: Array<Record<string, unknown>>) => ({
+      // The org's case status is a completion marker, not a pass
+      // (live-confirmed "COMPLETED") — it must not drive the buckets.
+      status: 'COMPLETED',
+      testNumber: n,
+      inputs: { utterance: 'u' },
+      generatedData: { topic: 'T', actionsSequence: [], outcome: 'ok' },
+      testResults: rows,
+    });
+    runResults = {
+      subjectName: 'Order_Agent',
+      testCases: [
+        mkCase(1, [{ name: 'a', result: 'PASS' }, { name: 'b', result: 'PASS' }]),
+        mkCase(2, [{ name: 'a', result: 'PASS' }, { name: 'b', result: 'FAILURE' }]),
+        mkCase(3, [{ name: 'a', result: 'PASS' }, { name: 'judge', metricScore: 'HIGH' }]),
+        mkCase(4, []),
+      ],
+    };
+    const parsed = JSON.parse(textOf(await call({ run_id: RUN_ID }))) as {
+      totals: { cases: number; passed: number; failed: number; indeterminate: number };
+      cases: Array<{ verdict: string; status: string }>;
+    };
+    expect(parsed.cases.map((c) => c.verdict)).toEqual([
+      'passed',
+      'failed',
+      'indeterminate', // a null-verdict label metric means READ the rows
+      'indeterminate', // no expectations at all is never a pass
+    ]);
+    expect(parsed.totals).toEqual({ cases: 4, passed: 1, failed: 1, indeterminate: 2 });
+    // The raw status stays visible — derivation is additive, not a rewrite.
+    expect(parsed.cases[0]!.status).toBe('COMPLETED');
+  });
+
   it('an ERROR run is the run failing, never a test verdict; TERMINATED is not a pass', async () => {
     runStatus = { status: 'ERROR', errorMessage: 'No active agent version.' };
     const err = JSON.parse(textOf(await call({ run_id: RUN_ID }))) as Record<string, unknown>;

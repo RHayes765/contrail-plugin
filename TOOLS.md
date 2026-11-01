@@ -1,6 +1,6 @@
 # Contrail Reference — tools, features, configuration
 
-Everything Contrail can do, in one place. Current as of **v0.32.0** (38 tools).
+Everything Contrail can do, in one place. Current as of **v0.33.0** (38 tools).
 The same tool surface is available in all three installs — the Claude Desktop
 extension (`.mcpb`), the Claude Code plugin, and the Contrail desktop app —
 with a few desktop-app differences [noted at the end](#the-desktop-app).
@@ -199,6 +199,15 @@ can be read directly.
   large real flow whole), max 2,000,000; ~2 MB budget across the whole call.
 - `include_dependencies` *(optional, default true)* — one-hop uses/used_by
   summaries (capped at 15 edges each).
+- `flow_version` *(optional)* — a historical flow VERSION number; applies
+  only to type `Flow` with exactly one name. The version is fetched from the
+  Tooling API (which serves old versions as JSON) and converted to flow XML.
+  The conversion is faithful for reading and diffing — element order is
+  alphabetical, so diff two CONVERTED versions against each other — but NOT
+  guaranteed deploy-ready, and the result says so. An unknown version number
+  lists the versions that exist. Discover numbers first with `soql_query`
+  `tooling: true`: `SELECT VersionNumber, Status FROM Flow WHERE
+  Definition.DeveloperName = '<name>' ORDER BY VersionNumber`.
 
 Platform/feature-delivered flows return only a descriptor — Salesforce
 exposes no definition content for them via any API, and the result says so.
@@ -422,7 +431,12 @@ only input and it already passed the deploy ritual. Requires an ACTIVE
 agent version; a run-level `ERROR` is the run failing (not a test verdict),
 and pass/fail mapping tolerates both result schemas Salesforce emits
 (anything label-shaped — e.g. `instruction_adherence`'s HIGH/LOW/UNCERTAIN —
-comes back as `passed: null` with the label visible). Costs: Salesforce's
+comes back as `passed: null` with the label visible). Each case carries an
+expectation-derived `verdict` — `failed` if any expectation failed, `passed`
+only when all passed (and ≥1 existed), else `indeterminate` — and `totals`
+counts those verdicts (`cases/passed/failed/indeterminate`); the org's own
+case `status` (COMPLETED means ran, not passed) is shown raw but never
+counted as a pass. Costs: Salesforce's
 own sources differ (newer Help says Testing Center is unmetered as of
 Summer '26; older docs mention Einstein Requests) — check your org's
 consumption cards rather than trusting either claim. The newer Studio
@@ -450,15 +464,20 @@ agent conversations and autolaunched flows execute as it, invisible to a
 self-trace). Ambiguous name matches are listed, never guessed; inactive
 users are refused (they run nothing, so the flag would capture nothing).
 Side
-effects, honestly: writes a self-expiring TraceFlag row and (first use) a
-reusable `Contrail_Debug` DebugLevel; generated logs consume the org's
-shared log allocation. An existing flag gets its expiry extended — never
-shortened (a longer human-configured window is left untouched and reported
-as `already-on`) — its own
-(possibly human-configured) debug level is preserved, and flags never stack.
+effects, honestly: writes a self-expiring TraceFlag row and (first use per
+preset) a reusable DebugLevel; generated logs consume the org's shared log
+allocation. An existing flag gets its expiry extended — never shortened (a
+longer human-configured window is left untouched and reported as
+`already-on`) — its own (possibly human-configured) debug level is
+preserved, and flags never stack. The `level` preset therefore applies only
+when the call CREATES a flag; an extend says the preset was not applied.
 
 - `connection`; `minutes` *(optional, 1–60, default 30)*; `user`
-  *(optional — Id, Username, or Name of the user to trace)*.
+  *(optional — Id, Username, or Name of the user to trace)*; `level`
+  *(optional preset for a NEW flag, default `standard` = `Contrail_Debug`)*:
+  `performance` (ApexCode FINE, profiling FINEST — limits/CPU work),
+  `exception` (stack-trace focus), `callout` (Callout FINEST), `minimal`
+  (small logs). Hand-picked category combos beyond these stay Setup work.
 
 ---
 
@@ -682,7 +701,8 @@ back), and success (DML **committed**) are reported distinctly and honestly.
 
 Stages a multi-file **Bulk API 2.0** data load — the migration-scale
 counterpart to `dml_propose`. Rows go **file → org and never through the
-conversation**: you prepare UTF-8, comma-delimited CSVs (API-name headers;
+conversation**: you prepare UTF-8 CSVs (API-name headers; a `.tsv` file is
+treated as TAB-delimited — the extension is the declaration;
 cross-object references as relationship-by-external-ID columns like
 `Account.External_Id__c`, resolved org-side — no id-mapping pipelines), and
 name one file per step. Steps execute sequentially in the order given —
@@ -692,9 +712,10 @@ mysteriously org-side) and **frozen** at propose with a SHA-256 the page
 shows and execute re-verifies. One approval page carries the whole plan.
 
 - `connection` — target, named unmissably.
-- `steps` — ordered, one CSV each (cap: `bulkLoad.maxFilesPerPlan`,
+- `steps` — ordered, one file each (cap: `bulkLoad.maxFilesPerPlan`,
   default 20; per-file cap `bulkLoad.maxFileBytes`, default 100 MB). Each:
-  `csv_file` (absolute path, same containment as `content_file`; in the
+  `csv_file` (absolute path, `.csv` or `.tsv`, same containment as
+  `content_file`; in the
   desktop app this is `{folder, path}` naming a linked project folder
   instead), `object`, `operation` (`insert`|`upsert`|`delete`),
   `external_id_field` (upsert only, required there — the match column;
@@ -711,13 +732,18 @@ seeding (≤200 rows), `dml_propose` is the right tool.
 
 ### `bulk_load_execute`
 
-Drives the approved plan: sequential ingest jobs from the frozen CSVs,
+Drives the approved plan: sequential ingest jobs from the frozen files,
 polled to completion with live progress. Large jobs take minutes — an
 in-progress result means call again with the **same** code (the running
 load is never restarted). Per-step results report processed/succeeded/failed
-counts; failed and unprocessed rows are fetched from the org and written as
-CSV files referenced **by path** (the trailing `sf__Error` column names each
-cause) — row data never enters the conversation in either direction.
+counts; failed, unprocessed, AND successful rows are fetched from the org
+and written as files referenced **by path** (`step-N-failed` carries the
+trailing `sf__Error` cause column; `step-N-success` carries the
+created/updated — or, for delete steps, deleted — ids in `sf__Id`; TAB jobs
+export `.tsv`, comma jobs `.csv`, so a fixed export re-proposes as-is) — row
+data never enters the conversation in either direction. Result directories
+older than `bulkLoad.resultsRetentionDays` (default 14; `0` keeps them
+forever) are swept at the next bulk-load propose.
 `executed: true` only when every step completed with zero failed rows.
 
 - `connection`, `confirmation_code`.
@@ -726,7 +752,7 @@ cause) — row data never enters the conversation in either direction.
 
 ## The skill pack
 
-Nineteen skills ship with Contrail (in `skills/`), encoding the judgment layer —
+Twenty-one skills ship with Contrail (in `skills/`), encoding the judgment layer —
 the difference between an agent that has tools and one that uses them the
 way a careful practitioner would. In Claude Code they load automatically
 with the plugin; in Claude Desktop they are added once via the Skills UI; in
@@ -753,6 +779,8 @@ the desktop app they are bundled and selectable per project.
 | `platform-prompt-template-generate` | Prompt Builder templates: grammar, merge-field language, the org-generated activeVersionIdentifier doctrine. |
 | `agentforce-eval-generate` | Testing Center definitions (AiEvaluationDefinition): expectation semantics, grounding against the real agent, test design. |
 | `salesforce-flow-visualize` | Interactive flow artifacts: a single version or a two-version diff — layered Flow-Builder-style canvas, go-to pills, parsed node inspector — built from a bundled, live-verified HTML template. |
+| `platform-lwc-generate` | LWC authoring: bundle anatomy, base-component selection, wire vs imperative Apex, js-meta exposure/targets (record pages, Flow screens, quick actions), events, SLDS. |
+| `platform-lwc-review` | Static LWC review: the Lightning Web Security rule catalog and a WCAG 2.2 checklist applied to retrieved bundle source — findings in plain markdown, boundaries stated. |
 
 ---
 
@@ -779,8 +807,9 @@ sections' defaults automatically.
 | | `maxFailedAttempts` | 5 | Wrong-code guesses before the pending code locks. |
 | | `allowedSourceRoots` | `[]` | Extra dirs `content_file`/`csv_file` may read from — for standing folders the human volunteers unprompted. Config-file-only by design: no tool call can widen it, and agents are told never to request an entry for a one-off (they copy into `staging/` instead). |
 | `bulkLoad` | `pollIntervalMs` / `ingestTimeoutMs` | 5 s / 30 min | Ingest-job polling, per job. |
-| | `maxFileBytes` | 100 MB | Per-CSV cap (Salesforce's raw ceiling per job). |
+| | `maxFileBytes` | 100 MB | Per-file cap (Salesforce's raw ceiling per job). |
 | | `maxFilesPerPlan` | 20 | Max steps in one bulk plan. |
+| | `resultsRetentionDays` | 14 | A load's results directory (failed/unprocessed/success row files) is swept at the next bulk-load propose once older than this; `0` keeps them forever. |
 | Various | `toolWaitMs` | 25 s | How long long-running tools wait inline before returning an in-progress result (call again to poll). |
 
 Env overrides: `CONTRAIL_SF_CLIENT_ID`, `CONTRAIL_SF_API_VERSION`,

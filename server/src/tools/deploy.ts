@@ -781,11 +781,12 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
               csv_file: z
                 .string()
                 .describe(
-                  "Absolute path to this step's CSV. Same containment as content_file: " +
-                    `under Contrail's staging directory (${stagingDir()} — stage CSVs there ` +
-                    'from the start; the session working folder is not a source root), ' +
-                    'snapshots, or a configured deploy.allowedSourceRoots entry. Read and ' +
-                    'frozen at propose time.',
+                  "Absolute path to this step's CSV (or .tsv — a .tsv extension means " +
+                    'TAB-delimited, scanned and loaded as such). Same containment as ' +
+                    `content_file: under Contrail's staging directory (${stagingDir()} — ` +
+                    'stage files there from the start; the session working folder is not ' +
+                    'a source root), snapshots, or a configured deploy.allowedSourceRoots ' +
+                    'entry. Read and frozen at propose time.',
                 ),
               object: z.string().describe('SObject API name, e.g. Account or Invoice__c.'),
               operation: z.enum(['insert', 'upsert', 'delete']),
@@ -856,8 +857,9 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
         "human's approval page — only pass a code the human just gave you (single-use, ~1h " +
         'expiry, invalidated by a new bulk_load_propose on the same connection). Large jobs ' +
         'take minutes: an in-progress result means call bulk_load_execute again with the ' +
-        'SAME code to check on it. Failed and unprocessed rows come back as CSV file paths ' +
-        '(never row data); rows loaded by completed steps are never rolled back.',
+        'SAME code to check on it. Successful, failed, and unprocessed rows come back as ' +
+        'file paths (never row data) — step-N-success carries the created/updated/deleted ' +
+        'record ids; rows loaded by completed steps are never rolled back.',
       inputSchema: {
         connection: z.string().describe('Target connection alias (or id).'),
         confirmation_code: z

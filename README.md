@@ -8,11 +8,35 @@ The Contrail engine shipped as a Claude plugin: a local stdio MCP server (the
 For the narrative overview see [CONTRAIL_OVERVIEW.md](CONTRAIL_OVERVIEW.md); to
 install, see [Getting Started](Getting%20Started.md).
 
-**Status: v0.32.0 — one-click packaging (MCPB)** on top of the completed
+**Status: v0.33.0 — one-click packaging (MCPB)** on top of the completed
 P0.1–P0.6 Phase 0 surface. `npm run mcpb` builds `contrail-<version>.mcpb`, a
 single MCP Bundle that installs into Claude Desktop via Settings → Extensions
 (no Node install, no npm, no config editing on the target machine) and covers
 Windows x64/ARM and macOS Intel/Apple Silicon from one file. 38 tools.
+
+**Quality-of-life wave (S40).** Five smaller asks shipped together. **Flow
+version history**: `retrieve_metadata` with `flow_version: N` fetches a
+historical flow version through the Tooling API and converts its JSON to
+flow XML — two converted versions diff cleanly, feeding the S39 visualizer's
+"v12 vs v13 in one org" case (honestly labeled: alphabetical element order,
+not deploy-ready). **Bulk-load trio**: `.tsv` files load as TAB-delimited
+(the extension is the declaration, recorded in the frozen manifest, and
+kept on every frozen copy and result export so a fixed export re-proposes
+as-is); successful rows come back as `step-N-success` files — created (or
+deleted) IDs as files, never rows in chat; and result directories older
+than `bulkLoad.resultsRetentionDays` (default 14, `0` = keep forever) are
+swept at the next bulk propose, closing the S27 unbounded-retention note. **Trace-flag level presets**:
+`set_trace_flag level: performance|exception|callout|minimal` picks a
+goal-matched DebugLevel for a NEW flag (an existing flag keeps its own level
+— never clobbered, and the result says so). **Honest eval totals**:
+`run_agent_eval` case verdicts now derive from the expectations themselves
+(the org's case `status: COMPLETED` means ran, not passed) — totals count
+passed/failed/indeterminate, with label-only metrics surfacing as
+indeterminate instead of vanishing into "other". And **two LWC skills**
+(pack 19 → 21): `platform-lwc-generate` (bundle authoring — base-component
+selection, wire vs imperative Apex, js-meta targets, events, SLDS, adapted
+from Salesforce's sf-skills) and `platform-lwc-review` (Lightning Web
+Security rule catalog + WCAG 2.2 checklist over retrieved bundle source).
 
 **Flow visualization as artifacts (S39).** A nineteenth skill,
 `salesforce-flow-visualize`: agents render any flow — one version, or a

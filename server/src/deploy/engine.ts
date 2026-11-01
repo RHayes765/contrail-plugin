@@ -19,6 +19,7 @@ import {
   closeIngestJob,
   createIngestJob,
   fetchFailedResults,
+  fetchSuccessfulResults,
   fetchUnprocessedRecords,
   getIngestJob,
   isTerminalIngestState,
@@ -70,6 +71,8 @@ interface BulkManifest {
     row_count: number;
     headers: string[];
     line_ending: 'LF' | 'CRLF';
+    /** S40: absent on pre-S40 manifests — treat as COMMA. */
+    column_delimiter?: 'COMMA' | 'TAB';
     bytes: number;
   }>;
 }
@@ -1572,6 +1575,36 @@ export class DeployEngine {
   // ── bulk data loads ────────────────────────────────────────────────────
 
   /**
+   * S40: delete bulk results directories older than
+   * bulkLoad.resultsRetentionDays (0 = keep forever). Best-effort by
+   * design — a sweep failure must never block a propose.
+   */
+  private sweepBulkResultDirs(): void {
+    const days = this.config.bulkLoad.resultsRetentionDays;
+    if (!days || days <= 0) return;
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    try {
+      for (const name of fs.readdirSync(deploysDir())) {
+        if (!name.endsWith('-results')) continue;
+        const full = path.join(deploysDir(), name);
+        try {
+          const stat = fs.statSync(full);
+          if (stat.isDirectory() && stat.mtimeMs < cutoff) {
+            fs.rmSync(full, { recursive: true, force: true });
+            this.audit.record('bulk.results_swept', {
+              detail: { dir: name, ageDays: Math.round((Date.now() - stat.mtimeMs) / 86_400_000) },
+            });
+          }
+        } catch {
+          // One unreadable entry never stops the sweep.
+        }
+      }
+    } catch {
+      // Missing deploys dir on a fresh install — nothing to sweep.
+    }
+  }
+
+  /**
    * Stage a bulk load plan behind the ritual (kind 'bulk'): scan and FREEZE
    * the CSVs now, show the whole plan on one approval page, and let the
    * human's code arm executeBulkLoad. Rows never transit the model — the
@@ -1621,6 +1654,12 @@ export class DeployEngine {
       }
     }
 
+    // S40: retention sweep. Results directories survive execution so the
+    // human can open failed/success exports afterward — but not forever.
+    // Swept here (the next bulk propose) instead of a background job; a
+    // sweep failure never blocks the propose.
+    this.sweepBulkResultDirs();
+
     const superseded = this.db.supersedePendingRequests(conn.id, 'bulk');
     if (superseded > 0) {
       for (const p of this.db.takeSupersededPayloadPaths(conn.id, 'bulk')) safeUnlink(p);
@@ -1664,9 +1703,12 @@ export class DeployEngine {
           );
         }
         const bytes = fs.readFileSync(s.sourcePath);
+        // S40: .tsv files are TAB-delimited — the scanner, the frozen copy,
+        // and the ingest job's columnDelimiter all follow the extension.
+        const isTsv = s.sourcePath.toLowerCase().endsWith('.tsv');
         let scan;
         try {
-          scan = scanCsv(bytes);
+          scan = scanCsv(bytes, isTsv ? '\t' : ',');
         } catch (err) {
           throw new ContrailError(
             `${label}: ${err instanceof Error ? err.message : String(err)}`,
@@ -1695,7 +1737,9 @@ export class DeployEngine {
         // name), everything else byte-verbatim. The hash fingerprints the
         // FROZEN bytes: that is the file the human approves and the org gets.
         const frozen = scan.hadBom ? bytes.subarray(UTF8_BOM.length) : bytes;
-        const file = `step-${n}.csv`;
+        // S40: the frozen copy keeps the delimiter-declaring extension — a
+        // TAB-delimited file named .csv would mis-scan if ever re-proposed.
+        const file = `step-${n}.${isTsv ? 'tsv' : 'csv'}`;
         fs.writeFileSync(path.join(stageDir, file), frozen);
         manifest.steps.push({
           n,
@@ -1708,6 +1752,7 @@ export class DeployEngine {
           row_count: scan.rowCount,
           headers: scan.headers,
           line_ending: scan.lineEnding,
+          column_delimiter: isTsv ? ('TAB' as const) : ('COMMA' as const),
           bytes: frozen.length,
         });
         scanWarnings.push(scan.warnings);
@@ -1973,6 +2018,7 @@ export class DeployEngine {
             operation: m.operation,
             ...(m.external_id_field ? { externalIdFieldName: m.external_id_field } : {}),
             lineEnding: m.line_ending,
+            columnDelimiter: m.column_delimiter ?? 'COMMA',
           });
           if (job) {
             job.progress = `${stepLabel} — uploading ${m.row_count.toLocaleString('en-US')} rows`;
@@ -1993,6 +2039,10 @@ export class DeployEngine {
       totalFailed += failed;
       const stepFailed = failedHard !== null || !info || info.state !== 'JobComplete' || failed > 0;
       if (stepFailed) anyFailure = true;
+      // S40: the org returns result exports in the JOB's delimiter — name them
+      // so the extension keeps declaring it (a TAB file named .csv would
+      // mis-scan if a fixed export were re-proposed).
+      const resExt = (m.column_delimiter ?? 'COMMA') === 'TAB' ? 'tsv' : 'csv';
 
       const entry: Record<string, unknown> = {
         step: m.n,
@@ -2010,10 +2060,27 @@ export class DeployEngine {
             : {}),
       };
 
+      // S40: created-record IDs. The success export (original columns +
+      // sf__Id / sf__Created) lands as a FILE beside the failed-rows
+      // exports — IDs never flood the conversation, and cleanup or
+      // follow-up loads can read them directly.
+      if (info && jobId && processed - failed > 0) {
+        try {
+          const p = writeResultCsv(
+            `step-${m.n}-success.${resExt}`,
+            await fetchSuccessfulResults(rest, version, jobId),
+          );
+          if (p) entry.success_rows_file = p;
+        } catch (err) {
+          entry.success_rows_note = `could not fetch the success export: ${String(
+            err instanceof Error ? err.message : err,
+          )}`;
+        }
+      }
       if (info && jobId && stepFailed) {
         try {
           const p = writeResultCsv(
-            `step-${m.n}-failed.csv`,
+            `step-${m.n}-failed.${resExt}`,
             await fetchFailedResults(rest, version, jobId),
           );
           if (p) entry.failed_rows_file = p;
@@ -2024,7 +2091,7 @@ export class DeployEngine {
         }
         try {
           const p = writeResultCsv(
-            `step-${m.n}-unprocessed.csv`,
+            `step-${m.n}-unprocessed.${resExt}`,
             await fetchUnprocessedRecords(rest, version, jobId),
           );
           if (p) entry.unprocessed_rows_file = p;

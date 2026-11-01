@@ -71,11 +71,15 @@ template is the higher-fidelity path.
   the copied-then-tweaked consulting case.
 - **Before/after an edit**: copy the snapshot file BEFORE deploying or
   refreshing, then diff against the new snapshot afterward.
-- **Honest limitation**: historical version numbers of a flow in ONE org are
-  not retrievable as XML — the Metadata API serves only the latest version,
-  and the Tooling API serves old versions as JSON, which this template does
-  not consume. Offer cross-org or before/after instead; never fabricate an
-  "old version" from memory.
+- **Historical versions in ONE org** (v12 vs v13): `retrieve_metadata` with
+  `flow_version: N` (type `Flow`, one name) returns that version converted
+  from the Tooling API's JSON to flow XML. Discover version numbers first
+  with `soql_query` `tooling: true` — `SELECT VersionNumber, Status FROM
+  Flow WHERE Definition.DeveloperName = '<name>' ORDER BY VersionNumber`.
+  Fidelity contract: two CONVERTED versions diff cleanly against each
+  other (use converted XML for BOTH panes); a converted version against a
+  Metadata API retrieve may show ordering-only noise, and converted output
+  is never deploy-ready. Never fabricate an "old version" from memory.
 
 ## 3. Confidentiality (client orgs)
 

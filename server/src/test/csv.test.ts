@@ -51,10 +51,15 @@ describe('what it reads', () => {
     expect(scanCsv(buf('Id\r\nx1\r\n\r\n')).rowCount).toBe(1);
   });
 
-  it('warns when a single-column header smells semicolon- or tab-delimited', () => {
+  it('warns when a single-column header smells like the OTHER delimiter, per mode', () => {
     const scan = scanCsv(buf('Name;Amount;Stage\na;1;x\n'));
     expect(scan.headers).toHaveLength(1);
-    expect(scan.warnings.some((w) => w.includes('comma-delimited'))).toBe(true);
+    expect(scan.warnings.some((w) => w.includes('NAMED .tsv'))).toBe(true);
+    // S40: the inverse — comma content scanned in TAB mode (a mislabeled .tsv)
+    // must warn too, and the advice must name the .csv rename, not a re-export.
+    const tabScan = scanCsv(buf('Name,Industry\nAcme,Tech\n'), '\t');
+    expect(tabScan.headers).toHaveLength(1);
+    expect(tabScan.warnings.some((w) => w.includes('NAMED .csv'))).toBe(true);
   });
 });
 
