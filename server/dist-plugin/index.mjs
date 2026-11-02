@@ -21873,7 +21873,7 @@ var ENGINE_VERSION, SERVER_NAME;
 var init_version = __esm({
   "src/core/version.ts"() {
     "use strict";
-    ENGINE_VERSION = "0.33.0";
+    ENGINE_VERSION = "0.34.0";
     SERVER_NAME = "contrail-engine";
   }
 });
@@ -22172,15 +22172,7 @@ var init_grants = __esm({
 import Database2 from "better-sqlite3";
 import fs2 from "node:fs";
 import { randomUUID } from "node:crypto";
-function fileIdentityStamp(file) {
-  let stat;
-  try {
-    stat = fs2.statSync(file, { bigint: true });
-  } catch {
-    return null;
-  }
-  if (stat.ino === 0n) return null;
-  const identity = `${stat.dev}:${stat.ino}`;
+function fnvStamp(identity) {
   let h = 2166136261;
   for (let i = 0; i < identity.length; i++) {
     h ^= identity.charCodeAt(i);
@@ -22189,24 +22181,49 @@ function fileIdentityStamp(file) {
   h = h & 2147483647;
   return h === 0 ? 1 : h;
 }
-function assertDbLineage(db) {
-  const expected = fileIdentityStamp(db.name);
-  if (expected === null) return;
-  const stored = db.pragma("application_id", { simple: true });
-  if (stored === expected) return;
-  const adoptMarker = `${db.name}.adopt`;
-  if (stored === 0 || fs2.existsSync(adoptMarker)) {
-    db.pragma(`application_id = ${expected}`);
-    try {
-      fs2.rmSync(adoptMarker, { force: true });
-    } catch {
-    }
-    return;
+function identityStamps(file, platform2 = process.platform) {
+  let stat;
+  try {
+    stat = fs2.statSync(file, { bigint: true });
+  } catch {
+    return null;
   }
-  throw new ContrailError(
-    `This database file is not the one this data directory last used \u2014 it is a copy (restored backup, or an MSIX-virtualized overlay view of ${db.name}). Writes are refused to prevent a split-brain fork. If this replacement was deliberate, create an empty file named "${adoptMarker}" and reopen.`,
-    "db_lineage_mismatch"
-  );
+  if (stat.ino === 0n) return null;
+  if (platform2 === "win32") {
+    return { current: fnvStamp(`${stat.dev}:${stat.ino}`), legacy: null };
+  }
+  return { current: fnvStamp(`${stat.ino}`), legacy: fnvStamp(`${stat.dev}:${stat.ino}`) };
+}
+function reconcileLineage(stored, stamps, adoptMarkerPresent) {
+  if (stored === stamps.current) return "ok";
+  if (stored === 0 || adoptMarkerPresent) return "adopt";
+  if (stamps.legacy !== null && stored === stamps.legacy) return "restamp";
+  return "mismatch";
+}
+function assertDbLineage(db) {
+  const stamps = identityStamps(db.name);
+  if (stamps === null) return;
+  const stored = db.pragma("application_id", { simple: true });
+  const adoptMarker = `${db.name}.adopt`;
+  switch (reconcileLineage(stored, stamps, fs2.existsSync(adoptMarker))) {
+    case "ok":
+      return;
+    case "adopt":
+      db.pragma(`application_id = ${stamps.current}`);
+      try {
+        fs2.rmSync(adoptMarker, { force: true });
+      } catch {
+      }
+      return;
+    case "restamp":
+      db.pragma(`application_id = ${stamps.current}`);
+      return;
+    case "mismatch":
+      throw new ContrailError(
+        `This database file is not the one this data directory last used \u2014 it is a copy (restored backup, or an MSIX-virtualized overlay view of ${db.name}). Writes are refused to prevent a split-brain fork. If this replacement was deliberate, create an empty file named "${adoptMarker}" and reopen.`,
+        "db_lineage_mismatch"
+      );
+  }
 }
 function rowToConnection(row) {
   return {
