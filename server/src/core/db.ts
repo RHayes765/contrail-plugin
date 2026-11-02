@@ -14,24 +14,25 @@ import { normalizeGrants, type GrantSet } from './grants.js';
 // interleaved checkpoints from the two lineages corrupt the shared pages —
 // this destroyed a real database on 2026-08-26.
 //
-// The guard: stamp a 31-bit hash of the file's OS identity (volume + NTFS
-// file id) into PRAGMA application_id — a header slot, so it needs no table
-// and works at every schema version either engine can open. A COW clone is a
-// physically different file with a different id, so a forked view fails the
+// The guard: stamp a 31-bit hash of the file's OS identity into PRAGMA
+// application_id — a header slot, so it needs no table and works at every
+// schema version either engine can open. A COW clone (or restored backup) is
+// a physically different file with a different id, so a forked view fails the
 // check on its next open, BEFORE any pragma or migration writes. A deliberate
 // replacement (restore, copied-in backup) re-stamps by dropping a marker file
 // `<db>.adopt` next to the database.
+//
+// Identity per platform: on Windows, volume serial + NTFS file id — both
+// stable across reboots, and the overlay clone is a different file id. On
+// macOS/Linux, the inode ONLY: st_dev there is assigned at mount time and
+// renumbers across reboots and OS updates (a macOS update locked out a real
+// install on 2026-11-02), while every real copy or restore gets a new inode —
+// so dev adds false positives and no protection. POSIX stamps written by the
+// old dev:ino formula are upgraded in place when they still match
+// (reconcileLineage's 'restamp'), never refused.
 
-/** FNV-1a over the identity string, folded to a positive 31-bit non-zero int. */
-function fileIdentityStamp(file: string): number | null {
-  let stat: fs.BigIntStats;
-  try {
-    stat = fs.statSync(file, { bigint: true });
-  } catch {
-    return null;
-  }
-  if (stat.ino === 0n) return null; // non-NTFS / unsupported: guard degrades off
-  const identity = `${stat.dev}:${stat.ino}`;
+/** FNV-1a over an identity string, folded to a positive 31-bit non-zero int. */
+function fnvStamp(identity: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < identity.length; i++) {
     h ^= identity.charCodeAt(i);
@@ -41,31 +42,78 @@ function fileIdentityStamp(file: string): number | null {
   return h === 0 ? 1 : h;
 }
 
+/**
+ * The file's current-formula stamp plus, on POSIX, the retired dev:ino one.
+ * Null when the guard degrades off (stat failure, or filesystems that report
+ * no inode). Exported for tests; `platform` is injectable for the same reason.
+ */
+export function identityStamps(
+  file: string,
+  platform: NodeJS.Platform = process.platform,
+): { current: number; legacy: number | null } | null {
+  let stat: fs.BigIntStats;
+  try {
+    stat = fs.statSync(file, { bigint: true });
+  } catch {
+    return null;
+  }
+  if (stat.ino === 0n) return null; // non-NTFS / unsupported: guard degrades off
+  if (platform === 'win32') {
+    return { current: fnvStamp(`${stat.dev}:${stat.ino}`), legacy: null };
+  }
+  return { current: fnvStamp(`${stat.ino}`), legacy: fnvStamp(`${stat.dev}:${stat.ino}`) };
+}
+
+export type LineageVerdict = 'ok' | 'adopt' | 'restamp' | 'mismatch';
+
+/**
+ * Pure arbitration, so every branch is unit-testable on any platform.
+ * 'restamp' fires only when the stored stamp matches the old, STRICTER
+ * formula against the file's current identity — provably the same file,
+ * just stamped before the formula dropped dev.
+ */
+export function reconcileLineage(
+  stored: number,
+  stamps: { current: number; legacy: number | null },
+  adoptMarkerPresent: boolean,
+): LineageVerdict {
+  if (stored === stamps.current) return 'ok';
+  if (stored === 0 || adoptMarkerPresent) return 'adopt';
+  if (stamps.legacy !== null && stored === stamps.legacy) return 'restamp';
+  return 'mismatch';
+}
+
 /** Throws before ANY write when the opened file is not the stamped lineage. */
 function assertDbLineage(db: Database.Database): void {
-  const expected = fileIdentityStamp(db.name);
-  if (expected === null) return;
+  const stamps = identityStamps(db.name);
+  if (stamps === null) return;
   const stored = db.pragma('application_id', { simple: true }) as number;
-  if (stored === expected) return;
   const adoptMarker = `${db.name}.adopt`;
-  if (stored === 0 || fs.existsSync(adoptMarker)) {
-    // Never stamped (pre-guard database or fresh file), or a deliberate
-    // replacement announced via the marker: adopt this file as the lineage.
-    db.pragma(`application_id = ${expected}`);
-    try {
-      fs.rmSync(adoptMarker, { force: true });
-    } catch {
-      /* marker cleanup is best-effort */
-    }
-    return;
+  switch (reconcileLineage(stored, stamps, fs.existsSync(adoptMarker))) {
+    case 'ok':
+      return;
+    case 'adopt':
+      // Never stamped (pre-guard database or fresh file), or a deliberate
+      // replacement announced via the marker: adopt this file as the lineage.
+      db.pragma(`application_id = ${stamps.current}`);
+      try {
+        fs.rmSync(adoptMarker, { force: true });
+      } catch {
+        /* marker cleanup is best-effort */
+      }
+      return;
+    case 'restamp':
+      db.pragma(`application_id = ${stamps.current}`);
+      return;
+    case 'mismatch':
+      throw new ContrailError(
+        `This database file is not the one this data directory last used — it is a copy ` +
+          `(restored backup, or an MSIX-virtualized overlay view of ${db.name}). Writes are ` +
+          `refused to prevent a split-brain fork. If this replacement was deliberate, create ` +
+          `an empty file named "${adoptMarker}" and reopen.`,
+        'db_lineage_mismatch',
+      );
   }
-  throw new ContrailError(
-    `This database file is not the one this data directory last used — it is a copy ` +
-      `(restored backup, or an MSIX-virtualized overlay view of ${db.name}). Writes are ` +
-      `refused to prevent a split-brain fork. If this replacement was deliberate, create ` +
-      `an empty file named "${adoptMarker}" and reopen.`,
-    'db_lineage_mismatch',
-  );
 }
 import type {
   ArtifactRecord,

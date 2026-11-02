@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { ContrailDb } from '../core/db.js';
+import { ContrailDb, identityStamps, reconcileLineage } from '../core/db.js';
 
 /**
  * The split-brain guard. The incident it exists for: an MSIX overlay gave two
@@ -102,5 +102,61 @@ describe('split-brain guard (db lineage)', () => {
     const b = path.join(tmp, 'b.db');
     fs.renameSync(a, b); // same NTFS file id — identity is the file, not the name
     new ContrailDb(b).close();
+  });
+});
+
+describe('identity formula per platform', () => {
+  // The 2026-11-02 incident: macOS assigns st_dev at mount time, so a reboot
+  // or OS update that renumbers volumes changed every file's dev — and the
+  // dev:ino stamp locked a real install out of its own, untouched database.
+  // POSIX identity is therefore the inode alone; Windows keeps dev:ino
+  // because both are stable there and the MSIX overlay is the live threat.
+
+  it('POSIX stamps on the inode only; Windows on volume + file id', () => {
+    const file = path.join(tmp, 'id.db');
+    fs.writeFileSync(file, 'x', 'utf8');
+    const darwin = identityStamps(file, 'darwin')!;
+    const linux = identityStamps(file, 'linux')!;
+    const win = identityStamps(file, 'win32')!;
+
+    expect(darwin.current).toBe(linux.current); // ino-only, platform-agnostic
+    expect(darwin.legacy).not.toBeNull();
+    expect(win.legacy).toBeNull(); // Windows never used another formula
+    // The retired POSIX formula IS the Windows formula (dev:ino).
+    expect(darwin.legacy).toBe(win.current);
+  });
+
+  it('degrades off when the file cannot be inspected', () => {
+    expect(identityStamps(path.join(tmp, 'no-such.db'))).toBeNull();
+  });
+
+  it('reconcileLineage arbitrates every branch', () => {
+    const stamps = { current: 1111, legacy: 2222 };
+    expect(reconcileLineage(1111, stamps, false)).toBe('ok');
+    expect(reconcileLineage(0, stamps, false)).toBe('adopt'); // pre-guard db
+    expect(reconcileLineage(3333, stamps, true)).toBe('adopt'); // deliberate replacement
+    expect(reconcileLineage(2222, stamps, false)).toBe('restamp'); // old formula, same file
+    expect(reconcileLineage(3333, stamps, false)).toBe('mismatch');
+    // No legacy formula (Windows): only the current stamp or the marker passes.
+    expect(reconcileLineage(2222, { current: 1111, legacy: null }, false)).toBe('mismatch');
+  });
+
+  it('a stamp from the old dev:ino formula opens and is upgraded in place', () => {
+    const file = path.join(tmp, 'upgraded.db');
+    new ContrailDb(file).close();
+    // Force the retired formula's value (on Windows this equals the current
+    // formula, making the open trivially 'ok'; on POSIX it exercises 'restamp'
+    // — both must open without refusal and end on the current stamp).
+    const legacyValue = identityStamps(file, 'darwin')!.legacy!;
+    const raw = new Database(file);
+    raw.pragma(`application_id = ${legacyValue}`);
+    raw.close();
+
+    new ContrailDb(file).close(); // must not throw
+    const check = new Database(file, { readonly: true });
+    expect(check.pragma('application_id', { simple: true })).toBe(
+      identityStamps(file)!.current,
+    );
+    check.close();
   });
 });
