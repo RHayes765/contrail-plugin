@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { getUpdateNotice, isNewerVersion, refreshUpdateCache } from '../core/updateCheck.js';
+import {
+  getUpdateNotice,
+  isNewerVersion,
+  pendingUpdateRefresh,
+  refreshUpdateCache,
+} from '../core/updateCheck.js';
 
 /**
  * The in-band update check: cached-only reads, one background GET a day, and
@@ -41,7 +46,10 @@ beforeEach(() => {
   fetchCalls = 0;
 });
 
-afterEach(() => {
+afterEach(async () => {
+  // Belt-and-braces: never let a background refresh outlive the env override —
+  // a late write would land in the REAL user cache, not the test dir.
+  await pendingUpdateRefresh();
   vi.unstubAllGlobals();
   delete process.env.CONTRAIL_DATA_DIR;
   fs.rmSync(tmp, { recursive: true, force: true });
@@ -118,7 +126,15 @@ describe('getUpdateNotice', () => {
     seedCache('0.14.0', 25 * 60 * 60 * 1000);
     const notice = getUpdateNotice('0.13.0', REPO, true);
     expect(notice?.latest).toBe('0.14.0'); // the cached answer, not the network's
-    await vi.waitFor(() => expect(fetchCalls).toBe(1));
+    // Drain the refresh WHILE the env override and fetch stub are still live —
+    // waiting only for the fetch let the WRITE land after afterEach tore down
+    // CONTRAIL_DATA_DIR, poisoning the real user cache with "0.15.0".
+    await pendingUpdateRefresh();
+    expect(fetchCalls).toBe(1);
+    const written = JSON.parse(
+      fs.readFileSync(path.join(tmp, 'update-check.json'), 'utf8'),
+    ) as Record<string, { latestVersion: string | null }>;
+    expect(written[REPO]?.latestVersion).toBe('0.15.0'); // landed in the TEST dir
   });
 
   it('no cache at all: null now, refresh fired for next time', async () => {

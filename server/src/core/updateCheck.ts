@@ -97,6 +97,20 @@ export async function refreshUpdateCache(repo: string): Promise<void> {
 }
 
 /**
+ * The one in-flight background refresh. Tracking it (a) dedupes concurrent
+ * kicks and (b) lets tests DRAIN it before their env/stubs unwind — an
+ * unawaited refresh used to outlive the test's CONTRAIL_DATA_DIR override
+ * and write the stubbed answer ("0.15.0") into the REAL user cache, which
+ * silenced update notices on dev machines for weeks.
+ */
+let inflight: Promise<void> | null = null;
+
+/** Resolves when any background refresh has fully landed (test hook). */
+export function pendingUpdateRefresh(): Promise<void> {
+  return inflight ?? Promise.resolve();
+}
+
+/**
  * The cached answer, never the network: returns a notice when the cache holds
  * a newer version than the one running, and quietly kicks a background
  * refresh when the cache is stale. Disabled => null and NO network, ever.
@@ -109,8 +123,12 @@ export function getUpdateNotice(
   if (!enabled) return null;
   const cache = readCache(repo);
   const stale = !cache || Date.now() - Date.parse(cache.checkedAt) > TTL_MS;
-  if (stale) {
-    refreshUpdateCache(repo).catch(() => {});
+  if (stale && !inflight) {
+    inflight = refreshUpdateCache(repo)
+      .catch(() => {})
+      .finally(() => {
+        inflight = null;
+      });
   }
   if (!cache?.latestVersion) return null;
   if (!isNewerVersion(cache.latestVersion, installedVersion)) return null;
