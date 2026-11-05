@@ -21873,7 +21873,7 @@ var ENGINE_VERSION, SERVER_NAME;
 var init_version = __esm({
   "src/core/version.ts"() {
     "use strict";
-    ENGINE_VERSION = "0.34.0";
+    ENGINE_VERSION = "0.35.0";
     SERVER_NAME = "contrail-engine";
   }
 });
@@ -22839,6 +22839,48 @@ var init_db = __esm({
         const rows = this.db.prepare(`SELECT * FROM audit_events ${where} ORDER BY ts DESC LIMIT ?`).all(...params, limit);
         return rows.map(rowToAudit);
       }
+      /**
+       * S41: OPPORTUNISTIC participation in the desktop app's cross-process
+       * snapshot lease. The app_locks table is desktop-owned (its v6 migration);
+       * the plugin's schema is frozen at v5 and NEVER creates it — on a machine
+       * without the desktop app the table is absent and acquisition trivially
+       * succeeds (in-process serialisation still holds via the refresh chain).
+       * Where the table exists, this mirrors the desktop's semantics exactly:
+       * expired or self-held locks are taken over; a live foreign lock refuses.
+       */
+      tryAcquireAppLock(name, holder, ttlMs) {
+        if (!this.hasAppLocksTable()) return true;
+        const now = Date.now();
+        const tx = this.db.transaction(() => {
+          const row = this.db.prepare(`SELECT holder, expires_at FROM app_locks WHERE name = ?`).get(name);
+          if (row && row.holder !== holder && new Date(row.expires_at).getTime() > now) {
+            return false;
+          }
+          this.db.prepare(
+            `INSERT OR REPLACE INTO app_locks (name, holder, pid, acquired_at, expires_at)
+           VALUES (?, ?, ?, ?, ?)`
+          ).run(
+            name,
+            holder,
+            process.pid,
+            new Date(now).toISOString(),
+            new Date(now + ttlMs).toISOString()
+          );
+          return true;
+        });
+        return tx();
+      }
+      releaseAppLock(name, holder) {
+        if (!this.hasAppLocksTable()) return;
+        this.db.prepare(`DELETE FROM app_locks WHERE name = ? AND holder = ?`).run(name, holder);
+      }
+      appLocksTableKnown = null;
+      hasAppLocksTable() {
+        if (this.appLocksTableKnown === true) return true;
+        const row = this.db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'app_locks'`).get();
+        this.appLocksTableKnown = row !== void 0;
+        return this.appLocksTableKnown;
+      }
       close() {
         this.db.close();
       }
@@ -23040,7 +23082,12 @@ var init_config = __esm({
           "PermissionSetGroup",
           "MutingPermissionSet",
           "QuickAction",
-          "LightningComponentBundle"
+          "LightningComponentBundle",
+          // S41: Aura bundles join LWC — same rationale, and cheap: orgs own few
+          // namespace-free bundles (installed ones are platform-excluded from
+          // wildcards; the named-member expansion still fetches the
+          // namespace-free installedEditable ones).
+          "AuraDefinitionBundle"
         ],
         pollIntervalMs: 2e3,
         retrieveTimeoutMs: 10 * 60 * 1e3,
@@ -28561,8 +28608,12 @@ function indexSnapshotFiles(files, fileProps, retrievedAt) {
   for (const group of bundles.values()) {
     const apiName = decodeSegment(group.seg);
     const sorted = [...group.files].sort((a, b) => a.rel.localeCompare(b.rel));
-    const base = `${group.spec.dir}/${group.seg}/${group.seg}${group.spec.mainExt}`;
-    const main2 = sorted.find((f) => f.rel === base) ?? sorted.find((f) => f.rel === `${base}-meta.xml`);
+    let main2;
+    for (const ext of group.spec.mainExts) {
+      const base = `${group.spec.dir}/${group.seg}/${group.seg}${ext}`;
+      main2 = sorted.find((f) => f.rel === base) ?? sorted.find((f) => f.rel === `${base}-meta.xml`);
+      if (main2) break;
+    }
     const content = sorted.map((f) => `<!-- contrail:file ${f.rel} -->
 ${f.text}`).join("\n");
     push(group.spec.type, apiName, main2?.rel ?? sorted[0].rel, content);
@@ -28664,20 +28715,42 @@ var init_indexer = __esm({
       { dir: "dashboards", ext: ".dashboard", type: "Dashboard", folderType: "DashboardFolder" }
     ];
     BUNDLE_DIR_TYPES = [
-      { dir: "genAiFunctions", type: "GenAiFunction", mainExt: ".genAiFunction" },
-      { dir: "genAiPlannerBundles", type: "GenAiPlannerBundle", mainExt: ".genAiPlannerBundle" },
-      { dir: "aiAuthoringBundles", type: "AiAuthoringBundle", mainExt: ".agent" },
+      { dir: "genAiFunctions", type: "GenAiFunction", mainExts: [".genAiFunction"] },
+      { dir: "genAiPlannerBundles", type: "GenAiPlannerBundle", mainExts: [".genAiPlannerBundle"] },
+      { dir: "aiAuthoringBundles", type: "AiAuthoringBundle", mainExts: [".agent"] },
       // S36: LWC bundles MUST ride this branch — as a simple type the generic
       // -meta.xml skip would swallow every <n>.js-meta.xml (which carries
       // isExposed/targets). Subdirectories are real (templates/x.html secondary
       // templates, live-confirmed).
-      { dir: "lwc", type: "LightningComponentBundle", mainExt: ".js" }
+      { dir: "lwc", type: "LightningComponentBundle", mainExts: [".js"] },
+      // S41: Aura bundles — the primary is kind-dependent (one of five), so an
+      // .app bundle must resolve its real main, not fall back alphabetically.
+      // A missing <n>.cmp-meta.xml is tolerated (old bundles retrieve without
+      // one); it rides the generic -meta.xml-is-content behavior of this branch.
+      {
+        dir: "aura",
+        type: "AuraDefinitionBundle",
+        mainExts: [".cmp", ".app", ".evt", ".intf", ".tokens"]
+      }
     ];
   }
 });
 
 // src/deps/extract.ts
-function extractFlowRefs(xml) {
+function addComponentRef(refs, raw, known) {
+  if (!raw) return;
+  const name = raw.trim().replace(/^(markup:\/\/)?c:/, "");
+  if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(name)) return;
+  const key2 = name.toLowerCase();
+  const aura = known?.aura.get(key2);
+  if (aura) {
+    refs.add("AuraDefinitionBundle", aura);
+    return;
+  }
+  const lwc = known?.lwc.get(key2);
+  if (lwc) refs.add("LightningComponentBundle", lwc);
+}
+function extractFlowRefs(xml, known) {
   const refs = new RefSet();
   let doc;
   try {
@@ -28711,6 +28784,12 @@ function extractFlowRefs(xml) {
     if (node.actionType === "flow" && typeof node.actionName === "string") {
       refs.add("Flow", node.actionName);
     }
+    if (node.actionType === "component" && typeof node.actionName === "string") {
+      addComponentRef(refs, node.actionName, known);
+    }
+  }
+  for (const m of xml.matchAll(/<extensionName>\s*(c:[A-Za-z][A-Za-z0-9_]*)\s*<\/extensionName>/g)) {
+    addComponentRef(refs, m[1], known);
   }
   for (const node of asArray(flow.subflows)) {
     if (node && typeof node === "object" && typeof node.flowName === "string") {
@@ -28906,10 +28985,67 @@ function extractQuickActionRefs(xml, apiName) {
   if (flow) refs.add("Flow", flow);
   const lwc = xml.match(/<lightningWebComponent>([^<]+)<\/lightningWebComponent>/)?.[1];
   if (lwc) refs.add("LightningComponentBundle", lwc);
+  const auraCmp = xml.match(/<lightningComponent>([^<]+)<\/lightningComponent>/)?.[1]?.trim();
+  if (auraCmp && (!auraCmp.includes(":") || auraCmp.startsWith("c:"))) {
+    refs.add("AuraDefinitionBundle", auraCmp.replace(/^c:/, ""));
+  }
   const page2 = xml.match(/<page>([^<]+)<\/page>/)?.[1];
   if (page2) refs.add("ApexPage", page2);
   const parent = apiName.includes(".") ? apiName.split(".")[0] : "";
   if (/__c$/i.test(parent)) refs.add("CustomObject", parent);
+  return refs.list();
+}
+function extractFlexiPageRefs(xml, known) {
+  const refs = new RefSet();
+  for (const m of xml.matchAll(
+    /<componentName>\s*(c:[A-Za-z][A-Za-z0-9_]*)\s*<\/componentName>/g
+  )) {
+    addComponentRef(refs, m[1], known);
+  }
+  return refs.list();
+}
+function extractCustomTabRefs(xml) {
+  const refs = new RefSet();
+  const aura = xml.match(/<auraComponent>([^<]+)<\/auraComponent>/)?.[1]?.trim();
+  if (aura && (!aura.includes(":") || aura.startsWith("c:"))) {
+    refs.add("AuraDefinitionBundle", aura.replace(/^c:/, ""));
+  }
+  return refs.list();
+}
+function extractAuraRefs(content, known) {
+  const refs = new RefSet();
+  for (const m of content.matchAll(/<c:([A-Za-z][A-Za-z0-9_]*)/g)) {
+    addComponentRef(refs, m[1], known);
+  }
+  for (const m of content.matchAll(/\b(?:extends|implements|tokens)="([^"]+)"/g)) {
+    for (const part of m[1].split(",")) {
+      if (part.trim().startsWith("c:")) addComponentRef(refs, part, known);
+    }
+  }
+  for (const m of content.matchAll(/<aura:handler[^>]*\bevent="(c:[^"]+)"/g)) {
+    addComponentRef(refs, m[1], known);
+  }
+  for (const m of content.matchAll(/<aura:registerEvent[^>]*\btype="(c:[^"]+)"/g)) {
+    addComponentRef(refs, m[1], known);
+  }
+  for (const m of content.matchAll(/<aura:dependency[^>]*\bresource="([^"]+)"/g)) {
+    addComponentRef(refs, m[1], known);
+  }
+  for (const m of content.matchAll(/\$A\.createComponent\(\s*["'](c:[^"']+)["']/g)) {
+    addComponentRef(refs, m[1], known);
+  }
+  for (const m of content.matchAll(/\bcontroller="([A-Za-z][A-Za-z0-9_.]*)"/g)) {
+    if (!m[1].includes(".")) refs.add("ApexClass", m[1]);
+  }
+  for (const m of content.matchAll(/datasource="apex:\/\/([A-Za-z][A-Za-z0-9_]*)"/g)) {
+    refs.add("ApexClass", m[1]);
+  }
+  for (const m of content.matchAll(/<sfdc:object>\s*([A-Za-z0-9_]+)\s*<\/sfdc:object>/g)) {
+    refs.add("CustomObject", m[1]);
+  }
+  for (const m of content.matchAll(/\$Label\.c\.([A-Za-z][A-Za-z0-9_]*)/g)) {
+    refs.add("CustomLabel", m[1]);
+  }
   return refs.list();
 }
 function extractLwcRefs(content) {
@@ -28944,11 +29080,15 @@ function buildKnownArtifacts(artifacts) {
     objects: /* @__PURE__ */ new Map(),
     fields: /* @__PURE__ */ new Map(),
     flows: /* @__PURE__ */ new Map(),
-    fieldsByShortName: /* @__PURE__ */ new Map()
+    fieldsByShortName: /* @__PURE__ */ new Map(),
+    aura: /* @__PURE__ */ new Map(),
+    lwc: /* @__PURE__ */ new Map()
   };
   for (const a of artifacts) {
     const key2 = a.apiName.toLowerCase();
     if (a.type === "ApexClass") known.classes.set(key2, a.apiName);
+    else if (a.type === "AuraDefinitionBundle") known.aura.set(key2, a.apiName);
+    else if (a.type === "LightningComponentBundle") known.lwc.set(key2, a.apiName);
     else if (a.type === "CustomObject") known.objects.set(key2, a.apiName);
     else if (a.type === "CustomField") {
       known.fields.set(key2, a.apiName);
@@ -28978,7 +29118,7 @@ function extractAllEdges(connectionId, artifacts, known = buildKnownArtifacts(ar
     }
   };
   for (const a of artifacts) {
-    if (a.type === "Flow") add("Flow", a.apiName, extractFlowRefs(a.content));
+    if (a.type === "Flow") add("Flow", a.apiName, extractFlowRefs(a.content, known));
     else if (a.type === "ApexClass" || a.type === "ApexTrigger") {
       add(a.type, a.apiName, extractApexRefs(a.content, known, a.apiName));
     } else if (a.type === "CustomField" || a.type === "ValidationRule") {
@@ -29006,6 +29146,12 @@ function extractAllEdges(connectionId, artifacts, known = buildKnownArtifacts(ar
       add(a.type, a.apiName, extractQuickActionRefs(a.content, a.apiName));
     } else if (a.type === "LightningComponentBundle") {
       add(a.type, a.apiName, extractLwcRefs(a.content));
+    } else if (a.type === "AuraDefinitionBundle") {
+      add(a.type, a.apiName, extractAuraRefs(a.content, known));
+    } else if (a.type === "FlexiPage") {
+      add(a.type, a.apiName, extractFlexiPageRefs(a.content, known));
+    } else if (a.type === "CustomTab") {
+      add(a.type, a.apiName, extractCustomTabRefs(a.content));
     }
   }
   return edges;
@@ -29080,6 +29226,11 @@ var init_orgdeps = __esm({
 });
 
 // src/snapshot/engine.ts
+import crypto2 from "node:crypto";
+function refreshJobId(normalizedTypes) {
+  const digest = crypto2.createHash("sha256").update(JSON.stringify([...normalizedTypes].sort())).digest("hex");
+  return `refresh-${digest.slice(0, 12)}`;
+}
 function normalizeRefreshTypes(types) {
   const all = new Set(types);
   for (const t of types) {
@@ -29106,6 +29257,21 @@ function buildRetrieveMembers(types, listedProps, warnings) {
     } else {
       warnings.push(
         "listMetadata returned no CustomObject inventory; falling back to the * wildcard, which misses standard objects."
+      );
+    }
+  }
+  if ("AuraDefinitionBundle" in members) {
+    const bundleNames = listedProps.filter((p) => p.type === "AuraDefinitionBundle" && !isManaged(p)).map((p) => p.fullName);
+    if (bundleNames.length > 0) {
+      members.AuraDefinitionBundle = bundleNames;
+      if (bundleNames.length > 2e3) {
+        warnings.push(
+          `AuraDefinitionBundle inventory is large (${bundleNames.length}); the retrieve may be slow or hit platform size limits.`
+        );
+      }
+    } else {
+      warnings.push(
+        "listMetadata returned no AuraDefinitionBundle inventory; falling back to the * wildcard, which misses installed-package bundles."
       );
     }
   }
@@ -29179,6 +29345,7 @@ function delay2(ms) {
 }
 function publicState(job) {
   return {
+    job_id: job.job_id,
     types: job.types,
     startedAt: job.startedAt,
     progress: job.progress,
@@ -29187,7 +29354,7 @@ function publicState(job) {
     error: job.error
   };
 }
-var CHILD_TYPES, COUPLED_TYPES, SnapshotEngine, TYPE_DIRS;
+var STALE_JOB_MS, SNAPSHOT_LOCK_TTL_MS, CHILD_TYPES, COUPLED_TYPES, SnapshotEngine, TYPE_DIRS;
 var init_engine = __esm({
   "src/snapshot/engine.ts"() {
     "use strict";
@@ -29198,6 +29365,8 @@ var init_engine = __esm({
     init_orgdeps();
     init_errors4();
     init_log();
+    STALE_JOB_MS = 30 * 6e4;
+    SNAPSHOT_LOCK_TTL_MS = 15 * 60 * 1e3;
     CHILD_TYPES = {
       CustomObject: ["CustomField", "ValidationRule", "ListView", "RecordType"],
       CustomLabels: ["CustomLabel"],
@@ -29218,50 +29387,113 @@ var init_engine = __esm({
         this.config = config2;
         this.audit = audit;
       }
+      /** Keyed `${conn.id}:${job_id}` — job identity is the requested input (S41 §3.1). */
       jobs = /* @__PURE__ */ new Map();
+      /**
+       * Per-connection tail of the refresh EXECUTION chain. Results are keyed by
+       * request, but runs stay serialised per connection: each refresh rewrites
+       * snapshot dirs and index rows wholesale (writeCurrent/replaceArtifacts),
+       * so two running at once would corrupt each other.
+       */
+      chains = /* @__PURE__ */ new Map();
+      lockHolder = `plugin:${process.pid}`;
       /**
        * Start (or observe) a refresh. Returns within ~toolWaitMs either the
        * finished summary or an in-progress state the caller reports back.
+       * Pass pollJobId (alone) to check on a job from an earlier call without
+       * re-sending types; a result is only ever delivered to the input that
+       * asked for it.
        */
-      async refresh(conn, types) {
-        let job = this.jobs.get(conn.id);
+      async refresh(conn, types, pollJobId) {
+        this.sweepStaleJobs();
+        let jobId;
+        let normalized = null;
+        if (pollJobId !== void 0) {
+          jobId = pollJobId;
+          if (!this.jobs.has(`${conn.id}:${jobId}`)) return { status: "unknown_job", job_id: jobId };
+        } else {
+          normalized = normalizeRefreshTypes(types ?? this.config.snapshot.types);
+          jobId = refreshJobId(normalized);
+        }
+        const key2 = `${conn.id}:${jobId}`;
+        let job = this.jobs.get(key2);
         if (job?.done) {
-          this.jobs.delete(conn.id);
-          if (job.result) return { status: "complete", summary: job.result };
-          if (job.error) return { status: "failed", error: job.error };
+          this.jobs.delete(key2);
+          if (job.result !== void 0) {
+            return { status: "complete", job_id: jobId, summary: job.result };
+          }
+          if (job.error !== void 0) return { status: "failed", job_id: jobId, error: job.error };
           job = void 0;
         }
         if (!job) {
-          job = this.startJob(conn, normalizeRefreshTypes(types ?? this.config.snapshot.types));
-          this.jobs.set(conn.id, job);
+          job = this.startJob(conn, normalized, jobId);
+          this.jobs.set(key2, job);
         }
         const winner = await Promise.race([
           job.promise.then(
-            (summary) => ({ status: "complete", summary }),
-            (err2) => ({ status: "failed", error: String(err2 instanceof Error ? err2.message : err2) })
+            (summary) => ({ status: "complete", job_id: jobId, summary }),
+            (err2) => ({
+              status: "failed",
+              job_id: jobId,
+              error: String(err2 instanceof Error ? err2.message : err2)
+            })
           ),
           delay2(this.config.snapshot.toolWaitMs).then(() => null)
         ]);
         if (winner) {
-          this.jobs.delete(conn.id);
+          this.jobs.delete(key2);
           return winner;
         }
-        return { status: "in_progress", state: publicState(job) };
+        return { status: "in_progress", job_id: jobId, state: publicState(job) };
       }
-      startJob(conn, types) {
+      sweepStaleJobs() {
+        const cutoff = Date.now() - STALE_JOB_MS;
+        for (const [key2, job] of this.jobs) {
+          if (job.done && job.finishedAt !== void 0 && job.finishedAt < cutoff) {
+            this.jobs.delete(key2);
+          }
+        }
+      }
+      startJob(conn, types, jobId) {
         const job = {
+          job_id: jobId,
           types,
           startedAt: (/* @__PURE__ */ new Date()).toISOString(),
           progress: "starting",
           done: false,
           promise: void 0
         };
-        job.promise = this.runRefresh(conn, types, job).then((summary) => {
+        const prev = this.chains.get(conn.id);
+        if (prev) job.progress = "queued behind an earlier refresh on this connection";
+        const lockName = `snapshot:${conn.id}`;
+        const run = (prev ?? Promise.resolve()).catch(() => {
+        }).then(async () => {
+          if (!this.db.tryAcquireAppLock(lockName, this.lockHolder, SNAPSHOT_LOCK_TTL_MS)) {
+            throw new ContrailError(
+              "another Contrail process (the desktop app) is refreshing this connection \u2014 try again once its sync finishes",
+              "snapshot_locked"
+            );
+          }
+          try {
+            return await this.runRefresh(conn, types, job);
+          } finally {
+            this.db.releaseAppLock(lockName, this.lockHolder);
+          }
+        });
+        const tail = run.catch(() => {
+        });
+        this.chains.set(conn.id, tail);
+        void tail.then(() => {
+          if (this.chains.get(conn.id) === tail) this.chains.delete(conn.id);
+        });
+        job.promise = run.then((summary) => {
           job.done = true;
+          job.finishedAt = Date.now();
           job.result = summary;
           return summary;
         }).catch((err2) => {
           job.done = true;
+          job.finishedAt = Date.now();
           job.error = String(err2 instanceof Error ? err2.message : err2);
           this.audit.record("snapshot.refresh_failed", {
             connectionId: conn.id,
@@ -29475,7 +29707,9 @@ var init_engine = __esm({
       PermissionSetGroup: "permissionsetgroups",
       MutingPermissionSet: "mutingpermissionsets",
       QuickAction: "quickActions",
-      LightningComponentBundle: "lwc"
+      LightningComponentBundle: "lwc",
+      // S41: Aura component bundles.
+      AuraDefinitionBundle: "aura"
     };
   }
 });
@@ -29924,13 +30158,46 @@ function flowDeactivationXml() {
 </FlowDefinition>
 `;
 }
-function parseBundleEnvelope(type, apiName, content, mainFile, alsoRequired = []) {
+function isRegisteredType(type) {
+  return type in FILE_TYPES || type in CHILD_TYPES2;
+}
+function parseEnvelopeFor(type, apiName, content) {
+  const spec = FILE_TYPES[type];
+  if (!spec?.envelope) {
+    throw new ContrailError(`${type} is not a bundle (envelope) type`, "bad_component");
+  }
+  return parseBundleEnvelope(type, apiName, content, spec);
+}
+function validateAuraBundle(apiName, files, main2) {
+  const kind = main2.slice(apiName.length);
+  const metaName = `${main2}-meta.xml`;
+  const allowed = /* @__PURE__ */ new Set([
+    main2,
+    metaName,
+    ...(AURA_SECONDARIES[kind] ?? []).map((s) => `${apiName}${s}`)
+  ]);
+  for (const [rel, body] of Object.entries(files)) {
+    if (!allowed.has(rel)) {
+      const reason = /(Provider|Model|Test)\.js$/.test(rel) ? `"${rel}" is not a deployable Aura definition \u2014 Provider/Model/Test files are not part of the bundle format` : rel.endsWith("-meta.xml") ? `"${rel}" \u2014 the only meta file is "${metaName}", named after the primary` : rel === `${apiName}.design` ? `"${rel}" \u2014 a .design belongs only to a component (.cmp) bundle` : !rel.startsWith(apiName) ? `"${rel}" \u2014 every file in an Aura bundle starts with the bundle name "${apiName}"` : `"${rel}" is not a valid file for a ${kind} bundle`;
+      throw new ContrailError(`AuraDefinitionBundle ${apiName}: ${reason}.`, "bad_component");
+    }
+    if (Buffer.byteLength(body, "utf8") > AURA_MAX_FILE_BYTES) {
+      throw new ContrailError(
+        `AuraDefinitionBundle ${apiName}: "${rel}" exceeds the 1,000,000-byte per-file limit.`,
+        "bad_component"
+      );
+    }
+  }
+}
+function parseBundleEnvelope(type, apiName, content, spec) {
+  const suffixes = Array.isArray(spec.envelopeMainSuffix) ? spec.envelopeMainSuffix : [spec.envelopeMainSuffix ?? spec.ext];
+  const exampleMain = `${apiName}${suffixes[0] ?? ""}`;
   let parsed;
   try {
     parsed = JSON.parse(content);
   } catch {
     throw new ContrailError(
-      `${type} ${apiName}: content must be a Contrail bundle envelope \u2014 JSON of the shape {"contrail_bundle":1, "files": {"${mainFile}": "<xml>", "input/schema.json": "\u2026"}}. Bundle types are directories of files; retrieve_metadata's bundle_files listing shows the real file set to carry over.`,
+      `${type} ${apiName}: content must be a Contrail bundle envelope \u2014 JSON of the shape {"contrail_bundle":1, "files": {"${exampleMain}": "<xml>", "input/schema.json": "\u2026"}}. Bundle types are directories of files; retrieve_metadata's bundle_files listing shows the real file set to carry over.`,
       "bad_component"
     );
   }
@@ -29957,6 +30224,12 @@ function parseBundleEnvelope(type, apiName, content, mainFile, alsoRequired = []
         "bad_component"
       );
     }
+    if (spec.flat && rel.includes("/")) {
+      throw new ContrailError(
+        `${type} ${apiName}: "${rel}" \u2014 ${type} bundles are FLAT: no subfolders, every file directly in the bundle directory.`,
+        "bad_component"
+      );
+    }
     const segs = rel.split("/");
     if (segs.length === 0 || segs.length > BUNDLE_MAX_DEPTH || segs.some((s) => !BUNDLE_REL_SEGMENT_RE.test(s))) {
       throw new ContrailError(
@@ -29978,21 +30251,38 @@ function parseBundleEnvelope(type, apiName, content, mainFile, alsoRequired = []
     }
     out[rel] = body;
   }
-  if (!(mainFile in out)) {
+  const candidates = suffixes.map((s) => `${apiName}${s}`);
+  const mains = candidates.filter((f) => f in out);
+  if (mains.length === 0) {
     throw new ContrailError(
-      `${type} ${apiName}: envelope is missing its main file "${mainFile}".`,
+      candidates.length === 1 ? `${type} ${apiName}: envelope is missing its main file "${candidates[0]}".` : `${type} ${apiName}: envelope has NO primary file \u2014 exactly one of ${candidates.join(", ")} is required.`,
       "bad_component"
     );
   }
+  if (mains.length > 1) {
+    throw new ContrailError(
+      `${type} ${apiName}: envelope carries MORE THAN ONE primary (${mains.join(", ")}) \u2014 a bundle has exactly one.`,
+      "bad_component"
+    );
+  }
+  const main2 = mains[0];
+  if (spec.requireMainMeta && !(`${main2}-meta.xml` in out)) {
+    throw new ContrailError(
+      `${type} ${apiName}: envelope is missing "${main2}-meta.xml" \u2014 Contrail requires the bundle meta on deploy to pin apiVersion (the platform would silently default it; retrieves of old bundles may lack one \u2014 add it).`,
+      "bad_component"
+    );
+  }
+  const alsoRequired = (spec.requiredSuffixes ?? []).map((s) => `${apiName}${s}`);
   for (const name of alsoRequired) {
     if (!(name in out)) {
       throw new ContrailError(
-        `${type} ${apiName}: envelope is missing required file "${name}" \u2014 this bundle type requires ${[mainFile, ...alsoRequired].join(" + ")}.`,
+        `${type} ${apiName}: envelope is missing required file "${name}" \u2014 this bundle type requires ${[main2, ...alsoRequired].join(" + ")}.`,
         "bad_component"
       );
     }
   }
-  return out;
+  if (type === "AuraDefinitionBundle") validateAuraBundle(apiName, out, main2);
+  return { files: out, main: main2 };
 }
 function buildDeployZip(components, deletions, apiVersionNumber, metaXmlLookup) {
   const files = /* @__PURE__ */ new Map();
@@ -30007,9 +30297,7 @@ function buildDeployZip(components, deletions, apiVersionNumber, metaXmlLookup) 
     validateTypeAndName(c.type, c.api_name);
     const fileSpec = FILE_TYPES[c.type];
     if (fileSpec?.envelope) {
-      const mainFile = `${c.api_name}${fileSpec.envelopeMainSuffix ?? fileSpec.ext}`;
-      const alsoRequired = (fileSpec.requiredSuffixes ?? []).map((s) => `${c.api_name}${s}`);
-      const bundleFiles = parseBundleEnvelope(c.type, c.api_name, c.content, mainFile, alsoRequired);
+      const { files: bundleFiles } = parseBundleEnvelope(c.type, c.api_name, c.content, fileSpec);
       const dirPrefix = `${fileSpec.dir}/${fileSafeSegment(c.api_name)}/`;
       for (const [rel, body] of Object.entries(bundleFiles)) {
         files.set(`${dirPrefix}${rel}`, strToU8(body));
@@ -30154,6 +30442,21 @@ function validateTypeAndName(type, name) {
     }
     return;
   }
+  if (type === "AuraDefinitionBundle") {
+    if (/__/.test(name)) {
+      throw new ContrailError(
+        `AuraDefinitionBundle "${name}": a namespaced bundle (ns__Name) belongs to its package \u2014 only namespace-free bundles deploy through Contrail (reading it still works via retrieve_metadata).`,
+        "bad_component"
+      );
+    }
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(name) || name.endsWith("_")) {
+      throw new ContrailError(
+        `invalid AuraDefinitionBundle name "${name}" \u2014 a Lightning developer name: start with a letter; letters, digits, single underscores; no trailing underscore.`,
+        "bad_component"
+      );
+    }
+    return;
+  }
   if (!NAME_RE.test(name) || name.includes("/")) {
     throw new ContrailError(`invalid component name "${name}"`, "bad_component");
   }
@@ -30173,13 +30476,11 @@ function analyzeChanges(db, store, conn, components, deletions) {
     }
     const envSpec = FILE_TYPES[c.type];
     if (envSpec?.envelope) {
-      const mainFile = `${c.api_name}${envSpec.envelopeMainSuffix ?? envSpec.ext}`;
-      const proposed = parseBundleEnvelope(
+      const { files: proposed, main: mainFile } = parseBundleEnvelope(
         c.type,
         c.api_name,
         c.content,
-        mainFile,
-        (envSpec.requiredSuffixes ?? []).map((s) => `${c.api_name}${s}`)
+        envSpec
       );
       const existingBundle = db.getArtifact(conn.id, c.type, c.api_name);
       const warnings2 = [];
@@ -30227,6 +30528,56 @@ function analyzeChanges(db, store, conn, components, deletions) {
           warnings2.push(
             `PUBLISHED-SNAPSHOT NAME \u2014 "${c.api_name}" is a version-suffixed published snapshot; the platform owns those. The editable draft is the NAKED bundle name \u2014 deploy a suffixed name only when promoting retrieved bytes.`
           );
+        }
+      }
+      if (c.type === "AuraDefinitionBundle") {
+        const kind = mainFile.slice(c.api_name.length);
+        const old = existingBundle ? readBundleFiles(store, conn, envSpec.dir, c.api_name) : {};
+        const oldMain = [".cmp", ".app", ".evt", ".intf", ".tokens"].map((s) => `${c.api_name}${s}`).find((f) => f in old);
+        if (oldMain && oldMain.slice(c.api_name.length) !== kind) {
+          throw new ContrailError(
+            `AuraDefinitionBundle ${c.api_name}: the SNAPSHOT's copy of this bundle is ${oldMain.slice(c.api_name.length)} and this envelope is ${kind} \u2014 changing a bundle's kind under the same name is untested platform behavior. Delete the old bundle first (its own destructive approval) or use a new name; if the org-side bundle already changed since the last refresh, run refresh_snapshot types:["AuraDefinitionBundle"] and validate again.`,
+            "bad_component"
+          );
+        }
+        const verOf = (files, main2) => main2 ? parseFloat(files[`${main2}-meta.xml`]?.match(/<apiVersion>\s*([\d.]+)/)?.[1] ?? "") : NaN;
+        const newVer = verOf(proposed, mainFile);
+        const oldVer = verOf(old, oldMain);
+        if (Number.isFinite(newVer) && Number.isFinite(oldVer) && newVer < 40 !== oldVer < 40) {
+          warnings2.push(
+            `API VERSION ${oldVer} \u2192 ${newVer} crosses the 39/40 boundary \u2014 in orgs still on Lightning Locker this toggles Locker for the component (LWS is an org setting, unaffected by apiVersion).`
+          );
+        }
+        const mainBody = proposed[mainFile] ?? "";
+        const isBackgroundItem = /lightning:backgroundUtilityItem/.test(mainBody);
+        if (change2 === "add" && (kind === ".cmp" || kind === ".app") && /lightning:(backgroundUtilityItem|utilityItem|availableForFlow(Actions|Screens))|flexipage:availableFor\w*|force:lightningQuickAction/.test(
+          mainBody
+        )) {
+          const refRe = new RegExp(`c:${c.api_name}\\b`);
+          const referencedInPackage = components.some((o) => o !== c && refRe.test(o.content));
+          const referencedInOrg = db.edgesTo(conn.id, "AuraDefinitionBundle", c.api_name).length > 0;
+          if (!referencedInPackage && !referencedInOrg) {
+            warnings2.push(
+              `INERT UNTIL PLACED \u2014 this component declares surface interfaces but nothing in this package or the snapshot references c:${c.api_name}; it renders NOWHERE until host metadata places it` + (isBackgroundItem ? ` (a background utility item sits in a utility bar's Background region, and the bar needs at least one VISIBLE item or it does not appear).` : `.`)
+            );
+          }
+        }
+        if (change2 !== "unchanged_content") {
+          warnings2.push(
+            `The deploy compiles markup and design (each design:attribute must match an aura:attribute) and parses the JS; runtime errors in a background item surface only in the browser console. Consoles already open keep the OLD definition until reloaded.`
+          );
+        }
+        const controller = mainBody.match(/\bcontroller="([A-Za-z][A-Za-z0-9_]*)"/)?.[1];
+        if (controller) {
+          const containerText = components.filter((p) => p.type === "PermissionSet" || p.type === "Profile").map((p) => p.content).join("\n");
+          const granted = permissionBlocks(containerText, "classAccesses").some(
+            (b) => new RegExp(`<apexClass>\\s*${controller}\\s*</apexClass>`, "i").test(b) && /<enabled>\s*true\s*<\/enabled>/i.test(b)
+          );
+          if (!granted) {
+            warnings2.push(
+              `server-side controller "${controller}" \u2014 users need Apex class access (classAccesses) for it, and no permission set in this package grants it (it may already be granted org-side; not checkable from here).`
+            );
+          }
         }
       }
       changes.push({ type: c.type, api_name: c.api_name, change: change2, warnings: warnings2, ...sourceOf(c) });
@@ -30321,11 +30672,52 @@ function analyzeChanges(db, store, conn, components, deletions) {
     }
     changes.push({ type: c.type, api_name: c.api_name, change, warnings, ...sourceOf(c) });
   }
+  {
+    const packagedBundles = new Set(
+      components.filter(
+        (x) => x.type === "AuraDefinitionBundle" || x.type === "LightningComponentBundle"
+      ).map((x) => x.api_name)
+    );
+    const refHosts = /* @__PURE__ */ new Set(["FlexiPage", "QuickAction", "Flow", "CustomTab"]);
+    for (const entry of changes) {
+      if (!refHosts.has(entry.type)) continue;
+      const comp = components.find(
+        (x) => x.type === entry.type && x.api_name === entry.api_name
+      );
+      if (!comp) continue;
+      const missing = /* @__PURE__ */ new Set();
+      for (const m of comp.content.matchAll(/\bc:([A-Za-z][A-Za-z0-9_]*)/g)) {
+        const name = m[1];
+        if (packagedBundles.has(name)) continue;
+        if (db.getArtifact(conn.id, "AuraDefinitionBundle", name) || db.getArtifact(conn.id, "LightningComponentBundle", name)) {
+          continue;
+        }
+        missing.add(name);
+      }
+      if (missing.size > 0) {
+        const list = [...missing].slice(0, 5).join(", ");
+        entry.warnings.push(
+          `references ${list} (c: namespace) \u2014 in neither this package nor the snapshot index. If the org lacks the bundle too, this deploy fails or leaves a broken reference; ship the bundle first or in this same package.`
+        );
+      }
+    }
+  }
   const destructive = deletions.map((d) => {
     const warnings = ["DELETION \u2014 cannot be undone by rollback"];
     const existing = db.getArtifact(conn.id, d.type, d.api_name);
     if (!existing) {
       warnings.push("not present in the local snapshot \u2014 verify the name before approving");
+    }
+    if (!isRegisteredType(d.type)) {
+      warnings.push(
+        `UNREGISTERED TYPE DELETE \u2014 Contrail cannot read ${d.type} or list its dependents; the component name and the org's own refusal rules are the only checks this delete gets.`
+      );
+    }
+    if (d.type === "AuraDefinitionBundle") {
+      const usedBy = db.edgesTo(conn.id, d.type, d.api_name).slice(0, 8);
+      warnings.push(
+        `deletes the ENTIRE bundle (every file \u2014 there is no per-file delete)` + (usedBy.length > 0 ? `; the org will REFUSE while it is referenced \u2014 known dependents: ` + usedBy.map((e) => `${e.fromType}:${e.fromName}`).join(", ") : `; the org refuses the delete if a FlexiPage, Flow, QuickAction, or action override still references it`)
+      );
     }
     return { type: d.type, api_name: d.api_name, change: "delete", warnings };
   });
@@ -30491,7 +30883,7 @@ function readOldContent(store, conn, type, apiName, filePath) {
   }
   return null;
 }
-var FILE_TYPES, XMLNS_META, CHILD_TYPES2, NAME_RE, FOLDER_SEGMENT_RE, BUNDLE_REL_SEGMENT_RE, BUNDLE_MAX_FILES, BUNDLE_MAX_DEPTH, XMLNS;
+var FILE_TYPES, XMLNS_META, CHILD_TYPES2, NAME_RE, FOLDER_SEGMENT_RE, BUNDLE_REL_SEGMENT_RE, BUNDLE_MAX_FILES, BUNDLE_MAX_DEPTH, AURA_SECONDARIES, AURA_MAX_FILE_BYTES, AURA_DEFTYPE_FILES, XMLNS;
 var init_package = __esm({
   "src/deploy/package.ts"() {
     "use strict";
@@ -30639,6 +31031,24 @@ var init_package = __esm({
         envelope: true,
         envelopeMainSuffix: ".js",
         requiredSuffixes: [".js-meta.xml"]
+      },
+      // S41: Aura component bundles. FLAT directories (live-confirmed on a
+      // real partial-org retrieve, 2026-11-04: every file `<N>`-prefixed, no
+      // subfolders); exactly ONE primary per bundle (.cmp component, .app
+      // application, .evt event, .intf interface, .tokens tokens); the primary's
+      // own -meta.xml is required on deploy (pins apiVersion — Developer Console
+      // creates bundles at the org's CURRENT version otherwise) and tolerated
+      // absent on retrieve. Deploy names are namespace-free developer names; the
+      // index/read path also serves ns__Name bundles (read-only). The deploy
+      // REPLACES the whole bundle: a file the org has that the envelope omits is
+      // deleted (SDR supportsPartialDelete; the BUNDLE REPLACE arm says so).
+      AuraDefinitionBundle: {
+        dir: "aura",
+        ext: ".cmp",
+        envelope: true,
+        envelopeMainSuffix: [".cmp", ".app", ".evt", ".intf", ".tokens"],
+        requireMainMeta: true,
+        flat: true
       }
     };
     XMLNS_META = "http://soap.sforce.com/2006/04/metadata";
@@ -30694,12 +31104,34 @@ var init_package = __esm({
     BUNDLE_REL_SEGMENT_RE = /^[A-Za-z0-9_$][A-Za-z0-9_$.\-]*$/;
     BUNDLE_MAX_FILES = 100;
     BUNDLE_MAX_DEPTH = 8;
+    AURA_SECONDARIES = {
+      ".cmp": ["Controller.js", "Helper.js", "Renderer.js", ".css", ".design", ".svg", ".auradoc"],
+      ".app": ["Controller.js", "Helper.js", "Renderer.js", ".css", ".svg", ".auradoc"],
+      ".evt": [".auradoc"],
+      ".intf": [".auradoc"],
+      ".tokens": []
+    };
+    AURA_MAX_FILE_BYTES = 1e6;
+    AURA_DEFTYPE_FILES = {
+      APPLICATION: ".app",
+      COMPONENT: ".cmp",
+      EVENT: ".evt",
+      INTERFACE: ".intf",
+      TOKENS: ".tokens",
+      CONTROLLER: "Controller.js",
+      HELPER: "Helper.js",
+      RENDERER: "Renderer.js",
+      STYLE: ".css",
+      DESIGN: ".design",
+      SVG: ".svg",
+      DOCUMENTATION: ".auradoc"
+    };
     XMLNS = "http://soap.sforce.com/2006/04/metadata";
   }
 });
 
 // src/deploy/engine.ts
-import crypto2 from "node:crypto";
+import crypto3 from "node:crypto";
 import fs10 from "node:fs";
 import path5 from "node:path";
 function isDmlPlan(input) {
@@ -30707,6 +31139,26 @@ function isDmlPlan(input) {
 }
 function stepReferenceId(step, index) {
   return step.ref ?? `step_${index + 1}`;
+}
+function validateJobId(input) {
+  const h = crypto3.createHash("sha256");
+  h.update(
+    `${JSON.stringify([
+      input.dryRun === true,
+      input.testLevel ?? null,
+      input.runTests ?? null,
+      input.allowUnregisteredDelete === true
+    ])}
+`
+  );
+  for (const c of input.components) {
+    const contentSha = crypto3.createHash("sha256").update(c.content).digest("hex");
+    h.update(`${JSON.stringify(["C", c.type, c.api_name, contentSha])}
+`);
+  }
+  for (const d of input.destructive) h.update(`${JSON.stringify(["D", d.type, d.api_name])}
+`);
+  return `${input.dryRun ? "vdry" : "val"}-${h.digest("hex").slice(0, 12)}`;
 }
 function approvalForAgent(kind, approval) {
   if (approval.opened) return { opened: true };
@@ -30750,7 +31202,7 @@ function summarizeOps(steps) {
 function delay3(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms).unref?.());
 }
-var REF_TOKEN_RE, DeployEngine;
+var REF_TOKEN_RE, STALE_JOB_MS2, DeployEngine;
 var init_engine2 = __esm({
   "src/deploy/engine.ts"() {
     "use strict";
@@ -30767,6 +31219,7 @@ var init_engine2 = __esm({
     init_package();
     init_log();
     REF_TOKEN_RE = /^@\{([A-Za-z][A-Za-z0-9_]*)\.id\}$/;
+    STALE_JOB_MS2 = 30 * 6e4;
     DeployEngine = class {
       constructor(db, store, tokenMgr, config2, audit, approvals = new ApprovalPageServer()) {
         this.db = db;
@@ -30802,22 +31255,136 @@ var init_engine2 = __esm({
       }
       // ── deploys ────────────────────────────────────────────────────────────
       async validateDeploy(conn, input) {
-        const jobKey = `${conn.id}:deploy-validate${input.dryRun ? ":dry" : ""}`;
-        return this.runJob(jobKey, () => this.doValidate(conn, input));
+        const jobId = validateJobId(input);
+        const outcome = await this.runJob(`${conn.id}:${jobId}`, () => this.doValidate(conn, input));
+        return { ...outcome, job_id: jobId };
       }
-      async doValidate(conn, input, job) {
-        if (!input.dryRun) {
-          const superseded = this.db.supersedePendingRequests(conn.id, "deploy");
-          if (superseded > 0) {
-            for (const p of this.db.takeSupersededPayloadPaths(conn.id, "deploy")) safeUnlink(p);
-            this.audit.record("deploy.superseded", {
-              connectionId: conn.id,
-              tool: "validate_deploy",
-              detail: { count: superseded }
-            });
+      /**
+       * S41 (§3.1): attach to a validation job by its id — polling without
+       * re-sending components or re-reading content files. Returns null when no
+       * running or uncollected job with that id exists for this connection.
+       */
+      async pollValidate(conn, jobId) {
+        const key2 = `${conn.id}:${jobId}`;
+        const existing = this.jobs.get(key2);
+        if (!existing) return null;
+        const outcome = await this.runJob(key2, () => existing.promise);
+        return { ...outcome, job_id: jobId };
+      }
+      /**
+       * S41: live org checks for Aura bundles — the two lies the local snapshot
+       * can tell about them. (1) MISCLASSIFIED ADD: a bundle the org has (e.g.
+       * hand-made in Developer Console) but the index lacks would classify as
+       * ADD and hide the overwrite of someone's work — re-read it live through
+       * Tooling AuraDefinition rows and show the file-level delta instead.
+       * (2) NAME COLLISION: an Aura bundle and an LWC in the same namespace
+       * cannot share a name, and the index holds only a fraction of an org's
+       * LWC bundles, so only a live check answers. Best-effort by design: a
+       * failed live check degrades to an honest "could not check" warning and
+       * never blocks the validation (the org gate still has the final word).
+       */
+      async auraLiveChecks(conn, input, changes) {
+        const rest = new RestClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
+        for (const c of input.components) {
+          if (c.type !== "AuraDefinitionBundle") continue;
+          const entry = changes.find((e) => e.type === c.type && e.api_name === c.api_name);
+          if (!entry) continue;
+          const esc3 = c.api_name.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+          let liveKindConflict = null;
+          try {
+            const lwc = await rest.toolingQuery(
+              `SELECT Id FROM LightningComponentBundle WHERE DeveloperName = '${esc3}' AND NamespacePrefix = null LIMIT 1`,
+              1
+            );
+            if (lwc.length > 0) {
+              entry.warnings.push(
+                `NAME COLLISION \u2014 the org has an LWC named "${c.api_name}" (live check); an Aura bundle and an LWC in the same namespace cannot share a name, so this deploy will fail org-side.`
+              );
+            }
+            if (entry.change !== "add") continue;
+            const defs = await rest.toolingQuery(
+              `SELECT DefType, Source FROM AuraDefinition WHERE AuraDefinitionBundle.DeveloperName = '${esc3}' AND AuraDefinitionBundle.NamespacePrefix = null`,
+              50
+            );
+            if (defs.length === 0) continue;
+            const { files: proposed, main: main2 } = parseEnvelopeFor(
+              "AuraDefinitionBundle",
+              c.api_name,
+              c.content
+            );
+            const kinds = [".cmp", ".app", ".evt", ".intf", ".tokens"];
+            const livePrimary = defs.map((d) => AURA_DEFTYPE_FILES[d.DefType]).find((s) => s !== void 0 && kinds.includes(s));
+            const envKind = main2.slice(c.api_name.length);
+            if (livePrimary && livePrimary !== envKind) {
+              liveKindConflict = { live: livePrimary, env: envKind };
+              throw new ContrailError("aura kind conflict (rethrown below)", "bad_component");
+            }
+            entry.change = "modify";
+            entry.warnings = entry.warnings.filter((w) => !w.startsWith("INERT UNTIL PLACED"));
+            const metaName = `${main2}-meta.xml`;
+            const live = new Map(
+              defs.map((d) => [
+                `${c.api_name}${AURA_DEFTYPE_FILES[d.DefType] ?? `.${d.DefType.toLowerCase()}`}`,
+                d.Source ?? ""
+              ])
+            );
+            const changed = [];
+            const added = [];
+            for (const [rel, body] of Object.entries(proposed)) {
+              if (rel === metaName) continue;
+              const liveBody = live.get(rel);
+              if (liveBody === void 0) added.push(rel);
+              else if (liveBody.trim() !== body.trim()) changed.push(rel);
+            }
+            const removed = [...live.keys()].filter((rel) => !(rel in proposed));
+            const bundleRow = await rest.toolingQuery(
+              `SELECT ApiVersion FROM AuraDefinitionBundle WHERE DeveloperName = '${esc3}' AND NamespacePrefix = null LIMIT 1`,
+              1
+            );
+            const liveVer = bundleRow[0]?.ApiVersion ?? null;
+            const propVer = proposed[metaName]?.match(/<apiVersion>\s*([\d.]+)/)?.[1] ?? null;
+            const describe = (label, list) => list.length > 0 ? `${label} ${list.slice(0, 8).join(", ")}${list.length > 8 ? "\u2026" : ""}` : "";
+            const delta = [describe("changed:", changed), describe("added:", added), describe("removed:", removed)].filter(Boolean).join("; ") || "no file-content differences";
+            entry.warnings.push(
+              `ORG HAS THIS BUNDLE (live check \u2014 it is not in the local snapshot; e.g. built by hand in Developer Console). This deploy OVERWRITES it: ${delta}. Files the org has that this envelope omits are DELETED (whole-bundle replace).` + (liveVer !== null && propVer !== null && Number(liveVer) !== Number(propVer) ? ` apiVersion changes ${liveVer} \u2192 ${propVer} (Developer Console creates bundles at the org's current version).` : "")
+            );
+          } catch (err2) {
+            if (!liveKindConflict) {
+              entry.warnings.push(
+                `could not live-check "${c.api_name}" against the org (${String(err2 instanceof Error ? err2.message : err2).slice(0, 120)}) \u2014 the ADD/MODIFY classification is from the local snapshot only.`
+              );
+            }
+          }
+          if (liveKindConflict) {
+            throw new ContrailError(
+              `AuraDefinitionBundle ${c.api_name}: the ORG's bundle is ${liveKindConflict.live} (live check) and this envelope is ${liveKindConflict.env} \u2014 changing a bundle's kind under the same name is untested platform behavior. Delete the old bundle first (its own destructive approval) or use a new name.`,
+              "bad_component"
+            );
           }
         }
+      }
+      async doValidate(conn, input, job) {
         const versionNumber = this.config.salesforce.apiVersion.replace(/^v/, "");
+        const translationTypes = /* @__PURE__ */ new Set([
+          "Translations",
+          "CustomObjectTranslation",
+          "StandardValueSetTranslation",
+          "GlobalValueSetTranslation"
+        ]);
+        for (const d of input.destructive) {
+          if (translationTypes.has(d.type)) {
+            throw new ContrailError(
+              `${d.type} ${d.api_name}: translation components are not deletable through Contrail \u2014 remove entries in Setup (Translation Workbench), or per-entry via Tooling ExternalStringLocalization for custom-label translations.`,
+              "bad_component"
+            );
+          }
+          if (!isRegisteredType(d.type) && input.allowUnregisteredDelete !== true) {
+            throw new ContrailError(
+              `${d.type} ${d.api_name}: this type is not registered \u2014 Contrail cannot read it or list its dependents, so the delete would be blind. Pass allow_unregistered_delete: true to proceed anyway (the approval page will carry the UNREGISTERED TYPE DELETE warning).`,
+              "bad_component"
+            );
+          }
+        }
         const built = buildDeployZip(
           input.components,
           input.destructive,
@@ -30832,6 +31399,10 @@ var init_engine2 = __esm({
           input.destructive
         );
         const permCoverage = analyzePermissionCoverage(input.components);
+        if (input.components.some((c) => c.type === "AuraDefinitionBundle")) {
+          if (job) job.progress = "live-checking Aura bundles against the org";
+          await this.auraLiveChecks(conn, input, changes);
+        }
         const blast = [];
         for (const item of [...changes, ...destructive]) {
           const lookupType = item.type === "FlowDefinition" ? "Flow" : item.type;
@@ -30914,6 +31485,17 @@ var init_engine2 = __esm({
             expires_at: null
           };
           return { summary: drySummary, validation_passed: true, approval: null };
+        }
+        {
+          const superseded = this.db.supersedePendingRequests(conn.id, "deploy");
+          if (superseded > 0) {
+            for (const p of this.db.takeSupersededPayloadPaths(conn.id, "deploy")) safeUnlink(p);
+            this.audit.record("deploy.superseded", {
+              connectionId: conn.id,
+              tool: "validate_deploy",
+              detail: { count: superseded }
+            });
+          }
         }
         const code = generateConfirmationCode();
         const expiresAt = new Date(Date.now() + this.config.deploy.codeTtlMs).toISOString();
@@ -31904,7 +32486,7 @@ POST /connect/bot-versions/${version2.Id}/activation`
             detail: { count: superseded }
           });
         }
-        const stageDir = path5.join(deploysDir(), `bulk-stage-${crypto2.randomUUID()}`);
+        const stageDir = path5.join(deploysDir(), `bulk-stage-${crypto3.randomUUID()}`);
         fs10.mkdirSync(stageDir, { recursive: true });
         const manifest = {
           bulk: true,
@@ -31971,7 +32553,7 @@ POST /connect/bot-versions/${version2.Id}/activation`
               external_id_field: s.externalIdField ?? null,
               file,
               display_name: s.displayName,
-              sha256: crypto2.createHash("sha256").update(frozen).digest("hex"),
+              sha256: crypto3.createHash("sha256").update(frozen).digest("hex"),
               row_count: scan.rowCount,
               headers: scan.headers,
               line_ending: scan.lineEnding,
@@ -32168,7 +32750,7 @@ columns: ${columnsLabel(m.headers)}`,
             failedHard = "the frozen CSV for this step is missing from the payload directory";
           } else {
             frozen = fs10.readFileSync(frozenPath);
-            const sha = crypto2.createHash("sha256").update(frozen).digest("hex");
+            const sha = crypto3.createHash("sha256").update(frozen).digest("hex");
             if (sha !== m.sha256) {
               failedHard = "the frozen CSV no longer matches the hash the human approved (frozen_payload_tampered) \u2014 refusing to send it";
               frozen = null;
@@ -32584,6 +33166,12 @@ columns: ${columnsLabel(m.headers)}`,
       }
       /** Soft-wait job wrapper mirroring SnapshotEngine: never trips MCP client timeouts. */
       async runJob(key2, work, waitMs = this.config.deploy.toolWaitMs) {
+        const cutoff = Date.now() - STALE_JOB_MS2;
+        for (const [k, j] of this.jobs) {
+          if (k !== key2 && j.done && j.finishedAt !== void 0 && j.finishedAt < cutoff) {
+            this.jobs.delete(k);
+          }
+        }
         let job = this.jobs.get(key2);
         if (job?.done) {
           this.jobs.delete(key2);
@@ -32600,10 +33188,12 @@ columns: ${columnsLabel(m.headers)}`,
           };
           j.promise = work(j).then((result) => {
             j.done = true;
+            j.finishedAt = Date.now();
             j.result = result;
             return result;
           }).catch((err2) => {
             j.done = true;
+            j.finishedAt = Date.now();
             j.error = String(err2 instanceof Error ? err2.message : err2);
             throw err2;
           });
@@ -32646,6 +33236,7 @@ var updateCheck_exports = {};
 __export(updateCheck_exports, {
   getUpdateNotice: () => getUpdateNotice,
   isNewerVersion: () => isNewerVersion,
+  pendingUpdateRefresh: () => pendingUpdateRefresh,
   refreshUpdateCache: () => refreshUpdateCache
 });
 import fs11 from "node:fs";
@@ -32705,12 +33296,17 @@ async function refreshUpdateCache(repo) {
     log("debug", "update-check cache write failed", { err: String(err2) });
   }
 }
+function pendingUpdateRefresh() {
+  return inflight ?? Promise.resolve();
+}
 function getUpdateNotice(installedVersion, repo, enabled) {
   if (!enabled) return null;
   const cache = readCache(repo);
   const stale = !cache || Date.now() - Date.parse(cache.checkedAt) > TTL_MS;
-  if (stale) {
-    refreshUpdateCache(repo).catch(() => {
+  if (stale && !inflight) {
+    inflight = refreshUpdateCache(repo).catch(() => {
+    }).finally(() => {
+      inflight = null;
     });
   }
   if (!cache?.latestVersion) return null;
@@ -32721,7 +33317,7 @@ function getUpdateNotice(installedVersion, repo, enabled) {
     download_url: `https://github.com/${repo}/releases/latest`
   };
 }
-var CACHE_FILE, TTL_MS, TIMEOUT_MS;
+var CACHE_FILE, TTL_MS, TIMEOUT_MS, inflight;
 var init_updateCheck = __esm({
   "src/core/updateCheck.ts"() {
     "use strict";
@@ -32730,6 +33326,7 @@ var init_updateCheck = __esm({
     CACHE_FILE = "update-check.json";
     TTL_MS = 24 * 60 * 60 * 1e3;
     TIMEOUT_MS = 4e3;
+    inflight = null;
   }
 });
 
@@ -33135,7 +33732,7 @@ function registerMetadataTools(server, deps) {
       inputSchema: {
         connection: external_exports.string().describe("Connection alias (or id)."),
         type: external_exports.string().describe(
-          "Metadata type: ApexClass, ApexTrigger, Flow, CustomObject, CustomField, ValidationRule, CustomLabel, PermissionSet, CustomPermission, PermissionSetGroup, QuickAction (dotted Account.New_X for object actions), and any other indexed type. Bundle types (LightningComponentBundle, GenAiFunction, \u2026) return the main file plus a bundle_files listing of every sibling with snapshot paths for direct reading."
+          "Metadata type: ApexClass, ApexTrigger, Flow, CustomObject, CustomField, ValidationRule, CustomLabel, PermissionSet, CustomPermission, PermissionSetGroup, QuickAction (dotted Account.New_X for object actions), and any other indexed type. Bundle types (LightningComponentBundle, AuraDefinitionBundle, GenAiFunction, \u2026) return the main file plus a bundle_files listing of every sibling with snapshot paths for direct reading; an Aura bundle absent from the snapshot (installed-package or ns__Name managed) reads LIVE from Tooling AuraDefinition rows instead."
         ),
         names: external_exports.array(external_exports.string()).min(1).max(10).describe("Full API names; children dotted (Account.MyField__c)."),
         max_bytes: external_exports.number().int().min(1e3).max(MAX_CONTENT_BYTES).optional().describe(
@@ -33314,26 +33911,37 @@ function registerMetadataTools(server, deps) {
       inputSchema: {
         connection: external_exports.string().describe("Connection alias (or id)."),
         types: external_exports.array(external_exports.string()).optional().describe("Metadata types to refresh (default: the configured manifest)."),
-        check_only: external_exports.boolean().optional().describe("Only compare org lastModifiedDate against the index; retrieve nothing.")
+        check_only: external_exports.boolean().optional().describe("Only compare org lastModifiedDate against the index; retrieve nothing."),
+        job_id: external_exports.string().optional().describe(
+          "Poll a RUNNING refresh by the job_id an earlier call returned \u2014 pass {connection, job_id} ALONE. Jobs are keyed by their requested type set, so a poll only ever returns the refresh it names (re-sending the same types attaches to the same job too)."
+        )
       }
     },
     async (args) => guarded(async () => {
       const conn = requireConnection(args.connection, "refresh_snapshot");
+      if (args.job_id !== void 0 && (args.types !== void 0 || args.check_only)) {
+        return fail("Pass job_id ALONE to poll a running refresh.");
+      }
       if (args.types?.some((t) => !TYPE_RE.test(t))) return fail("invalid metadata type");
       if (args.check_only) {
         const report = await engine.checkStaleness(conn, args.types);
         return ok({ connection: conn.alias, ...report });
       }
-      const outcome = await engine.refresh(conn, args.types);
+      const outcome = await engine.refresh(conn, args.types, args.job_id);
       switch (outcome.status) {
+        case "unknown_job":
+          return fail(
+            `No running or uncollected refresh job "${outcome.job_id}" on "${conn.alias}" \u2014 its result may already have been collected. Re-send types to start a new refresh.`
+          );
         case "complete":
-          return ok(outcome.summary, "Snapshot refreshed.");
+          return ok({ job_id: outcome.job_id, ...outcome.summary }, "Snapshot refreshed.");
         case "failed":
-          return fail(`Snapshot refresh failed: ${outcome.error}`);
+          return fail(`Snapshot refresh failed (job ${outcome.job_id}): ${outcome.error}`);
         case "in_progress":
           return ok(
             outcome.state,
-            "Refresh is still running. Call refresh_snapshot again with the same connection to check progress or collect the result."
+            // carries job_id and the requested types
+            `Refresh is still running \u2014 poll with {connection, job_id: "${outcome.job_id}"}, or re-send the same types (which attaches to this same job).`
           );
       }
     })
@@ -33507,6 +34115,54 @@ function registerMetadataTools(server, deps) {
     })
   );
 }
+async function fetchAuraLiveContent(deps, conn, name) {
+  const { tokenMgr, config: config2 } = deps;
+  const rest = new RestClient(tokenMgr, conn, config2.salesforce.apiVersion);
+  const m = /^(.+?)__(.+)$/.exec(name);
+  const dev = (m ? m[2] : name).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  const nsFilter = m ? `= '${m[1].replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'` : "= null";
+  const defs = await rest.toolingQuery(
+    `SELECT DefType, Source FROM AuraDefinition WHERE AuraDefinitionBundle.DeveloperName = '${dev}' AND AuraDefinitionBundle.NamespacePrefix ${nsFilter}`,
+    50
+  );
+  if (defs.length === 0) {
+    throw new ContrailError(
+      `AuraDefinitionBundle ${name} is in neither the local snapshot nor the org's Tooling AuraDefinition rows on "${conn.alias}".`,
+      "artifact_not_found"
+    );
+  }
+  const bundles = await rest.toolingQuery(
+    `SELECT ApiVersion, Description FROM AuraDefinitionBundle WHERE DeveloperName = '${dev}' AND NamespacePrefix ${nsFilter} LIMIT 1`,
+    1
+  );
+  const files = defs.map((d) => [
+    `${name}${AURA_DEFTYPE_FILES[d.DefType] ?? `.${d.DefType.toLowerCase()}`}`,
+    d.Source ?? ""
+  ]);
+  const meta = bundles[0];
+  if (meta?.ApiVersion != null) {
+    const primary = files.find(([f]) => /\.(cmp|app|evt|intf|tokens)$/.test(f))?.[0];
+    if (primary) {
+      files.push([
+        `${primary}-meta.xml`,
+        `<?xml version="1.0" encoding="UTF-8"?>
+<AuraDefinitionBundle xmlns="http://soap.sforce.com/2006/04/metadata">
+    <apiVersion>${Number(meta.ApiVersion).toFixed(1)}</apiVersion>
+` + (meta.Description ? `    <description>${meta.Description.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</description>
+` : "") + `</AuraDefinitionBundle>
+`
+      ]);
+    }
+  }
+  const hidden = files.some(([, body]) => body === "(hidden)");
+  const framed = files.sort(([a], [b]) => a.localeCompare(b)).map(([rel, text]) => `<!-- contrail:file aura/${name}/${rel} -->
+${text}`).join("\n");
+  return {
+    body: framed,
+    source: "tooling (live)",
+    note: `Bundle read live from Tooling AuraDefinition rows (not in the local snapshot) \u2014 every file concatenated under contrail:file headers, the snapshot index's own framing, for side-by-side comparison against a snapshot copy. diff_artifact itself is SNAPSHOT-ONLY and will not see this bundle until a refresh indexes it. The meta file is REBUILT from the bundle's ApiVersion/Description (AuraDefinition has no meta DefType).` + (hidden ? ' Some sources returned "(hidden)" \u2014 a managed package conceals them.' : "")
+  };
+}
 async function fetchFlowVersionContent(deps, conn, name, version2) {
   const { tokenMgr, config: config2 } = deps;
   const rest = new RestClient(tokenMgr, conn, config2.salesforce.apiVersion);
@@ -33546,6 +34202,9 @@ async function fetchArtifactContent(deps, conn, type, name) {
   if (BUNDLE_TYPES.has(type)) {
     const artifact = db.getArtifact(conn.id, type, name);
     if (!artifact?.filePath) {
+      if (type === "AuraDefinitionBundle") {
+        return fetchAuraLiveContent(deps, conn, name);
+      }
       throw new ContrailError(
         `${type} ${name} is not in the local snapshot \u2014 run refresh_snapshot with types:["${type}"].`,
         "artifact_not_found"
@@ -33755,6 +34414,7 @@ var init_metadata = __esm({
     init_indexer();
     init_graph();
     init_flowversion();
+    init_package();
     NAME_RE2 = /^[A-Za-z0-9_.\- ()'&$]+(\/[A-Za-z0-9_.\- ()'&$]+)?$/;
     nameOk = (name) => NAME_RE2.test(name) && !name.includes("..") && !name.includes("\\");
     TYPE_RE = /^[A-Za-z]+$/;
@@ -33786,7 +34446,9 @@ var init_metadata = __esm({
       "GenAiPlannerBundle",
       "AiAuthoringBundle",
       // S36
-      "LightningComponentBundle"
+      "LightningComponentBundle",
+      // S41
+      "AuraDefinitionBundle"
     ]);
   }
 });
@@ -35253,7 +35915,7 @@ var init_data = __esm({
 });
 
 // src/deploy/sources.ts
-import crypto3 from "node:crypto";
+import crypto4 from "node:crypto";
 import fs13 from "node:fs";
 import path7 from "node:path";
 function allowedSourceRoots(configured = []) {
@@ -35316,7 +35978,7 @@ function resolveSourceFile(rawPath, configuredRoots = []) {
   return {
     content: bytes.toString("utf8"),
     sourcePath: absPath,
-    sourceSha256: crypto3.createHash("sha256").update(bytes).digest("hex")
+    sourceSha256: crypto4.createHash("sha256").update(bytes).digest("hex")
   };
 }
 var MAX_SOURCE_FILE_BYTES;
@@ -35403,7 +36065,7 @@ function registerDeployTools(server, deps) {
         components: external_exports.array(
           external_exports.object({
             type: external_exports.string().describe(
-              `ApexClass, ApexTrigger, ApexPage, Flow, CustomObject, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, GlobalValueSet, ConnectedApp, NamedCredential / ExternalCredential / AuthProvider (credential metadata NEVER carries working secrets: per-principal values are entered in Setup after deploy, retrieves return placeholders, and principals need externalCredentialPrincipalAccesses on a permission set), PlatformEventChannel(Member), ManagedEventSubscription, Layout, CustomMetadata (records, dotted Type.Record names), LeadConvertSettings (SINGLETON \u2014 api_name is literally "LeadConvertSettings"; a modify replaces ALL lead field mappings, retrieve-first), Report / Dashboard (folder-qualified "FolderDevName/Name" api_names; deploy the ReportFolder/DashboardFolder component first or in the same package for a new folder), ReportFolder / DashboardFolder (content = the whole <ReportFolder> doc with folderShares \u2014 folder sharing is what makes reports visible), Agentforce types Bot, GenAiPlugin (agent topics \u2014 modifying one on an ACTIVE agent needs the human to deactivate it first), GenAiPromptTemplate (activeVersionIdentifier is org-generated: retrieve-first, never hand-type it), GenAiPromptTemplateActv, AiEvaluationDefinition (Testing Center test definitions), BotTemplate, BotBlock, CustomPermission (pairs with a customPermissions grant on a permission set \u2014 ungranted it does nothing), PermissionSetGroup (members DETACH if omitted on modify; the org recalculates grants ASYNCHRONOUSLY after deploy \u2014 verify Status via soql_query), MutingPermissionSet (a muted permission omitted on modify is UN-MUTED \u2014 silently restored to every assigned user), QuickAction (object actions dotted "Account.New_X", global actions bare; surfaced by page layouts, global publisher layouts, or Lightning record pages with dynamic actions \u2014 never by the deploy itself), or child types CustomField / ValidationRule / CustomLabel / ListView / RecordType / BotVersion (dotted MyBot.v1). Bundle types GenAiFunction / GenAiPlannerBundle / AiAuthoringBundle / LightningComponentBundle (one component = a directory of files) take a Contrail bundle ENVELOPE as content: JSON {"contrail_bundle":1, "files": {"<relative path>": "<body>", ...}} \u2014 the file set retrieve_metadata's bundle_files listing shows, main file included (e.g. "My_Fn.genAiFunction-meta.xml"). LightningComponentBundle (LWC) requires <Name>.js + <Name>.js-meta.xml; .html/.css/.svg and subdirectories (e.g. secondary templates) are normal, __tests__ and dot-files never deploy, and the org compiles on deploy. Refresh the snapshot before modifying an org-existing bundle \u2014 the whole directory is replaced. AiAuthoringBundle deploys as a DRAFT STAGE: exactly <Name>.agent (plaintext Agent Script) + <Name>.bundle-meta.xml; nothing compiles and the running agent is unchanged until a human publishes the draft. Agent publish/preview stay human; activate/deactivate goes through agent_activation_propose/execute (its own ritual), and eval runs through run_agent_eval.`
+              `ApexClass, ApexTrigger, ApexPage, Flow, CustomObject, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, GlobalValueSet, ConnectedApp, NamedCredential / ExternalCredential / AuthProvider (credential metadata NEVER carries working secrets: per-principal values are entered in Setup after deploy, retrieves return placeholders, and principals need externalCredentialPrincipalAccesses on a permission set), PlatformEventChannel(Member), ManagedEventSubscription, Layout, CustomMetadata (records, dotted Type.Record names), LeadConvertSettings (SINGLETON \u2014 api_name is literally "LeadConvertSettings"; a modify replaces ALL lead field mappings, retrieve-first), Report / Dashboard (folder-qualified "FolderDevName/Name" api_names; deploy the ReportFolder/DashboardFolder component first or in the same package for a new folder), ReportFolder / DashboardFolder (content = the whole <ReportFolder> doc with folderShares \u2014 folder sharing is what makes reports visible), Agentforce types Bot, GenAiPlugin (agent topics \u2014 modifying one on an ACTIVE agent needs the human to deactivate it first), GenAiPromptTemplate (activeVersionIdentifier is org-generated: retrieve-first, never hand-type it), GenAiPromptTemplateActv, AiEvaluationDefinition (Testing Center test definitions), BotTemplate, BotBlock, CustomPermission (pairs with a customPermissions grant on a permission set \u2014 ungranted it does nothing), PermissionSetGroup (members DETACH if omitted on modify; the org recalculates grants ASYNCHRONOUSLY after deploy \u2014 verify Status via soql_query), MutingPermissionSet (a muted permission omitted on modify is UN-MUTED \u2014 silently restored to every assigned user), QuickAction (object actions dotted "Account.New_X", global actions bare; surfaced by page layouts, global publisher layouts, or Lightning record pages with dynamic actions \u2014 never by the deploy itself), or child types CustomField / ValidationRule / CustomLabel / ListView / RecordType / BotVersion (dotted MyBot.v1). Bundle types GenAiFunction / GenAiPlannerBundle / AiAuthoringBundle / LightningComponentBundle / AuraDefinitionBundle (one component = a directory of files) take a Contrail bundle ENVELOPE as content: JSON {"contrail_bundle":1, "files": {"<relative path>": "<body>", ...}} \u2014 the file set retrieve_metadata's bundle_files listing shows, main file included (e.g. "My_Fn.genAiFunction-meta.xml"). LightningComponentBundle (LWC) requires <Name>.js + <Name>.js-meta.xml; .html/.css/.svg and subdirectories (e.g. secondary templates) are normal, __tests__ and dot-files never deploy, and the org compiles on deploy. AuraDefinitionBundle is FLAT (no subfolders), every file <Name>-prefixed, exactly ONE primary (<Name>.cmp|.app|.evt|.intf|.tokens) plus its required <Name>.<kind>-meta.xml (pins apiVersion); secondaries are <Name>Controller/Helper/Renderer.js, .css, .design (.cmp only), .svg, .auradoc; namespace-free names only. Refresh the snapshot before modifying an org-existing bundle \u2014 the whole directory is replaced (files the envelope omits are DELETED org-side). AiAuthoringBundle deploys as a DRAFT STAGE: exactly <Name>.agent (plaintext Agent Script) + <Name>.bundle-meta.xml; nothing compiles and the running agent is unchanged until a human publishes the draft. Agent publish/preview stay human; activate/deactivate goes through agent_activation_propose/execute (its own ritual), and eval runs through run_agent_eval.`
             ),
             api_name: external_exports.string().describe("Full API name; children dotted (Account.MyField__c)."),
             content: external_exports.string().optional().describe(
@@ -35415,17 +36077,37 @@ function registerDeployTools(server, deps) {
           })
         ).max(50).optional().describe("Components to create or update."),
         destructive: external_exports.array(external_exports.object({ type: external_exports.string(), api_name: external_exports.string() })).max(50).optional().describe("Components to DELETE. Deletions are destructive and flagged prominently."),
+        allow_unregistered_delete: external_exports.boolean().optional().describe(
+          "Required true to delete a component of a type Contrail cannot read \u2014 such a delete is BLIND (no content, no dependent listing) and the approval page says so. Translation types are refused regardless (Setup / per-entry Tooling are their routes)."
+        ),
         test_level: external_exports.enum(["NoTestRun", "RunLocalTests", "RunSpecifiedTests", "RunAllTestsInOrg"]).optional().describe(
           "OMIT unless you have a reason: the org then applies its own default \u2014 sandboxes run no tests; production runs local tests when the package carries Apex and none otherwise. Production REFUSES an explicit NoTestRun, so never send it there (a no-Apex prod deploy just omits this). RunSpecifiedTests needs run_tests."
         ),
         run_tests: external_exports.array(external_exports.string()).max(50).optional().describe("Test classes for RunSpecifiedTests."),
         dry_run: external_exports.boolean().optional().describe(
           "true = SILENT org-side validation for mid-build checks: full results (errors, warnings, permission coverage, tests), but NO approval request, code, or page is created, nothing becomes executable, and a pending approval on this connection is left untouched (a normal validate supersedes it). Use freely while iterating; the FINAL validate omits it so the human sees exactly one meaningful approval."
+        ),
+        job_id: external_exports.string().optional().describe(
+          "Poll a RUNNING validation by the job_id an earlier call returned \u2014 pass {connection, job_id} ALONE; nothing is re-sent and no content_file is re-read. Jobs are keyed by their input, so a poll only ever returns the result of the exact validation it names (re-sending identical full arguments attaches to the same job too)."
         )
       }
     },
     async (args) => guarded(async () => {
       const conn = requireConnection(args.connection, "validate_deploy");
+      if (args.job_id !== void 0) {
+        if (args.components?.length || args.destructive?.length || args.test_level !== void 0 || args.run_tests !== void 0 || args.dry_run !== void 0 || args.allow_unregistered_delete !== void 0) {
+          return fail(
+            "Pass job_id ALONE to poll a running validation \u2014 or the full arguments (without job_id) to start one. A poll cannot change the job's options: they are part of its identity."
+          );
+        }
+        const polled = await deploys.pollValidate(conn, args.job_id);
+        if (!polled) {
+          return fail(
+            `No running or uncollected validation job "${args.job_id}" on "${conn.alias}" \u2014 its result may already have been collected. Re-send the full arguments to validate again.`
+          );
+        }
+        return renderValidateOutcome(polled, conn);
+      }
       const components = (args.components ?? []).map((c) => {
         const hasInline = typeof c.content === "string";
         if (hasInline && c.content_file) {
@@ -35457,6 +36139,11 @@ function registerDeployTools(server, deps) {
       if (args.test_level === "RunSpecifiedTests" && !args.run_tests?.length) {
         return fail("RunSpecifiedTests requires run_tests.");
       }
+      if (args.test_level === "NoTestRun" && conn.orgType === "production") {
+        return fail(
+          `test_level NoTestRun is refused locally on "${conn.alias}" (production): the org rejects it org-side anyway. OMIT test_level \u2014 production then runs local tests for Apex packages and no tests otherwise.`
+        );
+      }
       const outcome = await deploys.validateDeploy(conn, {
         components,
         destructive,
@@ -35465,38 +36152,43 @@ function registerDeployTools(server, deps) {
         // a no-Apex package (it rejects an explicit NoTestRun).
         testLevel: args.test_level,
         runTests: args.run_tests ?? [],
-        dryRun: args.dry_run === true
+        dryRun: args.dry_run === true,
+        allowUnregisteredDelete: args.allow_unregistered_delete === true
       });
-      switch (outcome.status) {
-        case "in_progress":
-          return ok(
-            { progress: outcome.progress, started_at: outcome.started_at },
-            "Validation is still running \u2014 call validate_deploy again with the same connection AND the same arguments (including dry_run) to check on it."
-          );
-        case "failed":
-          return fail(`Validation errored: ${outcome.error}`);
-        case "complete": {
-          const r = outcome.result;
-          if (!r.validation_passed) {
-            return ok(
-              r.failure ?? {},
-              args.dry_run === true ? "Dry run: validation FAILED." : "Validation FAILED \u2014 no confirmation code was issued."
-            );
-          }
-          if (r.summary?.request_id === null) {
-            return ok(
-              { ...r.summary, dry_run: true },
-              "DRY RUN passed \u2014 no approval request or code exists, and nothing can be executed from this through Contrail. When the package is final, validate again without dry_run to propose it for approval."
-            );
-          }
-          return ok(
-            { ...r.summary, approval_page: r.approval },
-            `Validation passed. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`
-          );
-        }
-      }
+      return renderValidateOutcome(outcome, conn);
     })
   );
+  function renderValidateOutcome(outcome, conn) {
+    const isDry = outcome.job_id.startsWith("vdry-");
+    switch (outcome.status) {
+      case "in_progress":
+        return ok(
+          { job_id: outcome.job_id, progress: outcome.progress, started_at: outcome.started_at },
+          `Validation is still running \u2014 poll with {connection, job_id: "${outcome.job_id}"} (or re-send the same full arguments, which attaches to this same job).`
+        );
+      case "failed":
+        return fail(`Validation errored (job ${outcome.job_id}): ${outcome.error}`);
+      case "complete": {
+        const r = outcome.result;
+        if (!r.validation_passed) {
+          return ok(
+            { ...r.failure ?? {}, job_id: outcome.job_id },
+            isDry ? "Dry run: validation FAILED." : "Validation FAILED \u2014 no confirmation code was issued."
+          );
+        }
+        if (r.summary?.request_id === null) {
+          return ok(
+            { ...r.summary, dry_run: true, job_id: outcome.job_id },
+            "DRY RUN passed \u2014 no approval request or code exists, and nothing can be executed from this through Contrail. When the package is final, validate again without dry_run to propose it for approval."
+          );
+        }
+        return ok(
+          { ...r.summary, job_id: outcome.job_id, approval_page: r.approval },
+          `Validation passed. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`
+        );
+      }
+    }
+  }
   server.registerTool(
     "deactivate_flow",
     {
@@ -35523,7 +36215,7 @@ function registerDeployTools(server, deps) {
       switch (outcome.status) {
         case "in_progress":
           return ok(
-            { progress: outcome.progress, started_at: outcome.started_at },
+            { job_id: outcome.job_id, progress: outcome.progress, started_at: outcome.started_at },
             "Still validating \u2014 call deactivate_flow again with the same flow to check on it."
           );
         case "failed":
