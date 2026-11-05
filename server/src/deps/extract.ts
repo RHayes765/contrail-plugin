@@ -16,8 +16,34 @@ export interface Ref {
   toName: string;
 }
 
+/**
+ * S41: resolve a c:-namespace component reference. Aura markup children,
+ * FlexiPage componentName, Flow component actions and screen extensions all
+ * write `c:<name>`, which can be an Aura bundle OR an LWC — the platform
+ * forbids sharing a name, so the index answers which (Aura checked first).
+ * A name known to NEITHER map adds NO edge: a wrongly-TYPED dangling edge
+ * would poison blast radius. The cost is honest and bounded: the edge
+ * appears when the REFERENCING artifact's type is next refreshed with the
+ * bundle already indexed — a partial refresh of the bundle type ALONE does
+ * not rebuild other types' outbound edges, so refresh the referencing
+ * types (FlexiPage, Flow, …) too when inbound Aura/LWC edges matter.
+ */
+function addComponentRef(refs: RefSet, raw: string | undefined, known?: KnownArtifacts): void {
+  if (!raw) return;
+  const name = raw.trim().replace(/^(markup:\/\/)?c:/, '');
+  if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(name)) return;
+  const key = name.toLowerCase();
+  const aura = known?.aura.get(key);
+  if (aura) {
+    refs.add('AuraDefinitionBundle', aura);
+    return;
+  }
+  const lwc = known?.lwc.get(key);
+  if (lwc) refs.add('LightningComponentBundle', lwc);
+}
+
 /** Extract references from one flow's XML. */
-export function extractFlowRefs(xml: string): Ref[] {
+export function extractFlowRefs(xml: string, known?: KnownArtifacts): Ref[] {
   const refs: RefSet = new RefSet();
   let doc: Record<string, unknown>;
   try {
@@ -54,6 +80,16 @@ export function extractFlowRefs(xml: string): Ref[] {
     if (node.actionType === 'flow' && typeof node.actionName === 'string') {
       refs.add('Flow', node.actionName);
     }
+    // S41: Lightning-component actions — real orgs route flows through
+    // c:-namespace Aura components (previously invisible to the graph).
+    if (node.actionType === 'component' && typeof node.actionName === 'string') {
+      addComponentRef(refs, node.actionName, known);
+    }
+  }
+  // S41: screen components — a raw pass (screens nest fields inside regions
+  // arbitrarily deep; the regex sees every <extensionName> wherever it sits).
+  for (const m of xml.matchAll(/<extensionName>\s*(c:[A-Za-z][A-Za-z0-9_]*)\s*<\/extensionName>/g)) {
+    addComponentRef(refs, m[1], known);
   }
   for (const node of asArray(flow.subflows as Record<string, unknown>[])) {
     if (node && typeof node === 'object' && typeof node.flowName === 'string') {
@@ -338,10 +374,102 @@ export function extractQuickActionRefs(xml: string, apiName: string): Ref[] {
   if (flow) refs.add('Flow', flow);
   const lwc = xml.match(/<lightningWebComponent>([^<]+)<\/lightningWebComponent>/)?.[1];
   if (lwc) refs.add('LightningComponentBundle', lwc);
+  // S41: Aura quick actions declare their component in their OWN tag —
+  // typed by the grammar itself, no index lookup needed (optional c: prefix
+  // stripped; the dangling edge is correct even before the bundle indexes).
+  // A FOREIGN-namespace value (ns:Comp) is managed — skipped, not malformed
+  // into a colon-bearing edge name nothing can ever join.
+  const auraCmp = xml.match(/<lightningComponent>([^<]+)<\/lightningComponent>/)?.[1]?.trim();
+  if (auraCmp && (!auraCmp.includes(':') || auraCmp.startsWith('c:'))) {
+    refs.add('AuraDefinitionBundle', auraCmp.replace(/^c:/, ''));
+  }
   const page = xml.match(/<page>([^<]+)<\/page>/)?.[1];
   if (page) refs.add('ApexPage', page);
   const parent = apiName.includes('.') ? apiName.split('.')[0]! : '';
   if (/__c$/i.test(parent)) refs.add('CustomObject', parent);
+  return refs.list();
+}
+
+/**
+ * S41: FlexiPage → the custom components it places. Every custom placement
+ * (Aura or LWC alike) writes `<componentName>c:<name></componentName>` —
+ * the edge from a utility bar to its background item, and the inbound-edge
+ * gap LWC shipped with in S36. Standard components (flexipage:*,
+ * lightning:*) are not references to org metadata.
+ */
+export function extractFlexiPageRefs(xml: string, known?: KnownArtifacts): Ref[] {
+  const refs = new RefSet();
+  for (const m of xml.matchAll(
+    /<componentName>\s*(c:[A-Za-z][A-Za-z0-9_]*)\s*<\/componentName>/g,
+  )) {
+    addComponentRef(refs, m[1], known);
+  }
+  return refs.list();
+}
+
+/**
+ * S41: CustomTab → the Aura component it hosts (<auraComponent>, field name
+ * confirmed). LWC tabs use a different shape that is still unverified — no
+ * guessed arm for it.
+ */
+export function extractCustomTabRefs(xml: string): Ref[] {
+  const refs = new RefSet();
+  const aura = xml.match(/<auraComponent>([^<]+)<\/auraComponent>/)?.[1]?.trim();
+  // Foreign-namespace values (ns:Comp) are managed — skipped, see the
+  // QuickAction arm.
+  if (aura && (!aura.includes(':') || aura.startsWith('c:'))) {
+    refs.add('AuraDefinitionBundle', aura.replace(/^c:/, ''));
+  }
+  return refs.list();
+}
+
+/**
+ * S41: Aura bundle → everything its source names. Runs over the bundle's
+ * RAW concatenated index content (markup + js + css + design under
+ * contrail:file headers) — same no-stripping doctrine as extractLwcRefs:
+ * every token below lives inside markup or string literals. Standard
+ * interface markers (lightning:backgroundUtilityItem, flexipage:availableFor*)
+ * are placement facts, not references — deliberately no edge. $Resource
+ * gives no edge until StaticResource is a registered type (LWC precedent).
+ */
+export function extractAuraRefs(content: string, known: KnownArtifacts): Ref[] {
+  const refs = new RefSet();
+  // Markup composition: <c:child>, and the c: halves of extends/implements/
+  // tokens attribute lists.
+  for (const m of content.matchAll(/<c:([A-Za-z][A-Za-z0-9_]*)/g)) {
+    addComponentRef(refs, m[1], known);
+  }
+  for (const m of content.matchAll(/\b(?:extends|implements|tokens)="([^"]+)"/g)) {
+    for (const part of m[1]!.split(',')) {
+      if (part.trim().startsWith('c:')) addComponentRef(refs, part, known);
+    }
+  }
+  for (const m of content.matchAll(/<aura:handler[^>]*\bevent="(c:[^"]+)"/g)) {
+    addComponentRef(refs, m[1], known);
+  }
+  for (const m of content.matchAll(/<aura:registerEvent[^>]*\btype="(c:[^"]+)"/g)) {
+    addComponentRef(refs, m[1], known);
+  }
+  for (const m of content.matchAll(/<aura:dependency[^>]*\bresource="([^"]+)"/g)) {
+    addComponentRef(refs, m[1], known);
+  }
+  for (const m of content.matchAll(/\$A\.createComponent\(\s*["'](c:[^"']+)["']/g)) {
+    addComponentRef(refs, m[1], known);
+  }
+  // Server-side controller and design datasources are Apex. A dotted
+  // controller is a namespaced (installed) class — skipped, not local.
+  for (const m of content.matchAll(/\bcontroller="([A-Za-z][A-Za-z0-9_.]*)"/g)) {
+    if (!m[1]!.includes('.')) refs.add('ApexClass', m[1]!);
+  }
+  for (const m of content.matchAll(/datasource="apex:\/\/([A-Za-z][A-Za-z0-9_]*)"/g)) {
+    refs.add('ApexClass', m[1]!);
+  }
+  for (const m of content.matchAll(/<sfdc:object>\s*([A-Za-z0-9_]+)\s*<\/sfdc:object>/g)) {
+    refs.add('CustomObject', m[1]!);
+  }
+  for (const m of content.matchAll(/\$Label\.c\.([A-Za-z][A-Za-z0-9_]*)/g)) {
+    refs.add('CustomLabel', m[1]!);
+  }
   return refs.list();
 }
 
@@ -401,6 +529,14 @@ export interface KnownArtifacts {
   flows: Map<string, string>;
   /** Short field name (amount__c) → every qualified name holding it; unambiguous ones resolve Apex refs. */
   fieldsByShortName: Map<string, string[]>;
+  /**
+   * S41: c:-namespace references (Aura markup children, FlexiPage
+   * componentName, Flow component actions/extensions) can name an Aura
+   * bundle OR an LWC — the platform forbids sharing a name, so a lookup
+   * resolves to exactly one. Both maps are needed to type the edge.
+   */
+  aura: Map<string, string>;
+  lwc: Map<string, string>;
 }
 
 export function buildKnownArtifacts(
@@ -412,10 +548,14 @@ export function buildKnownArtifacts(
     fields: new Map(),
     flows: new Map(),
     fieldsByShortName: new Map(),
+    aura: new Map(),
+    lwc: new Map(),
   };
   for (const a of artifacts) {
     const key = a.apiName.toLowerCase();
     if (a.type === 'ApexClass') known.classes.set(key, a.apiName);
+    else if (a.type === 'AuraDefinitionBundle') known.aura.set(key, a.apiName);
+    else if (a.type === 'LightningComponentBundle') known.lwc.set(key, a.apiName);
     else if (a.type === 'CustomObject') known.objects.set(key, a.apiName);
     else if (a.type === 'CustomField') {
       known.fields.set(key, a.apiName);
@@ -457,7 +597,7 @@ export function extractAllEdges(
   };
 
   for (const a of artifacts) {
-    if (a.type === 'Flow') add('Flow', a.apiName, extractFlowRefs(a.content));
+    if (a.type === 'Flow') add('Flow', a.apiName, extractFlowRefs(a.content, known));
     else if (a.type === 'ApexClass' || a.type === 'ApexTrigger') {
       add(a.type, a.apiName, extractApexRefs(a.content, known, a.apiName));
     } else if (a.type === 'CustomField' || a.type === 'ValidationRule') {
@@ -485,6 +625,12 @@ export function extractAllEdges(
       add(a.type, a.apiName, extractQuickActionRefs(a.content, a.apiName));
     } else if (a.type === 'LightningComponentBundle') {
       add(a.type, a.apiName, extractLwcRefs(a.content));
+    } else if (a.type === 'AuraDefinitionBundle') {
+      add(a.type, a.apiName, extractAuraRefs(a.content, known));
+    } else if (a.type === 'FlexiPage') {
+      add(a.type, a.apiName, extractFlexiPageRefs(a.content, known));
+    } else if (a.type === 'CustomTab') {
+      add(a.type, a.apiName, extractCustomTabRefs(a.content));
     }
   }
   return edges;

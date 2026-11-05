@@ -1630,3 +1630,423 @@ describe('S36: permissions & UI-action types', () => {
     expect(lwc[0]!.content).toContain('contrail:file lwc/navCard/templates/alt.html');
   });
 });
+
+describe('S41: AuraDefinitionBundle', () => {
+  const conn = { id: 'conn-1', alias: 'dev' } as ConnectionRecord;
+  const V41 = '66.0';
+
+  function envelope(files: Record<string, string>): string {
+    return JSON.stringify({ contrail_bundle: 1, files });
+  }
+  const META =
+    '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    '<AuraDefinitionBundle xmlns="http://soap.sforce.com/2006/04/metadata">\n' +
+    '    <apiVersion>66.0</apiVersion>\n</AuraDefinitionBundle>\n';
+  const metaAt = (ver: string) => META.replace('66.0', ver);
+  const CMP =
+    '<aura:component implements="lightning:backgroundUtilityItem" access="global">' +
+    '<c:childCmp/></aura:component>';
+
+  function popEnvelope(extra: Record<string, string> = {}, omit: string[] = []): string {
+    const files: Record<string, string> = {
+      'voiceCallPop.cmp': CMP,
+      'voiceCallPop.cmp-meta.xml': META,
+      'voiceCallPopController.js': '({ onCall: function (cmp) {} })',
+      'voiceCallPop.design': '<design:component label="Voice Call Pop"/>',
+      ...extra,
+    };
+    for (const k of omit) delete files[k];
+    return envelope(files);
+  }
+
+  const dbNone = {
+    getArtifact: () => null,
+    edgesTo: () => [],
+  } as unknown as ContrailDb;
+  const storeNone = {
+    readCurrentFile: () => null,
+    listCurrentFiles: () => [],
+  } as unknown as SnapshotStore;
+
+  it('places a .cmp bundle flat under aura/<n>/ with ONE package.xml member', () => {
+    const built = buildDeployZip(
+      [comp('AuraDefinitionBundle', 'voiceCallPop', popEnvelope())],
+      [],
+      V41,
+      noMeta,
+    );
+    expect(built.files).toContain('aura/voiceCallPop/voiceCallPop.cmp');
+    expect(built.files).toContain('aura/voiceCallPop/voiceCallPop.cmp-meta.xml');
+    expect(built.files).toContain('aura/voiceCallPop/voiceCallPopController.js');
+    expect(built.packageXml).toContain('<members>voiceCallPop</members>');
+    expect(built.packageXml).toContain('<name>AuraDefinitionBundle</name>');
+    // ONE member per bundle — never one per file.
+    expect(built.packageXml.match(/<members>/g)).toHaveLength(1);
+    expect(zipText(built.zip, 'aura/voiceCallPop/voiceCallPop.cmp')).toContain('aura:component');
+  });
+
+  it('an .app bundle resolves its own primary (multi-candidate main)', () => {
+    const built = buildDeployZip(
+      [
+        comp(
+          'AuraDefinitionBundle',
+          'consoleApp',
+          envelope({
+            'consoleApp.app': '<aura:application/>',
+            'consoleApp.app-meta.xml': META,
+          }),
+        ),
+      ],
+      [],
+      V41,
+      noMeta,
+    );
+    expect(built.files).toContain('aura/consoleApp/consoleApp.app');
+  });
+
+  it('each grammar mistake is refused with ITS OWN message', () => {
+    const cases: Array<{ env: string; name?: string; re: RegExp }> = [
+      // Zero primaries.
+      {
+        env: envelope({ 'voiceCallPopController.js': '({})', 'voiceCallPop.cmp-meta.xml': META }),
+        re: /NO primary file — exactly one of/,
+      },
+      // Two primaries.
+      {
+        env: envelope({
+          'voiceCallPop.cmp': CMP,
+          'voiceCallPop.app': '<aura:application/>',
+          'voiceCallPop.cmp-meta.xml': META,
+        }),
+        re: /MORE THAN ONE primary/,
+      },
+      // A subfolder in a FLAT bundle.
+      {
+        env: popEnvelope({ 'helpers/extra.js': '({})' }),
+        re: /FLAT: no subfolders/,
+      },
+      // Provider.js is not part of the bundle format.
+      {
+        env: popEnvelope({ 'voiceCallPopProvider.js': '({})' }),
+        re: /Provider\/Model\/Test files are not/,
+      },
+      // .design belongs to component bundles only.
+      {
+        env: envelope({
+          'alertEvt.evt': '<aura:event type="APPLICATION"/>',
+          'alertEvt.evt-meta.xml': META,
+          'alertEvt.design': '<design:component/>',
+        }),
+        name: 'alertEvt',
+        re: /\.design belongs only to a component/,
+      },
+      // A stray meta not named after the primary.
+      {
+        env: popEnvelope({ 'voiceCallPop.app-meta.xml': META }),
+        re: /only meta file is "voiceCallPop\.cmp-meta\.xml"/,
+      },
+      // Missing the required meta.
+      {
+        env: popEnvelope({}, ['voiceCallPop.cmp-meta.xml']),
+        re: /missing "voiceCallPop\.cmp-meta\.xml"/,
+      },
+      // A file not prefixed with the bundle name.
+      {
+        env: popEnvelope({ 'other.css': '.x{}' }),
+        re: /starts with the bundle name/,
+      },
+    ];
+    for (const { env, name, re } of cases) {
+      expect(() =>
+        buildDeployZip([comp('AuraDefinitionBundle', name ?? 'voiceCallPop', env)], [], V41, noMeta),
+      ).toThrow(re);
+    }
+    // Name grammar: namespaced and malformed names get separate refusals.
+    expect(() =>
+      buildDeployZip([comp('AuraDefinitionBundle', 'ns__Pop', popEnvelope())], [], V41, noMeta),
+    ).toThrow(/namespaced bundle/);
+    expect(() =>
+      buildDeployZip([comp('AuraDefinitionBundle', 'pop_', popEnvelope())], [], V41, noMeta),
+    ).toThrow(/Lightning developer name/);
+    // Per-file size cap.
+    expect(() =>
+      buildDeployZip(
+        [
+          comp(
+            'AuraDefinitionBundle',
+            'voiceCallPop',
+            popEnvelope({ 'voiceCallPop.css': 'x'.repeat(1_000_001) }),
+          ),
+        ],
+        [],
+        V41,
+        noMeta,
+      ),
+    ).toThrow(/1,000,000-byte/);
+  });
+
+  it('tokens/event bundles take only their allowed files', () => {
+    // A tokens bundle is main + meta only.
+    expect(() =>
+      buildDeployZip(
+        [
+          comp(
+            'AuraDefinitionBundle',
+            'brandTokens',
+            envelope({
+              'brandTokens.tokens': '<aura:tokens/>',
+              'brandTokens.tokens-meta.xml': META,
+              'brandTokensController.js': '({})',
+            }),
+          ),
+        ],
+        [],
+        V41,
+        noMeta,
+      ),
+    ).toThrow(/not a valid file for a \.tokens bundle/);
+    // An event bundle allows .auradoc.
+    const ok = buildDeployZip(
+      [
+        comp(
+          'AuraDefinitionBundle',
+          'alertEvt',
+          envelope({
+            'alertEvt.evt': '<aura:event type="APPLICATION"/>',
+            'alertEvt.evt-meta.xml': META,
+            'alertEvt.auradoc': '<aura:documentation/>',
+          }),
+        ),
+      ],
+      [],
+      V41,
+      noMeta,
+    );
+    expect(ok.files).toContain('aura/alertEvt/alertEvt.auradoc');
+  });
+
+  it('INERT UNTIL PLACED fires for an unreferenced surface component; info line always', () => {
+    const { changes } = analyzeChanges(
+      dbNone,
+      storeNone,
+      conn,
+      [comp('AuraDefinitionBundle', 'voiceCallPop', popEnvelope())],
+      [],
+    );
+    expect(changes[0]!.change).toBe('add');
+    const text = changes[0]!.warnings.join(' ');
+    expect(text).toMatch(/INERT UNTIL PLACED/);
+    expect(text).toMatch(/Background region/);
+    expect(text).toMatch(/Consoles already open keep the OLD definition/);
+
+    // Referenced by another package component: the arm stays quiet.
+    const placed = analyzeChanges(
+      dbNone,
+      storeNone,
+      conn,
+      [
+        comp('AuraDefinitionBundle', 'voiceCallPop', popEnvelope()),
+        comp(
+          'FlexiPage',
+          'Console_Bar',
+          '<FlexiPage><componentName>c:voiceCallPop</componentName></FlexiPage>',
+        ),
+      ],
+      [],
+    );
+    expect(placed.changes[0]!.warnings.join(' ')).not.toMatch(/INERT UNTIL PLACED/);
+  });
+
+  it('BUNDLE REPLACE on modify names removed files; KIND CHANGE is refused', () => {
+    const snapshot: Record<string, string> = {
+      'aura/voiceCallPop/voiceCallPop.cmp': CMP,
+      'aura/voiceCallPop/voiceCallPop.cmp-meta.xml': META,
+      'aura/voiceCallPop/voiceCallPop.css': '.old {}',
+    };
+    const db = {
+      getArtifact: () => ({ filePath: 'aura/voiceCallPop/voiceCallPop.cmp' }),
+      edgesTo: () => [],
+    } as unknown as ContrailDb;
+    const store = {
+      readCurrentFile: (_c: string, rel: string) => snapshot[rel] ?? null,
+      listCurrentFiles: (_c: string, prefix: string) =>
+        Object.keys(snapshot).filter((k) => k.startsWith(prefix)),
+    } as unknown as SnapshotStore;
+    const { changes } = analyzeChanges(
+      db,
+      store,
+      conn,
+      [comp('AuraDefinitionBundle', 'voiceCallPop', popEnvelope())],
+      [],
+    );
+    expect(changes[0]!.change).toBe('modify');
+    const text = changes[0]!.warnings.join(' ');
+    expect(text).toMatch(/BUNDLE REPLACE/);
+    expect(text).toMatch(/removed: voiceCallPop\.css/);
+
+    // Same name, different kind: refused outright (untested platform path).
+    expect(() =>
+      analyzeChanges(
+        db,
+        store,
+        conn,
+        [
+          comp(
+            'AuraDefinitionBundle',
+            'voiceCallPop',
+            envelope({ 'voiceCallPop.app': '<aura:application/>', 'voiceCallPop.app-meta.xml': META }),
+          ),
+        ],
+        [],
+      ),
+    ).toThrow(/changing a bundle's kind/);
+  });
+
+  it('crossing the 39/40 apiVersion boundary warns about Locker, phrased as an org matter', () => {
+    const snapshot: Record<string, string> = {
+      'aura/voiceCallPop/voiceCallPop.cmp': CMP,
+      'aura/voiceCallPop/voiceCallPop.cmp-meta.xml': metaAt('39.0'),
+    };
+    const db = {
+      getArtifact: () => ({ filePath: 'aura/voiceCallPop/voiceCallPop.cmp' }),
+      edgesTo: () => [],
+    } as unknown as ContrailDb;
+    const store = {
+      readCurrentFile: (_c: string, rel: string) => snapshot[rel] ?? null,
+      listCurrentFiles: (_c: string, prefix: string) =>
+        Object.keys(snapshot).filter((k) => k.startsWith(prefix)),
+    } as unknown as SnapshotStore;
+    const { changes } = analyzeChanges(
+      db,
+      store,
+      conn,
+      [
+        comp(
+          'AuraDefinitionBundle',
+          'voiceCallPop',
+          envelope({ 'voiceCallPop.cmp': CMP, 'voiceCallPop.cmp-meta.xml': metaAt('66.0') }),
+        ),
+      ],
+      [],
+    );
+    const text = changes[0]!.warnings.join(' ');
+    expect(text).toMatch(/39\/40 boundary/);
+    expect(text).toMatch(/LWS is an org setting/);
+  });
+
+  it('ORDERING: a host referencing a bundle in neither package nor index warns on the HOST', () => {
+    const { changes } = analyzeChanges(
+      dbNone,
+      storeNone,
+      conn,
+      [
+        comp(
+          'FlexiPage',
+          'Console_Bar',
+          '<FlexiPage><componentName>c:ghostCmp</componentName></FlexiPage>',
+        ),
+      ],
+      [],
+    );
+    const host = changes.find((c) => c.api_name === 'Console_Bar')!;
+    expect(host.warnings.join(' ')).toMatch(/ghostCmp .*neither this package nor the snapshot/);
+  });
+
+  it('destructive: whole-bundle delete warning with dependents; unregistered types flagged', () => {
+    const db = {
+      getArtifact: () => ({ filePath: 'x' }),
+      edgesTo: () => [
+        { fromType: 'FlexiPage', fromName: 'Console_Bar', toType: 'AuraDefinitionBundle', toName: 'voiceCallPop' },
+      ],
+    } as unknown as ContrailDb;
+    const { destructive } = analyzeChanges(db, storeNone, conn, [], [
+      { type: 'AuraDefinitionBundle', api_name: 'voiceCallPop' },
+      { type: 'PresenceUserConfig', api_name: 'Voice_Agents' },
+    ]);
+    expect(destructive[0]!.warnings.join(' ')).toMatch(/ENTIRE bundle/);
+    expect(destructive[0]!.warnings.join(' ')).toMatch(/FlexiPage:Console_Bar/);
+    expect(destructive[1]!.warnings.join(' ')).toMatch(/UNREGISTERED TYPE DELETE/);
+  });
+
+  it('a server-side controller warns on the bundle unless a package permission set grants it', () => {
+    const pop = comp(
+      'AuraDefinitionBundle',
+      'voiceCallPop',
+      popEnvelope({
+        'voiceCallPop.cmp': '<aura:component controller="VoicePopController"/>',
+      }),
+    );
+    const bare = analyzeChanges(dbNone, storeNone, conn, [pop], []);
+    const text = bare.changes[0]!.warnings.join(' ');
+    expect(text).toMatch(/server-side controller "VoicePopController"/);
+    expect(text).toMatch(/classAccesses/);
+    // Honest about its own blindness: the grant may live org-side already.
+    expect(text).toMatch(/may already be granted org-side/);
+
+    const granted = analyzeChanges(
+      dbNone,
+      storeNone,
+      conn,
+      [
+        pop,
+        comp(
+          'PermissionSet',
+          'Voice_Access',
+          '<PermissionSet><classAccesses><apexClass>VoicePopController</apexClass>' +
+            '<enabled>true</enabled></classAccesses></PermissionSet>',
+        ),
+      ],
+      [],
+    );
+    expect(granted.changes[0]!.warnings.join(' ')).not.toMatch(/server-side controller/);
+
+    // The coverage TABLE deliberately has no Aura arm: a needs-row would
+    // claim certainty the engine lacks (the class is usually long-deployed
+    // and granted org-side) — the advisory above is a warning, not a need.
+    expect(analyzePermissionCoverage([pop]).uncovered).toHaveLength(0);
+  });
+
+  it('deployZipEntryPath: probes resolve the real primary; no probe = no guessed path', async () => {
+    const { deployZipEntryPath } = await import('../deploy/package.js');
+    for (const [name, ext] of [
+      ['voiceCallPop', '.cmp'],
+      ['consoleApp', '.app'],
+      ['alertEvt', '.evt'],
+    ] as const) {
+      const entries = [`aura/${name}/${name}${ext}`, `aura/${name}/${name}${ext}-meta.xml`];
+      const entry = deployZipEntryPath('AuraDefinitionBundle', name, { zipEntries: entries });
+      expect(entry).toMatchObject({ path: `aura/${name}/${name}${ext}`, bundleDir: `aura/${name}/` });
+    }
+    const blind = deployZipEntryPath('AuraDefinitionBundle', 'voiceCallPop');
+    expect(blind).toMatchObject({ path: '', bundleDir: 'aura/voiceCallPop/' });
+    expect((blind as { mainCandidates?: string[] }).mainCandidates).toContain(
+      'aura/voiceCallPop/voiceCallPop.cmp',
+    );
+  });
+
+  it('indexes an .app bundle resolving its main without the alphabetical fallback', () => {
+    const files = new Map<string, Uint8Array>([
+      // 'aaa.css' sorts BEFORE the .app file — the fallback would pick it.
+      ['aura/consoleApp/consoleApp.css', strToU8('.x {}')],
+      ['aura/consoleApp/consoleApp.app', strToU8('<aura:application/>')],
+      ['aura/consoleApp/consoleApp.app-meta.xml', strToU8(META)],
+    ]);
+    const rows = indexSnapshotFiles(files, [], '2026-11-04T00:00:00.000Z');
+    const aura = rows.filter((r) => r.type === 'AuraDefinitionBundle');
+    expect(aura).toHaveLength(1);
+    expect(aura[0]!.apiName).toBe('consoleApp');
+    expect(aura[0]!.filePath).toBe('aura/consoleApp/consoleApp.app');
+    expect(aura[0]!.content).toContain('contrail:file aura/consoleApp/consoleApp.app-meta.xml');
+  });
+
+  it('indexes a meta-less bundle (old retrieves) without complaint', () => {
+    const files = new Map<string, Uint8Array>([
+      ['aura/OpenURL/OpenURL.cmp', strToU8('<aura:component/>')],
+      ['aura/OpenURL/OpenURLController.js', strToU8('({})')],
+    ]);
+    const rows = indexSnapshotFiles(files, [], '2026-11-04T00:00:00.000Z');
+    const aura = rows.filter((r) => r.type === 'AuraDefinitionBundle');
+    expect(aura).toHaveLength(1);
+    expect(aura[0]!.filePath).toBe('aura/OpenURL/OpenURL.cmp');
+  });
+});

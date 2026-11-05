@@ -76,9 +76,25 @@ interface FileSpec {
    * The main file's name suffix inside the bundle dir (live-confirmed:
    * GenAiFunction's main XML retrieves as `<n>.genAiFunction-meta.xml`,
    * GenAiPlannerBundle's as bare `<n>.genAiPlannerBundle`). The envelope
-   * MUST contain `<apiName><envelopeMainSuffix>`.
+   * MUST contain `<apiName><envelopeMainSuffix>`. S41: an ARRAY means the
+   * bundle's kind is caller-chosen — the envelope must contain EXACTLY ONE
+   * of the candidates (Aura: .cmp|.app|.evt|.intf|.tokens).
    */
-  envelopeMainSuffix?: string;
+  envelopeMainSuffix?: string | string[];
+  /**
+   * S41: the main file's own `-meta.xml` is REQUIRED on deploy. Expressed
+   * separately from requiredSuffixes because the meta's NAME depends on
+   * which main file was found (`voiceCallPop.cmp-meta.xml`). The platform
+   * itself tolerates its absence (old bundles retrieve without one);
+   * Contrail requires it on deploy to pin apiVersion explicitly.
+   */
+  requireMainMeta?: true;
+  /**
+   * S41: the bundle is FLAT — no subfolders in envelope paths (Aura).
+   * Bundle types without this keep BUNDLE_MAX_DEPTH subfolders (LWC
+   * templates/ is real, live-confirmed in S36).
+   */
+  flat?: true;
   /**
    * S34: additional files `<apiName><suffix>` the envelope MUST also carry
    * beyond the main file (AiAuthoringBundle's `.bundle-meta.xml` is real
@@ -228,6 +244,24 @@ const FILE_TYPES: Record<string, FileSpec> = {
     envelopeMainSuffix: '.js',
     requiredSuffixes: ['.js-meta.xml'],
   },
+  // S41: Aura component bundles. FLAT directories (live-confirmed on a
+  // real partial-org retrieve, 2026-11-04: every file `<N>`-prefixed, no
+  // subfolders); exactly ONE primary per bundle (.cmp component, .app
+  // application, .evt event, .intf interface, .tokens tokens); the primary's
+  // own -meta.xml is required on deploy (pins apiVersion — Developer Console
+  // creates bundles at the org's CURRENT version otherwise) and tolerated
+  // absent on retrieve. Deploy names are namespace-free developer names; the
+  // index/read path also serves ns__Name bundles (read-only). The deploy
+  // REPLACES the whole bundle: a file the org has that the envelope omits is
+  // deleted (SDR supportsPartialDelete; the BUNDLE REPLACE arm says so).
+  AuraDefinitionBundle: {
+    dir: 'aura',
+    ext: '.cmp',
+    envelope: true,
+    envelopeMainSuffix: ['.cmp', '.app', '.evt', '.intf', '.tokens'],
+    requireMainMeta: true,
+    flat: true,
+  },
 };
 
 const XMLNS_META = 'http://soap.sforce.com/2006/04/metadata';
@@ -310,25 +344,128 @@ const BUNDLE_MAX_FILES = 100;
 const BUNDLE_MAX_DEPTH = 8;
 
 /**
+ * S41: the Aura bundle grammar — flat, every key `<N>`-prefixed, one meta
+ * (named after the primary), secondaries by bundle kind. Live-confirmed
+ * against real org retrieves (2026-11-04). Each refusal
+ * names its own reason: a generic "invalid path" for a Provider.js would
+ * send the author hunting through the wrong rules.
+ */
+const AURA_SECONDARIES: Record<string, string[]> = {
+  '.cmp': ['Controller.js', 'Helper.js', 'Renderer.js', '.css', '.design', '.svg', '.auradoc'],
+  '.app': ['Controller.js', 'Helper.js', 'Renderer.js', '.css', '.svg', '.auradoc'],
+  '.evt': ['.auradoc'],
+  '.intf': ['.auradoc'],
+  '.tokens': [],
+};
+const AURA_MAX_FILE_BYTES = 1_000_000;
+
+/**
+ * S41: Tooling AuraDefinition.DefType → bundle file-name suffix
+ * (live-confirmed table; the read path and the live validate checks share
+ * it). AuraDefinition has NO meta DefType — the meta file is rebuilt from
+ * AuraDefinitionBundle.ApiVersion/Description where needed. Never read
+ * AuraDefinitionBundle.Metadata instead: it returned a controller cut at
+ * 255 bytes (live-confirmed).
+ */
+export const AURA_DEFTYPE_FILES: Record<string, string> = {
+  APPLICATION: '.app',
+  COMPONENT: '.cmp',
+  EVENT: '.evt',
+  INTERFACE: '.intf',
+  TOKENS: '.tokens',
+  CONTROLLER: 'Controller.js',
+  HELPER: 'Helper.js',
+  RENDERER: 'Renderer.js',
+  STYLE: '.css',
+  DESIGN: '.design',
+  SVG: '.svg',
+  DOCUMENTATION: '.auradoc',
+};
+
+/**
+ * S41 (§3.15): can Contrail READ this type — and so list its dependents,
+ * classify the change, show content? The destructive path deliberately
+ * accepts ANY type (cleanup is a feature); this predicate decides whether a
+ * delete gets type-aware arms or the UNREGISTERED TYPE DELETE treatment.
+ */
+export function isRegisteredType(type: string): boolean {
+  return type in FILE_TYPES || type in CHILD_TYPES;
+}
+
+/** S41: parse a bundle envelope by TYPE (spec looked up internally) — for callers outside this file. */
+export function parseEnvelopeFor(
+  type: string,
+  apiName: string,
+  content: string,
+): { files: Record<string, string>; main: string } {
+  const spec = FILE_TYPES[type];
+  if (!spec?.envelope) {
+    throw new ContrailError(`${type} is not a bundle (envelope) type`, 'bad_component');
+  }
+  return parseBundleEnvelope(type, apiName, content, spec);
+}
+
+function validateAuraBundle(
+  apiName: string,
+  files: Record<string, string>,
+  main: string,
+): void {
+  const kind = main.slice(apiName.length);
+  const metaName = `${main}-meta.xml`;
+  const allowed = new Set([
+    main,
+    metaName,
+    ...(AURA_SECONDARIES[kind] ?? []).map((s) => `${apiName}${s}`),
+  ]);
+  for (const [rel, body] of Object.entries(files)) {
+    if (!allowed.has(rel)) {
+      const reason = /(Provider|Model|Test)\.js$/.test(rel)
+        ? `"${rel}" is not a deployable Aura definition — Provider/Model/Test files are not ` +
+          `part of the bundle format`
+        : rel.endsWith('-meta.xml')
+          ? `"${rel}" — the only meta file is "${metaName}", named after the primary`
+          : rel === `${apiName}.design`
+            ? `"${rel}" — a .design belongs only to a component (.cmp) bundle`
+            : !rel.startsWith(apiName)
+              ? `"${rel}" — every file in an Aura bundle starts with the bundle name ` +
+                `"${apiName}"`
+              : `"${rel}" is not a valid file for a ${kind} bundle`;
+      throw new ContrailError(`AuraDefinitionBundle ${apiName}: ${reason}.`, 'bad_component');
+    }
+    if (Buffer.byteLength(body, 'utf8') > AURA_MAX_FILE_BYTES) {
+      throw new ContrailError(
+        `AuraDefinitionBundle ${apiName}: "${rel}" exceeds the 1,000,000-byte per-file limit.`,
+        'bad_component',
+      );
+    }
+  }
+}
+
+/**
  * S30: parse and validate a Contrail bundle envelope. Security posture
  * mirrors validateTypeAndName: absolute rejects ('\\', '..') come first for
  * every path, then the tight per-segment grammar — these strings become zip
- * entry names and snapshot paths.
+ * entry names and snapshot paths. S41: returns the resolved MAIN file too
+ * (multi-candidate types like Aura pick exactly one primary), and enforces
+ * flat/requireMainMeta per the FileSpec.
  */
 export function parseBundleEnvelope(
   type: string,
   apiName: string,
   content: string,
-  mainFile: string,
-  alsoRequired: string[] = [],
-): Record<string, string> {
+  spec: FileSpec,
+): { files: Record<string, string>; main: string } {
+  const suffixes = Array.isArray(spec.envelopeMainSuffix)
+    ? spec.envelopeMainSuffix
+    : [spec.envelopeMainSuffix ?? spec.ext];
+  const exampleMain = `${apiName}${suffixes[0] ?? ''}`;
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
   } catch {
     throw new ContrailError(
       `${type} ${apiName}: content must be a Contrail bundle envelope — JSON of the shape ` +
-        `{"contrail_bundle":1, "files": {"${mainFile}": "<xml>", "input/schema.json": "…"}}. ` +
+        `{"contrail_bundle":1, "files": {"${exampleMain}": "<xml>", "input/schema.json": "…"}}. ` +
         `Bundle types are directories of files; retrieve_metadata's bundle_files listing ` +
         `shows the real file set to carry over.`,
       'bad_component',
@@ -354,6 +491,15 @@ export function parseBundleEnvelope(
     if (rel.includes('\\') || rel.includes('..')) {
       throw new ContrailError(
         `${type} ${apiName}: invalid envelope path "${rel}"`,
+        'bad_component',
+      );
+    }
+    // S41: flat bundle types take no subfolders at all — a '/' is a grammar
+    // error here, not a depth question.
+    if (spec.flat && rel.includes('/')) {
+      throw new ContrailError(
+        `${type} ${apiName}: "${rel}" — ${type} bundles are FLAT: no subfolders, every ` +
+          `file directly in the bundle directory.`,
         'bad_component',
       );
     }
@@ -387,25 +533,52 @@ export function parseBundleEnvelope(
     }
     out[rel] = body;
   }
-  if (!(mainFile in out)) {
+  // S41: resolve the main file. Single-candidate types keep the S30 error;
+  // multi-candidate types (Aura) get zero-primary and two-primary refusals
+  // of their own, because those are DIFFERENT authoring mistakes.
+  const candidates = suffixes.map((s) => `${apiName}${s}`);
+  const mains = candidates.filter((f) => f in out);
+  if (mains.length === 0) {
     throw new ContrailError(
-      `${type} ${apiName}: envelope is missing its main file "${mainFile}".`,
+      candidates.length === 1
+        ? `${type} ${apiName}: envelope is missing its main file "${candidates[0]}".`
+        : `${type} ${apiName}: envelope has NO primary file — exactly one of ` +
+          `${candidates.join(', ')} is required.`,
+      'bad_component',
+    );
+  }
+  if (mains.length > 1) {
+    throw new ContrailError(
+      `${type} ${apiName}: envelope carries MORE THAN ONE primary (${mains.join(', ')}) — ` +
+        `a bundle has exactly one.`,
+      'bad_component',
+    );
+  }
+  const main = mains[0]!;
+  // S41: the main's own -meta.xml, named after whichever primary was found.
+  if (spec.requireMainMeta && !(`${main}-meta.xml` in out)) {
+    throw new ContrailError(
+      `${type} ${apiName}: envelope is missing "${main}-meta.xml" — Contrail requires the ` +
+        `bundle meta on deploy to pin apiVersion (the platform would silently default it; ` +
+        `retrieves of old bundles may lack one — add it).`,
       'bad_component',
     );
   }
   // S34: some bundles have more than one REQUIRED file (an AiAuthoringBundle
   // is exactly <Name>.agent + <Name>.bundle-meta.xml) — missing one would
   // fail org-side with a worse message, or worse, deploy a half bundle.
+  const alsoRequired = (spec.requiredSuffixes ?? []).map((s) => `${apiName}${s}`);
   for (const name of alsoRequired) {
     if (!(name in out)) {
       throw new ContrailError(
         `${type} ${apiName}: envelope is missing required file "${name}" — this bundle ` +
-          `type requires ${[mainFile, ...alsoRequired].join(' + ')}.`,
+          `type requires ${[main, ...alsoRequired].join(' + ')}.`,
         'bad_component',
       );
     }
   }
-  return out;
+  if (type === 'AuraDefinitionBundle') validateAuraBundle(apiName, out, main);
+  return { files: out, main };
 }
 const XMLNS = 'http://soap.sforce.com/2006/04/metadata';
 
@@ -440,9 +613,7 @@ export function buildDeployZip(
     validateTypeAndName(c.type, c.api_name);
     const fileSpec = FILE_TYPES[c.type];
     if (fileSpec?.envelope) {
-      const mainFile = `${c.api_name}${fileSpec.envelopeMainSuffix ?? fileSpec.ext}`;
-      const alsoRequired = (fileSpec.requiredSuffixes ?? []).map((s) => `${c.api_name}${s}`);
-      const bundleFiles = parseBundleEnvelope(c.type, c.api_name, c.content, mainFile, alsoRequired);
+      const { files: bundleFiles } = parseBundleEnvelope(c.type, c.api_name, c.content, fileSpec);
       const dirPrefix = `${fileSpec.dir}/${fileSafeSegment(c.api_name)}/`;
       for (const [rel, body] of Object.entries(bundleFiles)) {
         files.set(`${dirPrefix}${rel}`, strToU8(body));
@@ -627,8 +798,18 @@ function zipPathFor(spec: FileSpec, apiName: string): string {
 export function deployZipEntryPath(
   type: string,
   apiName: string,
+  opts?: {
+    /**
+     * S41: zip entry names (as unzipped) for multi-primary bundle types —
+     * the real main is resolved by probing the candidates against what the
+     * zip actually holds, never guessed: the S28 capture reads deployed
+     * bytes back through this, and a path that "may" exist would silently
+     * capture nothing (this function's own contract, above).
+     */
+    zipEntries?: string[];
+  },
 ):
-  | { path: string; child: false; bundleDir?: string }
+  | { path: string; child: false; bundleDir?: string; mainCandidates?: string[] }
   | { path: string; child: true; childTag: string; childName: string }
   | null {
   const childSpec = CHILD_TYPES[type];
@@ -648,11 +829,23 @@ export function deployZipEntryPath(
     // S30 bundle: path = the main file; bundleDir = the whole component's
     // prefix, so the S28 capture reader can gather EVERY entry.
     const dirPrefix = `${spec.dir}/${fileSafeSegment(apiName)}/`;
-    return {
-      path: `${dirPrefix}${apiName}${spec.envelopeMainSuffix ?? spec.ext}`,
-      child: false,
-      bundleDir: dirPrefix,
-    };
+    const suffixes = Array.isArray(spec.envelopeMainSuffix)
+      ? spec.envelopeMainSuffix
+      : [spec.envelopeMainSuffix ?? spec.ext];
+    const candidates = suffixes.map((s) => `${dirPrefix}${apiName}${s}`);
+    const resolved =
+      candidates.length === 1
+        ? candidates[0]!
+        : candidates.find((p) => opts?.zipEntries?.includes(p));
+    if (resolved === undefined) {
+      // Multi-primary type with no zip to probe: bundleDir alone is still
+      // honest (the S28 capture gathers every entry under it and never
+      // reads `path` for bundles); a guessed main path is not — it could
+      // name a file the zip does not hold. path stays empty by contract;
+      // mainCandidates lets a caller with the files resolve it itself.
+      return { path: '', child: false, bundleDir: dirPrefix, mainCandidates: candidates };
+    }
+    return { path: resolved, child: false, bundleDir: dirPrefix };
   }
   return { path: zipPathFor(spec, apiName), child: false };
 }
@@ -682,6 +875,28 @@ function validateTypeAndName(type: string, name: string): void {
     if (!FOLDER_SEGMENT_RE.test(name)) {
       throw new ContrailError(
         `invalid ${type} name "${name}" — a folder dev name (letters, digits, underscores)`,
+        'bad_component',
+      );
+    }
+    return;
+  }
+  if (type === 'AuraDefinitionBundle') {
+    // S41: deploy names are namespace-free Lightning developer names —
+    // deliberately stricter than NAME_RE (no dots, dashes, spaces). A
+    // double-underscore name is a MANAGED member: the index and read path
+    // serve ns__Name bundles, a deploy refuses them.
+    if (/__/.test(name)) {
+      throw new ContrailError(
+        `AuraDefinitionBundle "${name}": a namespaced bundle (ns__Name) belongs to its ` +
+          `package — only namespace-free bundles deploy through Contrail (reading it ` +
+          `still works via retrieve_metadata).`,
+        'bad_component',
+      );
+    }
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(name) || name.endsWith('_')) {
+      throw new ContrailError(
+        `invalid AuraDefinitionBundle name "${name}" — a Lightning developer name: start ` +
+          `with a letter; letters, digits, single underscores; no trailing underscore.`,
         'bad_component',
       );
     }
@@ -721,13 +936,11 @@ export function analyzeChanges(
     // directory — the proposed content is an envelope, not a document.
     const envSpec = FILE_TYPES[c.type];
     if (envSpec?.envelope) {
-      const mainFile = `${c.api_name}${envSpec.envelopeMainSuffix ?? envSpec.ext}`;
-      const proposed = parseBundleEnvelope(
+      const { files: proposed, main: mainFile } = parseBundleEnvelope(
         c.type,
         c.api_name,
         c.content,
-        mainFile,
-        (envSpec.requiredSuffixes ?? []).map((s) => `${c.api_name}${s}`),
+        envSpec,
       );
       const existingBundle = db.getArtifact(conn.id, c.type, c.api_name);
       const warnings: string[] = [];
@@ -803,6 +1016,110 @@ export function analyzeChanges(
               `snapshot; the platform owns those. The editable draft is the NAKED bundle ` +
               `name — deploy a suffixed name only when promoting retrieved bytes.`,
           );
+        }
+      }
+      if (c.type === 'AuraDefinitionBundle') {
+        const kind = mainFile.slice(c.api_name.length);
+        const old = existingBundle ? readBundleFiles(store, conn, envSpec.dir, c.api_name) : {};
+        const oldMain = ['.cmp', '.app', '.evt', '.intf', '.tokens']
+          .map((s) => `${c.api_name}${s}`)
+          .find((f) => f in old);
+        // S41 KIND CHANGE: what the platform does to a bundle whose primary
+        // kind changes under the same name is untested (spec Q8) — refuse
+        // rather than find out on a client org. Attributed to the SNAPSHOT,
+        // which is what this reads: after an out-of-band delete the stale
+        // copy false-positives until a refresh, so the remedy names it.
+        // (The live-rows flavor of this refusal lives in auraLiveChecks.)
+        if (oldMain && oldMain.slice(c.api_name.length) !== kind) {
+          throw new ContrailError(
+            `AuraDefinitionBundle ${c.api_name}: the SNAPSHOT's copy of this bundle is ` +
+              `${oldMain.slice(c.api_name.length)} and this envelope is ${kind} — changing ` +
+              `a bundle's kind under the same name is untested platform behavior. Delete ` +
+              `the old bundle first (its own destructive approval) or use a new name; if ` +
+              `the org-side bundle already changed since the last refresh, run ` +
+              `refresh_snapshot types:["AuraDefinitionBundle"] and validate again.`,
+            'bad_component',
+          );
+        }
+        // S41 API VERSION: crossing 39/40 toggles Lightning Locker for the
+        // component in orgs still on Locker. Phrased carefully: LWS is an
+        // ORG setting — the bundle's apiVersion has no effect on it.
+        const verOf = (files: Record<string, string>, main: string | undefined): number =>
+          main
+            ? parseFloat(files[`${main}-meta.xml`]?.match(/<apiVersion>\s*([\d.]+)/)?.[1] ?? '')
+            : NaN;
+        const newVer = verOf(proposed, mainFile);
+        const oldVer = verOf(old, oldMain);
+        if (
+          Number.isFinite(newVer) &&
+          Number.isFinite(oldVer) &&
+          newVer < 40 !== oldVer < 40
+        ) {
+          warnings.push(
+            `API VERSION ${oldVer} → ${newVer} crosses the 39/40 boundary — in orgs still ` +
+              `on Lightning Locker this toggles Locker for the component (LWS is an org ` +
+              `setting, unaffected by apiVersion).`,
+          );
+        }
+        // S41 INERT UNTIL PLACED: a surface-declaring component that nothing
+        // references renders nowhere — the exact hand-made-voiceCallPop trap
+        // (deployed, green, invisible).
+        const mainBody = proposed[mainFile] ?? '';
+        const isBackgroundItem = /lightning:backgroundUtilityItem/.test(mainBody);
+        if (
+          change === 'add' &&
+          (kind === '.cmp' || kind === '.app') &&
+          /lightning:(backgroundUtilityItem|utilityItem|availableForFlow(Actions|Screens))|flexipage:availableFor\w*|force:lightningQuickAction/.test(
+            mainBody,
+          )
+        ) {
+          const refRe = new RegExp(`c:${c.api_name}\\b`);
+          const referencedInPackage = components.some((o) => o !== c && refRe.test(o.content));
+          const referencedInOrg =
+            db.edgesTo(conn.id, 'AuraDefinitionBundle', c.api_name).length > 0;
+          if (!referencedInPackage && !referencedInOrg) {
+            warnings.push(
+              `INERT UNTIL PLACED — this component declares surface interfaces but nothing ` +
+                `in this package or the snapshot references c:${c.api_name}; it renders ` +
+                `NOWHERE until host metadata places it` +
+                (isBackgroundItem
+                  ? ` (a background utility item sits in a utility bar's Background region, ` +
+                    `and the bar needs at least one VISIBLE item or it does not appear).`
+                  : `.`),
+            );
+          }
+        }
+        if (change !== 'unchanged_content') {
+          warnings.push(
+            `The deploy compiles markup and design (each design:attribute must match an ` +
+              `aura:attribute) and parses the JS; runtime errors in a background item ` +
+              `surface only in the browser console. Consoles already open keep the OLD ` +
+              `definition until reloaded.`,
+          );
+        }
+        // Server-side controller: ordinary Apex class access — said HERE as
+        // an advisory on the bundle, not through the coverage table, whose
+        // wording ("this package ADDS components … they will deploy") is
+        // written for components IN the package and would overstate for a
+        // controller class that may be long-deployed and already granted.
+        const controller = mainBody.match(/\bcontroller="([A-Za-z][A-Za-z0-9_]*)"/)?.[1];
+        if (controller) {
+          const containerText = components
+            .filter((p) => p.type === 'PermissionSet' || p.type === 'Profile')
+            .map((p) => p.content)
+            .join('\n');
+          const granted = permissionBlocks(containerText, 'classAccesses').some(
+            (b) =>
+              new RegExp(`<apexClass>\\s*${controller}\\s*</apexClass>`, 'i').test(b) &&
+              /<enabled>\s*true\s*<\/enabled>/i.test(b),
+          );
+          if (!granted) {
+            warnings.push(
+              `server-side controller "${controller}" — users need Apex class access ` +
+                `(classAccesses) for it, and no permission set in this package grants it ` +
+                `(it may already be granted org-side; not checkable from here).`,
+            );
+          }
         }
       }
       changes.push({ type: c.type, api_name: c.api_name, change, warnings, ...sourceOf(c) });
@@ -1002,11 +1319,78 @@ export function analyzeChanges(
     changes.push({ type: c.type, api_name: c.api_name, change, warnings, ...sourceOf(c) });
   }
 
+  // S41 ORDERING: a package component referencing c:<N> while that Aura/LWC
+  // bundle is in neither this package nor the snapshot index deploys a
+  // broken reference (or fails org-side) — said on the REFERENCING entry.
+  // Advisory by design: the c: scan over host XML can catch prose, and the
+  // snapshot may simply not have retrieved bundles yet.
+  {
+    const packagedBundles = new Set(
+      components
+        .filter(
+          (x) => x.type === 'AuraDefinitionBundle' || x.type === 'LightningComponentBundle',
+        )
+        .map((x) => x.api_name),
+    );
+    const refHosts = new Set(['FlexiPage', 'QuickAction', 'Flow', 'CustomTab']);
+    for (const entry of changes) {
+      if (!refHosts.has(entry.type)) continue;
+      const comp = components.find(
+        (x) => x.type === entry.type && x.api_name === entry.api_name,
+      );
+      if (!comp) continue;
+      const missing = new Set<string>();
+      for (const m of comp.content.matchAll(/\bc:([A-Za-z][A-Za-z0-9_]*)/g)) {
+        const name = m[1]!;
+        if (packagedBundles.has(name)) continue;
+        if (
+          db.getArtifact(conn.id, 'AuraDefinitionBundle', name) ||
+          db.getArtifact(conn.id, 'LightningComponentBundle', name)
+        ) {
+          continue;
+        }
+        missing.add(name);
+      }
+      if (missing.size > 0) {
+        const list = [...missing].slice(0, 5).join(', ');
+        entry.warnings.push(
+          `references ${list} (c: namespace) — in neither this package nor the snapshot ` +
+            `index. If the org lacks the bundle too, this deploy fails or leaves a broken ` +
+            `reference; ship the bundle first or in this same package.`,
+        );
+      }
+    }
+  }
+
   const destructive: ComponentChange[] = deletions.map((d) => {
     const warnings: string[] = ['DELETION — cannot be undone by rollback'];
     const existing = db.getArtifact(conn.id, d.type, d.api_name);
     if (!existing) {
       warnings.push('not present in the local snapshot — verify the name before approving');
+    }
+    // S41 (§3.15): a delete of a type Contrail cannot read gets no
+    // type-aware arms — say so where the human decides.
+    if (!isRegisteredType(d.type)) {
+      warnings.push(
+        `UNREGISTERED TYPE DELETE — Contrail cannot read ${d.type} or list its ` +
+          `dependents; the component name and the org's own refusal rules are the only ` +
+          `checks this delete gets.`,
+      );
+    }
+    // S41: an Aura bundle delete takes the WHOLE bundle (there is no
+    // per-file destructive member), and the org refuses while a FlexiPage,
+    // Flow, QuickAction, or override still uses it — name the dependents
+    // the graph knows about so the refusal isn't a surprise.
+    if (d.type === 'AuraDefinitionBundle') {
+      const usedBy = db.edgesTo(conn.id, d.type, d.api_name).slice(0, 8);
+      warnings.push(
+        `deletes the ENTIRE bundle (every file — there is no per-file delete)` +
+          (usedBy.length > 0
+            ? `; the org will REFUSE while it is referenced — known dependents: ` +
+              usedBy.map((e) => `${e.fromType}:${e.fromName}`).join(', ')
+            : `; the org refuses the delete if a FlexiPage, Flow, QuickAction, or ` +
+              `action override still references it`),
+      );
     }
     return { type: d.type, api_name: d.api_name, change: 'delete', warnings };
   });
@@ -1188,7 +1572,11 @@ export function analyzePermissionCoverage(components: ProposedComponent[]): Perm
       // set (or profile) enables it. Deliberately NO arm for QuickAction
       // (surfacing is a layout concern — no permission-set block exists),
       // LightningComponentBundle (visibility is isExposed/targets inside its
-      // own js-meta.xml), or PermissionSetGroup (it's a CONTAINER of
+      // own js-meta.xml), AuraDefinitionBundle (S41: placement is host
+      // metadata, and the server-side-controller class-access advisory
+      // lives on the bundle's own change entry — this table's wording is
+      // for components IN the package and would overstate for a
+      // long-deployed controller), or PermissionSetGroup (it's a CONTAINER of
       // permission sets; who holds it is a data question, PermissionSetAssignment).
       // And PSGs are never counted as grant CONTAINERS here either: coverage
       // scans in-package PermissionSet/Profile content only — a PSG whose

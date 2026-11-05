@@ -33,6 +33,9 @@ function known(): KnownArtifacts {
       ['amount__c', ['Invoice__c.Amount__c']],
       ['status__c', ['Invoice__c.Status__c', 'Order__c.Status__c']],
     ]),
+    // S41: c:-reference resolution maps.
+    aura: new Map([['voicecallpop', 'voiceCallPop'], ['navhelper', 'navHelper']]),
+    lwc: new Map([['refundpanel', 'refundPanel']]),
   };
 }
 
@@ -453,6 +456,104 @@ describe('S36: permission & UI-action extractors', () => {
     );
     expect(keys).toContain(
       'LightningComponentBundle:refundPanel>LightningComponentBundle:ldsUtils',
+    );
+  });
+});
+
+describe('S41: Aura edges', () => {
+  it('extractAuraRefs: markup, wiring, controller, design, labels — resolved by kind', async () => {
+    const { extractAuraRefs } = await import('../deps/extract.js');
+    const content = [
+      '<!-- contrail:file aura/hostCmp/hostCmp.cmp -->',
+      '<aura:component controller="VoicePopController" implements="flexipage:availableForAllPageTypes,c:voiceCallPop" extends="c:refundPanel">',
+      '  <aura:handler event="c:voiceCallPop" action="{!c.go}"/>',
+      '  <aura:registerEvent name="x" type="c:voiceCallPop"/>',
+      '  <aura:dependency resource="markup://c:navHelper"/>',
+      '  <c:refundPanel/>',
+      '  <c:ghostCmp/>',
+      '  {!$Label.c.RC_Error}',
+      '</aura:component>',
+      '<!-- contrail:file aura/hostCmp/hostCmpController.js -->',
+      '({ go: function () { $A.createComponent("c:voiceCallPop", {}, function () {}); } })',
+      '<!-- contrail:file aura/hostCmp/hostCmp.design -->',
+      '<design:component><design:attribute name="o" datasource="apex://PickerController"/>' +
+        '<sfdc:object>VoiceCall</sfdc:object></design:component>',
+    ].join('\n');
+    const refs = extractAuraRefs(content, known());
+    const keys = refs.map((r) => `${r.toType}:${r.toName}`);
+    expect(keys).toContain('AuraDefinitionBundle:voiceCallPop'); // handler/registerEvent/createComponent
+    expect(keys).toContain('AuraDefinitionBundle:navHelper'); // aura:dependency
+    expect(keys).toContain('LightningComponentBundle:refundPanel'); // <c:…> resolved to the LWC
+    expect(keys).toContain('ApexClass:VoicePopController'); // controller=
+    expect(keys).toContain('ApexClass:PickerController'); // design datasource
+    expect(keys).toContain('CustomObject:VoiceCall'); // sfdc:object
+    expect(keys).toContain('CustomLabel:RC_Error'); // $Label.c
+    // Unknown to BOTH maps: no edge — a wrongly-typed dangling edge is worse
+    // than a missing one, and refresh re-extracts against the fuller index.
+    expect(keys.join(' ')).not.toContain('ghostCmp');
+    // Standard interface markers are placement facts, never edges.
+    expect(keys.join(' ')).not.toContain('availableForAllPageTypes');
+  });
+
+  it('a dotted (namespaced) controller produces no local Apex edge', async () => {
+    const { extractAuraRefs } = await import('../deps/extract.js');
+    const refs = extractAuraRefs('<aura:component controller="RCSV.CallCtl"/>', known());
+    expect(refs).toHaveLength(0);
+  });
+
+  it('extractFlexiPageRefs: componentName c:x resolves Aura vs LWC', async () => {
+    const { extractFlexiPageRefs } = await import('../deps/extract.js');
+    const xml =
+      '<FlexiPage><componentName>c:voiceCallPop</componentName>' +
+      '<componentName>c:refundPanel</componentName>' +
+      '<componentName>flexipage:tab</componentName></FlexiPage>';
+    const keys = extractFlexiPageRefs(xml, known()).map((r) => `${r.toType}:${r.toName}`);
+    expect(keys).toEqual([
+      'AuraDefinitionBundle:voiceCallPop',
+      'LightningComponentBundle:refundPanel',
+    ]);
+  });
+
+  it('extractFlowRefs: component actions and screen extensions', () => {
+    const xml =
+      '<Flow xmlns="http://soap.sforce.com/2006/04/metadata">' +
+      '<actionCalls><name>nav</name><actionName>c:navHelper</actionName>' +
+      '<actionType>component</actionType></actionCalls>' +
+      '<screens><fields><name>pop</name>' +
+      '<extensionName>c:refundPanel</extensionName></fields></screens></Flow>';
+    const keys = extractFlowRefs(xml, known()).map((r) => `${r.toType}:${r.toName}`);
+    expect(keys).toContain('AuraDefinitionBundle:navHelper');
+    expect(keys).toContain('LightningComponentBundle:refundPanel');
+  });
+
+  it('QuickAction lightningComponent and CustomTab auraComponent are typed by their own tags', async () => {
+    const { extractQuickActionRefs, extractCustomTabRefs } = await import('../deps/extract.js');
+    const qa = extractQuickActionRefs(
+      '<QuickAction><lightningComponent>c:voiceCallPop</lightningComponent></QuickAction>',
+      'VoiceCall.Pop',
+    ).map((r) => `${r.toType}:${r.toName}`);
+    expect(qa).toContain('AuraDefinitionBundle:voiceCallPop');
+    const tab = extractCustomTabRefs(
+      '<CustomTab><auraComponent>c:consoleApp</auraComponent></CustomTab>',
+    ).map((r) => `${r.toType}:${r.toName}`);
+    expect(tab).toEqual(['AuraDefinitionBundle:consoleApp']);
+  });
+
+  it('joinable end-to-end: utility-bar FlexiPage → indexed Aura bundle', () => {
+    const files = new Map<string, Uint8Array>([
+      ['aura/voiceCallPop/voiceCallPop.cmp', strToU8('<aura:component implements="lightning:backgroundUtilityItem"/>')],
+      ['aura/voiceCallPop/voiceCallPop.cmp-meta.xml', strToU8('<AuraDefinitionBundle/>')],
+      [
+        'flexipages/Sales_Console_UtilityBar.flexipage',
+        strToU8('<FlexiPage><componentName>c:voiceCallPop</componentName></FlexiPage>'),
+      ],
+    ]);
+    const artifacts = indexSnapshotFiles(files, [], '2026-11-04T00:00:00.000Z');
+    const edges = extractAllEdges('conn-1', artifacts);
+    const keys = edges.map((e) => `${e.fromType}:${e.fromName}>${e.toType}:${e.toName}`);
+    // The S41 headline edge: the utility bar's used_by answer for the pop.
+    expect(keys).toContain(
+      'FlexiPage:Sales_Console_UtilityBar>AuraDefinitionBundle:voiceCallPop',
     );
   });
 });

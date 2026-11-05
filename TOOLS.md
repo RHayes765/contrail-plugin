@@ -246,14 +246,22 @@ answers "what breaks if I change this?"
 ### `refresh_snapshot`
 
 Manifest-driven re-retrieve of the org into the local snapshot, index, and
-dependency graph. Long-running on big orgs — an in-progress result means
-call again to check on it. `check_only: true` reports staleness without
-retrieving anything.
+dependency graph. Long-running on big orgs — an in-progress result carries a
+`job_id`; poll with `{connection, job_id}` alone. Jobs are keyed by their
+requested type set (S41), so a caller only ever collects the refresh it
+asked for — two sessions' refreshes can no longer cross-deliver — and
+concurrent refreshes on one connection queue and run one after the other.
+Refreshes also take a cross-process lease per connection: if the desktop
+app is mid-sync on the same org, the refresh refuses with a clear message
+instead of racing it over the shared snapshot — try again once its sync
+finishes. `check_only: true` reports staleness without retrieving anything.
 
 - `connection` — alias (or id).
 - `types` *(optional)* — types to refresh (default: the configured manifest —
   see [`snapshot.types`](#configuration-configjson)).
 - `check_only` *(optional)* — compare timestamps only.
+- `job_id` *(optional, alone)* — poll a running refresh without re-sending
+  types.
 
 ---
 
@@ -534,6 +542,13 @@ the connection is left untouched (a normal validate supersedes it) — the
 mid-build check that stops half-finished work from piling up approval
 pages that were never meant to be used.
 
+Every outcome carries a `job_id` keyed to the validation's exact input
+(components, options, dry/real), so parallel validations — two dry runs,
+a dry run beside a real validate, two sessions — never read each other's
+results (S41); an in-progress validation is polled with
+`{connection, job_id}` alone, nothing re-sent and no `content_file`
+re-read.
+
 - `connection` — target, named unmissably to the human.
 - `components` *(≤50)* — each `{type, api_name, content | content_file}`.
   Types include `ApexClass`, `ApexTrigger`, `ApexPage`, `Flow`,
@@ -572,7 +587,7 @@ pages that were never meant to be used.
   `CustomField` / `ValidationRule` / `CustomLabel` / `ListView` /
   `RecordType` / `BotVersion` (dotted API names — `MyBot.v1`). Bundle types
   `GenAiFunction` / `GenAiPlannerBundle` / `AiAuthoringBundle` /
-  `LightningComponentBundle` (one
+  `LightningComponentBundle` / `AuraDefinitionBundle` (one
   component = a directory of files) deploy via a **Contrail bundle
   envelope** — content is JSON
   `{"contrail_bundle":1, "files": {"<relative path>": "<body>", …}}`
@@ -581,6 +596,16 @@ pages that were never meant to be used.
   `<Name>.js` + `<Name>.js-meta.xml` (`.html`/`.css`/`.svg` and
   subdirectories are normal; `__tests__` and dot-files are refused locally —
   local tooling never deploys); the org compiles on deploy.
+  `AuraDefinitionBundle` (S41) is **FLAT** — every file `<Name>`-prefixed,
+  exactly ONE primary (`.cmp`/`.app`/`.evt`/`.intf`/`.tokens`) plus its
+  required `<Name>.<kind>-meta.xml` (pins apiVersion); secondaries are
+  `Controller/Helper/Renderer.js`, `.css`, `.design` (component bundles
+  only), `.svg`, `.auradoc`; namespace-free names only, and the whole bundle
+  is REPLACED on deploy (omitted files are deleted org-side — the page lists
+  them). Validation live-checks Aura against the org: a bundle the org
+  holds but the snapshot lacks (hand-made in Developer Console) classifies
+  as MODIFY with a live file delta — never a misleading ADD — and an LWC
+  name collision warns before the org refuses it.
   `AiAuthoringBundle` deploys as a **DRAFT
   STAGE**: exactly `<Name>.agent` (plaintext Agent Script) +
   `<Name>.bundle-meta.xml`; nothing compiles — the page says the running
@@ -593,14 +618,22 @@ pages that were never meant to be used.
 - `destructive` *(≤50)* — `{type, api_name}` to DELETE; led prominently on
   the page. Deletions are accepted for **any** metadata type, including
   types Contrail cannot author — cleanup is a feature; the guard is the
-  human approval, not a type gate.
+  human approval, not a type gate. S41 sharpens the blind corner: a type
+  Contrail cannot read additionally requires `allow_unregistered_delete:
+  true` and carries an **UNREGISTERED TYPE DELETE** warning (no content, no
+  dependent listing); translation types are refused outright (their safe
+  routes are Translation Workbench or per-entry Tooling writes).
 - `test_level` *(optional)* — `NoTestRun` | `RunLocalTests` |
   `RunSpecifiedTests` | `RunAllTestsInOrg`; `run_tests` for
   `RunSpecifiedTests`. **Omitted means omitted**: the org applies its own
   default (sandboxes: no tests; production: local tests when the package
-  carries Apex, none otherwise). Production *refuses* an explicit
-  `NoTestRun`, so a no-Apex production deploy simply leaves this out —
-  which is exactly what Contrail sends when the agent doesn't specify one.
+  carries Apex, none otherwise). An explicit `NoTestRun` on a production
+  connection is refused LOCALLY (S41 §3.14) — the org would reject it
+  anyway, at the cost of a round trip — so a no-Apex production deploy
+  simply leaves this out, which is exactly what Contrail sends when the
+  agent doesn't specify one.
+- `job_id` *(optional, alone)* — poll a running validation without
+  re-sending components.
 
 `content_file` reads a file byte-exactly (mandatory habit for large flows —
 retyping tens of KB of XML risks silent corruption), confined to Contrail's
@@ -797,7 +830,7 @@ sections' defaults automatically.
 | | `scopes` | `refresh_token, api, web` | OAuth scopes requested. |
 | `oauth` | `callbackPort` / `callbackPath` | `1717` / `/OauthRedirect` | Must match the connected app's registered callback. |
 | | `flowTimeoutMs` | 10 min | Browser-flow hard limit. |
-| `snapshot` | `types` | 20 types | The default retrieve manifest (ApexClass, ApexTrigger, Flow, CustomObject, CustomLabels, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, ApexPage, GlobalValueSet, Layout, CustomMetadata, LeadConvertSettings, and the S36 five: CustomPermission, PermissionSetGroup, MutingPermissionSet, QuickAction, LightningComponentBundle). Report/Dashboard (+ their folders), the Agentforce types, and the integration group (ConnectedApp, NamedCredential, ExternalCredential, AuthProvider, PlatformEventChannel[Member], ManagedEventSubscription) are deployable and indexable but deliberately OUT of the default — `refresh_snapshot types:[…]` pulls them explicitly. Package-installed components (managed OR unlocked) are platform-excluded from wildcard retrieves and never counted as snapshot staleness. |
+| `snapshot` | `types` | 21 types | The default retrieve manifest (ApexClass, ApexTrigger, Flow, CustomObject, CustomLabels, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, ApexPage, GlobalValueSet, Layout, CustomMetadata, LeadConvertSettings, the S36 five: CustomPermission, PermissionSetGroup, MutingPermissionSet, QuickAction, LightningComponentBundle — and S41's AuraDefinitionBundle, which expands to NAMED members from the live inventory because wildcard retrieves drop namespace-free installedEditable bundles, live-confirmed). Report/Dashboard (+ their folders), the Agentforce types, and the integration group (ConnectedApp, NamedCredential, ExternalCredential, AuthProvider, PlatformEventChannel[Member], ManagedEventSubscription) are deployable and indexable but deliberately OUT of the default — `refresh_snapshot types:[…]` pulls them explicitly. Package-installed components (managed OR unlocked) are platform-excluded from wildcard retrieves and never counted as snapshot staleness. |
 | | `pollIntervalMs` / `retrieveTimeoutMs` | 2 s / 10 min | Retrieve polling. |
 | `updates` | `checkEnabled` | `true` | Daily anonymous release check — the only phone-home; `false` disables it entirely. |
 | `localDiagnostics` | `enabled` | `true` | `check_apex`/`check_soql`; `false` makes them report honestly unavailable. |

@@ -14,6 +14,33 @@ single MCP Bundle that installs into Claude Desktop via Settings → Extensions
 (no Node install, no npm, no config editing on the target machine) and covers
 Windows x64/ARM and macOS Intel/Apple Silicon from one file. 38 tools.
 
+**Aura bundles + honest jobs (S41).** From a client Service Cloud Voice
+project's enhancement list, the P1 lane. **AuraDefinitionBundle** is deployable,
+indexed, diffable, and in the dependency graph: flat envelope deploys with
+exactly one primary (`.cmp`/`.app`/`.evt`/`.intf`/`.tokens`) and a required
+kind-named meta (pins apiVersion); per-mistake local refusals (wrong meta,
+Provider.js, subfolders, namespaced names); whole-bundle-replace honesty
+with removed files named; **live validate checks** — a bundle the org holds
+but the snapshot lacks classifies as MODIFY with a live Tooling file delta
+when the org is reachable (a failed live check says so instead of
+pretending), and Aura-vs-LWC name collisions warn before the org refuses. Snapshot wildcards drop
+namespace-free installedEditable bundles (live-confirmed), so retrieves
+expand to named members; bundles absent from the snapshot read LIVE from
+`AuraDefinition` rows (never the 255-byte-truncating `Metadata` field).
+New edges both ways: Aura markup/controller/design/label references out,
+and FlexiPage `componentName`, Flow component actions and screen
+extensions, QuickAction `lightningComponent`, and CustomTab
+`auraComponent` in — c:-references resolve Aura-vs-LWC against the index.
+**Jobs are keyed by request, not by connection** (a long-standing
+cross-delivery bug, reproduced live): refresh and validation results only
+ever reach the caller that asked, identical re-sends attach, `job_id` polls
+without re-sending content, refreshes queue per connection, and a locally
+refused validate no longer kills a pending approval code. Production-week
+guards: an explicit `NoTestRun` on a production connection is refused
+locally; deletes of unregistered types demand
+`allow_unregistered_delete: true` and say plainly that they are blind;
+`rollbackOnError=true` is pinned as an engine invariant.
+
 **Quality-of-life wave (S40).** Five smaller asks shipped together. **Flow
 version history**: `retrieve_metadata` with `flow_version: N` fetches a
 historical flow version through the Tooling API and converts its JSON to

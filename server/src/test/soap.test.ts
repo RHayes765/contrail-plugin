@@ -180,6 +180,26 @@ describe('MetadataSoapClient', () => {
     expect(body).not.toContain("Evil<'&>Name");
   });
 
+  it('S41 (§3.14): every deploy pins rollbackOnError=true — an ENGINE INVARIANT', async () => {
+    // The API default is FALSE: without this element a partially failed
+    // production deploy would commit the components that succeeded. Aura
+    // bundle replaces (and everything else) are atomic ONLY because of it.
+    let body = '';
+    vi.stubGlobal('fetch', async (_url: unknown, init?: RequestInit) => {
+      body = String(init?.body);
+      return new Response(
+        soapEnvelope(
+          `<deployResponse xmlns="http://soap.sforce.com/2006/04/metadata">
+             <result><id>0Af1</id></result>
+           </deployResponse>`,
+        ),
+      );
+    });
+    const client = new MetadataSoapClient(fakeTokenMgr(['AT']), CONN, 'v63.0');
+    await client.deploy(Buffer.from('zip'), { checkOnly: false, runTests: [] });
+    expect(body).toContain('<met:rollbackOnError>true</met:rollbackOnError>');
+  });
+
   it('parses checkRetrieveStatus with a base64 zip', async () => {
     const zipB64 = Buffer.from('PK-fake-zip').toString('base64');
     vi.stubGlobal('fetch', async () =>

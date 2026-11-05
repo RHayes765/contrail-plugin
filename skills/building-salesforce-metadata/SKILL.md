@@ -247,6 +247,22 @@ directory** and give `validate_deploy` the path:
   `@salesforce/messageChannel` and `@salesforce/resourceUrl` imports point at
   types Contrail doesn't deploy yet (LightningMessageChannel,
   StaticResource) — those stay human.
+- **Aura bundles (AuraDefinitionBundle) deploy via the envelope too — but
+  FLAT.** No subfolders; every file starts with the bundle name; exactly ONE
+  primary (`<n>.cmp` component, `.app`, `.evt`, `.intf`, or `.tokens`) plus
+  the REQUIRED `<n>.<kind>-meta.xml` (it pins `apiVersion`; Developer
+  Console otherwise creates bundles at the org's current version).
+  Secondaries: `<n>Controller.js`, `<n>Helper.js`, `<n>Renderer.js`,
+  `<n>.css`, `<n>.design` (component bundles only), `<n>.svg`,
+  `<n>.auradoc` — Provider/Model/Test `.js` files are not part of the
+  format and are refused. Deploy names are namespace-free. The deploy
+  REPLACES the whole bundle (an omitted file is deleted org-side), and the
+  org compiles markup/design and parses the JS on deploy; a background
+  utility item (`lightning:backgroundUtilityItem`) renders nowhere until a
+  utility bar's Background region places it — ship the host FlexiPage in
+  the same package or expect the INERT warning. Crossing apiVersion 39/40
+  toggles Lightning Locker in orgs not yet on LWS. Only an Aura component
+  can be a background utility item — an LWC rewrite is not a substitute.
 - **Namespaces** can contain single underscores (`sales_channel__Foo`), so split a
   qualified API name at the **first** `__`, never with a greedy pattern.
 - **Names**: components deploy under `type/Name.ext`; the tools reject names with

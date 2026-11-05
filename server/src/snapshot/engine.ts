@@ -12,6 +12,7 @@ import {
 import { RestClient } from '../salesforce/rest.js';
 import { SnapshotStore } from './store.js';
 import { indexSnapshotFiles } from './indexer.js';
+import crypto from 'node:crypto';
 import { buildKnownArtifacts, extractAllEdges } from '../deps/extract.js';
 import { fetchOrgDependencyEdges } from '../deps/orgdeps.js';
 import { ContrailError } from '../core/errors.js';
@@ -34,6 +35,7 @@ export interface RefreshSummary {
 }
 
 export interface RefreshJobState {
+  job_id: string;
   types: string[];
   startedAt: string;
   progress: string;
@@ -44,6 +46,26 @@ export interface RefreshJobState {
 
 interface RefreshJob extends RefreshJobState {
   promise: Promise<RefreshSummary>;
+  finishedAt?: number;
+}
+
+/** Finished-but-never-collected jobs are swept after this long. */
+const STALE_JOB_MS = 30 * 60_000;
+
+/** Matches the desktop app's snapshot lease TTL (its app_locks lease). */
+const SNAPSHOT_LOCK_TTL_MS = 15 * 60 * 1000;
+
+/**
+ * S41 (§3.1): a refresh job's identity is its REQUESTED TYPE SET, never the
+ * connection alone — so a caller can only ever collect the result of the
+ * refresh it asked for, and two sessions' refreshes cannot cross-deliver.
+ */
+function refreshJobId(normalizedTypes: string[]): string {
+  const digest = crypto
+    .createHash('sha256')
+    .update(JSON.stringify([...normalizedTypes].sort()))
+    .digest('hex');
+  return `refresh-${digest.slice(0, 12)}`;
 }
 
 /** Container types whose children are re-indexed alongside them. */
@@ -76,7 +98,16 @@ function normalizeRefreshTypes(types: string[]): string[] {
 }
 
 export class SnapshotEngine {
+  /** Keyed `${conn.id}:${job_id}` — job identity is the requested input (S41 §3.1). */
   private readonly jobs = new Map<string, RefreshJob>();
+  /**
+   * Per-connection tail of the refresh EXECUTION chain. Results are keyed by
+   * request, but runs stay serialised per connection: each refresh rewrites
+   * snapshot dirs and index rows wholesale (writeCurrent/replaceArtifacts),
+   * so two running at once would corrupt each other.
+   */
+  private readonly chains = new Map<string, Promise<unknown>>();
+  private readonly lockHolder = `plugin:${process.pid}`;
 
   constructor(
     private readonly db: ContrailDb,
@@ -89,57 +120,126 @@ export class SnapshotEngine {
   /**
    * Start (or observe) a refresh. Returns within ~toolWaitMs either the
    * finished summary or an in-progress state the caller reports back.
+   * Pass pollJobId (alone) to check on a job from an earlier call without
+   * re-sending types; a result is only ever delivered to the input that
+   * asked for it.
    */
   async refresh(
     conn: ConnectionRecord,
     types?: string[],
+    pollJobId?: string,
   ): Promise<
-    | { status: 'complete'; summary: RefreshSummary }
-    | { status: 'failed'; error: string }
-    | { status: 'in_progress'; state: RefreshJobState }
+    | { status: 'complete'; job_id: string; summary: RefreshSummary }
+    | { status: 'failed'; job_id: string; error: string }
+    | { status: 'in_progress'; job_id: string; state: RefreshJobState }
+    | { status: 'unknown_job'; job_id: string }
   > {
-    let job = this.jobs.get(conn.id);
+    this.sweepStaleJobs();
+    let jobId: string;
+    let normalized: string[] | null = null;
+    if (pollJobId !== undefined) {
+      jobId = pollJobId;
+      if (!this.jobs.has(`${conn.id}:${jobId}`)) return { status: 'unknown_job', job_id: jobId };
+    } else {
+      normalized = normalizeRefreshTypes(types ?? this.config.snapshot.types);
+      jobId = refreshJobId(normalized);
+    }
+    const key = `${conn.id}:${jobId}`;
+    let job = this.jobs.get(key);
     if (job?.done) {
-      this.jobs.delete(conn.id);
+      this.jobs.delete(key);
       // A finished job whose result was never collected is delivered now.
-      if (job.result) return { status: 'complete', summary: job.result };
-      if (job.error) return { status: 'failed', error: job.error };
+      // `!== undefined`, never truthiness: an empty error string must still
+      // deliver as FAILED, not fall through and restart work under a poll.
+      if (job.result !== undefined) {
+        return { status: 'complete', job_id: jobId, summary: job.result };
+      }
+      if (job.error !== undefined) return { status: 'failed', job_id: jobId, error: job.error };
       job = undefined;
     }
     if (!job) {
-      job = this.startJob(conn, normalizeRefreshTypes(types ?? this.config.snapshot.types));
-      this.jobs.set(conn.id, job);
+      // Poll mode never starts work: the has() check above returned, and a
+      // done job always carries result or error (set before done flips).
+      job = this.startJob(conn, normalized!, jobId);
+      this.jobs.set(key, job);
     }
     const winner = await Promise.race([
       job.promise.then(
-        (summary) => ({ status: 'complete' as const, summary }),
-        (err) => ({ status: 'failed' as const, error: String(err instanceof Error ? err.message : err) }),
+        (summary) => ({ status: 'complete' as const, job_id: jobId, summary }),
+        (err) => ({
+          status: 'failed' as const,
+          job_id: jobId,
+          error: String(err instanceof Error ? err.message : err),
+        }),
       ),
       delay(this.config.snapshot.toolWaitMs).then(() => null),
     ]);
     if (winner) {
-      this.jobs.delete(conn.id);
+      this.jobs.delete(key);
       return winner;
     }
-    return { status: 'in_progress', state: publicState(job) };
+    return { status: 'in_progress', job_id: jobId, state: publicState(job) };
   }
 
-  private startJob(conn: ConnectionRecord, types: string[]): RefreshJob {
+  private sweepStaleJobs(): void {
+    const cutoff = Date.now() - STALE_JOB_MS;
+    for (const [key, job] of this.jobs) {
+      if (job.done && job.finishedAt !== undefined && job.finishedAt < cutoff) {
+        this.jobs.delete(key);
+      }
+    }
+  }
+
+  private startJob(conn: ConnectionRecord, types: string[], jobId: string): RefreshJob {
     const job: RefreshJob = {
+      job_id: jobId,
       types,
       startedAt: new Date().toISOString(),
       progress: 'starting',
       done: false,
       promise: undefined as unknown as Promise<RefreshSummary>,
     };
-    job.promise = this.runRefresh(conn, types, job)
+    // Serialise RUNS per connection: a second refresh queues behind the
+    // running one and starts only after it settles (success or failure).
+    // Across PROCESSES the desktop app's snapshot lease applies too — the
+    // plugin participates opportunistically (see db.tryAcquireAppLock): on a
+    // machine where the desktop app shares ~/.contrail, a refresh held by
+    // the other process fails honestly instead of interleaving wholesale
+    // snapshot-dir rewrites with it.
+    const prev = this.chains.get(conn.id);
+    if (prev) job.progress = 'queued behind an earlier refresh on this connection';
+    const lockName = `snapshot:${conn.id}`;
+    const run = (prev ?? Promise.resolve())
+      .catch(() => {})
+      .then(async () => {
+        if (!this.db.tryAcquireAppLock(lockName, this.lockHolder, SNAPSHOT_LOCK_TTL_MS)) {
+          throw new ContrailError(
+            'another Contrail process (the desktop app) is refreshing this connection — ' +
+              'try again once its sync finishes',
+            'snapshot_locked',
+          );
+        }
+        try {
+          return await this.runRefresh(conn, types, job);
+        } finally {
+          this.db.releaseAppLock(lockName, this.lockHolder);
+        }
+      });
+    const tail = run.catch(() => {});
+    this.chains.set(conn.id, tail);
+    void tail.then(() => {
+      if (this.chains.get(conn.id) === tail) this.chains.delete(conn.id);
+    });
+    job.promise = run
       .then((summary) => {
         job.done = true;
+        job.finishedAt = Date.now();
         job.result = summary;
         return summary;
       })
       .catch((err) => {
         job.done = true;
+        job.finishedAt = Date.now();
         job.error = String(err instanceof Error ? err.message : err);
         this.audit.record('snapshot.refresh_failed', {
           connectionId: conn.id,
@@ -396,6 +496,29 @@ function buildRetrieveMembers(
       );
     }
   }
+  // S41: Aura wildcard retrieves exclude namespace-free installedEditable
+  // bundles (live-confirmed 2026-11-04: a wildcard returned 3 of an org's 6
+  // namespace-free bundles, dropping the installedEditable trio) — expand to
+  // NAMED members from the inventory, keeping the namespace-keyed isManaged
+  // test so those bundles stay retrievable (by-name retrieves DO return
+  // namespace-free installed components; the S36 LWC note below).
+  if ('AuraDefinitionBundle' in members) {
+    const bundleNames = listedProps
+      .filter((p) => p.type === 'AuraDefinitionBundle' && !isManaged(p))
+      .map((p) => p.fullName);
+    if (bundleNames.length > 0) {
+      members.AuraDefinitionBundle = bundleNames;
+      if (bundleNames.length > 2000) {
+        warnings.push(
+          `AuraDefinitionBundle inventory is large (${bundleNames.length}); the retrieve may be slow or hit platform size limits.`,
+        );
+      }
+    } else {
+      warnings.push(
+        'listMetadata returned no AuraDefinitionBundle inventory; falling back to the * wildcard, which misses installed-package bundles.',
+      );
+    }
+  }
   // S29: foldered types NEVER use the wildcard (unsupported for folder-based
   // types) — members are the folder names (their -meta.xml definitions) plus
   // every folder-qualified content path from the per-folder listing.
@@ -508,6 +631,8 @@ const TYPE_DIRS: Record<string, string> = {
   MutingPermissionSet: 'mutingpermissionsets',
   QuickAction: 'quickActions',
   LightningComponentBundle: 'lwc',
+  // S41: Aura component bundles.
+  AuraDefinitionBundle: 'aura',
 };
 
 /** The refreshed types' own directories — null if any requested type has no known mapping. */
@@ -555,6 +680,7 @@ function delay(ms: number): Promise<void> {
 
 function publicState(job: RefreshJob): RefreshJobState {
   return {
+    job_id: job.job_id,
     types: job.types,
     startedAt: job.startedAt,
     progress: job.progress,

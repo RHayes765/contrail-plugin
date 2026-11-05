@@ -132,9 +132,12 @@ import { generateConfirmationCode } from './codes.js';
 import { ApprovalPageServer } from './approval.js';
 import { renderApprovalPage } from '../connect/pages.js';
 import {
+  AURA_DEFTYPE_FILES,
   analyzeChanges,
   analyzePermissionCoverage,
   buildDeployZip,
+  isRegisteredType,
+  parseEnvelopeFor,
   type ComponentChange,
   type ProposedComponent,
   type ProposedDeletion,
@@ -177,6 +180,69 @@ type JobOutcome<T> =
   | { status: 'failed'; error: string }
   | { status: 'in_progress'; progress: string; started_at: string };
 
+type ValidateInput = {
+  components: ProposedComponent[];
+  destructive: ProposedDeletion[];
+  /** Omitted = the ORG's default behavior (prod refuses an explicit NoTestRun). */
+  testLevel?: TestLevel;
+  runTests: string[];
+  /**
+   * S41 (§3.15): required true for a destructive member whose type Contrail
+   * cannot read — the delete then proceeds with the UNREGISTERED TYPE
+   * DELETE warning instead of being refused.
+   */
+  allowUnregisteredDelete?: boolean;
+  /**
+   * S38: true = org-side validation ONLY. No approval request, code,
+   * payload, or page is created, nothing becomes executable, and any
+   * PENDING request on the connection is left untouched (a normal
+   * validate supersedes it). Mid-build checks use this; the final
+   * validate omits it so the human sees exactly one meaningful approval.
+   */
+  dryRun?: boolean;
+};
+
+type ValidateResult = {
+  summary: DeployValidationSummary | null;
+  validation_passed: boolean;
+  failure?: Record<string, unknown>;
+  approval: Record<string, unknown> | null;
+};
+
+/** Finished-but-never-collected jobs are swept after this long. */
+const STALE_JOB_MS = 30 * 60_000;
+
+/**
+ * S41 (§3.1): a validation job's identity is a digest of exactly what will
+ * be validated — resolved component content included — plus every option
+ * that changes the outcome. Keying by input instead of by connection means
+ * a caller can only ever collect the result of ITS OWN validation; two
+ * concurrent dry runs, a dry run beside a real validate (the S38 split now
+ * rides the id prefix), or two sessions' validations never cross-deliver.
+ * Re-sending identical arguments attaches to the running job, so the old
+ * poll-by-resend pattern still works.
+ */
+function validateJobId(input: ValidateInput): string {
+  const h = crypto.createHash('sha256');
+  // Every record is a JSON-framed array: field boundaries survive any
+  // characters a name or option could carry, so no two distinct inputs can
+  // collide into one digest stream via crafted separators.
+  h.update(
+    `${JSON.stringify([
+      input.dryRun === true,
+      input.testLevel ?? null,
+      input.runTests ?? null,
+      input.allowUnregisteredDelete === true,
+    ])}\n`,
+  );
+  for (const c of input.components) {
+    const contentSha = crypto.createHash('sha256').update(c.content).digest('hex');
+    h.update(`${JSON.stringify(['C', c.type, c.api_name, contentSha])}\n`);
+  }
+  for (const d of input.destructive) h.update(`${JSON.stringify(['D', d.type, d.api_name])}\n`);
+  return `${input.dryRun ? 'vdry' : 'val'}-${h.digest('hex').slice(0, 12)}`;
+}
+
 /**
  * Fired once per SUCCESSFULLY executed request, after the terminal row is
  * written and — critically — BEFORE the frozen payload is deleted, so an
@@ -197,6 +263,7 @@ interface Job<T> {
   progress: string;
   startedAt: string;
   done: boolean;
+  finishedAt?: number;
   result?: T;
   error?: string;
 }
@@ -242,62 +309,173 @@ export class DeployEngine {
 
   async validateDeploy(
     conn: ConnectionRecord,
-    input: {
-      components: ProposedComponent[];
-      destructive: ProposedDeletion[];
-      /** Omitted = the ORG's default behavior (prod refuses an explicit NoTestRun). */
-      testLevel?: TestLevel;
-      runTests: string[];
-      /**
-       * S38: true = org-side validation ONLY. No approval request, code,
-       * payload, or page is created, nothing becomes executable, and any
-       * PENDING request on the connection is left untouched (a normal
-       * validate supersedes it). Mid-build checks use this; the final
-       * validate omits it so the human sees exactly one meaningful approval.
-       */
-      dryRun?: boolean;
-    },
-  ): Promise<
-    JobOutcome<{
-      summary: DeployValidationSummary | null;
-      validation_passed: boolean;
-      failure?: Record<string, unknown>;
-      approval: Record<string, unknown> | null;
-    }>
-  > {
-    // S38: dry runs and real validations NEVER share a job — a second call
-    // with the other mode must not attach to the first's in-flight result
-    // and mislabel it (a dry check reading a real validate's summary would
-    // claim "nothing can be executed" about a live approval, and vice versa).
-    const jobKey = `${conn.id}:deploy-validate${input.dryRun ? ':dry' : ''}`;
-    return this.runJob(jobKey, () => this.doValidate(conn, input));
+    input: ValidateInput,
+  ): Promise<JobOutcome<ValidateResult> & { job_id: string }> {
+    // S41 (§3.1): keyed by INPUT, never by connection alone — see
+    // validateJobId. The S38 dry/real split is part of the id.
+    const jobId = validateJobId(input);
+    const outcome = await this.runJob(`${conn.id}:${jobId}`, () => this.doValidate(conn, input));
+    return { ...outcome, job_id: jobId };
+  }
+
+  /**
+   * S41 (§3.1): attach to a validation job by its id — polling without
+   * re-sending components or re-reading content files. Returns null when no
+   * running or uncollected job with that id exists for this connection.
+   */
+  async pollValidate(
+    conn: ConnectionRecord,
+    jobId: string,
+  ): Promise<(JobOutcome<ValidateResult> & { job_id: string }) | null> {
+    const key = `${conn.id}:${jobId}`;
+    const existing = this.jobs.get(key);
+    if (!existing) return null;
+    // runJob attaches to the stored job (or delivers its kept result); the
+    // work thunk is unreachable because the key is present.
+    const outcome = await this.runJob(key, () => existing.promise as Promise<ValidateResult>);
+    return { ...outcome, job_id: jobId };
+  }
+
+  /**
+   * S41: live org checks for Aura bundles — the two lies the local snapshot
+   * can tell about them. (1) MISCLASSIFIED ADD: a bundle the org has (e.g.
+   * hand-made in Developer Console) but the index lacks would classify as
+   * ADD and hide the overwrite of someone's work — re-read it live through
+   * Tooling AuraDefinition rows and show the file-level delta instead.
+   * (2) NAME COLLISION: an Aura bundle and an LWC in the same namespace
+   * cannot share a name, and the index holds only a fraction of an org's
+   * LWC bundles, so only a live check answers. Best-effort by design: a
+   * failed live check degrades to an honest "could not check" warning and
+   * never blocks the validation (the org gate still has the final word).
+   */
+  private async auraLiveChecks(
+    conn: ConnectionRecord,
+    input: ValidateInput,
+    changes: ComponentChange[],
+  ): Promise<void> {
+    const rest = new RestClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
+    for (const c of input.components) {
+      if (c.type !== 'AuraDefinitionBundle') continue;
+      const entry = changes.find((e) => e.type === c.type && e.api_name === c.api_name);
+      if (!entry) continue;
+      const esc = c.api_name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      // Set inside the try, thrown OUTSIDE it: the per-component catch
+      // exists to degrade FAILED live checks, and must not be able to
+      // swallow a refusal the live check succeeded in establishing.
+      let liveKindConflict: { live: string; env: string } | null = null;
+      try {
+        const lwc = await rest.toolingQuery<{ Id: string }>(
+          `SELECT Id FROM LightningComponentBundle WHERE DeveloperName = '${esc}' ` +
+            `AND NamespacePrefix = null LIMIT 1`,
+          1,
+        );
+        if (lwc.length > 0) {
+          entry.warnings.push(
+            `NAME COLLISION — the org has an LWC named "${c.api_name}" (live check); an ` +
+              `Aura bundle and an LWC in the same namespace cannot share a name, so this ` +
+              `deploy will fail org-side.`,
+          );
+        }
+        if (entry.change !== 'add') continue;
+        const defs = await rest.toolingQuery<{ DefType: string; Source: string | null }>(
+          `SELECT DefType, Source FROM AuraDefinition WHERE ` +
+            `AuraDefinitionBundle.DeveloperName = '${esc}' AND ` +
+            `AuraDefinitionBundle.NamespacePrefix = null`,
+          50,
+        );
+        if (defs.length === 0) continue;
+        const { files: proposed, main } = parseEnvelopeFor(
+          'AuraDefinitionBundle',
+          c.api_name,
+          c.content,
+        );
+        // The snapshot-based KIND CHANGE refusal cannot see an org-held
+        // bundle the index lacks — the LIVE rows can. Same refusal, same
+        // reason: untested platform behavior stays off client orgs.
+        const kinds = ['.cmp', '.app', '.evt', '.intf', '.tokens'];
+        const livePrimary = defs
+          .map((d) => AURA_DEFTYPE_FILES[d.DefType])
+          .find((s): s is string => s !== undefined && kinds.includes(s));
+        const envKind = main.slice(c.api_name.length);
+        if (livePrimary && livePrimary !== envKind) {
+          // Recorded, then thrown AFTER the catch below: the degrade path
+          // exists for FAILED checks and must not swallow a refusal this
+          // check succeeded in making. The sentinel just exits the try.
+          liveKindConflict = { live: livePrimary, env: envKind };
+          throw new ContrailError('aura kind conflict (rethrown below)', 'bad_component');
+        }
+        // The org HAS this bundle: never present the overwrite as an ADD —
+        // and retract the INERT UNTIL PLACED warning attached while this
+        // entry was still believed one ("renders NOWHERE" is false for a
+        // bundle the org already places; the snapshot just can't see it).
+        entry.change = 'modify';
+        entry.warnings = entry.warnings.filter((w) => !w.startsWith('INERT UNTIL PLACED'));
+        const metaName = `${main}-meta.xml`;
+        const live = new Map(
+          defs.map((d) => [
+            `${c.api_name}${AURA_DEFTYPE_FILES[d.DefType] ?? `.${d.DefType.toLowerCase()}`}`,
+            d.Source ?? '',
+          ]),
+        );
+        const changed: string[] = [];
+        const added: string[] = [];
+        for (const [rel, body] of Object.entries(proposed)) {
+          if (rel === metaName) continue; // compared as apiVersion below
+          const liveBody = live.get(rel);
+          if (liveBody === undefined) added.push(rel);
+          else if (liveBody.trim() !== body.trim()) changed.push(rel);
+        }
+        const removed = [...live.keys()].filter((rel) => !(rel in proposed));
+        const bundleRow = await rest.toolingQuery<{ ApiVersion: number | null }>(
+          `SELECT ApiVersion FROM AuraDefinitionBundle WHERE DeveloperName = '${esc}' ` +
+            `AND NamespacePrefix = null LIMIT 1`,
+          1,
+        );
+        const liveVer = bundleRow[0]?.ApiVersion ?? null;
+        const propVer = proposed[metaName]?.match(/<apiVersion>\s*([\d.]+)/)?.[1] ?? null;
+        const describe = (label: string, list: string[]) =>
+          list.length > 0
+            ? `${label} ${list.slice(0, 8).join(', ')}${list.length > 8 ? '…' : ''}`
+            : '';
+        const delta =
+          [describe('changed:', changed), describe('added:', added), describe('removed:', removed)]
+            .filter(Boolean)
+            .join('; ') || 'no file-content differences';
+        entry.warnings.push(
+          `ORG HAS THIS BUNDLE (live check — it is not in the local snapshot; e.g. built ` +
+            `by hand in Developer Console). This deploy OVERWRITES it: ${delta}. Files the ` +
+            `org has that this envelope omits are DELETED (whole-bundle replace).` +
+            (liveVer !== null && propVer !== null && Number(liveVer) !== Number(propVer)
+              ? ` apiVersion changes ${liveVer} → ${propVer} (Developer Console creates ` +
+                `bundles at the org's current version).`
+              : ''),
+        );
+      } catch (err) {
+        if (!liveKindConflict) {
+          entry.warnings.push(
+            `could not live-check "${c.api_name}" against the org ` +
+              `(${String(err instanceof Error ? err.message : err).slice(0, 120)}) — the ` +
+              `ADD/MODIFY classification is from the local snapshot only.`,
+          );
+        }
+      }
+      if (liveKindConflict) {
+        throw new ContrailError(
+          `AuraDefinitionBundle ${c.api_name}: the ORG's bundle is ${liveKindConflict.live} ` +
+            `(live check) and this envelope is ${liveKindConflict.env} — changing a ` +
+            `bundle's kind under the same name is untested platform behavior. Delete the ` +
+            `old bundle first (its own destructive approval) or use a new name.`,
+          'bad_component',
+        );
+      }
+    }
   }
 
   private async doValidate(
     conn: ConnectionRecord,
-    input: {
-      components: ProposedComponent[];
-      destructive: ProposedDeletion[];
-      testLevel?: TestLevel;
-      runTests: string[];
-      dryRun?: boolean;
-    },
+    input: ValidateInput,
     job?: Job<unknown>,
-  ) {
-    // A dry run must NOT supersede: an agent checking work-in-progress
-    // mid-build would otherwise silently kill a real pending approval.
-    if (!input.dryRun) {
-      const superseded = this.db.supersedePendingRequests(conn.id, 'deploy');
-      if (superseded > 0) {
-        for (const p of this.db.takeSupersededPayloadPaths(conn.id, 'deploy')) safeUnlink(p);
-        this.audit.record('deploy.superseded', {
-          connectionId: conn.id,
-          tool: 'validate_deploy',
-          detail: { count: superseded },
-        });
-      }
-    }
-
+  ): Promise<ValidateResult> {
     const versionNumber = this.config.salesforce.apiVersion.replace(/^v/, '');
 
     // NOTE: we deliberately do NOT auto-inject a FlowDefinition deactivation
@@ -307,6 +485,43 @@ export class DeployEngine {
     // validates. Flow deactivation is its own step (deactivate_flow); flow
     // deletion via the Metadata API is unreliable regardless (see the failure
     // guidance below).
+    //
+    // S41 (§3.15): the destructive path accepts ANY type by design (cleanup
+    // is a feature; the guard is the human approval) — but a delete of a
+    // type Contrail cannot read proceeds BLIND, so it takes an explicit
+    // flag, and translation types are refused outright: a file-level delete
+    // clobbers per-entry work whose safe write route is Setup's Translation
+    // Workbench or the per-entry Tooling path (ExternalStringLocalization).
+    const translationTypes = new Set([
+      'Translations',
+      'CustomObjectTranslation',
+      'StandardValueSetTranslation',
+      'GlobalValueSetTranslation',
+    ]);
+    for (const d of input.destructive) {
+      if (translationTypes.has(d.type)) {
+        throw new ContrailError(
+          `${d.type} ${d.api_name}: translation components are not deletable through ` +
+            `Contrail — remove entries in Setup (Translation Workbench), or per-entry ` +
+            `via Tooling ExternalStringLocalization for custom-label translations.`,
+          'bad_component',
+        );
+      }
+      if (!isRegisteredType(d.type) && input.allowUnregisteredDelete !== true) {
+        throw new ContrailError(
+          `${d.type} ${d.api_name}: this type is not registered — Contrail cannot read ` +
+            `it or list its dependents, so the delete would be blind. Pass ` +
+            `allow_unregistered_delete: true to proceed anyway (the approval page will ` +
+            `carry the UNREGISTERED TYPE DELETE warning).`,
+          'bad_component',
+        );
+      }
+    }
+
+    // S41: superseding happens only when a NEW code is about to be issued
+    // (immediately before insertDeployRequest, below) — so neither a local
+    // grammar refusal from these two lines, nor an org-FAILED validation,
+    // ever kills a pending approval on its way to not producing one.
     const built = buildDeployZip(input.components, input.destructive, versionNumber, (type, name) =>
       this.metaXmlFromSnapshot(conn, type, name),
     );
@@ -317,7 +532,15 @@ export class DeployEngine {
       input.components,
       input.destructive,
     );
+
     const permCoverage = analyzePermissionCoverage(input.components);
+
+    // S41: Aura bundles get two LIVE org checks the local snapshot cannot
+    // answer — see auraLiveChecks. Mutates the change entries in place.
+    if (input.components.some((c) => c.type === 'AuraDefinitionBundle')) {
+      if (job) job.progress = 'live-checking Aura bundles against the org';
+      await this.auraLiveChecks(conn, input, changes);
+    }
 
     // Blast radius per touched component; deletions with dependents get an
     // explicit warning on the destructive entry itself.
@@ -426,6 +649,25 @@ export class DeployEngine {
       return { summary: drySummary, validation_passed: true, approval: null };
     }
 
+    // S41 (review fix): supersede IMMEDIATELY before inserting the new
+    // request — atomically close the old approval as the new one opens.
+    // At doValidate's start it left a minutes-wide window (while org tests
+    // ran) in which a second input-keyed validate could also supersede
+    // nothing and leave TWO live codes on one connection; and superseding
+    // only here means an org-FAILED validation (which issues no code)
+    // leaves the pending approval intact, exactly like a local refusal.
+    // Dry runs never reach this line (returned above).
+    {
+      const superseded = this.db.supersedePendingRequests(conn.id, 'deploy');
+      if (superseded > 0) {
+        for (const p of this.db.takeSupersededPayloadPaths(conn.id, 'deploy')) safeUnlink(p);
+        this.audit.record('deploy.superseded', {
+          connectionId: conn.id,
+          tool: 'validate_deploy',
+          detail: { count: superseded },
+        });
+      }
+    }
     const code = generateConfirmationCode();
     const expiresAt = new Date(Date.now() + this.config.deploy.codeTtlMs).toISOString();
     const request = this.db.insertDeployRequest({
@@ -2561,6 +2803,14 @@ export class DeployEngine {
     work: (job: Job<T>) => Promise<T>,
     waitMs = this.config.deploy.toolWaitMs,
   ): Promise<JobOutcome<T>> {
+    // S41 (§3.1): input-keyed jobs mean an abandoned caller's finished
+    // result can linger — sweep anything done and uncollected for 30 min.
+    const cutoff = Date.now() - STALE_JOB_MS;
+    for (const [k, j] of this.jobs) {
+      if (k !== key && j.done && j.finishedAt !== undefined && j.finishedAt < cutoff) {
+        this.jobs.delete(k);
+      }
+    }
     let job = this.jobs.get(key) as Job<T> | undefined;
     if (job?.done) {
       this.jobs.delete(key);
@@ -2578,11 +2828,13 @@ export class DeployEngine {
       j.promise = work(j)
         .then((result) => {
           j.done = true;
+          j.finishedAt = Date.now();
           j.result = result;
           return result;
         })
         .catch((err) => {
           j.done = true;
+          j.finishedAt = Date.now();
           j.error = String(err instanceof Error ? err.message : err);
           throw err;
         });

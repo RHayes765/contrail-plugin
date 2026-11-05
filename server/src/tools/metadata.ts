@@ -11,6 +11,7 @@ import { MetadataSoapClient } from '../salesforce/metadataSoap.js';
 import { findChildBlock } from '../snapshot/indexer.js';
 import { queryDependencies } from '../deps/graph.js';
 import { flowMetadataJsonToXml } from '../salesforce/flowversion.js';
+import { AURA_DEFTYPE_FILES } from '../deploy/package.js';
 
 /**
  * The P0.2 metadata_read tool surface. Every handler resolves its target
@@ -214,8 +215,10 @@ export function registerMetadataTools(server: McpServer, deps: ToolDeps): void {
               'ValidationRule, CustomLabel, PermissionSet, CustomPermission, ' +
               'PermissionSetGroup, QuickAction (dotted Account.New_X for object actions), ' +
               'and any other indexed type. Bundle types (LightningComponentBundle, ' +
-              'GenAiFunction, …) return the main file plus a bundle_files listing of ' +
-              'every sibling with snapshot paths for direct reading.',
+              'AuraDefinitionBundle, GenAiFunction, …) return the main file plus a ' +
+              'bundle_files listing of every sibling with snapshot paths for direct ' +
+              'reading; an Aura bundle absent from the snapshot (installed-package or ' +
+              'ns__Name managed) reads LIVE from Tooling AuraDefinition rows instead.',
           ),
         names: z
           .array(z.string())
@@ -498,27 +501,49 @@ export function registerMetadataTools(server: McpServer, deps: ToolDeps): void {
           .boolean()
           .optional()
           .describe('Only compare org lastModifiedDate against the index; retrieve nothing.'),
+        job_id: z
+          .string()
+          .optional()
+          .describe(
+            'Poll a RUNNING refresh by the job_id an earlier call returned — pass ' +
+              '{connection, job_id} ALONE. Jobs are keyed by their requested type set, ' +
+              'so a poll only ever returns the refresh it names (re-sending the same ' +
+              'types attaches to the same job too).',
+          ),
       },
     },
-    async (args: { connection: string; types?: string[]; check_only?: boolean }) =>
+    async (args: {
+      connection: string;
+      types?: string[];
+      check_only?: boolean;
+      job_id?: string;
+    }) =>
       guarded(async () => {
         const conn = requireConnection(args.connection, 'refresh_snapshot');
+        if (args.job_id !== undefined && (args.types !== undefined || args.check_only)) {
+          return fail('Pass job_id ALONE to poll a running refresh.');
+        }
         if (args.types?.some((t) => !TYPE_RE.test(t))) return fail('invalid metadata type');
         if (args.check_only) {
           const report = await engine.checkStaleness(conn, args.types);
           return ok({ connection: conn.alias, ...report });
         }
-        const outcome = await engine.refresh(conn, args.types);
+        const outcome = await engine.refresh(conn, args.types, args.job_id);
         switch (outcome.status) {
+          case 'unknown_job':
+            return fail(
+              `No running or uncollected refresh job "${outcome.job_id}" on "${conn.alias}" — ` +
+                'its result may already have been collected. Re-send types to start a new refresh.',
+            );
           case 'complete':
-            return ok(outcome.summary, 'Snapshot refreshed.');
+            return ok({ job_id: outcome.job_id, ...outcome.summary }, 'Snapshot refreshed.');
           case 'failed':
-            return fail(`Snapshot refresh failed: ${outcome.error}`);
+            return fail(`Snapshot refresh failed (job ${outcome.job_id}): ${outcome.error}`);
           case 'in_progress':
             return ok(
-              outcome.state,
-              'Refresh is still running. Call refresh_snapshot again with the same ' +
-                'connection to check progress or collect the result.',
+              outcome.state, // carries job_id and the requested types
+              `Refresh is still running — poll with {connection, job_id: "${outcome.job_id}"}, ` +
+                'or re-send the same types (which attaches to this same job).',
             );
         }
       }),
@@ -781,7 +806,95 @@ const BUNDLE_TYPES = new Set([
   'AiAuthoringBundle',
   // S36
   'LightningComponentBundle',
+  // S41
+  'AuraDefinitionBundle',
 ]);
+
+/**
+ * S41: live Aura bundle read via the Tooling API — the Apex-bodies pattern.
+ * Serves bundles the snapshot lacks: installed-package bundles (wildcard
+ * retrieves exclude them, live-confirmed) and ns__Name managed members the
+ * deploy path refuses. Reads per-definition AuraDefinition.Source rows —
+ * NEVER AuraDefinitionBundle.Metadata, which returned a controller cut at
+ * 255 bytes (live-confirmed on OpenURL).
+ */
+async function fetchAuraLiveContent(
+  deps: ToolDeps,
+  conn: ConnectionRecord,
+  name: string,
+): Promise<{ body: string; source: string; note?: string }> {
+  const { tokenMgr, config } = deps;
+  const rest = new RestClient(tokenMgr, conn, config.salesforce.apiVersion);
+  // ns__Name = a namespaced (installed) bundle; local names cannot carry
+  // '__' (platform rule, enforced on deploy). Split at the FIRST '__' —
+  // namespace prefixes may contain single underscores (S17 lesson).
+  const m = /^(.+?)__(.+)$/.exec(name);
+  const dev = (m ? m[2]! : name).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  const nsFilter = m
+    ? `= '${m[1]!.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
+    : '= null';
+  const defs = await rest.toolingQuery<{
+    DefType: string;
+    Source: string | null;
+  }>(
+    `SELECT DefType, Source FROM AuraDefinition WHERE ` +
+      `AuraDefinitionBundle.DeveloperName = '${dev}' AND ` +
+      `AuraDefinitionBundle.NamespacePrefix ${nsFilter}`,
+    50,
+  );
+  if (defs.length === 0) {
+    throw new ContrailError(
+      `AuraDefinitionBundle ${name} is in neither the local snapshot nor the org's ` +
+        `Tooling AuraDefinition rows on "${conn.alias}".`,
+      'artifact_not_found',
+    );
+  }
+  const bundles = await rest.toolingQuery<{ ApiVersion: number | null; Description: string | null }>(
+    `SELECT ApiVersion, Description FROM AuraDefinitionBundle WHERE DeveloperName = '${dev}' ` +
+      `AND NamespacePrefix ${nsFilter} LIMIT 1`,
+    1,
+  );
+  const files: Array<[string, string]> = defs.map((d) => [
+    `${name}${AURA_DEFTYPE_FILES[d.DefType] ?? `.${d.DefType.toLowerCase()}`}`,
+    d.Source ?? '',
+  ]);
+  const meta = bundles[0];
+  if (meta?.ApiVersion != null) {
+    const primary = files.find(([f]) => /\.(cmp|app|evt|intf|tokens)$/.test(f))?.[0];
+    if (primary) {
+      files.push([
+        `${primary}-meta.xml`,
+        `<?xml version="1.0" encoding="UTF-8"?>\n` +
+          `<AuraDefinitionBundle xmlns="http://soap.sforce.com/2006/04/metadata">\n` +
+          // Metadata-format metas read "59.0"; the Tooling JSON number prints
+          // "59" — format it, or every snapshot comparison grows a phantom
+          // apiVersion delta.
+          `    <apiVersion>${Number(meta.ApiVersion).toFixed(1)}</apiVersion>\n` +
+          (meta.Description
+            ? `    <description>${meta.Description.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</description>\n`
+            : '') +
+          `</AuraDefinitionBundle>\n`,
+      ]);
+    }
+  }
+  const hidden = files.some(([, body]) => body === '(hidden)');
+  const framed = files
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([rel, text]) => `<!-- contrail:file aura/${name}/${rel} -->\n${text}`)
+    .join('\n');
+  return {
+    body: framed,
+    source: 'tooling (live)',
+    note:
+      `Bundle read live from Tooling AuraDefinition rows (not in the local snapshot) — ` +
+      `every file concatenated under contrail:file headers, the snapshot index's own ` +
+      `framing, for side-by-side comparison against a snapshot copy. diff_artifact ` +
+      `itself is SNAPSHOT-ONLY and will not see this bundle until a refresh indexes ` +
+      `it. The meta file is REBUILT from the bundle's ApiVersion/Description ` +
+      `(AuraDefinition has no meta DefType).` +
+      (hidden ? ' Some sources returned "(hidden)" — a managed package conceals them.' : ''),
+  };
+}
 
 /**
  * S40: a HISTORICAL flow version via the Tooling API. The Metadata API and
@@ -863,6 +976,11 @@ async function fetchArtifactContent(
   if (BUNDLE_TYPES.has(type)) {
     const artifact = db.getArtifact(conn.id, type, name);
     if (!artifact?.filePath) {
+      // S41: Aura bundles the snapshot lacks (installed-package or ns__Name
+      // managed members) read live from Tooling — the Apex-bodies pattern.
+      if (type === 'AuraDefinitionBundle') {
+        return fetchAuraLiveContent(deps, conn, name);
+      }
       throw new ContrailError(
         `${type} ${name} is not in the local snapshot — run refresh_snapshot with ` +
           `types:["${type}"].`,

@@ -165,6 +165,11 @@ export const DEFAULT_CONFIG: ContrailConfig = {
       'MutingPermissionSet',
       'QuickAction',
       'LightningComponentBundle',
+      // S41: Aura bundles join LWC — same rationale, and cheap: orgs own few
+      // namespace-free bundles (installed ones are platform-excluded from
+      // wildcards; the named-member expansion still fetches the
+      // namespace-free installedEditable ones).
+      'AuraDefinitionBundle',
     ],
     pollIntervalMs: 2000,
     retrieveTimeoutMs: 10 * 60 * 1000,

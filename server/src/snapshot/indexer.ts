@@ -98,15 +98,24 @@ const FOLDERED_DIR_TYPES: Array<{ dir: string; ext: string; type: string; folder
  * Checked BEFORE the generic -meta.xml skip — AiAuthoringBundle's
  * `.bundle-meta.xml` is real content, not a skippable sidecar.
  */
-const BUNDLE_DIR_TYPES: Array<{ dir: string; type: string; mainExt: string }> = [
-  { dir: 'genAiFunctions', type: 'GenAiFunction', mainExt: '.genAiFunction' },
-  { dir: 'genAiPlannerBundles', type: 'GenAiPlannerBundle', mainExt: '.genAiPlannerBundle' },
-  { dir: 'aiAuthoringBundles', type: 'AiAuthoringBundle', mainExt: '.agent' },
+const BUNDLE_DIR_TYPES: Array<{ dir: string; type: string; mainExts: string[] }> = [
+  { dir: 'genAiFunctions', type: 'GenAiFunction', mainExts: ['.genAiFunction'] },
+  { dir: 'genAiPlannerBundles', type: 'GenAiPlannerBundle', mainExts: ['.genAiPlannerBundle'] },
+  { dir: 'aiAuthoringBundles', type: 'AiAuthoringBundle', mainExts: ['.agent'] },
   // S36: LWC bundles MUST ride this branch — as a simple type the generic
   // -meta.xml skip would swallow every <n>.js-meta.xml (which carries
   // isExposed/targets). Subdirectories are real (templates/x.html secondary
   // templates, live-confirmed).
-  { dir: 'lwc', type: 'LightningComponentBundle', mainExt: '.js' },
+  { dir: 'lwc', type: 'LightningComponentBundle', mainExts: ['.js'] },
+  // S41: Aura bundles — the primary is kind-dependent (one of five), so an
+  // .app bundle must resolve its real main, not fall back alphabetically.
+  // A missing <n>.cmp-meta.xml is tolerated (old bundles retrieve without
+  // one); it rides the generic -meta.xml-is-content behavior of this branch.
+  {
+    dir: 'aura',
+    type: 'AuraDefinitionBundle',
+    mainExts: ['.cmp', '.app', '.evt', '.intf', '.tokens'],
+  },
 ];
 
 export function indexSnapshotFiles(
@@ -253,13 +262,18 @@ export function indexSnapshotFiles(
   for (const group of bundles.values()) {
     const apiName = decodeSegment(group.seg);
     const sorted = [...group.files].sort((a, b) => a.rel.localeCompare(b.rel));
-    // Main-file resolution tries the bare extension, then the -meta.xml
-    // flavor: GenAiFunction's main XML retrieves as
+    // Main-file resolution tries each candidate extension bare, then its
+    // -meta.xml flavor: GenAiFunction's main XML retrieves as
     // <Name>.genAiFunction-meta.xml (live-confirmed) while
-    // GenAiPlannerBundle's is bare <Name>.genAiPlannerBundle.
-    const base = `${group.spec.dir}/${group.seg}/${group.seg}${group.spec.mainExt}`;
-    const main =
-      sorted.find((f) => f.rel === base) ?? sorted.find((f) => f.rel === `${base}-meta.xml`);
+    // GenAiPlannerBundle's is bare <Name>.genAiPlannerBundle; an Aura
+    // bundle's primary is whichever of its five kinds exists (S41).
+    let main: { rel: string; text: string } | undefined;
+    for (const ext of group.spec.mainExts) {
+      const base = `${group.spec.dir}/${group.seg}/${group.seg}${ext}`;
+      main =
+        sorted.find((f) => f.rel === base) ?? sorted.find((f) => f.rel === `${base}-meta.xml`);
+      if (main) break;
+    }
     const content = sorted
       .map((f) => `<!-- contrail:file ${f.rel} -->\n${f.text}`)
       .join('\n');

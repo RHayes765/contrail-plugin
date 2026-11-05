@@ -843,6 +843,59 @@ export class ContrailDb {
     return (rows as AuditRow[]).map(rowToAudit);
   }
 
+  /**
+   * S41: OPPORTUNISTIC participation in the desktop app's cross-process
+   * snapshot lease. The app_locks table is desktop-owned (its v6 migration);
+   * the plugin's schema is frozen at v5 and NEVER creates it — on a machine
+   * without the desktop app the table is absent and acquisition trivially
+   * succeeds (in-process serialisation still holds via the refresh chain).
+   * Where the table exists, this mirrors the desktop's semantics exactly:
+   * expired or self-held locks are taken over; a live foreign lock refuses.
+   */
+  tryAcquireAppLock(name: string, holder: string, ttlMs: number): boolean {
+    if (!this.hasAppLocksTable()) return true;
+    const now = Date.now();
+    const tx = this.db.transaction((): boolean => {
+      const row = this.db
+        .prepare(`SELECT holder, expires_at FROM app_locks WHERE name = ?`)
+        .get(name) as { holder: string; expires_at: string } | undefined;
+      if (row && row.holder !== holder && new Date(row.expires_at).getTime() > now) {
+        return false;
+      }
+      this.db
+        .prepare(
+          `INSERT OR REPLACE INTO app_locks (name, holder, pid, acquired_at, expires_at)
+           VALUES (?, ?, ?, ?, ?)`,
+        )
+        .run(
+          name,
+          holder,
+          process.pid,
+          new Date(now).toISOString(),
+          new Date(now + ttlMs).toISOString(),
+        );
+      return true;
+    });
+    return tx();
+  }
+
+  releaseAppLock(name: string, holder: string): void {
+    if (!this.hasAppLocksTable()) return;
+    this.db.prepare(`DELETE FROM app_locks WHERE name = ? AND holder = ?`).run(name, holder);
+  }
+
+  private appLocksTableKnown: boolean | null = null;
+  private hasAppLocksTable(): boolean {
+    // Probed once per process, re-probed only while absent (the desktop may
+    // create it at any time; it is never dropped).
+    if (this.appLocksTableKnown === true) return true;
+    const row = this.db
+      .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'app_locks'`)
+      .get();
+    this.appLocksTableKnown = row !== undefined;
+    return this.appLocksTableKnown;
+  }
+
   close(): void {
     this.db.close();
   }
