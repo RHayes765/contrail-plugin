@@ -44,9 +44,18 @@ const STYLE = `
   label.grant p { margin: 0.15rem 0 0; font-size: 0.83rem; color: light-dark(#5b6472, #9aa4b2); }
   .field { margin-bottom: 1rem; }
   .field label { display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem; }
-  .field input[type=text] { width: 100%; padding: 0.5rem 0.65rem; border-radius: 8px;
+  .field input[type=text], .field input[type=password], .field select { width: 100%;
+      padding: 0.5rem 0.65rem; border-radius: 8px;
       border: 1px solid light-dark(#c9cfd8, #3a3f48); background: light-dark(#fff, #14161a);
       color: inherit; font-size: 0.95rem; }
+  .field .hint { font-size: 0.8rem; color: light-dark(#5b6472, #9aa4b2); margin-top: 0.3rem; }
+  .success { font-size: 0.9rem; background: #1a7c3a22; border: 1px solid #1a7c3a55;
+             color: light-dark(#176b33, #8ce8a8); border-radius: 8px; padding: 0.6rem 0.8rem;
+             margin-bottom: 1rem; }
+  .actions { display: flex; gap: 0.6rem; }
+  .actions button { width: auto; flex: 1; }
+  button.secondary { background: transparent; color: inherit;
+                     border: 1px solid light-dark(#c9cfd8, #3a3f48); }
   .note { font-size: 0.82rem; color: light-dark(#5b6472, #9aa4b2); margin: 0.75rem 0 0; }
   .warn { font-size: 0.85rem; background: #8a6d1a22; border: 1px solid #8a6d1a55;
           color: light-dark(#6d5a12, #e8d47c); border-radius: 8px; padding: 0.6rem 0.8rem;
@@ -75,7 +84,8 @@ const STYLE = `
           letter-spacing: 0.12em; padding: 0.7rem 0; user-select: all; }
 `;
 
-function page(title: string, body: string): string {
+/** The shared page shell — exported so sibling human-only pages (S42 Settings) keep the exact look. */
+export function page(title: string, body: string): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -354,12 +364,12 @@ export function renderApprovalPage(opts: ApprovalPageOptions): string {
 
 export function renderErrorPage(message: string): string {
   return page(
-    'Connection error',
+    'Contrail error',
     `
     <div class="card">
       <h1>Something went wrong</h1>
       <div class="error">${esc(message)}</div>
-      <p class="note">Close this tab and ask the agent to retry connect_org. Details are in
+      <p class="note">Close this tab and ask the agent to open the page again. Details are in
         the server log (stderr) if you need them.</p>
     </div>`,
   );

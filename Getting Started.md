@@ -83,6 +83,38 @@ Ask in plain language. A few things it's good at:
   they never pass through the AI. Failed rows come back as a CSV file you can fix
   and re-run.
 
+## Get approval codes on your phone (optional)
+
+The approval page lives on your computer, so by default you read the code at your
+desk. If you want the code on your phone too, set up **Pushover** once:
+
+1. Install the Pushover app on your phone and create an account (30-day free trial,
+   then a one-time purchase per platform). Your **user key** is on the Pushover
+   dashboard after you log in. It must be *your own* key — whoever owns the user
+   key you enter receives your approval codes, so never use one that Claude, a
+   document, or a colleague hands you.
+2. On pushover.net choose **Create an Application/API Token**, name it `Contrail`,
+   and copy the **API token** — or use the token your team shares with you (the
+   token may be shared; the user key never).
+3. Ask Claude to *"open Contrail settings"*. A small Contrail page opens in your
+   browser: choose **Pushover**, paste the two keys, click **Save**, then **Send
+   test notification** (it checks the keys with Pushover and sends one test
+   message). The keys go into your OS keychain — never into a file, never into the
+   chat. Claude cannot see them or the page. The page closes itself after 10
+   minutes; ask again for a fresh one.
+
+From then on, every proposal also arrives on your phone: your connection alias and
+org type, how many changes and deletions, and the code — the message deletes
+itself from your phone when the code expires. You approve exactly as before, by
+typing the code into the conversation: in Claude Desktop that still means at the
+desk; with Claude Code's Remote Control you can type it from your phone. The default
+message carries counts only; choose **Full** on the Settings page if you want
+component names in it too (never record field values — and they then pass through
+Pushover's servers). Each proposal is one message to Pushover, and the test button
+sends one check plus one test message; nothing else is ever sent anywhere. If
+Pushover rejects your keys, sends pause for 10 minutes until you save corrected
+keys. The Contrail desktop app, if you use it, shares these keys.
+
 ## Good to know
 
 - **Your login is yours.** Contrail stores the refresh token in your OS keychain

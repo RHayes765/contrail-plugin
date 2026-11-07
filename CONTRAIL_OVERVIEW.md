@@ -53,9 +53,9 @@ Salesforce professionals actually think about their work.
 This is the core invariant, and it is not configurable. Any change that modifies an
 org — deploying metadata or writing data — follows a strict two-step path: the
 assistant *proposes* a change, a human reviews it and reads a one-time confirmation
-code shown **only** on a local approval page in their own browser, and the change
-executes only when that code is supplied. The code never appears in anything the
-assistant can see. Even an assistant that has been manipulated or has simply
+code shown on a local approval page in their own browser (and, if they opted in,
+pushed to their own phone), and the change executes only when that code is
+supplied. The code never appears in anything the assistant can see. Even an assistant that has been manipulated or has simply
 misunderstood the task cannot approve its own writes — the approval lives entirely
 outside its reach, in front of a person.
 

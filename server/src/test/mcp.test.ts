@@ -100,6 +100,7 @@ describe('MCP surface', () => {
       'list_connections',
       'list_metadata',
       'manage_connection',
+      'open_settings',
       'refresh_snapshot',
       'retrieve_metadata',
       'run_agent_eval',

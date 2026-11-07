@@ -49,10 +49,33 @@ export interface ContrailConfig {
   updates: {
     /**
      * Once a day, ask the GitHub Releases API whether a newer Contrail exists
-     * (one anonymous GET — the product's only phone-home). Set false to
-     * disable entirely; the check never blocks or delays any tool call.
+     * (one anonymous GET — the product's only UNPROMPTED phone-home; the other
+     * outbound call, S42's approval notification, is opt-in and per-event).
+     * Set false to disable entirely; the check never blocks or delays any
+     * tool call.
      */
     checkEnabled: boolean;
+  };
+  notifications: {
+    /**
+     * S42: where a freshly minted confirmation code is ALSO delivered, beside
+     * the human-only approval page — so the human can approve from a phone
+     * (the localhost page is unreachable from one). 'pushover' sends one
+     * HTTPS POST to api.pushover.net per approval, carrying the review
+     * summary and the code; the user key and application token live in the
+     * OS keychain (set on the Settings page, never here). 'none' sends
+     * nothing. The agent never sees the code either way.
+     */
+    method: 'none' | 'pushover';
+    /**
+     * How much of the review travels in the message. 'minimal' = your
+     * connection alias, the org type, change/deletion/warning COUNTS and the
+     * code — no component names leave the machine. 'full' adds the component
+     * labels and warning text (they transit Pushover's servers — a
+     * confidentiality decision for client orgs); data changes are reduced to
+     * operation + object, never record field values.
+     */
+    summary: 'minimal' | 'full';
   };
   localDiagnostics: {
     /**
@@ -178,6 +201,10 @@ export const DEFAULT_CONFIG: ContrailConfig = {
   updates: {
     checkEnabled: true,
   },
+  notifications: {
+    method: 'none',
+    summary: 'minimal',
+  },
   localDiagnostics: {
     enabled: true,
     timeoutMs: 30 * 1000,
@@ -224,6 +251,7 @@ export function loadConfig(): ContrailConfig {
     oauth: { ...DEFAULT_CONFIG.oauth, ...fromDisk.oauth },
     snapshot: { ...DEFAULT_CONFIG.snapshot, ...fromDisk.snapshot },
     updates: { ...DEFAULT_CONFIG.updates, ...fromDisk.updates },
+    notifications: { ...DEFAULT_CONFIG.notifications, ...fromDisk.notifications },
     localDiagnostics: { ...DEFAULT_CONFIG.localDiagnostics, ...fromDisk.localDiagnostics },
     deploy: { ...DEFAULT_CONFIG.deploy, ...fromDisk.deploy },
     bulkLoad: { ...DEFAULT_CONFIG.bulkLoad, ...fromDisk.bulkLoad },
@@ -245,4 +273,64 @@ export function loadConfig(): ContrailConfig {
     merged.oauth.callbackPath = process.env.CONTRAIL_OAUTH_CALLBACK_PATH;
   }
   return merged;
+}
+
+/**
+ * S42: persist a patch to ONE config section. Patches the on-disk partial —
+ * never the merged, env-overridden object loadConfig returns, which would
+ * freeze environment overrides (and every default) into the human's file.
+ * Unknown sections on disk are preserved verbatim. An existing file that is
+ * not valid JSON is NEVER overwritten (a hand-edit with a typo must stay
+ * repairable) — the save throws and the Settings surface says so.
+ */
+export function saveConfigSection<K extends keyof ContrailConfig>(
+  section: K,
+  patch: Partial<ContrailConfig[K]>,
+): void {
+  const file = configPath();
+  let onDisk: Record<string, unknown> = {};
+  if (fs.existsSync(file)) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch (err) {
+      throw new Error(
+        `config.json exists but is not valid JSON (${String(err instanceof Error ? err.message : err)}). ` +
+          `Fix or remove ${file}, then save again — nothing was written.`,
+      );
+    }
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      onDisk = parsed as Record<string, unknown>;
+    }
+  }
+  const current = onDisk[section];
+  const base =
+    current && typeof current === 'object' && !Array.isArray(current)
+      ? (current as Record<string, unknown>)
+      : {};
+  onDisk[section] = { ...base, ...patch };
+  fs.writeFileSync(file, JSON.stringify(onDisk, null, 2) + '\n', 'utf8');
+}
+
+/**
+ * S42: the on-disk value of ONE section (no defaults, no env) — null when the
+ * file or the section is absent or unreadable. The notifier uses it to pick
+ * up a change saved by the OTHER surface (plugin vs desktop app) without a
+ * restart.
+ */
+export function readConfigSection<K extends keyof ContrailConfig>(
+  section: K,
+): Partial<ContrailConfig[K]> | null {
+  const file = configPath();
+  if (!fs.existsSync(file)) return null;
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const value = (parsed as Record<string, unknown>)[section];
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Partial<ContrailConfig[K]>)
+      : null;
+  } catch {
+    return null;
+  }
 }

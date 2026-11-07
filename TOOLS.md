@@ -1,6 +1,6 @@
 # Contrail Reference — tools, features, configuration
 
-Everything Contrail can do, in one place. Current as of **v0.35.0** (38 tools).
+Everything Contrail can do, in one place. Current as of **v0.35.0** (39 tools).
 The same tool surface is available in all three installs — the Claude Desktop
 extension (`.mcpb`), the Claude Code plugin, and the Contrail desktop app —
 with a few desktop-app differences [noted at the end](#the-desktop-app).
@@ -20,7 +20,8 @@ with a few desktop-app differences [noted at the end](#the-desktop-app).
 | [`connect_org`](#connect_org) | — | Browser OAuth connect; human sets grants on the completion page |
 | [`disconnect_org`](#disconnect_org) | — | Revoke the token and remove a connection |
 | [`manage_connection`](#manage_connection) | — | Open the grants page (the only place grants change) |
-| [`list_connections`](#list_connections) | — | List connected orgs + grants (+ update notice when behind) |
+| [`open_settings`](#open_settings) | — | Open the Settings page: approval codes to the human's phone (Pushover) |
+| [`list_connections`](#list_connections) | — | List connected orgs + grants (+ update notice when behind, + phone-notification status) |
 | [`get_permissions`](#get_permissions) | — | The full grants matrix, including what is NOT granted |
 | [`get_audit_log`](#get_audit_log) | — | Local audit log: connections, refusals, every write decision |
 | [`list_metadata`](#list_metadata) | metadata_read | Inventory from the snapshot index, or live from the org |
@@ -85,16 +86,25 @@ already passed this ritual — see `run_agent_eval`), in every environment
    short **confirmation code**.
 2. The code appears **only on that page** — never in any tool result — so the
    only way a write executes is the human reading the code back into chat.
-   Close the tab and nothing happens.
+   Close the tab and nothing happens. If the human has set up **phone
+   notifications** ([`open_settings`](#open_settings)), the engine also pushes
+   the review summary and the code to their phone at the moment it mints
+   them — so they can approve from anywhere — but the code still counts only
+   when the human types it into chat, and the agent still never sees it.
 
 Codes are single-use, expire in ~1 hour, are invalidated by any newer
 proposal **of the same kind** (deploy, DML, Apex, or bulk) on the same
 connection, and lock after repeated wrong guesses (brute-force guard). Every decision — proposals, executions, refusals — lands
 in the local audit log.
 
-Refresh tokens live in the OS keychain only. The daily release check
-(`updates.checkEnabled`) is the product's only phone-home, and it can be
-turned off.
+Refresh tokens live in the OS keychain only. Contrail makes exactly two kinds
+of outbound call that are not to your Salesforce orgs, and both are
+disclosed here: the daily release check (`updates.checkEnabled`, one
+anonymous request to GitHub, can be turned off) and — only if the human
+switched it on — Pushover: one request per approval, carrying the summary
+and the code (`notifications.method`), plus one key check and one test
+message when the human presses "Send test notification". Nothing else
+leaves the machine.
 
 ---
 
@@ -133,14 +143,43 @@ for the agent to fetch).
 
 - `connection` — alias (or id).
 
+### `open_settings`
+
+Opens the human-only localhost **Settings** page — today, approval codes on
+your phone. There the human switches Pushover delivery on or off, chooses
+how much of the review travels in the message (**minimal** = the connection
+alias, org type, counts and the code; **full** adds component names and
+warnings — never record field values — which then transit Pushover's
+servers), enters their Pushover user key and application token, and sends a
+test notification (Save first; the test button saves typed keys, checks them
+with Pushover, then sends one test message). The keys go from the browser
+straight into the OS keychain, shared with the desktop app; the page never
+renders a stored key back (only a masked tail), and the agent gets nothing
+but *opened: yes/no* plus the current method/configured status. Like the
+approval page, the session-bearing URL is never returned to the agent — if
+the browser cannot be opened it goes to the server log for the human to
+open. The page lives 10 minutes; call again for a fresh one. No arguments.
+
+Behaviour worth knowing: the phone message deletes itself when the code
+expires; after Pushover rejects the stored keys, sends pause for 10 minutes
+(saving on this page clears the pause); the agent is told only
+`phone_notification.status` and a reason category, and is to OFFER this tool
+for `not_configured` / `rejected` / `circuit_open` and merely report
+`timeout` / `network` / `quota`.
+
+Why a page rather than a tool argument: the notification destination is the
+one setting a prompt-injected agent must never be able to change — and the
+user key must be the human's own, since whoever owns it receives the codes.
+
 ### `list_connections`
 
 Every connected org with alias, org identity, type, and grants, plus
 `staging_dir` — the directory agents author `content_file`/`csv_file`
 sources into, named proactively on the session-start tool so it is never
-learned from a refusal. When a newer Contrail release exists (from the
-cached daily check — never a network call at tool time), the result carries
-an update notice with the download link.
+learned from a refusal — and `approval_notifications` (`method` and whether
+both Pushover keys are stored; never the keys). When a newer Contrail
+release exists (from the cached daily check — never a network call at tool
+time), the result carries an update notice with the download link.
 
 ### `get_permissions`
 
@@ -525,7 +564,10 @@ generated SOQL to `soql_query`.
 Grants: `metadata_write` (deploys) / `data_write` (DML, Apex, bulk). Every
 tool here follows the [two-step ritual](#the-security-model): propose →
 human reads the code off the approval page → execute with that code. The
-code never appears in any tool result.
+code never appears in any tool result. Every propose/validate result carries
+`approval_page.phone_notification` — `sent`, `failed` (with a reason
+category and what to do), or `off` — so the agent knows whether the human
+also has the code on their phone, without ever learning the code.
 
 ### `validate_deploy`
 
@@ -832,7 +874,9 @@ sections' defaults automatically.
 | | `flowTimeoutMs` | 10 min | Browser-flow hard limit. |
 | `snapshot` | `types` | 21 types | The default retrieve manifest (ApexClass, ApexTrigger, Flow, CustomObject, CustomLabels, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, ApexPage, GlobalValueSet, Layout, CustomMetadata, LeadConvertSettings, the S36 five: CustomPermission, PermissionSetGroup, MutingPermissionSet, QuickAction, LightningComponentBundle — and S41's AuraDefinitionBundle, which expands to NAMED members from the live inventory because wildcard retrieves drop namespace-free installedEditable bundles, live-confirmed). Report/Dashboard (+ their folders), the Agentforce types, and the integration group (ConnectedApp, NamedCredential, ExternalCredential, AuthProvider, PlatformEventChannel[Member], ManagedEventSubscription) are deployable and indexable but deliberately OUT of the default — `refresh_snapshot types:[…]` pulls them explicitly. Package-installed components (managed OR unlocked) are platform-excluded from wildcard retrieves and never counted as snapshot staleness. |
 | | `pollIntervalMs` / `retrieveTimeoutMs` | 2 s / 10 min | Retrieve polling. |
-| `updates` | `checkEnabled` | `true` | Daily anonymous release check — the only phone-home; `false` disables it entirely. |
+| `updates` | `checkEnabled` | `true` | Daily anonymous release check — the only *unprompted* phone-home; `false` disables it entirely. |
+| `notifications` | `method` | `none` | `pushover` also delivers each minted approval code (with the review summary) to the human's phone — one HTTPS POST to api.pushover.net per proposal. Set on the Settings page ([`open_settings`](#open_settings)); the Pushover user key and application token live in the OS keychain, never here. |
+| | `summary` | `minimal` | What the phone message carries: `minimal` = the connection alias, org type, change/deletion/warning counts and the code (no component names leave the machine); `full` adds component labels and warning text — data changes are reduced to operation + object, never record field values. |
 | `localDiagnostics` | `enabled` | `true` | `check_apex`/`check_soql`; `false` makes them report honestly unavailable. |
 | | `timeoutMs` | 30 s | Per-check budget including cold spawn. |
 | `deploy` | `pollIntervalMs` / `deployTimeoutMs` | 2 s / 15 min | Deploy polling. |
@@ -854,8 +898,9 @@ Env overrides: `CONTRAIL_SF_CLIENT_ID`, `CONTRAIL_SF_API_VERSION`,
 ## The desktop app
 
 The [Contrail desktop app](https://github.com/RHayes765/contrail-desktop)
-runs the same engine and the same 38 capabilities under an embedded agent
-runtime, and adds:
+runs the same engine and the same capabilities under an embedded agent
+runtime (38 of the 39 tools — `open_settings` has no counterpart because
+Settings are a native screen there), and adds:
 
 - **Projects as context silos.** Each project binds its own org connections
   (with env-role coloring: dev/qa/uat/prod), carries its own instructions,
@@ -869,7 +914,10 @@ runtime, and adds:
   decision is authoritative and the runtime physically lacks the approval
   channel. Seven project tools exist only here: `list_project_docs`,
   `read_project_doc`, `list_project_files`, `read_project_file`,
-  `list_project_notes`, `add_project_note`, `read_skill`.
+  `list_project_notes`, `add_project_note`, `read_skill`. Phone
+  notifications (Settings → Notifications, same Pushover keys as the
+  plugin) send a **code-free** "waiting in Deploy Review" push, because a
+  native approval is a click in the app, not a code.
 - **Linked folders.** Attach local folders to a project (like Claude
   Desktop's) — the agent sees their live contents, no per-file adding. Bulk
   loads name CSVs by `{folder, path}` coordinates; the app resolves them
@@ -891,6 +939,9 @@ on Linux; override with `CONTRAIL_DATA_DIR`) holds:
 
 - `contrail.db` — connections (no tokens — those are in the OS keychain),
   metadata index, dependency graph, audit log, write requests.
+- The OS keychain (service `contrail-engine`) — per-connection refresh
+  tokens, plus the Pushover user key and application token under the
+  `notify:pushover:user` / `notify:pushover:token` accounts.
 - `snapshots/<connection-id>/current/` — the retrieved metadata tree in
   standard source format (`classes/`, `flows/`, `objects/`, …).
 - `staging/` — where agents author files for `content_file` / `csv_file`,

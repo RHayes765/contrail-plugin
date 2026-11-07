@@ -5,39 +5,74 @@ import { log } from './log.js';
  * Refresh tokens live in the OS keychain only (Windows Credential Manager /
  * macOS Keychain / libsecret), keyed by connection id. Nothing token-shaped
  * ever touches the SQLite database, config file, or an MCP response.
+ *
+ * S42: the same store also holds the few NON-connection secrets the engine
+ * owns (the Pushover user key and application token behind approval
+ * notifications), under `notify:`-prefixed accounts that can never collide
+ * with a connection UUID. One keychain entry serves the plugin AND the desktop
+ * app — they share the data dir and the service name.
  */
 export interface TokenStore {
   setRefreshToken(connectionId: string, token: string): void;
   getRefreshToken(connectionId: string): string | null;
   deleteRefreshToken(connectionId: string): void;
+  /** Generic secret under an engine-owned account name (never a connection id). */
+  setSecret(account: string, value: string): void;
+  getSecret(account: string): string | null;
+  deleteSecret(account: string): void;
 }
 
 const SERVICE = 'contrail-engine';
 
 export class KeychainTokenStore implements TokenStore {
-  private entryFor(connectionId: string) {
+  private entryFor(account: string) {
     const { Entry } = loadKeyring();
-    return new Entry(SERVICE, connectionId);
+    return new Entry(SERVICE, account);
   }
 
   setRefreshToken(connectionId: string, token: string): void {
-    this.entryFor(connectionId).setPassword(token);
+    this.setSecret(connectionId, token);
   }
 
   getRefreshToken(connectionId: string): string | null {
+    // Token reads keep their original any-failure-is-absence contract: the
+    // caller's next step is a re-auth prompt either way.
     try {
-      return this.entryFor(connectionId).getPassword();
+      return this.getSecret(connectionId);
     } catch {
       return null;
     }
   }
 
   deleteRefreshToken(connectionId: string): void {
+    this.deleteSecret(connectionId);
+  }
+
+  setSecret(account: string, value: string): void {
+    this.entryFor(account).setPassword(value);
+  }
+
+  /**
+   * null ONLY when no entry exists. A locked, policy-blocked, or absent
+   * keychain THROWS — so a status surface can say "the store could not be
+   * read" instead of the false "no key stored" (the napi-rs keyring reports
+   * absence with a NoEntry-style message; everything else is a store fault).
+   */
+  getSecret(account: string): string | null {
     try {
-      this.entryFor(connectionId).deletePassword();
+      return this.entryFor(account).getPassword();
+    } catch (err) {
+      if (/no matching entry|not found|no such/i.test(String(err))) return null;
+      throw err;
+    }
+  }
+
+  deleteSecret(account: string): void {
+    try {
+      this.entryFor(account).deletePassword();
     } catch (err) {
       log('warn', 'keychain delete failed (entry may not exist)', {
-        connectionId,
+        account,
         err: String(err),
       });
     }
@@ -58,6 +93,18 @@ export class MemoryTokenStore implements TokenStore {
 
   deleteRefreshToken(connectionId: string): void {
     this.tokens.delete(connectionId);
+  }
+
+  setSecret(account: string, value: string): void {
+    this.tokens.set(account, value);
+  }
+
+  getSecret(account: string): string | null {
+    return this.tokens.get(account) ?? null;
+  }
+
+  deleteSecret(account: string): void {
+    this.tokens.delete(account);
   }
 }
 

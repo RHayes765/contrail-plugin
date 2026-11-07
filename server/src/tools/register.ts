@@ -11,6 +11,8 @@ import type { SnapshotStore } from '../snapshot/store.js';
 import type { SnapshotEngine } from '../snapshot/engine.js';
 import type { DeployEngine } from '../deploy/engine.js';
 import type { LocalDiagRunner } from '../localdiag/types.js';
+import type { ApprovalNotifier } from '../core/notify.js';
+import type { SettingsPageServer } from '../connect/settings.js';
 import { ContrailError } from '../core/errors.js';
 import { grantedList, notGrantedList } from '../core/grants.js';
 import { getUpdateNotice } from '../core/updateCheck.js';
@@ -32,6 +34,10 @@ export interface ToolDeps {
   engine: SnapshotEngine;
   deploys: DeployEngine;
   localDiag: LocalDiagRunner;
+  /** S42: phone delivery of approval codes (shared with the engine so the circuit state is one). */
+  notifier: ApprovalNotifier;
+  /** S42: the human-only Settings page server behind open_settings. */
+  settingsPage: SettingsPageServer;
 }
 
 const PERMISSION_NOTES = [
@@ -209,7 +215,9 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
       description:
         'List every connected org with its alias, org identity, type, and grants. Zero-cost ' +
         'local read — call this instead of guessing which orgs exist. Also returns ' +
-        'staging_dir: the directory to author content_file/csv_file sources into.',
+        'staging_dir: the directory to author content_file/csv_file sources into, and ' +
+        'approval_notifications: whether approval codes are also pushed to the human\'s phone ' +
+        '(configured by the human via open_settings; never by you).',
       inputSchema: {},
     },
     async () =>
@@ -229,6 +237,9 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
           // agent authoring a large component learns where deploy bytes live
           // before its first validate_deploy refusal, not from it.
           staging_dir: stagingDir(),
+          // S42: status only — method and whether both keys exist. Never the
+          // keys, never a hint of them.
+          approval_notifications: deps.notifier.status(),
           ...(update
             ? {
                 update_available: update,

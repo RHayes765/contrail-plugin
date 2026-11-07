@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { ContrailDb } from './core/db.js';
 import { KeychainTokenStore, type TokenStore } from './core/keychain.js';
 import { AuditLog } from './core/audit.js';
-import { loadConfig, type ContrailConfig } from './core/config.js';
+import { loadConfig, readConfigSection, type ContrailConfig } from './core/config.js';
 import { ConnectFlowManager, type FlowOps } from './connect/flow.js';
 import { AccessTokenManager } from './salesforce/tokens.js';
 import { SnapshotStore } from './snapshot/store.js';
@@ -15,10 +15,14 @@ import { registerDiffTools } from './tools/diff.js';
 import { registerDataTools } from './tools/data.js';
 import { registerDeployTools } from './tools/deploy.js';
 import { registerLocalDiagTools } from './tools/localdiag.js';
+import { registerSettingsTools } from './tools/settings.js';
 import { createLocalDiagRunner } from './localdiag/runner.js';
 import type { LocalDiagRunner } from './localdiag/types.js';
+import { PushoverNotifier, type ApprovalNotifier } from './core/notify.js';
+import { SettingsPageServer } from './connect/settings.js';
 import { dataDir, vendorDir } from './core/paths.js';
 import path from 'node:path';
+import openBrowserDefault from 'open';
 
 import { ENGINE_VERSION, SERVER_NAME } from './core/version.js';
 
@@ -33,6 +37,8 @@ export function createDeps(overrides?: {
   store?: SnapshotStore;
   approvals?: ApprovalPageServer;
   localDiag?: LocalDiagRunner;
+  /** S42: the approval notifier (phone push). Tests inject a fake; default is the real Pushover client. */
+  notifier?: ApprovalNotifier;
 }): ToolDeps {
   const db = overrides?.db ?? new ContrailDb();
   const tokens = overrides?.tokens ?? new KeychainTokenStore();
@@ -43,6 +49,25 @@ export function createDeps(overrides?: {
   const store = overrides?.store ?? new SnapshotStore();
   const engine = new SnapshotEngine(db, store, tokenMgr, config, audit);
   const deploys = new DeployEngine(db, store, tokenMgr, config, audit, overrides?.approvals);
+  // An injected config object is authoritative (tests); the loaded one is
+  // re-synced from disk per send so a change saved by the desktop app lands.
+  const notifier =
+    overrides?.notifier ??
+    new PushoverNotifier(config, tokens, fetch, () =>
+      overrides?.config ? null : readConfigSection('notifications'),
+    );
+  deploys.setApprovalNotifier(notifier);
+  const settingsPage = new SettingsPageServer({
+    config,
+    tokens,
+    audit,
+    notifier,
+    openBrowser:
+      overrides?.flowOps?.openBrowser ??
+      (async (url) => {
+        await openBrowserDefault(url);
+      }),
+  });
   const localDiag =
     overrides?.localDiag ??
     createLocalDiagRunner({
@@ -51,7 +76,20 @@ export function createDeps(overrides?: {
       timeoutMs: config.localDiagnostics.timeoutMs,
       workspaceRoot: path.join(dataDir(), 'localdiag-workspace'),
     });
-  return { db, tokens, audit, config, flows, tokenMgr, store, engine, deploys, localDiag };
+  return {
+    db,
+    tokens,
+    audit,
+    config,
+    flows,
+    tokenMgr,
+    store,
+    engine,
+    deploys,
+    localDiag,
+    notifier,
+    settingsPage,
+  };
 }
 
 /**
@@ -66,5 +104,6 @@ export function createServer(deps: ToolDeps): McpServer {
   registerDataTools(server, deps);
   registerDeployTools(server, deps);
   registerLocalDiagTools(server, deps);
+  registerSettingsTools(server, deps);
   return server;
 }

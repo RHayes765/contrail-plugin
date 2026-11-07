@@ -104,6 +104,9 @@ export const TOOL_GRANT_MAP: Readonly<Record<string, Grant | null>> = {
   connect_org: null,
   disconnect_org: null,
   manage_connection: null,
+  // S42: opens the human-only Settings page (approval notifications). No org,
+  // no grant — and the agent never sees what the human enters there.
+  open_settings: null,
   list_connections: null,
   get_permissions: null,
   get_audit_log: null,

@@ -130,7 +130,14 @@ import { deploysDir } from '../core/paths.js';
 import { ContrailError } from '../core/errors.js';
 import { generateConfirmationCode } from './codes.js';
 import { ApprovalPageServer } from './approval.js';
-import { renderApprovalPage } from '../connect/pages.js';
+import { renderApprovalPage, type ApprovalPageOptions } from '../connect/pages.js';
+import {
+  NullNotifier,
+  describePhoneOutcome,
+  type ApprovalNotifier,
+  type NotifyOutcome,
+  type PhoneNotification,
+} from '../core/notify.js';
 import {
   AURA_DEFTYPE_FILES,
   analyzeChanges,
@@ -271,6 +278,58 @@ interface Job<T> {
 export class DeployEngine {
   private readonly jobs = new Map<string, Job<unknown>>();
   private executionObserver: ExecutionObserver | null = null;
+  private notifier: ApprovalNotifier = new NullNotifier();
+
+  /**
+   * S42: register the approval notifier (the phone push of a freshly minted
+   * code). A setter for the same reason as setExecutionObserver: the real
+   * notifier needs the TokenStore, which the engine deliberately never holds.
+   * Unset = notifications off, so every existing construction keeps working.
+   */
+  setApprovalNotifier(notifier: ApprovalNotifier): void {
+    this.notifier = notifier;
+  }
+
+  /**
+   * Best-effort phone delivery of a just-presented approval. Fired AFTER the
+   * page exists, bounded by the notifier's own timeout, never allowed to fail
+   * the proposal. Audit rows carry outcome categories only — never the code,
+   * never a key. `mode: 'native'` (the desktop's in-app review) sends the
+   * summary WITHOUT the code: there is nowhere to type it.
+   */
+  private async notifyApproval(
+    view: ApprovalPageOptions,
+    requestId: string,
+    connectionId: string,
+    mode: 'page' | 'native',
+  ): Promise<PhoneNotification> {
+    let outcome: NotifyOutcome;
+    try {
+      outcome = await this.notifier.notify(view, { includeCode: mode === 'page' });
+    } catch (err) {
+      // Category only: a notifier's error MESSAGE could carry the code, and
+      // this seam exists to keep the code out of every log line.
+      log('warn', 'approval notifier threw; treating as not delivered', {
+        err: err instanceof Error ? err.name : typeof err,
+      });
+      outcome = { status: 'failed', reason: 'network' };
+    }
+    if (outcome.status === 'sent') {
+      this.audit.record('approval.notified', {
+        connectionId,
+        tool: proposeToolFor(view.kind),
+        detail: { requestId, kind: view.kind, method: 'pushover', codeIncluded: mode === 'page' },
+      });
+    } else if (outcome.status === 'failed') {
+      this.audit.record('approval.notify_failed', {
+        connectionId,
+        tool: proposeToolFor(view.kind),
+        outcome: 'error',
+        detail: { requestId, kind: view.kind, reason: outcome.reason },
+      });
+    }
+    return describePhoneOutcome(outcome, { includeCode: mode === 'page' });
+  }
 
   /**
    * Register the (single) execution observer. A setter rather than a ctor
@@ -702,46 +761,48 @@ export class DeployEngine {
       expires_at: expiresAt,
     };
 
-    const approval = await this.approvals.present(
-      renderApprovalPage({
-        kind: 'deploy',
-        code,
-        expiresAt,
-        org: {
-          alias: conn.alias,
-          orgName: conn.orgName,
-          orgType: conn.orgType,
-          instanceUrl: conn.instanceUrl,
+    const view: ApprovalPageOptions = {
+      kind: 'deploy',
+      code,
+      expiresAt,
+      org: {
+        alias: conn.alias,
+        orgName: conn.orgName,
+        orgType: conn.orgType,
+        instanceUrl: conn.instanceUrl,
+      },
+      changes: changes.map((c) => ({
+        label: `${c.change.toUpperCase()}  ${c.type}:${c.api_name}`,
+        warnings: c.warnings,
+        ...(c.source_path
+          ? { detail: `from ${c.source_path}  ·  sha256 ${(c.source_sha256 ?? '').slice(0, 16)}…` }
+          : {}),
+      })),
+      destructive: destructive.map((c) => ({
+        label: `DELETE  ${c.type}:${c.api_name}`,
+        warnings: c.warnings,
+      })),
+      results: [
+        { label: 'Validation', value: 'passed (checkOnly)' },
+        { label: 'Components', value: String(result.numberComponentsTotal) },
+        {
+          label: 'Tests',
+          value:
+            result.numberTestsTotal > 0
+              ? `${result.numberTestsTotal} run, ${result.numberTestErrors} failed`
+              : `none run (${input.testLevel ?? 'org default'})`,
+          bad: result.numberTestErrors > 0,
         },
-        changes: changes.map((c) => ({
-          label: `${c.change.toUpperCase()}  ${c.type}:${c.api_name}`,
-          warnings: c.warnings,
-          ...(c.source_path
-            ? { detail: `from ${c.source_path}  ·  sha256 ${(c.source_sha256 ?? '').slice(0, 16)}…` }
-            : {}),
-        })),
-        destructive: destructive.map((c) => ({
-          label: `DELETE  ${c.type}:${c.api_name}`,
-          warnings: c.warnings,
-        })),
-        results: [
-          { label: 'Validation', value: 'passed (checkOnly)' },
-          { label: 'Components', value: String(result.numberComponentsTotal) },
-          {
-            label: 'Tests',
-            value:
-              result.numberTestsTotal > 0
-                ? `${result.numberTestsTotal} run, ${result.numberTestErrors} failed`
-                : `none run (${input.testLevel ?? 'org default'})`,
-            bad: result.numberTestErrors > 0,
-          },
-        ],
-        blast,
-        warnings: permCoverage.warning ? [permCoverage.warning] : [],
-      }),
+      ],
+      blast,
+      warnings: permCoverage.warning ? [permCoverage.warning] : [],
+    };
+    const approval = await this.approvals.present(
+      renderApprovalPage(view),
       this.requestStatusCheck(request.id),
       this.config.deploy.codeTtlMs + 60_000,
     );
+    const phone = await this.notifyApproval(view, request.id, conn.id, 'page');
 
     this.audit.record('deploy.validated', {
       connectionId: conn.id,
@@ -757,7 +818,7 @@ export class DeployEngine {
     return {
       summary,
       validation_passed: true,
-      approval: approvalForAgent('deploy', approval),
+      approval: { ...approvalForAgent('deploy', approval), phone_notification: phone },
     };
   }
 
@@ -1012,32 +1073,34 @@ export class DeployEngine {
           { label: 'Mode', value: 'all-or-none (any failure rolls back every row)' },
         ];
 
+    const view: ApprovalPageOptions = {
+      kind: 'dml',
+      code,
+      expiresAt,
+      org: {
+        alias: conn.alias,
+        orgName: conn.orgName,
+        orgType: conn.orgType,
+        instanceUrl: conn.instanceUrl,
+      },
+      changes,
+      destructive,
+      results,
+      blast: [],
+      ...(isDmlPlan(input) && !input.all_or_none
+        ? {
+            warnings: [
+              'This plan is NOT atomic — approve only if partial completion is acceptable.',
+            ],
+          }
+        : {}),
+    };
     const approval = await this.approvals.present(
-      renderApprovalPage({
-        kind: 'dml',
-        code,
-        expiresAt,
-        org: {
-          alias: conn.alias,
-          orgName: conn.orgName,
-          orgType: conn.orgType,
-          instanceUrl: conn.instanceUrl,
-        },
-        changes,
-        destructive,
-        results,
-        blast: [],
-        ...(isDmlPlan(input) && !input.all_or_none
-          ? {
-              warnings: [
-                'This plan is NOT atomic — approve only if partial completion is acceptable.',
-              ],
-            }
-          : {}),
-      }),
+      renderApprovalPage(view),
       this.requestStatusCheck(request.id),
       this.config.deploy.codeTtlMs + 60_000,
     );
+    const phone = await this.notifyApproval(view, request.id, conn.id, 'page');
 
     this.audit.record('dml.proposed', {
       connectionId: conn.id,
@@ -1063,7 +1126,7 @@ export class DeployEngine {
       request_id: request.id,
       ...preview,
       expires_at: expiresAt,
-      approval_page: approvalForAgent('dml', approval),
+      approval_page: { ...approvalForAgent('dml', approval), phone_notification: phone },
     };
   }
 
@@ -1342,44 +1405,46 @@ export class DeployEngine {
       summaryJson: JSON.stringify({ lines, chars: script.length }),
     });
 
-    const approval = await this.approvals.present(
-      renderApprovalPage({
-        kind: 'apex',
-        code,
-        expiresAt,
-        org: {
-          alias: conn.alias,
-          orgName: conn.orgName,
-          orgType: conn.orgType,
-          instanceUrl: conn.instanceUrl,
+    const view: ApprovalPageOptions = {
+      kind: 'apex',
+      code,
+      expiresAt,
+      org: {
+        alias: conn.alias,
+        orgName: conn.orgName,
+        orgType: conn.orgType,
+        instanceUrl: conn.instanceUrl,
+      },
+      changes: [
+        {
+          label: `Execute anonymous Apex (${lines} line${lines === 1 ? '' : 's'}, ${script.length} chars)`,
+          warnings: [],
+          // The full script, verbatim — the human is approving these exact
+          // bytes, so nothing may be elided (.chg-detail renders pre-wrap).
+          detail: script,
         },
-        changes: [
-          {
-            label: `Execute anonymous Apex (${lines} line${lines === 1 ? '' : 's'}, ${script.length} chars)`,
-            warnings: [],
-            // The full script, verbatim — the human is approving these exact
-            // bytes, so nothing may be elided (.chg-detail renders pre-wrap).
-            detail: script,
-          },
-        ],
-        destructive: [],
-        results: [
-          {
-            label: 'Validation',
-            value: 'none — the org compiles and runs the script only when you approve',
-          },
-          { label: 'Runs as', value: conn.username ?? 'the connected user' },
-        ],
-        blast: [],
-        warnings: [
-          'ANONYMOUS APEX — this script runs with YOUR permissions and can read or write ' +
-            'anything your user can. DML it performs COMMITS on success (nothing rolls back ' +
-            'unless the script throws). Read every line below before approving.',
-        ],
-      }),
+      ],
+      destructive: [],
+      results: [
+        {
+          label: 'Validation',
+          value: 'none — the org compiles and runs the script only when you approve',
+        },
+        { label: 'Runs as', value: conn.username ?? 'the connected user' },
+      ],
+      blast: [],
+      warnings: [
+        'ANONYMOUS APEX — this script runs with YOUR permissions and can read or write ' +
+          'anything your user can. DML it performs COMMITS on success (nothing rolls back ' +
+          'unless the script throws). Read every line below before approving.',
+      ],
+    };
+    const approval = await this.approvals.present(
+      renderApprovalPage(view),
       this.requestStatusCheck(request.id),
       this.config.deploy.codeTtlMs + 60_000,
     );
+    const phone = await this.notifyApproval(view, request.id, conn.id, 'page');
 
     this.audit.record('apex.proposed', {
       connectionId: conn.id,
@@ -1393,7 +1458,7 @@ export class DeployEngine {
       lines,
       chars: script.length,
       expires_at: expiresAt,
-      approval_page: approvalForAgent('apex', approval),
+      approval_page: { ...approvalForAgent('apex', approval), phone_notification: phone },
     };
   }
 
@@ -1626,45 +1691,47 @@ export class DeployEngine {
       summaryJson: JSON.stringify({ rows: [{ label, warnings: [] }] }),
     });
 
-    const approval = await this.approvals.present(
-      renderApprovalPage({
-        kind: 'activation',
-        code,
-        expiresAt,
-        org: {
-          alias: conn.alias,
-          orgName: conn.orgName,
-          orgType: conn.orgType,
-          instanceUrl: conn.instanceUrl,
+    const view: ApprovalPageOptions = {
+      kind: 'activation',
+      code,
+      expiresAt,
+      org: {
+        alias: conn.alias,
+        orgName: conn.orgName,
+        orgType: conn.orgType,
+        instanceUrl: conn.instanceUrl,
+      },
+      changes: [
+        {
+          label,
+          warnings: [],
+          detail:
+            `BotVersion ${version.Id}\n` +
+            `status ${version.Status} → ${input.status}\n` +
+            `POST /connect/bot-versions/${version.Id}/activation`,
         },
-        changes: [
-          {
-            label,
-            warnings: [],
-            detail:
-              `BotVersion ${version.Id}\n` +
-              `status ${version.Status} → ${input.status}\n` +
-              `POST /connect/bot-versions/${version.Id}/activation`,
-          },
-        ],
-        destructive: [],
-        results: [
-          {
-            label: 'Validation',
-            value: 'none — the org accepts or refuses the change only when you approve',
-          },
-        ],
-        blast: [],
-        warnings: [
-          'LIVE AGENT BEHAVIOR — this changes what users experience IMMEDIATELY. ' +
-            'Deactivating takes the agent version offline on every channel it serves; ' +
-            'activating puts this version in front of users. This is not a metadata ' +
-            'deploy: there is no draft in between.',
-        ],
-      }),
+      ],
+      destructive: [],
+      results: [
+        {
+          label: 'Validation',
+          value: 'none — the org accepts or refuses the change only when you approve',
+        },
+      ],
+      blast: [],
+      warnings: [
+        'LIVE AGENT BEHAVIOR — this changes what users experience IMMEDIATELY. ' +
+          'Deactivating takes the agent version offline on every channel it serves; ' +
+          'activating puts this version in front of users. This is not a metadata ' +
+          'deploy: there is no draft in between.',
+      ],
+    };
+    const approval = await this.approvals.present(
+      renderApprovalPage(view),
       this.requestStatusCheck(request.id),
       this.config.deploy.codeTtlMs + 60_000,
     );
+    const phone = await this.notifyApproval(view, request.id, conn.id, 'page');
 
     this.audit.record('activation.proposed', {
       connectionId: conn.id,
@@ -1688,7 +1755,7 @@ export class DeployEngine {
       requested_status: input.status,
       proposed: true,
       expires_at: expiresAt,
-      approval_page: approvalForAgent('activation', approval),
+      approval_page: { ...approvalForAgent('activation', approval), phone_notification: phone },
     };
   }
 
@@ -2066,53 +2133,55 @@ export class DeployEngine {
       throw err;
     }
 
-    const approval = await this.approvals.present(
-      renderApprovalPage({
-        kind: 'bulk',
-        code,
-        expiresAt,
-        org: {
-          alias: conn.alias,
-          orgName: conn.orgName,
-          orgType: conn.orgType,
-          instanceUrl: conn.instanceUrl,
+    const view: ApprovalPageOptions = {
+      kind: 'bulk',
+      code,
+      expiresAt,
+      org: {
+        alias: conn.alias,
+        orgName: conn.orgName,
+        orgType: conn.orgType,
+        instanceUrl: conn.instanceUrl,
+      },
+      changes: rows.filter((r) => !r.destructive),
+      destructive: rows.filter((r) => r.destructive),
+      results: [
+        {
+          label: 'Plan',
+          value:
+            `${manifest.steps.length} step${manifest.steps.length === 1 ? '' : 's'} / ` +
+            `${totalRows.toLocaleString('en-US')} rows total`,
         },
-        changes: rows.filter((r) => !r.destructive),
-        destructive: rows.filter((r) => r.destructive),
-        results: [
-          {
-            label: 'Plan',
-            value:
-              `${manifest.steps.length} step${manifest.steps.length === 1 ? '' : 's'} / ` +
-              `${totalRows.toLocaleString('en-US')} rows total`,
-          },
-          { label: 'Operations', value: summarizeOps(manifest.steps) },
-          {
-            // A PROMISE about failure behaviour — it must match what
-            // doExecuteBulk actually does.
-            label: 'Mode',
-            value: input.stopOnFailure
-              ? 'stop-on-failure (a step with failed rows halts later steps; rows already ' +
-                'loaded STAY — there is no cross-job rollback)'
-              : 'continue-on-failure (every step runs; rows already loaded STAY — no ' +
-                'cross-job rollback)',
-          },
-        ],
-        blast: [],
-        warnings: [
-          ...(deleteRows > 0
-            ? [
-                `This plan DELETES ${deleteRows.toLocaleString('en-US')} row(s) ` +
-                  '(soft delete → Recycle Bin).',
-              ]
-            : []),
-          'Bulk loads are NOT atomic. Each step is its own org-side job; rows loaded by ' +
-            'completed steps remain in the org even if a later step fails.',
-        ],
-      }),
+        { label: 'Operations', value: summarizeOps(manifest.steps) },
+        {
+          // A PROMISE about failure behaviour — it must match what
+          // doExecuteBulk actually does.
+          label: 'Mode',
+          value: input.stopOnFailure
+            ? 'stop-on-failure (a step with failed rows halts later steps; rows already ' +
+              'loaded STAY — there is no cross-job rollback)'
+            : 'continue-on-failure (every step runs; rows already loaded STAY — no ' +
+              'cross-job rollback)',
+        },
+      ],
+      blast: [],
+      warnings: [
+        ...(deleteRows > 0
+          ? [
+              `This plan DELETES ${deleteRows.toLocaleString('en-US')} row(s) ` +
+                '(soft delete → Recycle Bin).',
+            ]
+          : []),
+        'Bulk loads are NOT atomic. Each step is its own org-side job; rows loaded by ' +
+          'completed steps remain in the org even if a later step fails.',
+      ],
+    };
+    const approval = await this.approvals.present(
+      renderApprovalPage(view),
       this.requestStatusCheck(request.id),
       this.config.deploy.codeTtlMs + 60_000,
     );
+    const phone = await this.notifyApproval(view, request.id, conn.id, 'page');
 
     this.audit.record('bulk.proposed', {
       connectionId: conn.id,
@@ -2142,7 +2211,7 @@ export class DeployEngine {
       total_rows: totalRows,
       stop_on_failure: input.stopOnFailure,
       expires_at: expiresAt,
-      approval_page: approvalForAgent('bulk', approval),
+      approval_page: { ...approvalForAgent('bulk', approval), phone_notification: phone },
     };
   }
 
@@ -2894,6 +2963,19 @@ function approvalForAgent(
       'Contrail server log (stderr) for the human to open — it is deliberately NOT provided ' +
       'to you. Ask the human to open the Contrail log, visit the page, and read the code back.',
   };
+}
+
+/** The propose-side tool a request kind is minted by — for audit attribution. */
+function proposeToolFor(kind: DeployRequestKind): string {
+  return kind === 'deploy'
+    ? 'validate_deploy'
+    : kind === 'dml'
+      ? 'dml_propose'
+      : kind === 'apex'
+        ? 'apex_propose'
+        : kind === 'activation'
+          ? 'agent_activation_propose'
+          : 'bulk_load_propose';
 }
 
 /** The human-facing noun for a pending request of each kind. */

@@ -23,7 +23,9 @@ const ID_RE = /^[a-zA-Z0-9]{15}([a-zA-Z0-9]{3})?$/;
 const APPROVAL_INSTRUCTIONS =
   'The confirmation code is displayed ONLY on the approval page in the human\'s browser — ' +
   'it is not available to you anywhere. Present this summary (destructive changes first), ' +
-  'then ask the human to review the page and read the code back if they approve.';
+  'then ask the human to review the page and read the code back if they approve. ' +
+  '(If approval_page.phone_notification says "sent", the same summary and code also reached ' +
+  'the human\'s phone; the code still only counts when the human types it into this chat.)';
 
 const REF_RE = /^[A-Za-z][A-Za-z0-9_]*$/;
 const REF_TOKEN_RE = /^@\{([A-Za-z][A-Za-z0-9_]*)\.id\}$/;

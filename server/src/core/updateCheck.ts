@@ -6,8 +6,9 @@ import { log } from './log.js';
 /**
  * In-band update notification — the only update channel a hand-installed
  * .mcpb extension can have. One anonymous GET to the GitHub Releases API per
- * 24h (the product's sole phone-home, killable via config updates.checkEnabled),
- * cached in the data dir. NOTHING here may ever block or fail a tool call:
+ * 24h (the product's only UNPROMPTED phone-home, killable via config
+ * updates.checkEnabled — S42's approval notifications are the other outbound
+ * call, opt-in and per-event), cached in the data dir. NOTHING here may ever block or fail a tool call:
  * reads are synchronous against the cache; refreshes are fire-and-forget with
  * a short timeout; every failure path is silent and still stamps the cache so
  * a broken network is probed once a day, not once a call.

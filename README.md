@@ -12,7 +12,25 @@ install, see [Getting Started](Getting%20Started.md).
 P0.1–P0.6 Phase 0 surface. `npm run mcpb` builds `contrail-<version>.mcpb`, a
 single MCP Bundle that installs into Claude Desktop via Settings → Extensions
 (no Node install, no npm, no config editing on the target machine) and covers
-Windows x64/ARM and macOS Intel/Apple Silicon from one file. 38 tools.
+Windows x64/ARM and macOS Intel/Apple Silicon from one file. 39 tools.
+
+**Approval codes on your phone (S42).** The confirmation code lives on a
+human-only localhost page — unreachable from a phone, so approving away from
+the desk was impossible. Now the engine can ALSO push each minted code, with
+the review substance behind it (org, change/deletion/warning counts; optionally
+the component names), to the human's phone through **Pushover** at the moment
+it mints the code — engine-side, never through the agent, which still never
+sees the code and still only acts on a code the human types into chat. Off by
+default; a prompt-injected agent cannot switch it on or redirect it, because
+the destination lives on a new human-only **Settings page** (`open_settings`,
+the connect_org grants-page mechanics: session token, loopback-only, URL
+withheld from the agent) — the Pushover keys go from the browser straight into
+the OS keychain and are never rendered back (only a 4-character tail, so you can
+tell which key is stored). Every proposal reports
+`phone_notification` (sent / failed-with-reason / off); a rejected key opens a
+circuit breaker so Pushover never sees a storm of bad requests; a desktop-app
+approval (a click, not a code) pushes a code-free "waiting in Deploy Review".
+With Claude Code's Remote Control, the whole loop now closes from a phone.
 
 **Aura bundles + honest jobs (S41).** From a client Service Cloud Voice
 project's enhancement list, the P1 lane. **AuraDefinitionBundle** is deployable,
@@ -221,8 +239,9 @@ the P0.5 hardening:
   esbuild single-file bundle option.
 
 The write-safety invariant (spec §0/§5) remains enforced, not aspirational: the
-confirmation code appears **only** on a human-only localhost approval page, never
-in a tool result, so a prompt-injected agent with tool access cannot self-approve.
+confirmation code appears only on human-only surfaces — the localhost approval
+page and, if the human opted in, their own phone — never in a tool result, so a
+prompt-injected agent with tool access cannot self-approve.
 
 ## Layout
 
@@ -339,9 +358,15 @@ URL. Env overrides: `CONTRAIL_SF_CLIENT_ID`, `CONTRAIL_SF_API_VERSION`,
   withholds its session-bearing URL from the tool result (returned only if the
   browser fails to open) so a prompt-injected agent with an HTTP tool cannot
   drive the grants form.
-- **Localhost hardening:** both local pages send `X-Frame-Options: DENY` +
-  `frame-ancestors 'none'` (clickjacking) and refuse non-loopback Host headers
-  (DNS rebinding); the `--http` transport validates Host/Origin the same way.
+- **Localhost hardening:** all three local pages (grants, approval, settings)
+  send `X-Frame-Options: DENY` + `frame-ancestors 'none'` (clickjacking) and
+  refuse non-loopback Host headers (DNS rebinding); the `--http` transport
+  validates Host/Origin the same way.
+- **Phone notifications (opt-in):** the Pushover user key and application
+  token live in the OS keychain only, are entered on the human-only Settings
+  page, and are never returned to the agent nor rendered back beyond a masked
+  4-character tail; the push is sent engine-side at code-mint time, so the
+  agent learns only sent/failed/off.
 - **Login targets:** only `*.salesforce.com` / `*.salesforce.mil` hosts are
   accepted, https only.
 - **Data:** connection metadata + audit log in SQLite under
