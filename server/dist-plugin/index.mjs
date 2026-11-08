@@ -21873,7 +21873,7 @@ var ENGINE_VERSION, SERVER_NAME;
 var init_version = __esm({
   "src/core/version.ts"() {
     "use strict";
-    ENGINE_VERSION = "0.37.0";
+    ENGINE_VERSION = "0.37.1";
     SERVER_NAME = "contrail-engine";
   }
 });
