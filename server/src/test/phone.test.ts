@@ -389,7 +389,12 @@ describe('S43: the Remote Control gate — a code is pushed only when it could b
     expect(text).toContain('"when": "remote_control"');
     expect(text).toContain('"state": "on"');
     expect(text).toContain('"user_hook": "not_installed"');
-    expect(text).not.toContain(tmp);
+    // No settings-file path and no marker path leak (staging_dir legitimately
+    // names the data dir, so the data dir itself is not the thing to assert on).
+    expect(text).not.toContain('settings.json');
+    expect(text).not.toContain('claude-home');
+    expect(text).not.toContain('remote-control/');
+    expect(text).not.toContain('remote-control\\');
   });
 
   it('deactivate_flow mints through the same gate: hook ON for its call → pushed; no report → unknown', async () => {
