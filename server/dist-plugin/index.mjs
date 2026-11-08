@@ -21873,7 +21873,7 @@ var ENGINE_VERSION, SERVER_NAME;
 var init_version = __esm({
   "src/core/version.ts"() {
     "use strict";
-    ENGINE_VERSION = "0.37.1";
+    ENGINE_VERSION = "0.37.2";
     SERVER_NAME = "contrail-engine";
   }
 });
@@ -37816,10 +37816,22 @@ function powerShellHookBody(markerDir) {
     "if ($id -notmatch '^[A-Za-z0-9_-]{1,80}$') { $id = '' }",
     "$tool = if ($j) { ([string]$j.tool_name) -replace '[^A-Za-z0-9_.-]', '' } else { '' }",
     "if ($tool.Length -gt 120) { $tool = $tool.Substring(0, 120) }",
-    "$on = -not [string]::IsNullOrEmpty($env:CLAUDE_CODE_BRIDGE_SESSION_ID)",
+    "$sid = if ($j) { [string]$j.session_id } else { '' }",
+    "$signal = 'none'",
+    "if (-not [string]::IsNullOrEmpty($env:CLAUDE_CODE_BRIDGE_SESSION_ID)) { $signal = 'env' }",
+    // Signal 2: Claude Code's session record for this very process (PID + session id must both
+    // match). A plain second `if`, not `elseif`: the statements are joined with `; `, and
+    // PowerShell rejects a separator between `}` and `elseif`.
+    "if ($signal -eq 'none' -and $sid -and $env:CLAUDE_PID -match '^[0-9]{1,10}$') {",
+    "$cfg = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR.Trim() } else { Join-Path $env:USERPROFILE '.claude' }",
+    "$sf = Join-Path (Join-Path $cfg 'sessions') ($env:CLAUDE_PID + '.json')",
+    "try { if (Test-Path -LiteralPath $sf) { $rec = Get-Content -LiteralPath $sf -Raw | ConvertFrom-Json",
+    "if ($rec -and ([string]$rec.sessionId) -eq $sid -and -not [string]::IsNullOrEmpty([string]$rec.bridgeSessionId)) { $signal = 'session_record' } } } catch { }",
+    "}",
+    "$on = $signal -ne 'none'",
     `$dir = '${dir}'`,
     "New-Item -ItemType Directory -Force -Path $dir | Out-Null",
-    "$body = @{ v = 1; remote_control = $on; at = [DateTime]::UtcNow.ToString('o'); tool_name = $tool; tool_use_id = $id } | ConvertTo-Json -Compress",
+    "$body = @{ v = 1; remote_control = $on; at = [DateTime]::UtcNow.ToString('o'); tool_name = $tool; tool_use_id = $id; signal = $signal } | ConvertTo-Json -Compress",
     "$enc = New-Object System.Text.UTF8Encoding($false)",
     "[IO.File]::WriteAllText((Join-Path $dir 'latest.json'), $body, $enc)",
     "if ($id) { [IO.File]::WriteAllText((Join-Path $dir ($id + '.json')), $body, $enc) }",
@@ -37835,11 +37847,19 @@ function shHookBody(markerDir) {
     "input=$(cat)",
     `id=${pick2("tool_use_id", "[A-Za-z0-9_-]", 80, "tail")}`,
     `tool=${pick2("tool_name", "[A-Za-z0-9_.-]", 120, "head")}`,
-    'if [ -n "$CLAUDE_CODE_BRIDGE_SESSION_ID" ]; then on=true; else on=false; fi',
+    `sid=${pick2("session_id", "[A-Za-z0-9_-]", 80, "head")}`,
+    "signal=none",
+    'if [ -n "$CLAUDE_CODE_BRIDGE_SESSION_ID" ]; then signal=env',
+    // Signal 2: Claude Code's session record for this very process (PID + session id must both match).
+    `elif [ -n "$sid" ] && printf '%s' "$CLAUDE_PID" | grep -q '^[0-9]\\{1,10\\}$'; then`,
+    '  cfg="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; sf="$cfg/sessions/$CLAUDE_PID.json"',
+    `  if [ -f "$sf" ] && grep -q "\\"sessionId\\"[[:space:]]*:[[:space:]]*\\"$sid\\"" "$sf" 2>/dev/null && grep -q '"bridgeSessionId"[[:space:]]*:[[:space:]]*"[^"][^"]*"' "$sf" 2>/dev/null; then signal=session_record; fi`,
+    "fi",
+    'if [ "$signal" != none ]; then on=true; else on=false; fi',
     `dir='${dir}'`,
     'mkdir -p "$dir" 2>/dev/null || exit 0',
     "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-    `body=$(printf '{"v":1,"remote_control":%s,"at":"%s","tool_name":"%s","tool_use_id":"%s"}' "$on" "$at" "$tool" "$id")`,
+    `body=$(printf '{"v":1,"remote_control":%s,"at":"%s","tool_name":"%s","tool_use_id":"%s","signal":"%s"}' "$on" "$at" "$tool" "$id" "$signal")`,
     `printf '%s' "$body" > "$dir/latest.json" 2>/dev/null`,
     `if [ -n "$id" ]; then printf '%s' "$body" > "$dir/$id.json" 2>/dev/null; fi`,
     "exit 0"
@@ -38393,8 +38413,10 @@ var init_settings2 = __esm({
         tiny hook that Claude Code runs right before a Contrail tool mints a code. It records a
         yes/no, a timestamp, the Contrail tool's name and Claude Code's id for that call under
         Contrail's data directory \u2014 never your session link, never the tool's arguments \u2014 and
-        never blocks a tool call. On Claude Code older than 2.1.199 it always reports off (upgrade,
-        or choose "Always"). Hook: <strong>${esc2(hookLine)}</strong>.
+        never blocks a tool call. It reads Claude Code's own signals (the Remote Control variable
+        Claude Code \u2265 2.1.199 gives hooks, or the session record the Claude Desktop app keeps); on a
+        version that exposes neither it always reports off (upgrade, or choose "Always").
+        Hook: <strong>${esc2(hookLine)}</strong>.
         Last report: <strong>${esc2(lastReport)}</strong>.</p>
       <div class="actions">
         <button type="submit" name="action" value="install_hook" class="secondary">Install hook into Claude Code</button>
