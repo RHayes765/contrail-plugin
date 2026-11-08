@@ -172,15 +172,19 @@ arguments.
 minted in has **Remote Control** connected — a code on a phone is useless when
 it cannot be typed from one, so the desk case stays quiet. A stdio MCP server
 cannot see Remote Control (its environment is fixed at spawn, and Claude Code
-exposes no file or event for it); what Claude Code does expose is
-`CLAUDE_CODE_BRIDGE_SESSION_ID` in the environment of **hook** processes while
-a connection is active (Claude Code ≥ 2.1.199; older versions never set it,
-so there the hook always reports off — upgrade, or choose Always). So Contrail runs a tiny
-**PreToolUse hook** on its code-minting tools (plus `list_connections` and
-this one): right before the tool runs, the hook writes a marker under the
-Contrail data directory — `remote-control/<tool_use_id>.json` and
-`latest.json`, holding a boolean, a timestamp, the tool name and the
-tool-use id, never the session link, never tool arguments — and the engine
+exposes no file or event for it); what a **hook** process can see is either
+`CLAUDE_CODE_BRIDGE_SESSION_ID` in its environment while a connection is
+active (documented; Claude Code ≥ 2.1.199) or — in the Claude Desktop app's
+Code tab, where that variable is not exported — Claude Code's own per-process
+session record `~/.claude/sessions/<pid>.json`, whose `bridgeSessionId` is
+present while connected (observed on Claude Code 2.1.317, undocumented; the
+hook trusts it only when the record's session id is its own). A version that
+exposes neither makes the hook report off — upgrade, or choose Always. So
+Contrail runs a tiny **PreToolUse hook** on its code-minting tools (plus
+`list_connections` and this one): right before the tool runs, the hook writes
+a marker under the Contrail data directory — `remote-control/<tool_use_id>.json`
+and `latest.json`, holding a boolean, a timestamp, the tool name, the tool-use
+id and which signal fired, never the session link, never tool arguments — and the engine
 reads that marker when the tool call starts (the mint may come minutes later,
 after org validation). The hook ships with the Claude Code **plugin**
 (`hooks/hooks.json`, `node hooks/remote-control.mjs`). For the Claude Desktop

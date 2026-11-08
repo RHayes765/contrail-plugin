@@ -123,10 +123,12 @@ desk. If you want the code on your phone too, set up **Pushover** once:
 
    The hook records a yes/no, a timestamp, the Contrail tool's name and Claude
    Code's id for that call under Contrail's data folder — never your session
-   link, never what the tool was called with. Needs Claude Code 2.1.199 or newer:
-   older versions never expose the Remote Control state, so the hook reports
-   *off* there (upgrade, or choose **Always**). Until a hook reports, Claude's
-   result says the push was *skipped* and why; it never pretends one was sent.
+   link, never what the tool was called with. It reads the Remote Control state
+   from Claude Code itself (the variable Claude Code 2.1.199+ gives hooks, or the
+   session record the Claude Desktop app keeps); on a version that exposes
+   neither, the hook reports *off* (upgrade, or choose **Always**). Until a hook
+   reports, Claude's result says the push was *skipped* and why; it never
+   pretends one was sent.
 
    **Upgrading from 0.36 with Pushover already on:** codes now reach your phone
    only while Remote Control is on. If you installed Contrail as a Claude Code

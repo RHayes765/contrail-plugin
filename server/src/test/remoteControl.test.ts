@@ -220,11 +220,32 @@ describe('hook flavours', () => {
     });
   const pretty = (toolUseId: string) => JSON.stringify(JSON.parse(compact(toolUseId)), null, 2);
 
+  /**
+   * The hook's environment: the documented variable when `on`, plus a Claude
+   * config dir of our own (so the real ~/.claude/sessions is never read) and
+   * a CLAUDE_PID the session-record cases key their fixture file on.
+   */
   function envWith(on: boolean): NodeJS.ProcessEnv {
-    const env: NodeJS.ProcessEnv = { ...process.env, CONTRAIL_DATA_DIR: tmp };
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      CONTRAIL_DATA_DIR: tmp,
+      CLAUDE_CONFIG_DIR: path.join(tmp, 'claude-cfg'),
+      CLAUDE_PID: '4242',
+      USERPROFILE: tmp,
+      HOME: tmp,
+    };
     if (on) env.CLAUDE_CODE_BRIDGE_SESSION_ID = 'session_abc';
     else delete env.CLAUDE_CODE_BRIDGE_SESSION_ID;
     return env;
+  }
+
+  /** Claude Code's per-process session record (the Desktop app's signal). */
+  function sessionRecord(fields: Record<string, unknown> | null): void {
+    const dir = path.join(tmp, 'claude-cfg', 'sessions');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, '4242.json');
+    if (fields === null) fs.rmSync(file, { force: true });
+    else fs.writeFileSync(file, JSON.stringify({ pid: 4242, kind: 'interactive', ...fields }));
   }
 
   function readMarker(name: string): Record<string, unknown> {
@@ -240,9 +261,34 @@ describe('hook flavours', () => {
     expect(readMarker('latest.json')).toMatchObject({ remote_control: true });
     expect(JSON.stringify(readMarker('latest.json'))).not.toContain('session_abc');
 
+    expect(readMarker(`toolu_${tag}1.json`)).toMatchObject({ signal: 'env' });
+
     const off = run(compact(`toolu_${tag}2`), false);
     expect(off.status).toBe(0);
-    expect(readMarker(`toolu_${tag}2.json`)).toMatchObject({ remote_control: false });
+    expect(readMarker(`toolu_${tag}2.json`)).toMatchObject({ remote_control: false, signal: 'none' });
+
+    // Signal 2 — the Desktop app's case: no variable, but Claude Code's session record for
+    // THIS process says the bridge is up for THIS session id.
+    sessionRecord({ sessionId: 'sess-1', bridgeSessionId: 'session_recorded_xyz' });
+    const rec = run(compact(`toolu_${tag}4`), false);
+    expect(rec.status).toBe(0);
+    expect(readMarker(`toolu_${tag}4.json`)).toMatchObject({ remote_control: true, signal: 'session_record' });
+    expect(JSON.stringify(readMarker(`toolu_${tag}4.json`))).not.toContain('session_recorded_xyz'); // never the id
+    // A record for ANOTHER session (reused PID), or one with the bridge gone, does not count.
+    sessionRecord({ sessionId: 'sess-other', bridgeSessionId: 'session_recorded_xyz' });
+    run(compact(`toolu_${tag}5`), false);
+    expect(readMarker(`toolu_${tag}5.json`)).toMatchObject({ remote_control: false, signal: 'none' });
+    sessionRecord({ sessionId: 'sess-1', bridgeSessionId: '' });
+    run(compact(`toolu_${tag}6`), false);
+    expect(readMarker(`toolu_${tag}6.json`)).toMatchObject({ remote_control: false, signal: 'none' });
+    sessionRecord({ sessionId: 'sess-1' });
+    run(compact(`toolu_${tag}7`), false);
+    expect(readMarker(`toolu_${tag}7.json`)).toMatchObject({ remote_control: false, signal: 'none' });
+    // The variable wins the label when both are present.
+    sessionRecord({ sessionId: 'sess-1', bridgeSessionId: 'session_recorded_xyz' });
+    run(compact(`toolu_${tag}8`), true);
+    expect(readMarker(`toolu_${tag}8.json`)).toMatchObject({ remote_control: true, signal: 'env' });
+    sessionRecord(null);
 
     // Pretty-printed input (Claude Code's documented example shape), decoys and all.
     const pp = run(pretty(`toolu_${tag}3`), true);

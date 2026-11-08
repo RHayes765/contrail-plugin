@@ -16,21 +16,27 @@ import { log } from './log.js';
  *
  * How the state reaches us. A stdio MCP server cannot observe Remote Control:
  * its environment is frozen at spawn, and Claude Code documents no file,
- * setting or event for it. The one documented signal is the environment of
- * HOOK processes — Claude Code ≥ 2.1.199 sets CLAUDE_CODE_BRIDGE_SESSION_ID
- * in a hook's environment while the session has an active Remote Control
- * connection and removes it when the connection ends. So Contrail runs a tiny
- * PreToolUse hook on its code-minting tools (shipped with the plugin as
+ * setting or event for it. What a HOOK process can see, two ways:
+ * (1) CLAUDE_CODE_BRIDGE_SESSION_ID in its environment — documented, Claude
+ * Code ≥ 2.1.199, set while the session has an active Remote Control
+ * connection and removed when it ends; (2) Claude Code's per-process session
+ * record `<CLAUDE_CONFIG_DIR | ~/.claude>/sessions/<CLAUDE_PID>.json`, whose
+ * `bridgeSessionId` is present while connected — observed in the Claude
+ * Desktop app's Code tab (Claude Code 2.1.317, 2026-11-08), where the
+ * variable is NOT exported; undocumented, so the hook trusts it only when the
+ * record's sessionId equals the hook's own session_id. So Contrail runs a
+ * tiny PreToolUse hook on its code-minting tools (shipped with the plugin as
  * hooks/hooks.json; installable into ~/.claude/settings.json from the
  * Settings page for the Claude Desktop extension and manual installs). The
  * hook writes a MARKER before the tool runs:
  *
  *   <dataDir>/remote-control/<tool_use_id>.json   (this call)
  *   <dataDir>/remote-control/latest.json          (most recent call)
- *   { v:1, remote_control: boolean, at: ISO, tool_name, tool_use_id }
+ *   { v:1, remote_control: boolean, at: ISO, tool_name, tool_use_id,
+ *     signal: 'env' | 'session_record' | 'none' }
  *
- * — a boolean and timestamps, never the bridge session id, never tool
- * arguments. The server samples the marker when the tool call STARTS (the
+ * — a boolean, timestamps and which signal fired, never the bridge session
+ * id, never tool arguments. The server samples the marker when the tool call STARTS (the
  * hook has just run; the mint may be minutes later, after org validation):
  * - when the request's `_meta` carried Claude Code's tool-use id
  *   (`claudecode/toolUseId` — observed in Claude Code, not documented, and
@@ -512,11 +518,12 @@ function toolNameMatches(markerTool: string, toolName: string): boolean {
 // ---- the inline hook bodies ---------------------------------------------------
 //
 // Both do exactly what hooks/remote-control.mjs does: read the PreToolUse JSON
-// from stdin, take tool_use_id and tool_name, record whether
-// CLAUDE_CODE_BRIDGE_SESSION_ID is set, write latest.json and <id>.json, exit 0.
-// No double quotes anywhere in either body: the exec form hands the body to the
-// interpreter as ONE argument, and a body free of `"` survives every quoting
-// layer between a JSON string and a Windows command line.
+// from stdin, take session_id / tool_use_id / tool_name, decide ON from either
+// signal (the environment variable, or the session record whose sessionId
+// matches), write latest.json and <id>.json, exit 0. No double quotes anywhere
+// in either body: the exec form hands the body to the interpreter as ONE
+// argument, and a body free of `"` survives every quoting layer between a JSON
+// string and a Windows command line.
 
 /** PowerShell 5.1-compatible, one line (newlines inside a Windows argument are not worth the risk). */
 export function powerShellHookBody(markerDir: string): string {
@@ -533,10 +540,22 @@ export function powerShellHookBody(markerDir: string): string {
     "if ($id -notmatch '^[A-Za-z0-9_-]{1,80}$') { $id = '' }",
     "$tool = if ($j) { ([string]$j.tool_name) -replace '[^A-Za-z0-9_.-]', '' } else { '' }",
     'if ($tool.Length -gt 120) { $tool = $tool.Substring(0, 120) }',
-    '$on = -not [string]::IsNullOrEmpty($env:CLAUDE_CODE_BRIDGE_SESSION_ID)',
+    "$sid = if ($j) { [string]$j.session_id } else { '' }",
+    "$signal = 'none'",
+    "if (-not [string]::IsNullOrEmpty($env:CLAUDE_CODE_BRIDGE_SESSION_ID)) { $signal = 'env' }",
+    // Signal 2: Claude Code's session record for this very process (PID + session id must both
+    // match). A plain second `if`, not `elseif`: the statements are joined with `; `, and
+    // PowerShell rejects a separator between `}` and `elseif`.
+    "if ($signal -eq 'none' -and $sid -and $env:CLAUDE_PID -match '^[0-9]{1,10}$') {",
+    "$cfg = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR.Trim() } else { Join-Path $env:USERPROFILE '.claude' }",
+    "$sf = Join-Path (Join-Path $cfg 'sessions') ($env:CLAUDE_PID + '.json')",
+    'try { if (Test-Path -LiteralPath $sf) { $rec = Get-Content -LiteralPath $sf -Raw | ConvertFrom-Json',
+    "if ($rec -and ([string]$rec.sessionId) -eq $sid -and -not [string]::IsNullOrEmpty([string]$rec.bridgeSessionId)) { $signal = 'session_record' } } } catch { }",
+    '}',
+    "$on = $signal -ne 'none'",
     `$dir = '${dir}'`,
     'New-Item -ItemType Directory -Force -Path $dir | Out-Null',
-    "$body = @{ v = 1; remote_control = $on; at = [DateTime]::UtcNow.ToString('o'); tool_name = $tool; tool_use_id = $id } | ConvertTo-Json -Compress",
+    "$body = @{ v = 1; remote_control = $on; at = [DateTime]::UtcNow.ToString('o'); tool_name = $tool; tool_use_id = $id; signal = $signal } | ConvertTo-Json -Compress",
     '$enc = New-Object System.Text.UTF8Encoding($false)',
     "[IO.File]::WriteAllText((Join-Path $dir 'latest.json'), $body, $enc)",
     "if ($id) { [IO.File]::WriteAllText((Join-Path $dir ($id + '.json')), $body, $enc) }",
@@ -564,11 +583,19 @@ export function shHookBody(markerDir: string): string {
     'input=$(cat)',
     `id=${pick('tool_use_id', '[A-Za-z0-9_-]', 80, 'tail')}`,
     `tool=${pick('tool_name', '[A-Za-z0-9_.-]', 120, 'head')}`,
-    'if [ -n "$CLAUDE_CODE_BRIDGE_SESSION_ID" ]; then on=true; else on=false; fi',
+    `sid=${pick('session_id', '[A-Za-z0-9_-]', 80, 'head')}`,
+    'signal=none',
+    'if [ -n "$CLAUDE_CODE_BRIDGE_SESSION_ID" ]; then signal=env',
+    // Signal 2: Claude Code's session record for this very process (PID + session id must both match).
+    'elif [ -n "$sid" ] && printf \'%s\' "$CLAUDE_PID" | grep -q \'^[0-9]\\{1,10\\}$\'; then',
+    '  cfg="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"; sf="$cfg/sessions/$CLAUDE_PID.json"',
+    '  if [ -f "$sf" ] && grep -q "\\"sessionId\\"[[:space:]]*:[[:space:]]*\\"$sid\\"" "$sf" 2>/dev/null && grep -q \'"bridgeSessionId"[[:space:]]*:[[:space:]]*"[^"][^"]*"\' "$sf" 2>/dev/null; then signal=session_record; fi',
+    'fi',
+    'if [ "$signal" != none ]; then on=true; else on=false; fi',
     `dir='${dir}'`,
     'mkdir -p "$dir" 2>/dev/null || exit 0',
     'at=$(date -u +%Y-%m-%dT%H:%M:%SZ)',
-    `body=$(printf '{"v":1,"remote_control":%s,"at":"%s","tool_name":"%s","tool_use_id":"%s"}' "$on" "$at" "$tool" "$id")`,
+    `body=$(printf '{"v":1,"remote_control":%s,"at":"%s","tool_name":"%s","tool_use_id":"%s","signal":"%s"}' "$on" "$at" "$tool" "$id" "$signal")`,
     'printf \'%s\' "$body" > "$dir/latest.json" 2>/dev/null',
     'if [ -n "$id" ]; then printf \'%s\' "$body" > "$dir/$id.json" 2>/dev/null; fi',
     'exit 0',

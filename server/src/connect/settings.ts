@@ -463,8 +463,10 @@ export class SettingsPageServer {
         tiny hook that Claude Code runs right before a Contrail tool mints a code. It records a
         yes/no, a timestamp, the Contrail tool's name and Claude Code's id for that call under
         Contrail's data directory — never your session link, never the tool's arguments — and
-        never blocks a tool call. On Claude Code older than 2.1.199 it always reports off (upgrade,
-        or choose "Always"). Hook: <strong>${esc(hookLine)}</strong>.
+        never blocks a tool call. It reads Claude Code's own signals (the Remote Control variable
+        Claude Code ≥ 2.1.199 gives hooks, or the session record the Claude Desktop app keeps); on a
+        version that exposes neither it always reports off (upgrade, or choose "Always").
+        Hook: <strong>${esc(hookLine)}</strong>.
         Last report: <strong>${esc(lastReport)}</strong>.</p>
       <div class="actions">
         <button type="submit" name="action" value="install_hook" class="secondary">Install hook into Claude Code</button>

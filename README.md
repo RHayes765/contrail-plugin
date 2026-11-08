@@ -18,9 +18,11 @@ Windows x64/ARM and macOS Intel/Apple Silicon from one file. 39 tools.
 on a phone is only worth a buzz when it can be typed from the phone, so by
 default (`notifications.when: remote_control`) the engine now pushes only
 while the Claude Code session has **Remote Control** connected. A stdio MCP
-server cannot see that state — its environment is frozen at spawn — but
-Claude Code sets `CLAUDE_CODE_BRIDGE_SESSION_ID` in **hook** processes while a
-connection is live, so Contrail ships a tiny PreToolUse hook (bundled with the
+server cannot see that state — its environment is frozen at spawn — but a
+**hook** process can: Claude Code sets `CLAUDE_CODE_BRIDGE_SESSION_ID` for
+hooks while a connection is live (the CLI), and the Claude Desktop app's Code
+tab records the connection in Claude Code's per-process session file instead.
+So Contrail ships a tiny PreToolUse hook (bundled with the
 plugin; installable into Claude Code's user settings — script inline, nothing
 executable on disk — from the human-only Settings page for the Claude Desktop
 extension and manual installs) that records on/off per tool call, and the
