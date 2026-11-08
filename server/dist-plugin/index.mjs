@@ -235,10 +235,10 @@ function assignProp(target, prop, value) {
     configurable: true
   });
 }
-function getElementAtPath(obj, path12) {
-  if (!path12)
+function getElementAtPath(obj, path13) {
+  if (!path13)
     return obj;
-  return path12.reduce((acc, key2) => acc?.[key2], obj);
+  return path13.reduce((acc, key2) => acc?.[key2], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -487,11 +487,11 @@ function aborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path12, issues) {
+function prefixIssues(path13, issues) {
   return issues.map((iss) => {
     var _a2;
     (_a2 = iss).path ?? (_a2.path = []);
-    iss.path.unshift(path12);
+    iss.path.unshift(path13);
     return iss;
   });
 }
@@ -6792,8 +6792,8 @@ var init_parseUtil = __esm({
     init_errors3();
     init_en2();
     makeIssue = (params) => {
-      const { data, path: path12, errorMaps, issueData } = params;
-      const fullPath = [...path12, ...issueData.path || []];
+      const { data, path: path13, errorMaps, issueData } = params;
+      const fullPath = [...path13, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -7101,11 +7101,11 @@ var init_types2 = __esm({
     init_parseUtil();
     init_util2();
     ParseInputLazyPath = class {
-      constructor(parent, value, path12, key2) {
+      constructor(parent, value, path13, key2) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path12;
+        this._path = path13;
         this._key = key2;
       }
       get path() {
@@ -10676,11 +10676,11 @@ function normalizeObjectSchema(schema) {
   }
   return void 0;
 }
-function getDotPath(path12) {
-  if (path12.length === 0) {
+function getDotPath(path13) {
+  if (path13.length === 0) {
     return "object root";
   }
-  return path12.reduce((acc, seg, index) => {
+  return path13.reduce((acc, seg, index) => {
     if (index === 0) {
       return String(seg);
     }
@@ -16548,8 +16548,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path12) {
-      let input = path12;
+    function removeDotSegments(path13) {
+      let input = path13;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -16801,8 +16801,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path12, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path12 && path12 !== "/" ? path12 : void 0;
+        const [path13, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path13 && path13 !== "/" ? path13 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -20221,12 +20221,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs15, exportName) {
+    function addFormats(ajv, list, fs16, exportName) {
       var _a2;
       var _b2;
       (_a2 = (_b2 = ajv.opts.code).formats) !== null && _a2 !== void 0 ? _a2 : _b2.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs15[f]);
+        ajv.addFormat(f, fs16[f]);
     }
     module.exports = exports = formatsPlugin;
     Object.defineProperty(exports, "__esModule", { value: true });
@@ -21873,7 +21873,7 @@ var ENGINE_VERSION, SERVER_NAME;
 var init_version = __esm({
   "src/core/version.ts"() {
     "use strict";
-    ENGINE_VERSION = "0.36.0";
+    ENGINE_VERSION = "0.37.0";
     SERVER_NAME = "contrail-engine";
   }
 });
@@ -23155,7 +23155,8 @@ var init_config = __esm({
       },
       notifications: {
         method: "none",
-        summary: "minimal"
+        summary: "minimal",
+        when: "remote_control"
       },
       localDiagnostics: {
         enabled: true,
@@ -28107,9 +28108,9 @@ function asArray(value) {
   if (value === void 0 || value === null) return [];
   return Array.isArray(value) ? value : [value];
 }
-function xmlDig(node, ...path12) {
+function xmlDig(node, ...path13) {
   let current = node;
-  for (const key2 of path12) {
+  for (const key2 of path13) {
     if (current === null || typeof current !== "object") return void 0;
     const obj = current;
     if (key2 in obj) {
@@ -28530,35 +28531,35 @@ var init_rest = __esm({
       async runQuery(basePath, soql, maxRows) {
         const records = [];
         let totalSize = null;
-        let path12 = `${basePath}?q=${encodeURIComponent(soql)}`;
-        while (path12 && records.length < maxRows) {
-          const res = await this.request(path12);
+        let path13 = `${basePath}?q=${encodeURIComponent(soql)}`;
+        while (path13 && records.length < maxRows) {
+          const res = await this.request(path13);
           const data = await res.json();
           if (totalSize === null && typeof data.totalSize === "number") totalSize = data.totalSize;
           records.push(...data.records ?? []);
-          path12 = data.done === false && data.nextRecordsUrl ? data.nextRecordsUrl : null;
+          path13 = data.done === false && data.nextRecordsUrl ? data.nextRecordsUrl : null;
         }
         return { records: records.slice(0, maxRows), totalSize };
       }
       /** Authenticated request against the connection's instance; 401 → refresh once and retry. */
-      async request(path12, init) {
-        let res = await this.rawRequest(path12, init);
+      async request(path13, init) {
+        let res = await this.rawRequest(path13, init);
         if (res.status === 401) {
           this.tokenMgr.invalidate(this.conn.id);
-          res = await this.rawRequest(path12, init);
+          res = await this.rawRequest(path13, init);
         }
         if (!res.ok) {
           const body = await res.text();
           throw new ContrailError(
-            `Salesforce API error ${res.status} on ${path12.split("?")[0]}: ${truncate(body, 500)}`,
+            `Salesforce API error ${res.status} on ${path13.split("?")[0]}: ${truncate(body, 500)}`,
             "salesforce_api_error"
           );
         }
         return res;
       }
-      async rawRequest(path12, init) {
+      async rawRequest(path13, init) {
         const accessToken = await this.tokenMgr.getAccessToken(this.conn);
-        const url = path12.startsWith("http") ? path12 : new URL(path12, this.conn.instanceUrl).toString();
+        const url = path13.startsWith("http") ? path13 : new URL(path13, this.conn.instanceUrl).toString();
         return fetch(url, {
           ...init,
           headers: {
@@ -30224,6 +30225,13 @@ var init_approval = __esm({
 function describePhoneOutcome(outcome, opts) {
   if (outcome.status === "off") return { status: "off" };
   const settings = opts.includeCode ? "via open_settings" : "in the app's Settings \u2192 Notifications";
+  if (outcome.status === "skipped") {
+    return {
+      status: "skipped",
+      reason: outcome.reason,
+      note: outcome.reason === "remote_control_off" ? 'Phone notification skipped: Remote Control was not connected when this was proposed, so the code was not pushed (phone delivery is set to "only while Remote Control is on"). The human approves from the page on their desktop as usual; nothing to do.' : `Phone notification skipped: phone delivery is set to "only while Remote Control is on", but Contrail's Remote Control hook did not report for this call \u2014 it is not installed, or this is not a Claude Code session. The code is on the approval page as always. If the human expected a push, they can install the hook or switch delivery to Always ${settings}.`
+    };
+  }
   if (outcome.status === "sent") {
     return {
       status: "sent",
@@ -30296,9 +30304,12 @@ function composePushover(view, opts) {
     const warns = [...view.warnings ?? [], ...rowWarnings].slice(0, FULL_WARNINGS_MAX);
     head.push(...warns.map((w) => `\u26A0 ${truncate2(squash(w), 140)}`));
   }
+  const clock = expiryClock(view.expiresAt);
+  const expiry = clock === "soon" ? "it expires soon" : `it expires at ${clock}`;
   const tail = opts.includeCode ? [
-    `Code: ${view.code} \u2014 expires ${expiryClock(view.expiresAt)}`,
-    "Approve by typing the code into your Contrail session. Full details are on the approval page on your desktop."
+    `Type the code below into your Contrail session to approve \u2014 ${expiry}. Full details are on the approval page on your desktop.`,
+    "",
+    view.code
   ] : ["Waiting in Deploy Review \u2014 open the Contrail desktop app to approve."];
   const tailText = tail.join("\n");
   const headText = truncate2(head.join("\n"), Math.max(0, MESSAGE_MAX - tailText.length - 1));
@@ -30365,6 +30376,9 @@ var init_notify = __esm({
           if (disk.summary === "minimal" || disk.summary === "full") {
             this.config.notifications.summary = disk.summary;
           }
+          if (disk.when === "remote_control" || disk.when === "always") {
+            this.config.notifications.when = disk.when;
+          }
         }
       }
       status() {
@@ -30372,6 +30386,7 @@ var init_notify = __esm({
         const creds = this.credentials();
         return {
           method: this.config.notifications.method,
+          when: this.config.notifications.when,
           configured: creds.kind === "ok",
           ...creds.kind === "unavailable" ? { storeError: creds.error } : {}
         };
@@ -30533,7 +30548,7 @@ var init_notify = __esm({
         return { ok: false, message: "Notifications are not available in this build." };
       }
       status() {
-        return { method: "none", configured: false };
+        return { method: "none", when: "remote_control", configured: false };
       }
       resetCircuit() {
       }
@@ -30703,8 +30718,8 @@ function buildDeployZip(components, deletions, apiVersionNumber, metaXmlLookup) 
           "bad_component"
         );
       }
-      const path12 = zipPathFor(fileSpec, c.api_name);
-      files.set(path12, strToU8(c.content));
+      const path13 = zipPathFor(fileSpec, c.api_name);
+      files.set(path13, strToU8(c.content));
       if (fileSpec.metaRoot) {
         const meta = metaXmlLookup(c.type, c.api_name) ?? fileSpec.metaXml?.(apiVersionNumber, c.api_name) ?? `<?xml version="1.0" encoding="UTF-8"?>
 <${fileSpec.metaRoot} xmlns="${XMLNS}">
@@ -30712,7 +30727,7 @@ function buildDeployZip(components, deletions, apiVersionNumber, metaXmlLookup) 
     <status>Active</status>
 </${fileSpec.metaRoot}>
 `;
-        files.set(`${path12}-meta.xml`, strToU8(meta));
+        files.set(`${path13}-meta.xml`, strToU8(meta));
       }
       addMember(fileSpec.manifestType ?? c.type, c.api_name);
       continue;
@@ -30726,9 +30741,9 @@ function buildDeployZip(components, deletions, apiVersionNumber, metaXmlLookup) 
           "bad_component"
         );
       }
-      const path12 = `${childSpec.dir}/${parent}${childSpec.ext}`;
-      const key2 = `${childSpec.containerRoot}:${path12}`;
-      const container = containers.get(key2) ?? { root: childSpec.containerRoot, path: path12, blocks: [] };
+      const path13 = `${childSpec.dir}/${parent}${childSpec.ext}`;
+      const key2 = `${childSpec.containerRoot}:${path13}`;
+      const container = containers.get(key2) ?? { root: childSpec.containerRoot, path: path13, blocks: [] };
       container.blocks.push(c.content.trim());
       containers.set(key2, container);
       addMember(c.type, c.api_name);
@@ -31664,6 +31679,12 @@ var init_engine2 = __esm({
             connectionId,
             tool: proposeToolFor(view.kind),
             outcome: "error",
+            detail: { requestId, kind: view.kind, reason: outcome.reason }
+          });
+        } else if (outcome.status === "skipped") {
+          this.audit.record("approval.notify_skipped", {
+            connectionId,
+            tool: proposeToolFor(view.kind),
             detail: { requestId, kind: view.kind, reason: outcome.reason }
           });
         }
@@ -33898,32 +33919,41 @@ function registerTools(server, deps) {
     "list_connections",
     {
       title: "List connected orgs",
-      description: "List every connected org with its alias, org identity, type, and grants. Zero-cost local read \u2014 call this instead of guessing which orgs exist. Also returns staging_dir: the directory to author content_file/csv_file sources into, and approval_notifications: whether approval codes are also pushed to the human's phone (configured by the human via open_settings; never by you).",
+      description: "List every connected org with its alias, org identity, type, and grants. Zero-cost local read \u2014 call this instead of guessing which orgs exist. Also returns staging_dir: the directory to author content_file/csv_file sources into, and approval_notifications: whether approval codes are also pushed to the human's phone (configured by the human via open_settings; never by you), including when \u2014 by default only while this Claude Code session has Remote Control connected \u2014 and the last Remote Control state Contrail's hook reported (remote_control.user_hook covers Claude Code's user settings.json only: not_installed is normal for plugin installs, whose hook ships bundled \u2014 judge by state).",
       inputSchema: {}
     },
-    async () => guarded(() => {
-      const list = db.listConnections().map(connectionSummary);
-      const update = getUpdateNotice(
-        ENGINE_VERSION,
-        UPDATE_REPO,
-        deps.config.updates.checkEnabled
-      );
-      return ok({
-        connections: list,
-        count: list.length,
-        // The session-start surface names the staging dir PROACTIVELY, so an
-        // agent authoring a large component learns where deploy bytes live
-        // before its first validate_deploy refusal, not from it.
-        staging_dir: stagingDir(),
-        // S42: status only — method and whether both keys exist. Never the
-        // keys, never a hint of them.
-        approval_notifications: deps.notifier.status(),
-        ...update ? {
-          update_available: update,
-          update_note: `Contrail ${update.latest} is available (you are on ${update.installed}). Tell the human: download it at ${update.download_url} \u2014 a Claude Desktop extension updates by installing the new .mcpb over the old one.`
-        } : {}
-      });
-    })
+    async (_args, extra) => deps.remoteControl.run(
+      extra,
+      "list_connections",
+      () => guarded(() => {
+        const list = db.listConnections().map(connectionSummary);
+        const update = getUpdateNotice(
+          ENGINE_VERSION,
+          UPDATE_REPO,
+          deps.config.updates.checkEnabled
+        );
+        return ok({
+          connections: list,
+          count: list.length,
+          // The session-start surface names the staging dir PROACTIVELY, so an
+          // agent authoring a large component learns where deploy bytes live
+          // before its first validate_deploy refusal, not from it.
+          staging_dir: stagingDir(),
+          // S42: status only — method and whether both keys exist. Never the
+          // keys, never a hint of them. S43: plus when pushes go out and the
+          // last Remote Control state the hook reported (this call's, when the
+          // hook fired for it).
+          approval_notifications: {
+            ...deps.notifier.status(),
+            remote_control: deps.remoteControl.status()
+          },
+          ...update ? {
+            update_available: update,
+            update_note: `Contrail ${update.latest} is available (you are on ${update.installed}). Tell the human: download it at ${update.download_url} \u2014 a Claude Desktop extension updates by installing the new .mcpb over the old one.`
+          } : {}
+        });
+      })
+    )
   );
   server.registerTool(
     "get_permissions",
@@ -34950,41 +34980,41 @@ function rootElement(doc) {
   if (!name) return null;
   return { name, value: doc[name] };
 }
-function diffNode(a, b, path12, changes, state) {
+function diffNode(a, b, path13, changes, state) {
   if (changes.length > MAX_CHANGES) {
     state.truncated = true;
     return;
   }
   if (deepEqual(a, b)) return;
   if (Array.isArray(a) || Array.isArray(b)) {
-    diffCollection(asArray(a), asArray(b), path12, changes, state);
+    diffCollection(asArray(a), asArray(b), path13, changes, state);
     return;
   }
   const aKeyed = isObject2(a) && itemKey(a) !== null;
   const bKeyed = isObject2(b) && itemKey(b) !== null;
   if ((aKeyed || bKeyed) && (a == null || isObject2(a)) && (b == null || isObject2(b))) {
-    diffCollection(a == null ? [] : [a], b == null ? [] : [b], path12, changes, state);
+    diffCollection(a == null ? [] : [a], b == null ? [] : [b], path13, changes, state);
     return;
   }
   if (isObject2(a) && isObject2(b)) {
-    diffObjectFields(a, b, path12, changes, state);
+    diffObjectFields(a, b, path13, changes, state);
     return;
   }
-  changes.push({ kind: "scalar", path: path12, a: summarize(a), b: summarize(b) });
+  changes.push({ kind: "scalar", path: path13, a: summarize(a), b: summarize(b) });
 }
-function diffObjectFields(a, b, path12, changes, state) {
+function diffObjectFields(a, b, path13, changes, state) {
   const keys = /* @__PURE__ */ new Set([...Object.keys(a), ...Object.keys(b)]);
   for (const key2 of keys) {
-    diffNode(a[key2], b[key2], path12 ? `${path12}.${key2}` : key2, changes, state);
+    diffNode(a[key2], b[key2], path13 ? `${path13}.${key2}` : key2, changes, state);
   }
 }
-function diffCollection(a, b, path12, changes, state) {
+function diffCollection(a, b, path13, changes, state) {
   const aKeyed = keyItems(a);
   const bKeyed = keyItems(b);
   if (!aKeyed || !bKeyed) {
     changes.push({
       kind: "unkeyed",
-      path: path12,
+      path: path13,
       note: `list changed (${a.length} \u2192 ${b.length} items; no stable key to match on)`
     });
     return;
@@ -34992,15 +35022,15 @@ function diffCollection(a, b, path12, changes, state) {
   for (const [key2, aItem] of aKeyed) {
     const bItem = bKeyed.get(key2);
     if (bItem === void 0) {
-      changes.push({ kind: "removed", path: path12, key: key2 });
+      changes.push({ kind: "removed", path: path13, key: key2 });
     } else if (isObject2(aItem) && isObject2(bItem)) {
-      diffObjectFields(aItem, bItem, `${path12}[${key2}]`, changes, state);
+      diffObjectFields(aItem, bItem, `${path13}[${key2}]`, changes, state);
     } else {
-      diffNode(aItem, bItem, `${path12}[${key2}]`, changes, state);
+      diffNode(aItem, bItem, `${path13}[${key2}]`, changes, state);
     }
   }
   for (const key2 of bKeyed.keys()) {
-    if (!aKeyed.has(key2)) changes.push({ kind: "added", path: path12, key: key2 });
+    if (!aKeyed.has(key2)) changes.push({ kind: "added", path: path13, key: key2 });
   }
 }
 function keyItems(items) {
@@ -35443,8 +35473,8 @@ function registerDataTools(server, deps) {
       if (args.fields?.some((f) => !/^[A-Za-z0-9_.]+$/.test(f))) {
         return fail("invalid field name");
       }
-      const path12 = `/services/data/${config2.salesforce.apiVersion}/sobjects/${encodeURIComponent(args.object)}/${encodeURIComponent(args.id)}` + (args.fields?.length ? `?fields=${encodeURIComponent(args.fields.join(","))}` : "");
-      const res = await rest(conn).request(path12);
+      const path13 = `/services/data/${config2.salesforce.apiVersion}/sobjects/${encodeURIComponent(args.object)}/${encodeURIComponent(args.id)}` + (args.fields?.length ? `?fields=${encodeURIComponent(args.fields.join(","))}` : "");
+      const res = await rest(conn).request(path13);
       const record2 = truncateDeep(stripAttributes(await res.json()));
       return ok({ connection: conn.alias, object: args.object, record: record2 });
     })
@@ -36009,9 +36039,9 @@ function flattenGroupings(nodes, prefix) {
   const map = /* @__PURE__ */ new Map();
   for (const n of nodes ?? []) {
     if (typeof n.key !== "string") continue;
-    const path12 = [...prefix, n.label ?? ""];
-    map.set(n.key, path12);
-    for (const [k, v] of flattenGroupings(n.groupings, path12)) map.set(k, v);
+    const path13 = [...prefix, n.label ?? ""];
+    map.set(n.key, path13);
+    for (const [k, v] of flattenGroupings(n.groupings, path13)) map.set(k, v);
   }
   return map;
 }
@@ -36499,7 +36529,7 @@ function validateDmlPlan(args) {
   return null;
 }
 function registerDeployTools(server, deps) {
-  const { db, audit, deploys, config: config2 } = deps;
+  const { db, audit, deploys, config: config2, remoteControl } = deps;
   function requireConnection(ref, tool) {
     const rec = db.resolveConnection(ref);
     if (!rec) throw new ConnectionNotFoundError(ref);
@@ -36543,71 +36573,75 @@ function registerDeployTools(server, deps) {
         )
       }
     },
-    async (args) => guarded(async () => {
-      const conn = requireConnection(args.connection, "validate_deploy");
-      if (args.job_id !== void 0) {
-        if (args.components?.length || args.destructive?.length || args.test_level !== void 0 || args.run_tests !== void 0 || args.dry_run !== void 0 || args.allow_unregistered_delete !== void 0) {
+    async (args, extra) => (
+      // S43: sample the Remote Control state at call start (the hook has just
+      // reported); the mint, minutes later, reads that sample.
+      remoteControl.run(extra, "validate_deploy", () => guarded(async () => {
+        const conn = requireConnection(args.connection, "validate_deploy");
+        if (args.job_id !== void 0) {
+          if (args.components?.length || args.destructive?.length || args.test_level !== void 0 || args.run_tests !== void 0 || args.dry_run !== void 0 || args.allow_unregistered_delete !== void 0) {
+            return fail(
+              "Pass job_id ALONE to poll a running validation \u2014 or the full arguments (without job_id) to start one. A poll cannot change the job's options: they are part of its identity."
+            );
+          }
+          const polled = await deploys.pollValidate(conn, args.job_id);
+          if (!polled) {
+            return fail(
+              `No running or uncollected validation job "${args.job_id}" on "${conn.alias}" \u2014 its result may already have been collected. Re-send the full arguments to validate again.`
+            );
+          }
+          return renderValidateOutcome(polled, conn);
+        }
+        const components = (args.components ?? []).map((c) => {
+          const hasInline = typeof c.content === "string";
+          if (hasInline && c.content_file) {
+            throw new Error(
+              `${c.type} ${c.api_name}: pass content OR content_file, not both \u2014 Contrail will not guess which one you meant to deploy.`
+            );
+          }
+          if (!hasInline && !c.content_file) {
+            throw new Error(
+              `${c.type} ${c.api_name}: needs content or content_file. For large components write the source under ${stagingDir()} and pass content_file.`
+            );
+          }
+          if (c.content_file) {
+            const src = resolveSourceFile(c.content_file, config2.deploy.allowedSourceRoots);
+            return {
+              type: c.type,
+              api_name: c.api_name,
+              content: src.content,
+              source_path: src.sourcePath,
+              source_sha256: src.sourceSha256
+            };
+          }
+          return { type: c.type, api_name: c.api_name, content: c.content };
+        });
+        const destructive = args.destructive ?? [];
+        if (components.length + destructive.length === 0) {
+          return fail("Provide at least one component or destructive entry.");
+        }
+        if (args.test_level === "RunSpecifiedTests" && !args.run_tests?.length) {
+          return fail("RunSpecifiedTests requires run_tests.");
+        }
+        if (args.test_level === "NoTestRun" && conn.orgType === "production") {
           return fail(
-            "Pass job_id ALONE to poll a running validation \u2014 or the full arguments (without job_id) to start one. A poll cannot change the job's options: they are part of its identity."
+            `test_level NoTestRun is refused locally on "${conn.alias}" (production): the org rejects it org-side anyway. OMIT test_level \u2014 production then runs local tests for Apex packages and no tests otherwise.`
           );
         }
-        const polled = await deploys.pollValidate(conn, args.job_id);
-        if (!polled) {
-          return fail(
-            `No running or uncollected validation job "${args.job_id}" on "${conn.alias}" \u2014 its result may already have been collected. Re-send the full arguments to validate again.`
-          );
-        }
-        return renderValidateOutcome(polled, conn);
-      }
-      const components = (args.components ?? []).map((c) => {
-        const hasInline = typeof c.content === "string";
-        if (hasInline && c.content_file) {
-          throw new Error(
-            `${c.type} ${c.api_name}: pass content OR content_file, not both \u2014 Contrail will not guess which one you meant to deploy.`
-          );
-        }
-        if (!hasInline && !c.content_file) {
-          throw new Error(
-            `${c.type} ${c.api_name}: needs content or content_file. For large components write the source under ${stagingDir()} and pass content_file.`
-          );
-        }
-        if (c.content_file) {
-          const src = resolveSourceFile(c.content_file, config2.deploy.allowedSourceRoots);
-          return {
-            type: c.type,
-            api_name: c.api_name,
-            content: src.content,
-            source_path: src.sourcePath,
-            source_sha256: src.sourceSha256
-          };
-        }
-        return { type: c.type, api_name: c.api_name, content: c.content };
-      });
-      const destructive = args.destructive ?? [];
-      if (components.length + destructive.length === 0) {
-        return fail("Provide at least one component or destructive entry.");
-      }
-      if (args.test_level === "RunSpecifiedTests" && !args.run_tests?.length) {
-        return fail("RunSpecifiedTests requires run_tests.");
-      }
-      if (args.test_level === "NoTestRun" && conn.orgType === "production") {
-        return fail(
-          `test_level NoTestRun is refused locally on "${conn.alias}" (production): the org rejects it org-side anyway. OMIT test_level \u2014 production then runs local tests for Apex packages and no tests otherwise.`
-        );
-      }
-      const outcome = await deploys.validateDeploy(conn, {
-        components,
-        destructive,
-        // Unspecified stays unspecified all the way to the SOAP call — the
-        // org's default behavior is the only choice production accepts for
-        // a no-Apex package (it rejects an explicit NoTestRun).
-        testLevel: args.test_level,
-        runTests: args.run_tests ?? [],
-        dryRun: args.dry_run === true,
-        allowUnregisteredDelete: args.allow_unregistered_delete === true
-      });
-      return renderValidateOutcome(outcome, conn);
-    })
+        const outcome = await deploys.validateDeploy(conn, {
+          components,
+          destructive,
+          // Unspecified stays unspecified all the way to the SOAP call — the
+          // org's default behavior is the only choice production accepts for
+          // a no-Apex package (it rejects an explicit NoTestRun).
+          testLevel: args.test_level,
+          runTests: args.run_tests ?? [],
+          dryRun: args.dry_run === true,
+          allowUnregisteredDelete: args.allow_unregistered_delete === true
+        });
+        return renderValidateOutcome(outcome, conn);
+      }))
+    )
   );
   function renderValidateOutcome(outcome, conn) {
     const isDry = outcome.job_id.startsWith("vdry-");
@@ -36650,39 +36684,42 @@ function registerDeployTools(server, deps) {
         flow: external_exports.string().describe("Flow API name (DeveloperName).")
       }
     },
-    async (args) => guarded(async () => {
-      const conn = requireConnection(args.connection, "deactivate_flow");
-      if (!/^[A-Za-z0-9_]+$/.test(args.flow)) return fail("invalid flow API name");
-      const outcome = await deploys.validateDeploy(conn, {
-        components: [
-          { type: "FlowDefinition", api_name: args.flow, content: flowDeactivationXml() }
-        ],
-        destructive: [],
-        // No test level: an explicit NoTestRun would make production refuse
-        // to deactivate a flow at all; omitted, the org waves a no-Apex
-        // package through everywhere.
-        runTests: []
-      });
-      switch (outcome.status) {
-        case "in_progress":
-          return ok(
-            { job_id: outcome.job_id, progress: outcome.progress, started_at: outcome.started_at },
-            "Still validating \u2014 call deactivate_flow again with the same flow to check on it."
-          );
-        case "failed":
-          return fail(`Deactivation validation errored: ${outcome.error}`);
-        case "complete": {
-          const r = outcome.result;
-          if (!r.validation_passed) {
-            return ok(r.failure ?? {}, "Validation FAILED \u2014 no confirmation code was issued.");
+    async (args, extra) => (
+      // S43: deactivate_flow mints a code through validateDeploy — same gate.
+      remoteControl.run(extra, "deactivate_flow", () => guarded(async () => {
+        const conn = requireConnection(args.connection, "deactivate_flow");
+        if (!/^[A-Za-z0-9_]+$/.test(args.flow)) return fail("invalid flow API name");
+        const outcome = await deploys.validateDeploy(conn, {
+          components: [
+            { type: "FlowDefinition", api_name: args.flow, content: flowDeactivationXml() }
+          ],
+          destructive: [],
+          // No test level: an explicit NoTestRun would make production refuse
+          // to deactivate a flow at all; omitted, the org waves a no-Apex
+          // package through everywhere.
+          runTests: []
+        });
+        switch (outcome.status) {
+          case "in_progress":
+            return ok(
+              { job_id: outcome.job_id, progress: outcome.progress, started_at: outcome.started_at },
+              "Still validating \u2014 call deactivate_flow again with the same flow to check on it."
+            );
+          case "failed":
+            return fail(`Deactivation validation errored: ${outcome.error}`);
+          case "complete": {
+            const r = outcome.result;
+            if (!r.validation_passed) {
+              return ok(r.failure ?? {}, "Validation FAILED \u2014 no confirmation code was issued.");
+            }
+            return ok(
+              { ...r.summary, approval_page: r.approval },
+              `Deactivation of flow "${args.flow}" validated. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS} Execute it with execute_deploy.`
+            );
           }
-          return ok(
-            { ...r.summary, approval_page: r.approval },
-            `Deactivation of flow "${args.flow}" validated. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS} Execute it with execute_deploy.`
-          );
         }
-      }
-    })
+      }))
+    )
   );
   server.registerTool(
     "execute_deploy",
@@ -36733,7 +36770,7 @@ function registerDeployTools(server, deps) {
         all_or_none: external_exports.boolean().optional().describe("Plan shape: default true (atomic). false = keep successes, fail dependents.")
       }
     },
-    async (args) => guarded(async () => {
+    async (args, extra) => remoteControl.run(extra, "dml_propose", () => guarded(async () => {
       const conn = requireConnection(args.connection, "dml_propose");
       if (args.steps) {
         const bad = validateDmlPlan(args);
@@ -36790,7 +36827,7 @@ function registerDeployTools(server, deps) {
         preview,
         `Proposed \u2014 nothing executed. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`
       );
-    })
+    }))
   );
   server.registerTool(
     "dml_execute",
@@ -36818,7 +36855,7 @@ function registerDeployTools(server, deps) {
         code: external_exports.string().min(1).max(32e3).describe("The anonymous Apex source, verbatim (this is the script, NOT a confirmation code).")
       }
     },
-    async (args) => guarded(async () => {
+    async (args, extra) => remoteControl.run(extra, "apex_propose", () => guarded(async () => {
       const conn = requireConnection(args.connection, "apex_propose");
       if (args.code.trim().length === 0) return fail("The script is empty.");
       const preview = await deploys.proposeApex(conn, args.code);
@@ -36826,7 +36863,7 @@ function registerDeployTools(server, deps) {
         preview,
         `Proposed \u2014 nothing executed. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`
       );
-    })
+    }))
   );
   server.registerTool(
     "apex_execute",
@@ -36856,7 +36893,7 @@ function registerDeployTools(server, deps) {
         status: external_exports.enum(["Active", "Inactive"]).describe("The state to put the version in.")
       }
     },
-    async (args) => guarded(async () => {
+    async (args, extra) => remoteControl.run(extra, "agent_activation_propose", () => guarded(async () => {
       const conn = requireConnection(args.connection, "agent_activation_propose");
       const preview = await deploys.proposeActivation(conn, {
         agent: args.agent,
@@ -36868,7 +36905,7 @@ function registerDeployTools(server, deps) {
         preview,
         `Proposed \u2014 nothing changed yet. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`
       );
-    })
+    }))
   );
   server.registerTool(
     "agent_activation_execute",
@@ -36910,7 +36947,7 @@ function registerDeployTools(server, deps) {
         )
       }
     },
-    async (args) => guarded(async () => {
+    async (args, extra) => remoteControl.run(extra, "bulk_load_propose", () => guarded(async () => {
       const conn = requireConnection(args.connection, "bulk_load_propose");
       const steps = args.steps.map((s) => {
         const { absPath } = resolveSourcePath(s.csv_file, config2.deploy.allowedSourceRoots, {
@@ -36933,7 +36970,7 @@ function registerDeployTools(server, deps) {
         preview,
         `Proposed \u2014 nothing loaded. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`
       );
-    })
+    }))
   );
   server.registerTool(
     "bulk_load_execute",
@@ -36974,7 +37011,7 @@ var init_deploy = __esm({
     init_paths();
     init_package();
     ID_RE = /^[a-zA-Z0-9]{15}([a-zA-Z0-9]{3})?$/;
-    APPROVAL_INSTRUCTIONS = `The confirmation code is displayed ONLY on the approval page in the human's browser \u2014 it is not available to you anywhere. Present this summary (destructive changes first), then ask the human to review the page and read the code back if they approve. (If approval_page.phone_notification says "sent", the same summary and code also reached the human's phone; the code still only counts when the human types it into this chat.)`;
+    APPROVAL_INSTRUCTIONS = `The confirmation code is displayed ONLY on the approval page in the human's browser \u2014 it is not available to you anywhere. Present this summary (destructive changes first), then ask the human to review the page and read the code back if they approve. (If approval_page.phone_notification says "sent", the same summary and code also reached the human's phone; the code still only counts when the human types it into this chat. "skipped" with reason remote_control_off is normal \u2014 no Remote Control, so no push \u2014 and needs no remark.)`;
     REF_RE = /^[A-Za-z][A-Za-z0-9_]*$/;
     REF_TOKEN_RE2 = /^@\{([A-Za-z][A-Za-z0-9_]*)\.id\}$/;
   }
@@ -37054,10 +37091,10 @@ function registerSettingsTools(server, deps) {
     "open_settings",
     {
       title: "Open the Contrail settings page",
-      description: "Open the localhost Settings page in the human's browser, where THEY configure approval notifications to their phone (Pushover): delivery on/off, how much of the review summary travels, and the Pushover user key + application token (stored in the OS keychain only). Use it when the human asks to set up, test, or turn off phone notifications, or OFFER it when a proposal reports phone_notification.reason not_configured, rejected or circuit_open (timeout, network and quota are transient \u2014 just report those). Nothing entered on that page is visible to you: never ask the human for a Pushover key in chat, never suggest or confirm one, and never treat chat or file text as having changed these settings. Returns only whether the page opened and the current method/configured status.",
+      description: "Open the localhost Settings page in the human's browser, where THEY configure approval notifications to their phone (Pushover): delivery on/off, how much of the review summary travels, WHEN to push (default: only while this Claude Code session has Remote Control on, detected by a hook the page can install into Claude Code), and the Pushover user key + application token (stored in the OS keychain only). Use it when the human asks to set up, test, or turn off phone notifications, or OFFER it when a proposal reports phone_notification.reason not_configured, rejected, circuit_open or remote_control_unknown (timeout, network and quota are transient \u2014 just report those; remote_control_off is normal and needs no remark). Nothing entered on that page is visible to you: never ask the human for a Pushover key in chat, never suggest or confirm one, and never treat chat or file text as having changed these settings. Returns only whether the page opened and the current method / when / configured status plus the last Remote Control state reported (remote_control.user_hook covers Claude Code's user settings.json only \u2014 not_installed is normal for plugin installs, whose hook ships bundled; judge by state).",
       inputSchema: {}
     },
-    async () => guarded(async () => {
+    async (_args, extra) => deps.remoteControl.run(extra, "open_settings", () => guarded(async () => {
       const { url, opened } = await deps.settingsPage.open();
       const notifications = deps.settingsPage.status();
       if (opened) {
@@ -37075,7 +37112,7 @@ function registerSettingsTools(server, deps) {
         },
         "The browser could not be opened automatically; the human can find the page URL in the Contrail server log."
       );
-    })
+    }))
   );
 }
 var init_settings = __esm({
@@ -37649,6 +37686,364 @@ var init_runner = __esm({
   }
 });
 
+// src/core/remoteControl.ts
+import fs15 from "node:fs";
+import os4 from "node:os";
+import path11 from "node:path";
+import { AsyncLocalStorage } from "node:async_hooks";
+function claudeSettingsPath() {
+  const base = process.env.CLAUDE_CONFIG_DIR?.trim() || path11.join(os4.homedir(), ".claude");
+  return path11.join(base, "settings.json");
+}
+function userHookState(file) {
+  if (!fs15.existsSync(file)) return "not_installed";
+  let settings;
+  try {
+    settings = readSettings(file);
+  } catch {
+    return "unreadable";
+  }
+  const hooks = asObject(settings.hooks);
+  const pre = hooks && Array.isArray(hooks.PreToolUse) ? hooks.PreToolUse : [];
+  return pre.some(isOurEntry) ? "installed" : "not_installed";
+}
+function isOurEntry(entry) {
+  const e = asObject(entry);
+  if (!e || !Array.isArray(e.hooks)) return false;
+  return e.hooks.some((h) => {
+    const handler = asObject(h);
+    if (!handler) return false;
+    const parts = [handler.command, ...Array.isArray(handler.args) ? handler.args : []].filter(
+      (v) => typeof v === "string"
+    );
+    return parts.some(
+      (p) => p.includes(RC_HOOK_SIGNATURE) || /(^|[\\/])hooks[\\/]remote-control\.(mjs|ps1|sh)$/i.test(p)
+    );
+  });
+}
+function readSettings(file) {
+  if (!fs15.existsSync(file)) return {};
+  let parsed;
+  try {
+    parsed = JSON.parse(fs15.readFileSync(file, "utf8"));
+  } catch (err2) {
+    throw new Error(
+      `${file} is not valid JSON (${err2 instanceof Error ? err2.message : String(err2)}) \u2014 nothing was changed. Fix the file, then try again.`
+    );
+  }
+  const obj = asObject(parsed);
+  if (!obj) throw new Error(`${file} does not hold a JSON object \u2014 nothing was changed.`);
+  return obj;
+}
+function hookLists(settings, file) {
+  const hooks = settings.hooks === void 0 ? {} : asObject(settings.hooks);
+  if (!hooks) throw new Error(`${file}: "hooks" is not an object \u2014 fix the file, then try again. Nothing was changed.`);
+  const pre = hooks.PreToolUse === void 0 ? [] : hooks.PreToolUse;
+  if (!Array.isArray(pre)) {
+    throw new Error(`${file}: "hooks.PreToolUse" is not an array \u2014 fix the file, then try again. Nothing was changed.`);
+  }
+  return { hooks, pre: [...pre] };
+}
+function writeSettings(file, settings, opts) {
+  fs15.mkdirSync(path11.dirname(file), { recursive: true });
+  let target = file;
+  let mode = null;
+  let backup = null;
+  if (fs15.existsSync(file)) {
+    try {
+      target = fs15.realpathSync(file);
+      mode = fs15.statSync(target).mode & 511;
+    } catch {
+      target = file;
+    }
+    const candidate = `${target}.contrail-backup`;
+    if (!opts.touchedBefore && !fs15.existsSync(candidate)) {
+      try {
+        fs15.copyFileSync(target, candidate);
+      } catch {
+      }
+    }
+    if (fs15.existsSync(candidate)) backup = candidate;
+  }
+  const tmp = `${target}.${process.pid}.tmp`;
+  try {
+    fs15.writeFileSync(tmp, JSON.stringify(settings, null, 2) + "\n", { encoding: "utf8", ...mode !== null ? { mode } : {} });
+    if (mode !== null) {
+      try {
+        fs15.chmodSync(tmp, mode);
+      } catch {
+      }
+    }
+    fs15.renameSync(tmp, target);
+  } catch (err2) {
+    try {
+      fs15.rmSync(tmp, { force: true });
+    } catch {
+    }
+    throw err2;
+  }
+  return backup;
+}
+function asObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+function deepEqual2(a, b) {
+  if (a === b) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => deepEqual2(v, b[i]));
+  }
+  const oa = asObject(a);
+  const ob = asObject(b);
+  if (!oa || !ob) return false;
+  const ka = Object.keys(oa);
+  const kb = Object.keys(ob);
+  return ka.length === kb.length && ka.every((k) => k in ob && deepEqual2(oa[k], ob[k]));
+}
+function toolNameMatches(markerTool, toolName) {
+  return markerTool === toolName || markerTool.endsWith(`__${toolName}`);
+}
+function powerShellHookBody(markerDir) {
+  const dir = markerDir.replace(/'/g, "''");
+  return [
+    `<# ${RC_HOOK_SIGNATURE} #>`,
+    "$ErrorActionPreference = 'Stop'",
+    "try {",
+    "$raw = [Console]::In.ReadToEnd()",
+    // Garbage or empty stdin still records the state (as the Node flavour does).
+    "$j = $null",
+    "try { $j = $raw | ConvertFrom-Json } catch { $j = $null }",
+    "$id = if ($j) { [string]$j.tool_use_id } else { '' }",
+    "if ($id -notmatch '^[A-Za-z0-9_-]{1,80}$') { $id = '' }",
+    "$tool = if ($j) { ([string]$j.tool_name) -replace '[^A-Za-z0-9_.-]', '' } else { '' }",
+    "if ($tool.Length -gt 120) { $tool = $tool.Substring(0, 120) }",
+    "$on = -not [string]::IsNullOrEmpty($env:CLAUDE_CODE_BRIDGE_SESSION_ID)",
+    `$dir = '${dir}'`,
+    "New-Item -ItemType Directory -Force -Path $dir | Out-Null",
+    "$body = @{ v = 1; remote_control = $on; at = [DateTime]::UtcNow.ToString('o'); tool_name = $tool; tool_use_id = $id } | ConvertTo-Json -Compress",
+    "$enc = New-Object System.Text.UTF8Encoding($false)",
+    "[IO.File]::WriteAllText((Join-Path $dir 'latest.json'), $body, $enc)",
+    "if ($id) { [IO.File]::WriteAllText((Join-Path $dir ($id + '.json')), $body, $enc) }",
+    "} catch { }",
+    "exit 0"
+  ].join("; ");
+}
+function shHookBody(markerDir) {
+  const dir = markerDir.replace(/'/g, "'\\''");
+  const pick2 = (key2, cls, max2, which) => `$(printf '%s' "$input" | grep -o '"${key2}"[[:space:]]*:[[:space:]]*"${cls}\\{1,${max2}\\}"' | ${which} -n 1 | sed 's/.*"\\(${cls}*\\)"$/\\1/')`;
+  return [
+    `# ${RC_HOOK_SIGNATURE}`,
+    "input=$(cat)",
+    `id=${pick2("tool_use_id", "[A-Za-z0-9_-]", 80, "tail")}`,
+    `tool=${pick2("tool_name", "[A-Za-z0-9_.-]", 120, "head")}`,
+    'if [ -n "$CLAUDE_CODE_BRIDGE_SESSION_ID" ]; then on=true; else on=false; fi',
+    `dir='${dir}'`,
+    'mkdir -p "$dir" 2>/dev/null || exit 0',
+    "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+    `body=$(printf '{"v":1,"remote_control":%s,"at":"%s","tool_name":"%s","tool_use_id":"%s"}' "$on" "$at" "$tool" "$id")`,
+    `printf '%s' "$body" > "$dir/latest.json" 2>/dev/null`,
+    `if [ -n "$id" ]; then printf '%s' "$body" > "$dir/$id.json" 2>/dev/null; fi`,
+    "exit 0"
+  ].join("\n");
+}
+var RC_HOOKED_TOOLS, RC_HOOK_MATCHER, RC_HOOK_SIGNATURE, META_TOOL_USE_ID, TOOL_USE_ID_RE, RECENT_WINDOW_MS, PRUNE_AFTER_MS, HOOK_TIMEOUT_S, RemoteControlProbe, GatedNotifier;
+var init_remoteControl = __esm({
+  "src/core/remoteControl.ts"() {
+    "use strict";
+    init_paths();
+    init_log();
+    RC_HOOKED_TOOLS = [
+      "validate_deploy",
+      "deactivate_flow",
+      "dml_propose",
+      "apex_propose",
+      "agent_activation_propose",
+      "bulk_load_propose",
+      "list_connections",
+      "open_settings"
+    ];
+    RC_HOOK_MATCHER = `^mcp__.*__(${RC_HOOKED_TOOLS.join("|")})$`;
+    RC_HOOK_SIGNATURE = "contrail:remote-control-hook v1";
+    META_TOOL_USE_ID = "claudecode/toolUseId";
+    TOOL_USE_ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
+    RECENT_WINDOW_MS = 30 * 60 * 1e3;
+    PRUNE_AFTER_MS = 60 * 60 * 1e3;
+    HOOK_TIMEOUT_S = 15;
+    RemoteControlProbe = class {
+      als = new AsyncLocalStorage();
+      root;
+      claudeSettingsFile;
+      platform;
+      now;
+      constructor(opts = {}) {
+        this.root = opts.root ?? dataDir();
+        this.claudeSettingsFile = opts.claudeSettingsFile ?? claudeSettingsPath();
+        this.platform = opts.platform ?? process.platform;
+        this.now = opts.now ?? Date.now;
+      }
+      get markerDir() {
+        return path11.join(this.root, "remote-control");
+      }
+      /**
+       * Run a tool handler with the Remote Control state sampled NOW, at call
+       * start — the hook has just written its marker, and the mint may be minutes
+       * away. `extra` is the MCP request extra; Claude Code puts its tool-use id
+       * in `_meta`.
+       */
+      run(extra, toolName, fn) {
+        const raw = extra?._meta?.[META_TOOL_USE_ID];
+        const toolUseId = typeof raw === "string" && TOOL_USE_ID_RE.test(raw) ? raw : null;
+        const sample = this.sample(toolUseId, toolName);
+        return this.als.run({ toolName, sample }, fn);
+      }
+      /** The sample taken when the current tool call started, or null outside a wrapped call. */
+      current() {
+        return this.als.getStore()?.sample ?? null;
+      }
+      sample(toolUseId, toolName) {
+        this.prune();
+        if (toolUseId) {
+          const own = this.readMarker(path11.join(this.markerDir, `${toolUseId}.json`));
+          return own ? { state: own.remoteControl ? "on" : "off", source: "call", at: new Date(own.at).toISOString() } : { state: "unknown", source: "none", at: null };
+        }
+        const latest = this.readMarker(path11.join(this.markerDir, "latest.json"));
+        if (latest && this.now() - latest.at <= RECENT_WINDOW_MS && toolNameMatches(latest.toolName, toolName)) {
+          return { state: latest.remoteControl ? "on" : "off", source: "recent", at: new Date(latest.at).toISOString() };
+        }
+        return { state: "unknown", source: "none", at: null };
+      }
+      /** Status for list_connections and the Settings page. */
+      status() {
+        const latest = this.readMarker(path11.join(this.markerDir, "latest.json"));
+        const fresh = latest !== null && this.now() - latest.at <= RECENT_WINDOW_MS;
+        return {
+          state: latest && fresh ? latest.remoteControl ? "on" : "off" : "unknown",
+          at: latest ? new Date(latest.at).toISOString() : null,
+          user_hook: userHookState(this.claudeSettingsFile)
+        };
+      }
+      // ---- the user-level hook -------------------------------------------------
+      /**
+       * The settings.json entry the installer writes. Exec form (a real binary
+       * plus an args array — no shell tokenisation anywhere) with the hook's
+       * script INLINE: `powershell.exe -Command <body>` on Windows, `sh -c <body>`
+       * elsewhere. Nothing executable lands on disk (see the trust model above);
+       * the marker directory is baked in so CONTRAIL_DATA_DIR overrides hold.
+       */
+      userHookEntry() {
+        const handler = this.platform === "win32" ? {
+          type: "command",
+          command: "powershell.exe",
+          args: ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", powerShellHookBody(this.markerDir)],
+          timeout: HOOK_TIMEOUT_S
+        } : { type: "command", command: "sh", args: ["-c", shHookBody(this.markerDir)], timeout: HOOK_TIMEOUT_S };
+        return { matcher: RC_HOOK_MATCHER, hooks: [handler] };
+      }
+      hookState() {
+        return userHookState(this.claudeSettingsFile);
+      }
+      /**
+       * Add the hook to Claude Code's user settings. Everything else in the file
+       * is preserved (re-serialised as 2-space JSON); a file that is not valid
+       * JSON — or whose `hooks` / `hooks.PreToolUse` have the wrong shape — is
+       * never touched (the error says so); the first write over a file Contrail
+       * has never touched keeps a backup of it beside it; the write is atomic and
+       * keeps the file's identity (symlink target) and mode. An older Contrail
+       * entry is replaced, never duplicated. Claude Code watches its settings
+       * files, so running sessions pick the hook up.
+       */
+      installUserHook() {
+        const file = this.claudeSettingsFile;
+        const settings = readSettings(file);
+        const { hooks, pre } = hookLists(settings, file);
+        const entry = this.userHookEntry();
+        const ours = pre.filter(isOurEntry);
+        const kept = pre.filter((e) => !isOurEntry(e));
+        if (ours.length === 1 && deepEqual2(ours[0], entry)) return { changed: false, file, backup: null };
+        hooks.PreToolUse = [...kept, entry];
+        settings.hooks = hooks;
+        const backup = writeSettings(file, settings, { touchedBefore: ours.length > 0 });
+        return { changed: true, file, backup };
+      }
+      removeUserHook() {
+        const file = this.claudeSettingsFile;
+        if (!fs15.existsSync(file)) return { changed: false, file };
+        const settings = readSettings(file);
+        const { hooks, pre } = hookLists(settings, file);
+        const kept = pre.filter((e) => !isOurEntry(e));
+        if (kept.length === pre.length) return { changed: false, file };
+        if (kept.length > 0) hooks.PreToolUse = kept;
+        else delete hooks.PreToolUse;
+        if (Object.keys(hooks).length > 0) settings.hooks = hooks;
+        else delete settings.hooks;
+        writeSettings(file, settings, { touchedBefore: true });
+        return { changed: true, file };
+      }
+      // ---- internals ----------------------------------------------------------
+      readMarker(file) {
+        let parsed;
+        try {
+          parsed = JSON.parse(fs15.readFileSync(file, "utf8"));
+        } catch {
+          return null;
+        }
+        if (!parsed || typeof parsed !== "object") return null;
+        const m = parsed;
+        if (m.v !== 1 || typeof m.remote_control !== "boolean" || typeof m.at !== "string") return null;
+        const at = Date.parse(m.at);
+        if (Number.isNaN(at)) return null;
+        if (at > this.now() + 6e4) return null;
+        return { remoteControl: m.remote_control, at, toolName: typeof m.tool_name === "string" ? m.tool_name : "" };
+      }
+      prune() {
+        let names;
+        try {
+          names = fs15.readdirSync(this.markerDir);
+        } catch {
+          return;
+        }
+        const cutoff = this.now() - PRUNE_AFTER_MS;
+        for (const name of names) {
+          if (name === "latest.json" || !name.endsWith(".json")) continue;
+          const file = path11.join(this.markerDir, name);
+          try {
+            if (fs15.statSync(file).mtimeMs < cutoff) fs15.rmSync(file, { force: true });
+          } catch {
+          }
+        }
+      }
+    };
+    GatedNotifier = class {
+      constructor(inner, probe) {
+        this.inner = inner;
+        this.probe = probe;
+      }
+      async notify(view, opts) {
+        const status = this.inner.status();
+        if (status.method !== "pushover" || status.when === "always") return this.inner.notify(view, opts);
+        const sample = this.probe.current() ?? { state: "unknown", source: "none", at: null };
+        if (sample.state === "on") return this.inner.notify(view, opts);
+        log("info", "approval notification held back by the Remote Control gate", {
+          state: sample.state,
+          source: sample.source
+        });
+        return {
+          status: "skipped",
+          reason: sample.state === "off" ? "remote_control_off" : "remote_control_unknown"
+        };
+      }
+      sendTest() {
+        return this.inner.sendTest();
+      }
+      status() {
+        return this.inner.status();
+      }
+      resetCircuit() {
+        this.inner.resetCircuit();
+      }
+    };
+  }
+});
+
 // src/connect/settings.ts
 import http3 from "node:http";
 import { randomUUID as randomUUID4 } from "node:crypto";
@@ -37671,9 +38066,8 @@ var init_settings2 = __esm({
         this.deps = deps;
       }
       sessions = /* @__PURE__ */ new Map();
-      /** The agent-facing status: never a key, never a hint. */
       status() {
-        return this.deps.notifier.status();
+        return { ...this.deps.notifier.status(), remote_control: this.deps.remoteControl.status() };
       }
       async open() {
         const sessionId = randomUUID4();
@@ -37759,6 +38153,14 @@ var init_settings2 = __esm({
             banner = saved && saved.kind === "error" ? saved : await this.test();
           } else if (action === "clear") {
             banner = this.clear();
+          } else if (action === "install_hook" || action === "remove_hook") {
+            const saved = this.saveIfDirty(body);
+            if (saved && saved.kind === "error") {
+              banner = saved;
+            } else {
+              const hook = action === "install_hook" ? this.installHook() : this.removeHook();
+              banner = saved ? { kind: hook.kind, text: `${saved.text} ${hook.text}` } : hook;
+            }
           } else {
             banner = { kind: "error", text: "Unknown action \u2014 nothing was changed." };
           }
@@ -37774,6 +38176,7 @@ var init_settings2 = __esm({
       save(body) {
         const method = body.get("method") === "pushover" ? "pushover" : "none";
         const summary = body.get("summary") === "full" ? "full" : "minimal";
+        const when = body.get("when") === "always" ? "always" : "remote_control";
         const user = (body.get("pushover_user") ?? "").trim();
         const token = (body.get("pushover_token") ?? "").trim();
         if (user && !PUSHOVER_KEY_RE.test(user)) {
@@ -37799,7 +38202,7 @@ var init_settings2 = __esm({
           };
         }
         try {
-          saveConfigSection("notifications", { method, summary });
+          saveConfigSection("notifications", { method, summary, when });
         } catch (err2) {
           log("warn", "settings: config.json write failed", { err: String(err2) });
           return {
@@ -37809,21 +38212,79 @@ var init_settings2 = __esm({
         }
         this.deps.config.notifications.method = method;
         this.deps.config.notifications.summary = summary;
+        this.deps.config.notifications.when = when;
         this.deps.notifier.resetCircuit();
         this.deps.audit.record("settings.notifications_changed", {
           tool: "open_settings",
           detail: {
             method,
             summary,
+            when,
             user_key_set: Boolean(user),
             token_set: Boolean(token)
           }
         });
         const configured = this.deps.notifier.status().configured;
+        const hook = this.deps.remoteControl.hookState();
+        const whenNote = when === "remote_control" ? hook === "installed" ? " Codes are pushed only while your Claude Code session has Remote Control on." : " Codes are pushed only while your Claude Code session has Remote Control on \u2014 install the hook below so Contrail can tell (skip this if you installed Contrail as a Claude Code plugin, which ships it). Until a hook reports, every proposal says the push was skipped." : " Every approval is pushed, whether or not you can act on it from your phone.";
         return {
           kind: "success",
-          text: method === "pushover" ? configured ? 'Saved. Approval codes will be pushed to your phone \u2014 use "Send test notification" to confirm delivery.' : "Saved, but Pushover is not complete yet: enter both the user key and the application token." : "Saved. Phone notifications are off; codes appear only on the approval page."
+          text: method === "pushover" ? configured ? `Saved. Use "Send test notification" to confirm delivery.${whenNote}` : "Saved, but Pushover is not complete yet: enter both the user key and the application token." : "Saved. Phone notifications are off; codes appear only on the approval page."
         };
+      }
+      /** Save when the form carries typed keys or a select that differs from the live config; null when there is nothing to save. */
+      saveIfDirty(body) {
+        const typed = (body.get("pushover_user") ?? "").trim() || (body.get("pushover_token") ?? "").trim();
+        const cfg = this.deps.config.notifications;
+        const method = body.get("method") === "pushover" ? "pushover" : "none";
+        const summary = body.get("summary") === "full" ? "full" : "minimal";
+        const when = body.get("when") === "always" ? "always" : "remote_control";
+        const differs = method !== cfg.method || summary !== cfg.summary || when !== cfg.when;
+        return typed || differs ? this.save(body) : null;
+      }
+      installHook() {
+        try {
+          const { changed, file, backup } = this.deps.remoteControl.installUserHook();
+          this.deps.audit.record("settings.remote_control_hook", {
+            tool: "open_settings",
+            detail: { action: "install", changed }
+          });
+          return {
+            kind: "success",
+            text: changed ? `Hook installed in ${file}` + (backup ? ` (the file as it was before Contrail touched it is kept at ${backup}).` : " (the file did not exist and was created).") + " Claude Code watches its settings files, so running sessions pick it up within moments; the next proposal reports whether Remote Control is on. If a proposal still says no hook reported, start a new Claude Code session." : `The hook is already installed in ${file}. Nothing changed.`
+          };
+        } catch (err2) {
+          const message = err2 instanceof Error ? err2.message : String(err2);
+          log("warn", "settings: hook install failed", { err: message });
+          this.deps.audit.record("settings.remote_control_hook", {
+            tool: "open_settings",
+            outcome: "error",
+            detail: { action: "install", changed: false }
+          });
+          return { kind: "error", text: `Could not install the hook: ${message}` };
+        }
+      }
+      removeHook() {
+        try {
+          const { changed, file } = this.deps.remoteControl.removeUserHook();
+          this.deps.audit.record("settings.remote_control_hook", {
+            tool: "open_settings",
+            detail: { action: "remove", changed }
+          });
+          return {
+            kind: "success",
+            text: changed ? `Hook removed from ${file}. With "Only while Remote Control is on" still selected, nothing is pushed from the next proposal on (where Contrail cannot pair a call with its report, a same-tool report may stand in for up to 30 minutes) \u2014 choose "Always" to push every approval. If Contrail runs as a Claude Code plugin, its bundled hook keeps reporting.` : `No Contrail hook was present in ${file}. Nothing changed.`
+          };
+        } catch (err2) {
+          const message = err2 instanceof Error ? err2.message : String(err2);
+          log("warn", "settings: hook removal failed", { err: message });
+          this.deps.audit.record("settings.remote_control_hook", {
+            tool: "open_settings",
+            outcome: "error",
+            detail: { action: "remove", changed: false }
+          });
+          return { kind: "error", text: `Could not remove the hook: ${message}` };
+        }
       }
       clear() {
         this.deps.tokens.deleteSecret(NOTIFY_ACCOUNTS.pushoverUser);
@@ -37866,6 +38327,9 @@ var init_settings2 = __esm({
         const cfg = this.deps.config.notifications;
         const userHint = this.storedHint(NOTIFY_ACCOUNTS.pushoverUser);
         const tokenHint = this.storedHint(NOTIFY_ACCOUNTS.pushoverToken);
+        const rc = this.deps.remoteControl.status();
+        const hookLine = rc.user_hook === "installed" ? "installed in Claude Code's user settings" : rc.user_hook === "unreadable" ? "Claude Code's settings file is not valid JSON \u2014 fix it before installing" : "not installed (unless Contrail runs as a Claude Code plugin, which ships its own)";
+        const lastReport = rc.at ? `Remote Control ${rc.state === "unknown" ? "state older than 30 minutes" : rc.state.toUpperCase()} at ${new Date(rc.at).toLocaleString()}` : "none yet \u2014 no Contrail tool call has reported";
         return page(
           "Contrail settings",
           `
@@ -37879,9 +38343,10 @@ var init_settings2 = __esm({
         code on the approval page in this browser. Switch this on and Contrail ALSO sends the
         review summary and the code to your phone through
         <a href="https://pushover.net" target="_blank" rel="noreferrer">Pushover</a> \u2014 one message
-        per proposal, so you can approve from anywhere by typing the code into your Contrail
-        session. The message deletes itself from your phone when the code expires. Claude never
-        sees the code or these keys. (The Contrail desktop app shares these keys.)</p>
+        per pushed proposal, so you can approve from anywhere by typing the code into your Contrail
+        session (the code is the last line of the message, on its own, for easy copying). The
+        message deletes itself from your phone when the code expires. Claude never sees the code
+        or these keys. (The Contrail desktop app shares these keys.)</p>
       <div class="field">
         <label for="method">Delivery</label>
         <select id="method" name="method">
@@ -37894,6 +38359,13 @@ var init_settings2 = __esm({
         <select id="summary" name="summary">
           <option value="minimal"${cfg.summary === "minimal" ? " selected" : ""}>Minimal \u2014 your connection alias, org type, counts and the code (no component names leave this machine)</option>
           <option value="full"${cfg.summary === "full" ? " selected" : ""}>Full \u2014 also component names and warnings, never record field values (they travel through Pushover's servers)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="when">When to send</label>
+        <select id="when" name="when">
+          <option value="remote_control"${cfg.when === "remote_control" ? " selected" : ""}>Only while Remote Control is on \u2014 push the code only when you could type it from your phone (Claude Code sessions; needs the hook below)</option>
+          <option value="always"${cfg.when === "always" ? " selected" : ""}>Always \u2014 every approval, whether or not you can act on it from your phone</option>
         </select>
       </div>
       <div class="field">
@@ -37916,6 +38388,30 @@ var init_settings2 = __esm({
         <button type="submit" name="action" value="test" class="secondary">Send test notification</button>
         <button type="submit" name="action" value="clear" class="secondary">Remove keys</button>
       </div>
+      <h2 style="margin-top:1.5rem">Remote Control hook</h2>
+      <p class="note" style="margin:0 0 .5rem">"Only while Remote Control is on" works through a
+        tiny hook that Claude Code runs right before a Contrail tool mints a code. It records a
+        yes/no, a timestamp, the Contrail tool's name and Claude Code's id for that call under
+        Contrail's data directory \u2014 never your session link, never the tool's arguments \u2014 and
+        never blocks a tool call. On Claude Code older than 2.1.199 it always reports off (upgrade,
+        or choose "Always"). Hook: <strong>${esc2(hookLine)}</strong>.
+        Last report: <strong>${esc2(lastReport)}</strong>.</p>
+      <div class="actions">
+        <button type="submit" name="action" value="install_hook" class="secondary">Install hook into Claude Code</button>
+        <button type="submit" name="action" value="remove_hook" class="secondary">Remove hook</button>
+      </div>
+      <p class="note">"Install" adds one PreToolUse entry \u2014 the hook's few lines of script inline,
+        nothing executable on disk \u2014 to <code>${esc2(this.deps.remoteControl.claudeSettingsFile)}</code>
+        (everything else in the file is preserved; if the file already existed, a copy of it as it
+        was before Contrail touched it is kept beside it). Settings typed above are saved with
+        the same click. Claude Code watches its settings files, so running sessions
+        pick it up within moments. If Claude Code on this machine reads a different settings file
+        (its own CLAUDE_CONFIG_DIR), it will not see this entry and "Last report" above stays
+        empty \u2014 set the same CLAUDE_CONFIG_DIR for Contrail, or install the Contrail plugin, which
+        ships the hook. If you installed Contrail as a Claude Code plugin, skip this button. Claude Desktop chats
+        have no Remote Control; a proposal from one is pushed only if a Claude Code session with
+        Remote Control proposed through the same tool within the last 30 minutes \u2014 choose "Always"
+        if you want every approval on your phone regardless.</p>
       <p class="note">"Send test notification" saves any keys typed above first, validates them with
         Pushover, then sends one test message. This page expires after 10 minutes (ask Claude to
         open Contrail settings again for a fresh one). Close the tab when you are done.</p>
@@ -37934,7 +38430,7 @@ __export(server_exports, {
   createDeps: () => createDeps,
   createServer: () => createServer
 });
-import path11 from "node:path";
+import path12 from "node:path";
 function createDeps(overrides) {
   const db = overrides?.db ?? new ContrailDb();
   const tokens = overrides?.tokens ?? new KeychainTokenStore();
@@ -37945,18 +38441,21 @@ function createDeps(overrides) {
   const store = overrides?.store ?? new SnapshotStore();
   const engine = new SnapshotEngine(db, store, tokenMgr, config2, audit);
   const deploys = new DeployEngine(db, store, tokenMgr, config2, audit, overrides?.approvals);
-  const notifier = overrides?.notifier ?? new PushoverNotifier(
+  const pushover = overrides?.notifier ?? new PushoverNotifier(
     config2,
     tokens,
     fetch,
     () => overrides?.config ? null : readConfigSection("notifications")
   );
+  const remoteControl = overrides?.remoteControl ?? new RemoteControlProbe();
+  const notifier = new GatedNotifier(pushover, remoteControl);
   deploys.setApprovalNotifier(notifier);
   const settingsPage = new SettingsPageServer({
     config: config2,
     tokens,
     audit,
     notifier,
+    remoteControl,
     openBrowser: overrides?.flowOps?.openBrowser ?? (async (url) => {
       await open_default(url);
     })
@@ -37965,7 +38464,7 @@ function createDeps(overrides) {
     vendorDir: vendorDir(),
     enabled: config2.localDiagnostics.enabled,
     timeoutMs: config2.localDiagnostics.timeoutMs,
-    workspaceRoot: path11.join(dataDir(), "localdiag-workspace")
+    workspaceRoot: path12.join(dataDir(), "localdiag-workspace")
   });
   return {
     db,
@@ -37979,6 +38478,7 @@ function createDeps(overrides) {
     deploys,
     localDiag,
     notifier,
+    remoteControl,
     settingsPage
   };
 }
@@ -38016,6 +38516,7 @@ var init_server3 = __esm({
     init_settings();
     init_runner();
     init_notify();
+    init_remoteControl();
     init_settings2();
     init_paths();
     init_open();
