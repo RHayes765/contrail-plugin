@@ -12,6 +12,7 @@ import { ApprovalPageServer } from '../deploy/approval.js';
 import { createDeps, createServer } from '../server.js';
 import { emptyGrantSet } from '../core/grants.js';
 import type { ApprovalNotifier, NotifyOutcome } from '../core/notify.js';
+import { RemoteControlProbe } from '../core/remoteControl.js';
 import type { ApprovalPageOptions } from '../connect/pages.js';
 
 /**
@@ -26,8 +27,10 @@ import type { ApprovalPageOptions } from '../connect/pages.js';
 class RecordingNotifier implements ApprovalNotifier {
   calls: Array<{ view: ApprovalPageOptions; includeCode: boolean }> = [];
   behaviour: 'sent' | 'throw' | 'fail' = 'sent';
+  method: 'pushover' | 'none' = 'pushover';
   async notify(view: ApprovalPageOptions, opts: { includeCode: boolean }): Promise<NotifyOutcome> {
     this.calls.push({ view, includeCode: opts.includeCode });
+    if (this.method === 'none') return { status: 'off' };
     if (this.behaviour === 'throw') throw new Error(`boom ${view.code}`);
     if (this.behaviour === 'fail') return { status: 'failed', reason: 'rejected' };
     return { status: 'sent' };
@@ -36,7 +39,7 @@ class RecordingNotifier implements ApprovalNotifier {
     return { ok: true, message: 'ok' };
   }
   status() {
-    return { method: 'pushover' as const, configured: true };
+    return { method: this.method, when: config.notifications.when, configured: true };
   }
   resetCircuit() {}
 }
@@ -46,6 +49,8 @@ let db: ContrailDb;
 let client: Client;
 let presentedPages: string[];
 let notifier: RecordingNotifier;
+let config: ContrailConfig;
+let probe: RemoteControlProbe;
 
 function soapEnvelope(inner: string): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -146,11 +151,14 @@ beforeEach(async () => {
     return origPresent(html, statusCheck);
   };
 
-  const config: ContrailConfig = {
+  // S42's cases run with the gate open ('always'); the S43 cases flip it.
+  config = {
     ...DEFAULT_CONFIG,
     salesforce: { ...DEFAULT_CONFIG.salesforce },
+    notifications: { ...DEFAULT_CONFIG.notifications, when: 'always' },
     deploy: { ...DEFAULT_CONFIG.deploy, pollIntervalMs: 5 },
   };
+  probe = new RemoteControlProbe({ root: tmp, claudeSettingsFile: path.join(tmp, 'claude-home', 'settings.json') });
   const deps = createDeps({
     db,
     tokens,
@@ -158,6 +166,7 @@ beforeEach(async () => {
     store: new SnapshotStore(path.join(tmp, 'snapshots')),
     approvals,
     notifier,
+    remoteControl: probe,
     flowOps: {
       exchangeCode: async () => {
         throw new Error('not exercised');
@@ -198,7 +207,7 @@ function codeFromPage(html: string): string {
   return m[1]!;
 }
 
-async function validate(extra: Record<string, unknown> = {}) {
+async function validate(extra: Record<string, unknown> = {}, meta?: Record<string, unknown>) {
   return client.callTool({
     name: 'validate_deploy',
     arguments: {
@@ -206,7 +215,23 @@ async function validate(extra: Record<string, unknown> = {}) {
       components: [{ type: 'FlexiPage', api_name: 'Phone_Page', content: '<FlexiPage/>' }],
       ...extra,
     },
+    ...(meta ? { _meta: meta } : {}),
   });
+}
+
+/** What Contrail's PreToolUse hook writes right before the tool call (see hooks/remote-control.mjs). */
+function hookReported(opts: { toolUseId?: string; on: boolean; toolName?: string; at?: Date }): void {
+  const dir = path.join(tmp, 'remote-control');
+  fs.mkdirSync(dir, { recursive: true });
+  const body = JSON.stringify({
+    v: 1,
+    remote_control: opts.on,
+    at: (opts.at ?? new Date()).toISOString(),
+    tool_name: opts.toolName ?? 'mcp__plugin_contrail_contrail-engine__validate_deploy',
+    tool_use_id: opts.toolUseId ?? '',
+  });
+  fs.writeFileSync(path.join(dir, 'latest.json'), body);
+  if (opts.toolUseId) fs.writeFileSync(path.join(dir, `${opts.toolUseId}.json`), body);
 }
 
 describe('S42: the phone copy of a minted code', () => {
@@ -280,5 +305,113 @@ describe('S42: the phone copy of a minted code', () => {
     expect(notifier.calls[0]!.view.code).toBe(codeFromPage(presentedPages[0]!));
     expect(textOf(result)).toContain('"phone_notification"');
     expect(textOf(result)).not.toContain(notifier.calls[0]!.view.code);
+  });
+});
+
+describe('S43: the Remote Control gate — a code is pushed only when it could be typed from the phone', () => {
+  beforeEach(() => {
+    config.notifications.when = 'remote_control';
+  });
+
+  it('hook reported ON for this call (per-call marker + _meta tool-use id) → pushed, exactly as before', async () => {
+    hookReported({ toolUseId: 'toolu_01on', on: true });
+    const result = await validate({}, { 'claudecode/toolUseId': 'toolu_01on' });
+    expect(result.isError ?? false).toBe(false);
+    expect(notifier.calls).toHaveLength(1);
+    expect(notifier.calls[0]!.view.code).toBe(codeFromPage(presentedPages[0]!));
+    expect(textOf(result)).toContain('"status": "sent"');
+  });
+
+  it('hook reported OFF → skipped with remote_control_off; the page still has the code, the agent never does', async () => {
+    hookReported({ toolUseId: 'toolu_02off', on: false });
+    const result = await validate({}, { 'claudecode/toolUseId': 'toolu_02off' });
+    const text = textOf(result);
+    expect(result.isError ?? false).toBe(false);
+    expect(notifier.calls).toHaveLength(0);
+    expect(presentedPages).toHaveLength(1);
+    expect(text).toContain('"status": "skipped"');
+    expect(text).toContain('"reason": "remote_control_off"');
+    expect(text).toContain('nothing to do');
+    expect(text).not.toContain('open_settings');
+    expect(text).not.toContain(codeFromPage(presentedPages[0]!));
+    const skipped = db.queryAuditEvents({}).filter((e) => e.eventType === 'approval.notify_skipped');
+    expect(skipped).toHaveLength(1);
+    expect(skipped[0]!.detail).toMatchObject({ kind: 'deploy', reason: 'remote_control_off' });
+    expect(JSON.stringify(db.queryAuditEvents({}))).not.toContain(codeFromPage(presentedPages[0]!));
+  });
+
+  it('no hook report at all → skipped with remote_control_unknown, and the agent is told how the human fixes it', async () => {
+    const text = textOf(await validate({}, { 'claudecode/toolUseId': 'toolu_03none' }));
+    expect(notifier.calls).toHaveLength(0);
+    expect(text).toContain('"reason": "remote_control_unknown"');
+    expect(text).toContain('hook did not report');
+    expect(text).toContain('open_settings');
+    expect(text).not.toContain(codeFromPage(presentedPages[0]!));
+  });
+
+  it('without a tool-use id in _meta, a RECENT same-tool report counts; one for another tool does not', async () => {
+    hookReported({ on: true, toolName: 'mcp__Contrail__validate_deploy' }); // latest.json only, Desktop-extension name
+    expect(textOf(await validate())).toContain('"status": "sent"');
+    expect(notifier.calls).toHaveLength(1);
+
+    hookReported({ on: true, toolName: 'mcp__Contrail__dml_propose' });
+    expect(textOf(await validate())).toContain('"reason": "remote_control_unknown"');
+    expect(notifier.calls).toHaveLength(1);
+
+    hookReported({ on: true, toolName: 'mcp__Contrail__validate_deploy', at: new Date(Date.now() - 45 * 60_000) }); // stale
+    expect(textOf(await validate())).toContain('"reason": "remote_control_unknown"');
+    expect(notifier.calls).toHaveLength(1);
+  });
+
+  it("'always' pushes with no hook report; method 'none' stays off whatever the hook says", async () => {
+    config.notifications.when = 'always';
+    expect(textOf(await validate())).toContain('"status": "sent"');
+    expect(notifier.calls).toHaveLength(1);
+
+    config.notifications.when = 'remote_control';
+    notifier.method = 'none';
+    hookReported({ toolUseId: 'toolu_04on', on: true });
+    expect(textOf(await validate({}, { 'claudecode/toolUseId': 'toolu_04on' }))).toContain('"status": "off"');
+    expect(notifier.calls).toHaveLength(2); // the inner notifier answered 'off' itself
+  });
+
+  it('a dry run mints no code and consults nobody, gate or not', async () => {
+    hookReported({ toolUseId: 'toolu_05dry', on: true });
+    const result = await validate({ dry_run: true }, { 'claudecode/toolUseId': 'toolu_05dry' });
+    expect(presentedPages).toHaveLength(0);
+    expect(notifier.calls).toHaveLength(0);
+    expect(textOf(result)).not.toContain('phone_notification');
+  });
+
+  it('list_connections shows the gate setting and the last report the hook made, with no secrets and no paths', async () => {
+    hookReported({ toolUseId: 'toolu_06list', on: true, toolName: 'mcp__Contrail__list_connections' });
+    const text = textOf(await client.callTool({ name: 'list_connections', arguments: {}, _meta: { 'claudecode/toolUseId': 'toolu_06list' } }));
+    expect(text).toContain('"when": "remote_control"');
+    expect(text).toContain('"state": "on"');
+    expect(text).toContain('"user_hook": "not_installed"');
+    expect(text).not.toContain(tmp);
+  });
+
+  it('deactivate_flow mints through the same gate: hook ON for its call → pushed; no report → unknown', async () => {
+    hookReported({ toolUseId: 'toolu_deact_on', on: true, toolName: 'mcp__Contrail__deactivate_flow' });
+    const first = await client.callTool({
+      name: 'deactivate_flow',
+      arguments: { connection: 'phone-org', flow: 'Phone_Flow_A' },
+      _meta: { 'claudecode/toolUseId': 'toolu_deact_on' },
+    });
+    expect(first.isError ?? false).toBe(false);
+    expect(notifier.calls).toHaveLength(1);
+    expect(notifier.calls[0]!.view.kind).toBe('deploy');
+    expect(notifier.calls[0]!.view.code).toBe(codeFromPage(presentedPages[0]!));
+    expect(textOf(first)).toContain('"status": "sent"');
+    expect(textOf(first)).not.toContain(notifier.calls[0]!.view.code);
+
+    const second = await client.callTool({
+      name: 'deactivate_flow',
+      arguments: { connection: 'phone-org', flow: 'Phone_Flow_B' },
+      _meta: { 'claudecode/toolUseId': 'toolu_deact_none' },
+    });
+    expect(textOf(second)).toContain('"reason": "remote_control_unknown"');
+    expect(notifier.calls).toHaveLength(1);
   });
 });

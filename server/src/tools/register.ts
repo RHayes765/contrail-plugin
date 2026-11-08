@@ -12,6 +12,7 @@ import type { SnapshotEngine } from '../snapshot/engine.js';
 import type { DeployEngine } from '../deploy/engine.js';
 import type { LocalDiagRunner } from '../localdiag/types.js';
 import type { ApprovalNotifier } from '../core/notify.js';
+import type { RemoteControlProbe } from '../core/remoteControl.js';
 import type { SettingsPageServer } from '../connect/settings.js';
 import { ContrailError } from '../core/errors.js';
 import { grantedList, notGrantedList } from '../core/grants.js';
@@ -36,6 +37,8 @@ export interface ToolDeps {
   localDiag: LocalDiagRunner;
   /** S42: phone delivery of approval codes (shared with the engine so the circuit state is one). */
   notifier: ApprovalNotifier;
+  /** S43: Remote Control state sampled per tool call (the phone push gate) + the user-hook installer. */
+  remoteControl: RemoteControlProbe;
   /** S42: the human-only Settings page server behind open_settings. */
   settingsPage: SettingsPageServer;
 }
@@ -217,10 +220,15 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
         'local read — call this instead of guessing which orgs exist. Also returns ' +
         'staging_dir: the directory to author content_file/csv_file sources into, and ' +
         'approval_notifications: whether approval codes are also pushed to the human\'s phone ' +
-        '(configured by the human via open_settings; never by you).',
+        '(configured by the human via open_settings; never by you), including when — by ' +
+        'default only while this Claude Code session has Remote Control connected — and the ' +
+        'last Remote Control state Contrail\'s hook reported (remote_control.user_hook covers ' +
+        "Claude Code's user settings.json only: not_installed is normal for plugin installs, " +
+        'whose hook ships bundled — judge by state).',
       inputSchema: {},
     },
-    async () =>
+    async (_args, extra) =>
+      deps.remoteControl.run(extra, 'list_connections', () =>
       guarded(() => {
         const list = db.listConnections().map(connectionSummary);
         // Cached-only read (never the network): when a newer release exists,
@@ -238,8 +246,13 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
           // before its first validate_deploy refusal, not from it.
           staging_dir: stagingDir(),
           // S42: status only — method and whether both keys exist. Never the
-          // keys, never a hint of them.
-          approval_notifications: deps.notifier.status(),
+          // keys, never a hint of them. S43: plus when pushes go out and the
+          // last Remote Control state the hook reported (this call's, when the
+          // hook fired for it).
+          approval_notifications: {
+            ...deps.notifier.status(),
+            remote_control: deps.remoteControl.status(),
+          },
           ...(update
             ? {
                 update_available: update,
@@ -251,6 +264,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
             : {}),
         });
       }),
+      ),
   );
 
   server.registerTool(

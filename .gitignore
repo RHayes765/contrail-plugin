@@ -9,3 +9,4 @@ dist-mcpb/
 *.log
 .DS_Store
 *.tsbuildinfo
+*.stackdump

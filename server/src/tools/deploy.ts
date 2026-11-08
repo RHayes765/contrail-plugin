@@ -25,7 +25,9 @@ const APPROVAL_INSTRUCTIONS =
   'it is not available to you anywhere. Present this summary (destructive changes first), ' +
   'then ask the human to review the page and read the code back if they approve. ' +
   '(If approval_page.phone_notification says "sent", the same summary and code also reached ' +
-  'the human\'s phone; the code still only counts when the human types it into this chat.)';
+  'the human\'s phone; the code still only counts when the human types it into this chat. ' +
+  '"skipped" with reason remote_control_off is normal — no Remote Control, so no push — and ' +
+  'needs no remark.)';
 
 const REF_RE = /^[A-Za-z][A-Za-z0-9_]*$/;
 const REF_TOKEN_RE = /^@\{([A-Za-z][A-Za-z0-9_]*)\.id\}$/;
@@ -120,7 +122,7 @@ function validateDmlPlan(args: {
 }
 
 export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
-  const { db, audit, deploys, config } = deps;
+  const { db, audit, deploys, config, remoteControl } = deps;
 
   function requireConnection(ref: string, tool: string): ConnectionRecord {
     const rec = db.resolveConnection(ref);
@@ -306,7 +308,10 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
       dry_run?: boolean;
       job_id?: string;
       allow_unregistered_delete?: boolean;
-    }) =>
+    }, extra) =>
+      // S43: sample the Remote Control state at call start (the hook has just
+      // reported); the mint, minutes later, reads that sample.
+      remoteControl.run(extra, 'validate_deploy', () =>
       guarded(async () => {
         const conn = requireConnection(args.connection, 'validate_deploy');
         if (args.job_id !== undefined) {
@@ -394,7 +399,7 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
           allowUnregisteredDelete: args.allow_unregistered_delete === true,
         });
         return renderValidateOutcome(outcome, conn);
-      }),
+      })),
   );
 
   /**
@@ -461,7 +466,9 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
         flow: z.string().describe('Flow API name (DeveloperName).'),
       },
     },
-    async (args: { connection: string; flow: string }) =>
+    async (args: { connection: string; flow: string }, extra) =>
+      // S43: deactivate_flow mints a code through validateDeploy — same gate.
+      remoteControl.run(extra, 'deactivate_flow', () =>
       guarded(async () => {
         const conn = requireConnection(args.connection, 'deactivate_flow');
         if (!/^[A-Za-z0-9_]+$/.test(args.flow)) return fail('invalid flow API name');
@@ -495,7 +502,7 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
             );
           }
         }
-      }),
+      })),
   );
 
   server.registerTool(
@@ -614,7 +621,8 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
         id?: string;
       }>;
       all_or_none?: boolean;
-    }) =>
+    }, extra) =>
+      remoteControl.run(extra, 'dml_propose', () =>
       guarded(async () => {
         const conn = requireConnection(args.connection, 'dml_propose');
 
@@ -677,7 +685,7 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
           preview,
           `Proposed — nothing executed. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`,
         );
-      }),
+      })),
   );
 
   server.registerTool(
@@ -729,7 +737,8 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
           .describe('The anonymous Apex source, verbatim (this is the script, NOT a confirmation code).'),
       },
     },
-    async (args: { connection: string; code: string }) =>
+    async (args: { connection: string; code: string }, extra) =>
+      remoteControl.run(extra, 'apex_propose', () =>
       guarded(async () => {
         const conn = requireConnection(args.connection, 'apex_propose');
         if (args.code.trim().length === 0) return fail('The script is empty.');
@@ -738,7 +747,7 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
           preview,
           `Proposed — nothing executed. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`,
         );
-      }),
+      })),
   );
 
   server.registerTool(
@@ -794,7 +803,8 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
           .describe('The state to put the version in.'),
       },
     },
-    async (args: { connection: string; agent: string; version: string; status: 'Active' | 'Inactive' }) =>
+    async (args: { connection: string; agent: string; version: string; status: 'Active' | 'Inactive' }, extra) =>
+      remoteControl.run(extra, 'agent_activation_propose', () =>
       guarded(async () => {
         const conn = requireConnection(args.connection, 'agent_activation_propose');
         const preview = await deploys.proposeActivation(conn, {
@@ -807,7 +817,7 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
           preview,
           `Proposed — nothing changed yet. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`,
         );
-      }),
+      })),
   );
 
   server.registerTool(
@@ -901,7 +911,8 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
         external_id_field?: string;
       }>;
       stop_on_failure?: boolean;
-    }) =>
+    }, extra) =>
+      remoteControl.run(extra, 'bulk_load_propose', () =>
       guarded(async () => {
         const conn = requireConnection(args.connection, 'bulk_load_propose');
         const steps = args.steps.map((s) => {
@@ -925,7 +936,7 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
           preview,
           `Proposed — nothing loaded. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`,
         );
-      }),
+      })),
   );
 
   server.registerTool(

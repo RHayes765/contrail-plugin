@@ -9,9 +9,11 @@ import {
   NOTIFY_ACCOUNTS,
   PUSHOVER_KEY_RE,
   type ApprovalNotifier,
-  type NotifyMethod,
+  type NotifierStatus,
   type NotifySummary,
+  type NotifyWhen,
 } from '../core/notify.js';
+import type { RcStatus, RemoteControlProbe } from '../core/remoteControl.js';
 import { esc, page, renderErrorPage } from './pages.js';
 
 /**
@@ -25,6 +27,13 @@ import { esc, page, renderErrorPage } from './pages.js';
  * knob a prompt-injected agent must never reach (redirect the codes, approve
  * its own deploy). The keys go straight from the human's browser into the OS
  * keychain; stored values are never rendered back — only a masked hint.
+ *
+ * S43 adds the "when" choice (push only while Remote Control is on, or
+ * always) and the Remote Control hook block: a button that installs the
+ * PreToolUse hook into Claude Code's user settings.json (see
+ * core/remoteControl.ts) — a write to a file outside Contrail's own data dir,
+ * which is why it is a human's click on this page and nothing an agent can
+ * reach.
  */
 
 interface SettingsSession {
@@ -40,8 +49,13 @@ export interface SettingsPageDeps {
   tokens: TokenStore;
   audit: AuditLog;
   notifier: ApprovalNotifier;
+  /** S43: Remote Control state + the user-hook installer. */
+  remoteControl: RemoteControlProbe;
   openBrowser: (url: string) => Promise<void>;
 }
+
+/** The agent-facing status: never a key, never a hint, never a path. */
+export type SettingsStatus = NotifierStatus & { remote_control: RcStatus };
 
 interface Banner {
   kind: 'success' | 'error';
@@ -53,9 +67,8 @@ export class SettingsPageServer {
 
   constructor(private readonly deps: SettingsPageDeps) {}
 
-  /** The agent-facing status: never a key, never a hint. */
-  status(): { method: NotifyMethod; configured: boolean } {
-    return this.deps.notifier.status();
+  status(): SettingsStatus {
+    return { ...this.deps.notifier.status(), remote_control: this.deps.remoteControl.status() };
   }
 
   async open(): Promise<{ url: string; opened: boolean }> {
@@ -154,6 +167,17 @@ export class SettingsPageServer {
         banner = saved && saved.kind === 'error' ? saved : await this.test();
       } else if (action === 'clear') {
         banner = this.clear();
+      } else if (action === 'install_hook' || action === 'remove_hook') {
+        // The hook buttons sit in the same form as the keys and selects:
+        // anything typed or changed above is saved FIRST (the "Send test"
+        // precedent), and a save error stops here — nothing is silently dropped.
+        const saved = this.saveIfDirty(body);
+        if (saved && saved.kind === 'error') {
+          banner = saved;
+        } else {
+          const hook = action === 'install_hook' ? this.installHook() : this.removeHook();
+          banner = saved ? { kind: hook.kind, text: `${saved.text} ${hook.text}` } : hook;
+        }
       } else {
         banner = { kind: 'error', text: 'Unknown action — nothing was changed.' };
       }
@@ -171,6 +195,7 @@ export class SettingsPageServer {
   private save(body: URLSearchParams): Banner {
     const method = body.get('method') === 'pushover' ? 'pushover' : 'none';
     const summary: NotifySummary = body.get('summary') === 'full' ? 'full' : 'minimal';
+    const when: NotifyWhen = body.get('when') === 'always' ? 'always' : 'remote_control';
     const user = (body.get('pushover_user') ?? '').trim();
     const token = (body.get('pushover_token') ?? '').trim();
     // Empty fields mean "keep what is stored" — the form never echoes a
@@ -198,7 +223,7 @@ export class SettingsPageServer {
       };
     }
     try {
-      saveConfigSection('notifications', { method, summary });
+      saveConfigSection('notifications', { method, summary, when });
     } catch (err) {
       log('warn', 'settings: config.json write failed', { err: String(err) });
       return {
@@ -210,26 +235,109 @@ export class SettingsPageServer {
     // so the change applies to the next proposal without a restart.
     this.deps.config.notifications.method = method;
     this.deps.config.notifications.summary = summary;
+    this.deps.config.notifications.when = when;
     this.deps.notifier.resetCircuit();
     this.deps.audit.record('settings.notifications_changed', {
       tool: 'open_settings',
       detail: {
         method,
         summary,
+        when,
         user_key_set: Boolean(user),
         token_set: Boolean(token),
       },
     });
     const configured = this.deps.notifier.status().configured;
+    const hook = this.deps.remoteControl.hookState();
+    const whenNote =
+      when === 'remote_control'
+        ? hook === 'installed'
+          ? ' Codes are pushed only while your Claude Code session has Remote Control on.'
+          : ' Codes are pushed only while your Claude Code session has Remote Control on — install ' +
+            'the hook below so Contrail can tell (skip this if you installed Contrail as a Claude ' +
+            'Code plugin, which ships it). Until a hook reports, every proposal says the push was ' +
+            'skipped.'
+        : ' Every approval is pushed, whether or not you can act on it from your phone.';
     return {
       kind: 'success',
       text:
         method === 'pushover'
           ? configured
-            ? 'Saved. Approval codes will be pushed to your phone — use "Send test notification" to confirm delivery.'
+            ? `Saved. Use "Send test notification" to confirm delivery.${whenNote}`
             : 'Saved, but Pushover is not complete yet: enter both the user key and the application token.'
           : 'Saved. Phone notifications are off; codes appear only on the approval page.',
     };
+  }
+
+  /** Save when the form carries typed keys or a select that differs from the live config; null when there is nothing to save. */
+  private saveIfDirty(body: URLSearchParams): Banner | null {
+    const typed = (body.get('pushover_user') ?? '').trim() || (body.get('pushover_token') ?? '').trim();
+    const cfg = this.deps.config.notifications;
+    const method = body.get('method') === 'pushover' ? 'pushover' : 'none';
+    const summary = body.get('summary') === 'full' ? 'full' : 'minimal';
+    const when = body.get('when') === 'always' ? 'always' : 'remote_control';
+    const differs = method !== cfg.method || summary !== cfg.summary || when !== cfg.when;
+    return typed || differs ? this.save(body) : null;
+  }
+
+  private installHook(): Banner {
+    try {
+      const { changed, file, backup } = this.deps.remoteControl.installUserHook();
+      this.deps.audit.record('settings.remote_control_hook', {
+        tool: 'open_settings',
+        detail: { action: 'install', changed },
+      });
+      return {
+        kind: 'success',
+        text: changed
+          ? `Hook installed in ${file}` +
+            (backup
+              ? ` (the file as it was before Contrail touched it is kept at ${backup}).`
+              : ' (the file did not exist and was created).') +
+            ' Claude Code watches its settings files, so running sessions pick it up within ' +
+            'moments; the next proposal reports whether Remote Control is on. If a proposal ' +
+            'still says no hook reported, start a new Claude Code session.'
+          : `The hook is already installed in ${file}. Nothing changed.`,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log('warn', 'settings: hook install failed', { err: message });
+      this.deps.audit.record('settings.remote_control_hook', {
+        tool: 'open_settings',
+        outcome: 'error',
+        detail: { action: 'install', changed: false },
+      });
+      return { kind: 'error', text: `Could not install the hook: ${message}` };
+    }
+  }
+
+  private removeHook(): Banner {
+    try {
+      const { changed, file } = this.deps.remoteControl.removeUserHook();
+      this.deps.audit.record('settings.remote_control_hook', {
+        tool: 'open_settings',
+        detail: { action: 'remove', changed },
+      });
+      return {
+        kind: 'success',
+        text: changed
+          ? `Hook removed from ${file}. With "Only while Remote Control is on" still selected, ` +
+            'nothing is pushed from the next proposal on (where Contrail cannot pair a call with ' +
+            'its report, a same-tool report may stand in for up to 30 minutes) — choose "Always" ' +
+            'to push every approval. If Contrail runs as a Claude Code plugin, its bundled hook ' +
+            'keeps reporting.'
+          : `No Contrail hook was present in ${file}. Nothing changed.`,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log('warn', 'settings: hook removal failed', { err: message });
+      this.deps.audit.record('settings.remote_control_hook', {
+        tool: 'open_settings',
+        outcome: 'error',
+        detail: { action: 'remove', changed: false },
+      });
+      return { kind: 'error', text: `Could not remove the hook: ${message}` };
+    }
   }
 
   private clear(): Banner {
@@ -278,6 +386,16 @@ export class SettingsPageServer {
     const cfg = this.deps.config.notifications;
     const userHint = this.storedHint(NOTIFY_ACCOUNTS.pushoverUser);
     const tokenHint = this.storedHint(NOTIFY_ACCOUNTS.pushoverToken);
+    const rc = this.deps.remoteControl.status();
+    const hookLine =
+      rc.user_hook === 'installed'
+        ? "installed in Claude Code's user settings"
+        : rc.user_hook === 'unreadable'
+          ? "Claude Code's settings file is not valid JSON — fix it before installing"
+          : 'not installed (unless Contrail runs as a Claude Code plugin, which ships its own)';
+    const lastReport = rc.at
+      ? `Remote Control ${rc.state === 'unknown' ? 'state older than 30 minutes' : rc.state.toUpperCase()} at ${new Date(rc.at).toLocaleString()}`
+      : 'none yet — no Contrail tool call has reported';
     return page(
       'Contrail settings',
       `
@@ -295,9 +413,10 @@ export class SettingsPageServer {
         code on the approval page in this browser. Switch this on and Contrail ALSO sends the
         review summary and the code to your phone through
         <a href="https://pushover.net" target="_blank" rel="noreferrer">Pushover</a> — one message
-        per proposal, so you can approve from anywhere by typing the code into your Contrail
-        session. The message deletes itself from your phone when the code expires. Claude never
-        sees the code or these keys. (The Contrail desktop app shares these keys.)</p>
+        per pushed proposal, so you can approve from anywhere by typing the code into your Contrail
+        session (the code is the last line of the message, on its own, for easy copying). The
+        message deletes itself from your phone when the code expires. Claude never sees the code
+        or these keys. (The Contrail desktop app shares these keys.)</p>
       <div class="field">
         <label for="method">Delivery</label>
         <select id="method" name="method">
@@ -310,6 +429,13 @@ export class SettingsPageServer {
         <select id="summary" name="summary">
           <option value="minimal"${cfg.summary === 'minimal' ? ' selected' : ''}>Minimal — your connection alias, org type, counts and the code (no component names leave this machine)</option>
           <option value="full"${cfg.summary === 'full' ? ' selected' : ''}>Full — also component names and warnings, never record field values (they travel through Pushover's servers)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="when">When to send</label>
+        <select id="when" name="when">
+          <option value="remote_control"${cfg.when === 'remote_control' ? ' selected' : ''}>Only while Remote Control is on — push the code only when you could type it from your phone (Claude Code sessions; needs the hook below)</option>
+          <option value="always"${cfg.when === 'always' ? ' selected' : ''}>Always — every approval, whether or not you can act on it from your phone</option>
         </select>
       </div>
       <div class="field">
@@ -332,6 +458,30 @@ export class SettingsPageServer {
         <button type="submit" name="action" value="test" class="secondary">Send test notification</button>
         <button type="submit" name="action" value="clear" class="secondary">Remove keys</button>
       </div>
+      <h2 style="margin-top:1.5rem">Remote Control hook</h2>
+      <p class="note" style="margin:0 0 .5rem">"Only while Remote Control is on" works through a
+        tiny hook that Claude Code runs right before a Contrail tool mints a code. It records a
+        yes/no, a timestamp, the Contrail tool's name and Claude Code's id for that call under
+        Contrail's data directory — never your session link, never the tool's arguments — and
+        never blocks a tool call. On Claude Code older than 2.1.199 it always reports off (upgrade,
+        or choose "Always"). Hook: <strong>${esc(hookLine)}</strong>.
+        Last report: <strong>${esc(lastReport)}</strong>.</p>
+      <div class="actions">
+        <button type="submit" name="action" value="install_hook" class="secondary">Install hook into Claude Code</button>
+        <button type="submit" name="action" value="remove_hook" class="secondary">Remove hook</button>
+      </div>
+      <p class="note">"Install" adds one PreToolUse entry — the hook's few lines of script inline,
+        nothing executable on disk — to <code>${esc(this.deps.remoteControl.claudeSettingsFile)}</code>
+        (everything else in the file is preserved; if the file already existed, a copy of it as it
+        was before Contrail touched it is kept beside it). Settings typed above are saved with
+        the same click. Claude Code watches its settings files, so running sessions
+        pick it up within moments. If Claude Code on this machine reads a different settings file
+        (its own CLAUDE_CONFIG_DIR), it will not see this entry and "Last report" above stays
+        empty — set the same CLAUDE_CONFIG_DIR for Contrail, or install the Contrail plugin, which
+        ships the hook. If you installed Contrail as a Claude Code plugin, skip this button. Claude Desktop chats
+        have no Remote Control; a proposal from one is pushed only if a Claude Code session with
+        Remote Control proposed through the same tool within the last 30 minutes — choose "Always"
+        if you want every approval on your phone regardless.</p>
       <p class="note">"Send test notification" saves any keys typed above first, validates them with
         Pushover, then sends one test message. This page expires after 10 minutes (ask Claude to
         open Contrail settings again for a fresh one). Close the tab when you are done.</p>

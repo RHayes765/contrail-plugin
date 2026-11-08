@@ -19,6 +19,7 @@ import { registerSettingsTools } from './tools/settings.js';
 import { createLocalDiagRunner } from './localdiag/runner.js';
 import type { LocalDiagRunner } from './localdiag/types.js';
 import { PushoverNotifier, type ApprovalNotifier } from './core/notify.js';
+import { GatedNotifier, RemoteControlProbe } from './core/remoteControl.js';
 import { SettingsPageServer } from './connect/settings.js';
 import { dataDir, vendorDir } from './core/paths.js';
 import path from 'node:path';
@@ -39,6 +40,8 @@ export function createDeps(overrides?: {
   localDiag?: LocalDiagRunner;
   /** S42: the approval notifier (phone push). Tests inject a fake; default is the real Pushover client. */
   notifier?: ApprovalNotifier;
+  /** S43: the Remote Control probe (marker dir + Claude settings file). Tests point it at a temp dir. */
+  remoteControl?: RemoteControlProbe;
 }): ToolDeps {
   const db = overrides?.db ?? new ContrailDb();
   const tokens = overrides?.tokens ?? new KeychainTokenStore();
@@ -51,17 +54,22 @@ export function createDeps(overrides?: {
   const deploys = new DeployEngine(db, store, tokenMgr, config, audit, overrides?.approvals);
   // An injected config object is authoritative (tests); the loaded one is
   // re-synced from disk per send so a change saved by the desktop app lands.
-  const notifier =
+  const pushover =
     overrides?.notifier ??
     new PushoverNotifier(config, tokens, fetch, () =>
       overrides?.config ? null : readConfigSection('notifications'),
     );
+  // S43: every notifier — injected fakes included — sits behind the Remote
+  // Control gate, so the gate is what the tests exercise too.
+  const remoteControl = overrides?.remoteControl ?? new RemoteControlProbe();
+  const notifier = new GatedNotifier(pushover, remoteControl);
   deploys.setApprovalNotifier(notifier);
   const settingsPage = new SettingsPageServer({
     config,
     tokens,
     audit,
     notifier,
+    remoteControl,
     openBrowser:
       overrides?.flowOps?.openBrowser ??
       (async (url) => {
@@ -88,6 +96,7 @@ export function createDeps(overrides?: {
     deploys,
     localDiag,
     notifier,
+    remoteControl,
     settingsPage,
   };
 }

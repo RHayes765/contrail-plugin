@@ -14,6 +14,23 @@ single MCP Bundle that installs into Claude Desktop via Settings → Extensions
 (no Node install, no npm, no config editing on the target machine) and covers
 Windows x64/ARM and macOS Intel/Apple Silicon from one file. 39 tools.
 
+**Pushes only when they can be used; the code on its own line (S43).** A code
+on a phone is only worth a buzz when it can be typed from the phone, so by
+default (`notifications.when: remote_control`) the engine now pushes only
+while the Claude Code session has **Remote Control** connected. A stdio MCP
+server cannot see that state — its environment is frozen at spawn — but
+Claude Code sets `CLAUDE_CODE_BRIDGE_SESSION_ID` in **hook** processes while a
+connection is live, so Contrail ships a tiny PreToolUse hook (bundled with the
+plugin; installable into Claude Code's user settings — script inline, nothing
+executable on disk — from the human-only Settings page for the Claude Desktop
+extension and manual installs) that records on/off per tool call, and the
+engine samples it when the proposing tool is called. No report → `skipped`,
+never sent, with the reason in the result; `when: always` keeps the S42
+behaviour. The message itself now ends with the bare code on its own
+line after a blank line, so a thumb selects and copies it in one motion.
+(Native OS "copy code" auto-fill is an SMS/Mail feature; no third-party push
+can trigger it.)
+
 **Approval codes on your phone (S42).** The confirmation code lives on a
 human-only localhost page — unreachable from a phone, so approving away from
 the desk was impossible. Now the engine can ALSO push each minted code, with
@@ -366,7 +383,12 @@ URL. Env overrides: `CONTRAIL_SF_CLIENT_ID`, `CONTRAIL_SF_API_VERSION`,
   token live in the OS keychain only, are entered on the human-only Settings
   page, and are never returned to the agent nor rendered back beyond a masked
   4-character tail; the push is sent engine-side at code-mint time, so the
-  agent learns only sent/failed/off.
+  agent learns only sent/failed/skipped/off. The Remote Control hook records a
+  yes/no, a timestamp, the Contrail tool's name and Claude Code's id for the
+  call — never the session link, never the tool's arguments — and its
+  installer edits Claude Code's user `settings.json` only
+  from a human's click on the Settings page (merge, backup, refuse invalid
+  JSON, removable).
 - **Login targets:** only `*.salesforce.com` / `*.salesforce.mil` hosts are
   accepted, https only.
 - **Data:** connection metadata + audit log in SQLite under

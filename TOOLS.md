@@ -90,7 +90,12 @@ already passed this ritual — see `run_agent_eval`), in every environment
    notifications** ([`open_settings`](#open_settings)), the engine also pushes
    the review summary and the code to their phone at the moment it mints
    them — so they can approve from anywhere — but the code still counts only
-   when the human types it into chat, and the agent still never sees it.
+   when the human types it into chat, and the agent still never sees it. By
+   default the push goes out **only while the Claude Code session has Remote
+   Control connected** (the one situation in which a code on a phone can be
+   typed from the phone); see [`open_settings`](#open_settings) for how
+   Contrail learns that, and `notifications.when` to push every approval
+   instead.
 
 Codes are single-use, expire in ~1 hour, are invalidated by any newer
 proposal **of the same kind** (deploy, DML, Apex, or bulk) on the same
@@ -101,7 +106,7 @@ Refresh tokens live in the OS keychain only. Contrail makes exactly two kinds
 of outbound call that are not to your Salesforce orgs, and both are
 disclosed here: the daily release check (`updates.checkEnabled`, one
 anonymous request to GitHub, can be turned off) and — only if the human
-switched it on — Pushover: one request per approval, carrying the summary
+switched it on — Pushover: one request per pushed approval, carrying the summary
 and the code (`notifications.method`), plus one key check and one test
 message when the human presses "Send test notification". Nothing else
 leaves the machine.
@@ -150,34 +155,96 @@ your phone. There the human switches Pushover delivery on or off, chooses
 how much of the review travels in the message (**minimal** = the connection
 alias, org type, counts and the code; **full** adds component names and
 warnings — never record field values — which then transit Pushover's
-servers), enters their Pushover user key and application token, and sends a
-test notification (Save first; the test button saves typed keys, checks them
-with Pushover, then sends one test message). The keys go from the browser
-straight into the OS keychain, shared with the desktop app; the page never
-renders a stored key back (only a masked tail), and the agent gets nothing
-but *opened: yes/no* plus the current method/configured status. Like the
-approval page, the session-bearing URL is never returned to the agent — if
-the browser cannot be opened it goes to the server log for the human to
-open. The page lives 10 minutes; call again for a fresh one. No arguments.
+servers), chooses **when** a push goes out (below), enters their Pushover
+user key and application token, and sends a test notification (Save first;
+the test button saves typed keys, checks them with Pushover, then sends one
+test message). The keys go from the browser straight into the OS keychain,
+shared with the desktop app; the page never renders a stored key back (only
+a masked tail), and the agent gets nothing but *opened: yes/no* plus the
+current method / when / configured status and the last Remote Control state
+reported. Like the approval page, the session-bearing URL is never returned
+to the agent — if the browser cannot be opened it goes to the server log for
+the human to open. The page lives 10 minutes; call again for a fresh one. No
+arguments.
+
+**When a push goes out (`notifications.when`).** The default,
+`remote_control`, pushes a code only while the Claude Code session it was
+minted in has **Remote Control** connected — a code on a phone is useless when
+it cannot be typed from one, so the desk case stays quiet. A stdio MCP server
+cannot see Remote Control (its environment is fixed at spawn, and Claude Code
+exposes no file or event for it); what Claude Code does expose is
+`CLAUDE_CODE_BRIDGE_SESSION_ID` in the environment of **hook** processes while
+a connection is active (Claude Code ≥ 2.1.199; older versions never set it,
+so there the hook always reports off — upgrade, or choose Always). So Contrail runs a tiny
+**PreToolUse hook** on its code-minting tools (plus `list_connections` and
+this one): right before the tool runs, the hook writes a marker under the
+Contrail data directory — `remote-control/<tool_use_id>.json` and
+`latest.json`, holding a boolean, a timestamp, the tool name and the
+tool-use id, never the session link, never tool arguments — and the engine
+reads that marker when the tool call starts (the mint may come minutes later,
+after org validation). The hook ships with the Claude Code **plugin**
+(`hooks/hooks.json`, `node hooks/remote-control.mjs`). For the Claude Desktop
+extension used from the Desktop app's Code tab, and for manual installs, the
+Settings page has an **Install hook into Claude Code** button: it adds one
+`PreToolUse` entry to Claude Code's user `settings.json` (`~/.claude/`, or the
+`CLAUDE_CONFIG_DIR` the Contrail server sees) carrying the hook's few lines of
+script **inline** — `powershell.exe -Command …` on Windows, `sh -c …`
+elsewhere — so nothing executable lands on disk where an agent could edit it.
+Everything else in the file is preserved (re-serialised as 2-space JSON), the
+first write keeps a backup of the untouched file beside it, a file that is
+not valid JSON is never touched, and **Remove hook** takes the entry out
+again. Claude Code watches its settings files, so running sessions pick the
+hook up within moments (start a new session if a proposal still reports no
+hook). The hook never blocks a tool call; a matcher regex keeps it to the
+eight Contrail tools (the six that mint a code — `validate_deploy`,
+`deactivate_flow`, `dml_propose`, `apex_propose`, `agent_activation_propose`,
+`bulk_load_propose` — plus `list_connections` and `open_settings`) under any server name
+(`mcp__plugin_contrail_contrail-engine__…`, `mcp__contrail-engine__…`,
+`mcp__Contrail__…`).
+
+With no usable report for a call — hook not installed, or not a Claude Code
+session at all (Claude Desktop chats have no Remote Control) — the push is
+**skipped**, not sent: the result says `phone_notification.status: skipped`
+with `remote_control_unknown`, and the human can install the hook or choose
+**Always** (`when: always`, the S42 behaviour: every approval is pushed).
+Remote Control off is `skipped` with `remote_control_off`, the designed quiet
+case. The state is sampled when the proposing tool is called: turning Remote
+Control on during a long validation does not change that call's decision (a
+fresh proposal, once the first has completed and been collected, does). How
+the engine pairs a call with its report: Claude Code's tool-use id, when the
+request's `_meta` carries it (`claudecode/toolUseId` — observed in Claude
+Code, not documented; its passage through the Claude Desktop extension bridge
+is unverified) selects that call's marker and nothing else; without an id,
+a report for the same tool within the last 30 minutes stands in — which can
+be another session's, so a Claude Desktop chat proposing within 30 minutes of
+a Remote Control session's call to the same tool may still be pushed.
 
 Behaviour worth knowing: the phone message deletes itself when the code
-expires; after Pushover rejects the stored keys, sends pause for 10 minutes
-(saving on this page clears the pause); the agent is told only
-`phone_notification.status` and a reason category, and is to OFFER this tool
-for `not_configured` / `rejected` / `circuit_open` and merely report
-`timeout` / `network` / `quota`.
+expires, and the code is the message's **last line, alone** so it can be
+selected and copied in one motion; after Pushover rejects the stored keys,
+sends pause for 10 minutes (saving on this page clears the pause); the agent
+is told only `phone_notification.status` and a reason category, and is to
+OFFER this tool for `not_configured` / `rejected` / `circuit_open` /
+`remote_control_unknown`, merely report `timeout` / `network` / `quota`, and
+say nothing about `remote_control_off`.
 
 Why a page rather than a tool argument: the notification destination is the
 one setting a prompt-injected agent must never be able to change — and the
 user key must be the human's own, since whoever owns it receives the codes.
+The hook installer is on the same page for the same reason: it writes to a
+file outside Contrail's own data directory, and only a human's click does.
 
 ### `list_connections`
 
 Every connected org with alias, org identity, type, and grants, plus
 `staging_dir` — the directory agents author `content_file`/`csv_file`
 sources into, named proactively on the session-start tool so it is never
-learned from a refusal — and `approval_notifications` (`method` and whether
-both Pushover keys are stored; never the keys). When a newer Contrail
+learned from a refusal — and `approval_notifications` (`method`, `when`,
+whether both Pushover keys are stored — never the keys — and `remote_control`:
+the last state Contrail's hook reported, `on` / `off` / `unknown`, when, and
+`user_hook` — whether the entry in Claude Code's user `settings.json` is
+installed; `not_installed` is normal for plugin installs, whose hook ships
+bundled). When a newer Contrail
 release exists (from the cached daily check — never a network call at tool
 time), the result carries an update notice with the download link.
 
@@ -566,8 +633,10 @@ tool here follows the [two-step ritual](#the-security-model): propose →
 human reads the code off the approval page → execute with that code. The
 code never appears in any tool result. Every propose/validate result carries
 `approval_page.phone_notification` — `sent`, `failed` (with a reason
-category and what to do), or `off` — so the agent knows whether the human
-also has the code on their phone, without ever learning the code.
+category and what to do), `skipped` (`remote_control_off`, the quiet
+desk case; or `remote_control_unknown`, no hook report for this call), or
+`off` — so the agent knows whether the human also has the code on their
+phone, without ever learning the code.
 
 ### `validate_deploy`
 
@@ -875,8 +944,9 @@ sections' defaults automatically.
 | `snapshot` | `types` | 21 types | The default retrieve manifest (ApexClass, ApexTrigger, Flow, CustomObject, CustomLabels, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, ApexPage, GlobalValueSet, Layout, CustomMetadata, LeadConvertSettings, the S36 five: CustomPermission, PermissionSetGroup, MutingPermissionSet, QuickAction, LightningComponentBundle — and S41's AuraDefinitionBundle, which expands to NAMED members from the live inventory because wildcard retrieves drop namespace-free installedEditable bundles, live-confirmed). Report/Dashboard (+ their folders), the Agentforce types, and the integration group (ConnectedApp, NamedCredential, ExternalCredential, AuthProvider, PlatformEventChannel[Member], ManagedEventSubscription) are deployable and indexable but deliberately OUT of the default — `refresh_snapshot types:[…]` pulls them explicitly. Package-installed components (managed OR unlocked) are platform-excluded from wildcard retrieves and never counted as snapshot staleness. |
 | | `pollIntervalMs` / `retrieveTimeoutMs` | 2 s / 10 min | Retrieve polling. |
 | `updates` | `checkEnabled` | `true` | Daily anonymous release check — the only *unprompted* phone-home; `false` disables it entirely. |
-| `notifications` | `method` | `none` | `pushover` also delivers each minted approval code (with the review summary) to the human's phone — one HTTPS POST to api.pushover.net per proposal. Set on the Settings page ([`open_settings`](#open_settings)); the Pushover user key and application token live in the OS keychain, never here. |
+| `notifications` | `method` | `none` | `pushover` also delivers each approval code the `when` setting lets through (with the review summary) to the human's phone — one HTTPS POST to api.pushover.net per pushed approval. Set on the Settings page ([`open_settings`](#open_settings)); the Pushover user key and application token live in the OS keychain, never here. |
 | | `summary` | `minimal` | What the phone message carries: `minimal` = the connection alias, org type, change/deletion/warning counts and the code (no component names leave the machine); `full` adds component labels and warning text — data changes are reduced to operation + object, never record field values. |
+| | `when` | `remote_control` | When a push goes out: `remote_control` only while the Claude Code session has Remote Control connected (reported by Contrail's PreToolUse hook — see [`open_settings`](#open_settings); no report → skipped, never sent); `always` pushes every approval. Plugin / Claude Code only — the desktop app's code-free push ignores it. |
 | `localDiagnostics` | `enabled` | `true` | `check_apex`/`check_soql`; `false` makes them report honestly unavailable. |
 | | `timeoutMs` | 30 s | Per-check budget including cold spawn. |
 | `deploy` | `pollIntervalMs` / `deployTimeoutMs` | 2 s / 15 min | Deploy polling. |
@@ -947,6 +1017,9 @@ on Linux; override with `CONTRAIL_DATA_DIR`) holds:
 - `staging/` — where agents author files for `content_file` / `csv_file`,
   from the start (a session's working folder is never *automatically* a
   deploy source root).
+- `remote-control/` — the Remote Control hook's markers (a boolean, a
+  timestamp, tool name and tool-use id per call; swept after an hour). Nothing
+  executable lives in the data directory (see [`open_settings`](#open_settings)).
 - `deploys/` — frozen approved payloads (cleaned when spent) and
   `<request>-results/` directories with failed-row exports (kept).
 - `config.json` — everything in the table above.

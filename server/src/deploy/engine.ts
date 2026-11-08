@@ -327,6 +327,13 @@ export class DeployEngine {
         outcome: 'error',
         detail: { requestId, kind: view.kind, reason: outcome.reason },
       });
+    } else if (outcome.status === 'skipped') {
+      // S43: the notifier held the push back on purpose (Remote Control gate).
+      this.audit.record('approval.notify_skipped', {
+        connectionId,
+        tool: proposeToolFor(view.kind),
+        detail: { requestId, kind: view.kind, reason: outcome.reason },
+      });
     }
     return describePhoneOutcome(outcome, { includeCode: mode === 'page' });
   }

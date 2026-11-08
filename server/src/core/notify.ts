@@ -25,6 +25,11 @@ import { log } from './log.js';
  *   counts and (with summary 'full') the labels — not a bare code. Labels for
  *   DATA changes are reduced to operation + object: record field values are
  *   someone's PII and never ride a push.
+ * - S43: the code is the LAST line of the message, alone after a blank line,
+ *   so a thumb can select and copy it in one motion. Whether a push goes out
+ *   at all is the caller's decision (the plugin gates on Claude Code's Remote
+ *   Control — `notifications.when`); this module only composes and sends, and
+ *   describes a `skipped` outcome when the caller held the push back.
  */
 
 export const NOTIFY_ACCOUNTS = {
@@ -50,6 +55,7 @@ const FULL_WARNINGS_MAX = 3;
 export type NotificationsConfig = ContrailConfig['notifications'];
 export type NotifyMethod = NotificationsConfig['method'];
 export type NotifySummary = NotificationsConfig['summary'];
+export type NotifyWhen = NotificationsConfig['when'];
 
 export type NotifyFailure =
   | 'not_configured'
@@ -60,13 +66,27 @@ export type NotifyFailure =
   | 'network'
   | 'circuit_open';
 
+/**
+ * S43: why a push was deliberately NOT attempted (method is on, keys may be
+ * fine). `remote_control_off`: the Claude Code session has no Remote Control
+ * connection, so a code on the phone could not be typed from there anyway.
+ * `remote_control_unknown`: delivery is gated on Remote Control but nothing
+ * reported the state for this call (hook not installed, installed into a
+ * different CLAUDE_CONFIG_DIR than Claude Code reads, or not a Claude Code
+ * session at all).
+ */
+export type NotifySkip = 'remote_control_off' | 'remote_control_unknown';
+
 export type NotifyOutcome =
   | { status: 'sent' }
   | { status: 'off' }
+  | { status: 'skipped'; reason: NotifySkip }
   | { status: 'failed'; reason: NotifyFailure };
 
 export interface NotifierStatus {
   method: NotifyMethod;
+  /** S43: 'remote_control' = push only while the Claude Code session has Remote Control connected; 'always' = every approval. */
+  when: NotifyWhen;
   /** Both keys present in the keychain (does not prove they are valid). */
   configured: boolean;
   /** Set when the OS keychain itself could not be read — distinct from "no keys stored". */
@@ -84,8 +104,8 @@ export interface ApprovalNotifier {
 
 /** What the agent is told about the phone delivery (never the code, never a key). */
 export interface PhoneNotification {
-  status: 'sent' | 'failed' | 'off';
-  reason?: NotifyFailure;
+  status: 'sent' | 'failed' | 'off' | 'skipped';
+  reason?: NotifyFailure | NotifySkip;
   note?: string;
 }
 
@@ -101,6 +121,27 @@ export function describePhoneOutcome(
 ): PhoneNotification {
   if (outcome.status === 'off') return { status: 'off' };
   const settings = opts.includeCode ? 'via open_settings' : "in the app's Settings → Notifications";
+  if (outcome.status === 'skipped') {
+    // S43. Neither reason is a fault in the ritual: the code is on the page.
+    // 'off' is the designed quiet case (the human is at the desk) and warrants
+    // no remark; 'unknown' is worth one sentence, because the human may expect
+    // a push that will never come until the hook reports.
+    return {
+      status: 'skipped',
+      reason: outcome.reason,
+      note:
+        outcome.reason === 'remote_control_off'
+          ? 'Phone notification skipped: Remote Control was not connected when this was ' +
+            'proposed, so the code was not pushed (phone delivery is set to "only while ' +
+            'Remote Control is on"). The human approves from the page on their desktop as ' +
+            'usual; nothing to do.'
+          : 'Phone notification skipped: phone delivery is set to "only while Remote Control ' +
+            'is on", but Contrail\'s Remote Control hook did not report for this call — it is ' +
+            'not installed, or this is not a Claude Code session. The code is on the approval ' +
+            'page as always. If the human expected a push, they can install the hook or switch ' +
+            `delivery to Always ${settings}.`,
+    };
+  }
   if (outcome.status === 'sent') {
     return {
       status: 'sent',
@@ -196,7 +237,9 @@ function phoneLabel(kind: ApprovalPageOptions['kind'], label: string): string {
  * The message itself. 'minimal' carries the connection alias, org type and
  * counts — no component names leave the machine. 'full' adds labels and
  * warnings. The code lines are composed LAST and protected from truncation: a
- * clipped code would be worse than no message at all.
+ * clipped code would be worse than no message at all. The code is the final
+ * line, alone after a blank line (S43): on a phone, "select the last line" is
+ * one long-press, and no other digits sit near it to be grabbed by mistake.
  */
 export function composePushover(
   view: ApprovalPageOptions,
@@ -226,11 +269,14 @@ export function composePushover(
     head.push(...warns.map((w) => `⚠ ${truncate(squash(w), 140)}`));
   }
 
+  const clock = expiryClock(view.expiresAt);
+  const expiry = clock === 'soon' ? 'it expires soon' : `it expires at ${clock}`;
   const tail: string[] = opts.includeCode
     ? [
-        `Code: ${view.code} — expires ${expiryClock(view.expiresAt)}`,
-        'Approve by typing the code into your Contrail session. Full details are on the ' +
-          'approval page on your desktop.',
+        `Type the code below into your Contrail session to approve — ${expiry}. Full details ` +
+          'are on the approval page on your desktop.',
+        '',
+        view.code,
       ]
     : ['Waiting in Deploy Review — open the Contrail desktop app to approve.'];
   const tailText = tail.join('\n');
@@ -309,6 +355,9 @@ export class PushoverNotifier implements ApprovalNotifier {
       if (disk.summary === 'minimal' || disk.summary === 'full') {
         this.config.notifications.summary = disk.summary;
       }
+      if (disk.when === 'remote_control' || disk.when === 'always') {
+        this.config.notifications.when = disk.when;
+      }
     }
   }
 
@@ -317,6 +366,7 @@ export class PushoverNotifier implements ApprovalNotifier {
     const creds = this.credentials();
     return {
       method: this.config.notifications.method,
+      when: this.config.notifications.when,
       configured: creds.kind === 'ok',
       ...(creds.kind === 'unavailable' ? { storeError: creds.error } : {}),
     };
@@ -507,7 +557,7 @@ export class NullNotifier implements ApprovalNotifier {
   }
 
   status(): NotifierStatus {
-    return { method: 'none', configured: false };
+    return { method: 'none', when: 'remote_control', configured: false };
   }
 
   resetCircuit(): void {}

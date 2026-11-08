@@ -103,17 +103,56 @@ desk. If you want the code on your phone too, set up **Pushover** once:
    chat. Claude cannot see them or the page. The page closes itself after 10
    minutes; ask again for a fresh one.
 
-From then on, every proposal also arrives on your phone: your connection alias and
-org type, how many changes and deletions, and the code — the message deletes
-itself from your phone when the code expires. You approve exactly as before, by
-typing the code into the conversation: in Claude Desktop that still means at the
-desk; with Claude Code's Remote Control you can type it from your phone. The default
-message carries counts only; choose **Full** on the Settings page if you want
-component names in it too (never record field values — and they then pass through
-Pushover's servers). Each proposal is one message to Pushover, and the test button
-sends one check plus one test message; nothing else is ever sent anywhere. If
-Pushover rejects your keys, sends pause for 10 minutes until you save corrected
-keys. The Contrail desktop app, if you use it, shares these keys.
+4. **Tell Contrail when you are remote.** By default a code is pushed **only
+   while your Claude Code session has Remote Control turned on** — the one time
+   you can actually type it from your phone — so you are not buzzed for every
+   change you approve at your desk. Contrail learns that from a tiny hook that
+   Claude Code runs right before a Contrail tool proposes a change:
+   - Installed Contrail as a **Claude Code plugin**? The hook ships with it.
+     Nothing to do.
+   - Using the **Claude Desktop extension** (including from the Desktop app's
+     Code tab) or a manual install? On the Settings page, under *Remote Control
+     hook*, click **Install hook into Claude Code**. It adds one entry to Claude
+     Code's user `settings.json` with the hook's few lines of script inline —
+     nothing executable is written anywhere (if that file already existed, a
+     copy of it as it was is kept beside it; **Remove hook** takes the entry out
+     again). Claude Code notices the change on its own; if the next proposal
+     still says no hook reported, start a new Claude Code session.
+   - Prefer every approval on your phone regardless? Set *When to send* to
+     **Always**.
+
+   The hook records a yes/no, a timestamp, the Contrail tool's name and Claude
+   Code's id for that call under Contrail's data folder — never your session
+   link, never what the tool was called with. Needs Claude Code 2.1.199 or newer:
+   older versions never expose the Remote Control state, so the hook reports
+   *off* there (upgrade, or choose **Always**). Until a hook reports, Claude's
+   result says the push was *skipped* and why; it never pretends one was sent.
+
+   **Upgrading from 0.36 with Pushover already on:** codes now reach your phone
+   only while Remote Control is on. If you installed Contrail as a Claude Code
+   plugin, the hook is already there — a proposal you make at your desk is simply
+   not pushed (a quiet *skipped*, by design; Claude says nothing), so choose
+   **Always** if you want the old every-time behaviour. If you use the Claude
+   Desktop extension or a manual install, nothing is pushed until you install the
+   hook (above) or choose **Always**; the first proposal tells you so. Claude
+   Desktop chats never have Remote Control, so with the default setting they do
+   not push (a chat within 30 minutes of a Remote Control session's proposal
+   through the same tool is the one exception).
+
+From then on, a proposal made while Remote Control is on also arrives on your
+phone: your connection alias and org type, how many changes and deletions, and
+the code — on its own line at the very end, so you can long-press and copy it.
+The message deletes itself from your phone when the code expires. You approve
+exactly as before, by typing the code into the conversation, from your phone
+through Remote Control or at the desk. (Want the notification from Claude
+Desktop chats too, even though you type the code at the desk? Choose
+**Always**.) The default message carries counts only; choose **Full** on the
+Settings page if you want component names in it too (never record field values —
+and they then pass through Pushover's servers). Each proposal is one message to
+Pushover, and the test button sends one check plus one test message; nothing
+else is ever sent anywhere. If Pushover rejects your keys, sends pause for 10
+minutes until you save corrected keys. The Contrail desktop app, if you use it,
+shares these keys (its own code-free push ignores the Remote Control setting).
 
 ## Good to know
 

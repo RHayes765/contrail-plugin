@@ -1,0 +1,18 @@
+{
+  "description": "Contrail: record whether this Claude Code session has Remote Control connected, right before a Contrail tool that mints an approval code — so the code is pushed to your phone only when you could type it from there. Writes a yes/no, a timestamp, the Contrail tool's name and Claude Code's id for the call under Contrail's data directory (never your session link, never the tool's arguments); never blocks a tool call. See TOOLS.md → open_settings ('When a push goes out'), or Getting Started → 'Get approval codes on your phone'.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^mcp__.*__(validate_deploy|deactivate_flow|dml_propose|apex_propose|agent_activation_propose|bulk_load_propose|list_connections|open_settings)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/remote-control.mjs"],
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

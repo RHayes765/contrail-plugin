@@ -107,7 +107,13 @@ marketplace's auto-update in `/plugin`). No manual config, no zip.
 Manual fallback: skip step 2's config file and add the server to the
 project/user MCP config instead (e.g. a `.mcp.json` with the same
 `contrail-engine` entry, absolute path to `server/dist-plugin/index.mjs`), or add
-`CONTRAIL_ROOT` as a local plugin directory. Step 1 is the same.
+`CONTRAIL_ROOT` as a local plugin directory. Step 1 is the same. One thing the
+marketplace install carries that a bare MCP entry does not: the plugin's
+`hooks/hooks.json` (the Remote Control hook behind phone notifications). With a
+manual entry — or with the Claude Desktop extension — the human installs that
+hook themselves from Contrail's Settings page (ask Claude to *"open Contrail
+settings"*, then **Install hook into Claude Code**). Never edit
+`~/.claude/settings.json` for them.
 
 ## Gotchas we already learned (don't rediscover them)
 

@@ -76,6 +76,17 @@ export interface ContrailConfig {
      * operation + object, never record field values.
      */
     summary: 'minimal' | 'full';
+    /**
+     * S43: WHEN a push goes out (plugin / Claude Code sessions only — the
+     * desktop app's code-free push ignores this). 'remote_control' (default)
+     * pushes only while the Claude Code session has Remote Control connected,
+     * because a code on a phone is useless when it cannot be typed from one;
+     * the state comes from Contrail's PreToolUse hook (shipped with the plugin,
+     * or installed into ~/.claude/settings.json from the Settings page). With
+     * no hook report for a call the push is skipped and the tool result says
+     * why. 'always' restores the S42 behaviour: every approval is pushed.
+     */
+    when: 'remote_control' | 'always';
   };
   localDiagnostics: {
     /**
@@ -204,6 +215,7 @@ export const DEFAULT_CONFIG: ContrailConfig = {
   notifications: {
     method: 'none',
     summary: 'minimal',
+    when: 'remote_control',
   },
   localDiagnostics: {
     enabled: true,

@@ -43,7 +43,15 @@ function view(overrides: Partial<ApprovalPageOptions> = {}): ApprovalPageOptions
 }
 
 function configWith(method: 'none' | 'pushover', summary: 'minimal' | 'full' = 'minimal'): ContrailConfig {
-  return { ...DEFAULT_CONFIG, notifications: { method, summary } };
+  return { ...DEFAULT_CONFIG, notifications: { method, summary, when: 'remote_control' } };
+}
+
+/** S43: the code is the LAST line, alone, after a blank line — and appears exactly once. */
+function expectCodeIsLastLine(message: string): void {
+  const lines = message.split('\n');
+  expect(lines.at(-1)).toBe(CODE);
+  expect(lines.at(-2)).toBe('');
+  expect(message.split(CODE)).toHaveLength(2);
 }
 
 function storeWithKeys(): MemoryTokenStore {
@@ -78,7 +86,8 @@ describe('composePushover', () => {
     expect(m.title).toBe('Contrail: approve deploy → acme-uat (sandbox)');
     expect(m.message).toContain('2 changes · 1 deletion · 3 warnings');
     expect(m.message).toContain('Includes DELETIONS.');
-    expect(m.message).toContain(`Code: ${CODE} — expires`);
+    expect(m.message).toContain('it expires at');
+    expectCodeIsLastLine(m.message);
     expect(m.message).not.toContain('Secret_Field__c');
     expect(m.message).not.toContain('Old_Router');
     expect(m.message).not.toContain('advisory');
@@ -93,7 +102,7 @@ describe('composePushover', () => {
     expect(lines).toContain('• ADD CustomField:Invoice__c.Secret_Field__c');
     expect(lines.indexOf('• DELETE Flow:Old_Router')).toBeLessThan(lines.indexOf('• MODIFY ApexClass:InvoiceService'));
     expect(m.message).toContain('⚠ top-level advisory');
-    expect(m.message).toContain(`Code: ${CODE}`);
+    expectCodeIsLastLine(m.message);
   });
 
   it('full with many long labels: the 1024 cap holds and the code lines survive intact', () => {
@@ -103,8 +112,8 @@ describe('composePushover', () => {
     }));
     const m = composePushover(view({ changes: many, destructive: [] }), { includeCode: true, summary: 'full' });
     expect(m.message.length).toBeLessThanOrEqual(1024);
-    expect(m.message).toContain(`Code: ${CODE} — expires`);
-    expect(m.message.endsWith('approval page on your desktop.')).toBe(true);
+    expect(m.message).toContain('approval page on your desktop.');
+    expectCodeIsLastLine(m.message); // the tail — instruction, blank line, code — is intact
     expect(m.message).toContain('…'); // the HEAD was clipped, never the tail
   });
 
@@ -113,7 +122,19 @@ describe('composePushover', () => {
     const m = composePushover(view({ changes: many, destructive: [], warnings: [] }), { includeCode: true, summary: 'full' });
     expect(m.message.split('\n').filter((l) => l.startsWith('• MODIFY'))).toHaveLength(10);
     expect(m.message).toContain('• … 30 more');
-    expect(m.message).toContain(`Code: ${CODE}`);
+    expectCodeIsLastLine(m.message);
+  });
+
+  it('S43: the message reads head → instruction with the expiry → blank line → bare code', () => {
+    const m = composePushover(view(), { includeCode: true, summary: 'minimal' });
+    const lines = m.message.split('\n');
+    expect(lines[0]).toBe('2 changes · 1 deletion · 3 warnings');
+    expect(lines[1]).toBe('Includes DELETIONS.');
+    expect(lines[2]).toMatch(/^Type the code below into your Contrail session to approve — it expires at /);
+    expect(lines[3]).toBe('');
+    expect(lines[4]).toBe(CODE);
+    expect(lines).toHaveLength(5);
+    expect(m.message).not.toContain('Code:'); // no label glued to the code — a thumb selects the bare line
   });
 
   it('full strips record field values from DATA-change labels — PII never rides a push', () => {
@@ -162,7 +183,7 @@ describe('PushoverNotifier', () => {
     const n = new PushoverNotifier(configWith('none'), storeWithKeys(), f.fetch);
     expect(await n.notify(view(), { includeCode: true })).toEqual({ status: 'off' });
     expect(f.calls).toHaveLength(0);
-    expect(n.status()).toEqual({ method: 'none', configured: true });
+    expect(n.status()).toEqual({ method: 'none', when: 'remote_control', configured: true });
   });
 
   it('method pushover without keys → not_configured, no network', async () => {
@@ -170,7 +191,7 @@ describe('PushoverNotifier', () => {
     const n = new PushoverNotifier(configWith('pushover'), new MemoryTokenStore(), f.fetch);
     expect(await n.notify(view(), { includeCode: true })).toEqual({ status: 'failed', reason: 'not_configured' });
     expect(f.calls).toHaveLength(0);
-    expect(n.status()).toEqual({ method: 'pushover', configured: false });
+    expect(n.status()).toEqual({ method: 'pushover', when: 'remote_control', configured: false });
   });
 
   it('sends ONE JSON POST with token, user, title, message, ttl — and reports sent', async () => {
@@ -257,16 +278,20 @@ describe('PushoverNotifier', () => {
     expect((await n.sendTest()).message).toContain('could not be read');
   });
 
-  it('syncs method/summary from the on-disk section before every send and status read', async () => {
+  it('syncs method/summary/when from the on-disk section before every send and status read', async () => {
     const f = fakeFetch(() => ({ status: 200, json: { status: 1 } }));
-    let disk: { method?: string; summary?: string } | null = { method: 'pushover', summary: 'full' };
+    let disk: { method?: string; summary?: string; when?: string } | null = { method: 'pushover', summary: 'full' };
     const cfg = configWith('none'); // in-memory says off…
     const n = new PushoverNotifier(cfg, storeWithKeys(), f.fetch, () => disk as never);
     expect(await n.notify(view(), { includeCode: true })).toEqual({ status: 'sent' }); // …disk says on
-    expect(cfg.notifications).toEqual({ method: 'pushover', summary: 'full' }); // live object converged
+    expect(cfg.notifications).toEqual({ method: 'pushover', summary: 'full', when: 'remote_control' }); // live object converged
     expect(String(f.calls[0]!.body.message)).toContain('• DELETE'); // and 'full' applied
-    disk = { method: 'bogus', summary: 'everything' }; // garbage on disk is ignored
+    disk = { method: 'bogus', summary: 'everything', when: 'sometimes' }; // garbage on disk is ignored
     expect(n.status().method).toBe('pushover');
+    expect(n.status().when).toBe('remote_control');
+    disk = { when: 'always' }; // S43: the gate setting converges the same way
+    expect(n.status().when).toBe('always');
+    expect(cfg.notifications.when).toBe('always');
     disk = null;
     expect(n.status().method).toBe('pushover');
   });
@@ -281,6 +306,8 @@ describe('PushoverNotifier', () => {
       describePhoneOutcome(out, { includeCode: false }),
       describePhoneOutcome({ status: 'sent' }, { includeCode: true }),
       describePhoneOutcome({ status: 'sent' }, { includeCode: false }),
+      describePhoneOutcome({ status: 'skipped', reason: 'remote_control_off' }, { includeCode: true }),
+      describePhoneOutcome({ status: 'skipped', reason: 'remote_control_unknown' }, { includeCode: true }),
     ]);
     expect(text).not.toContain(CODE);
     expect(text).not.toContain(USER);
@@ -308,6 +335,23 @@ describe('PushoverNotifier', () => {
     expect(nativeFail.note).not.toContain('open_settings');
     expect(nativeFail.note).toContain('Deploy Review');
     expect(describePhoneOutcome({ status: 'off' }, { includeCode: false })).toEqual({ status: 'off' });
+  });
+
+  it('S43: a skipped push is described as the quiet case it is — off needs no remark, unknown names the fix', () => {
+    const off = describePhoneOutcome({ status: 'skipped', reason: 'remote_control_off' }, { includeCode: true });
+    expect(off.status).toBe('skipped');
+    expect(off.reason).toBe('remote_control_off');
+    expect(off.note).toContain('nothing to do');
+    expect(off.note).not.toContain('open_settings');
+
+    const unknown = describePhoneOutcome({ status: 'skipped', reason: 'remote_control_unknown' }, { includeCode: true });
+    expect(unknown.reason).toBe('remote_control_unknown');
+    expect(unknown.note).toContain('hook did not report');
+    expect(unknown.note).toContain('open_settings');
+    expect(unknown.note).toContain('Always');
+    const unknownNative = describePhoneOutcome({ status: 'skipped', reason: 'remote_control_unknown' }, { includeCode: false });
+    expect(unknownNative.note).toContain('Settings → Notifications');
+    expect(unknownNative.note).not.toContain('open_settings');
   });
 
   it('sendTest validates the keys first, then sends a test message naming the devices', async () => {
@@ -350,7 +394,7 @@ describe('NullNotifier, key grammar, keychain accounts', () => {
   it('NullNotifier is simply off', async () => {
     const n = new NullNotifier();
     expect(await n.notify()).toEqual({ status: 'off' });
-    expect(n.status()).toEqual({ method: 'none', configured: false });
+    expect(n.status()).toEqual({ method: 'none', when: 'remote_control', configured: false });
     expect((await n.sendTest()).ok).toBe(false);
   });
 

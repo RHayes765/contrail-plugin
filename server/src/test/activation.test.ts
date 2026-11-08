@@ -210,8 +210,9 @@ describe('agent activation ritual', () => {
     expect(proposed.isError ?? false).toBe(false);
     expect(proposedText).toContain('nothing changed yet');
     expect(proposedText).toContain('0X9000000000002AAA');
-    // The code lives ONLY on the page.
-    expect(proposedText).not.toMatch(/[A-Z2-9]{4}-[A-Z2-9]{4}/);
+    // The code lives ONLY on the page. (The request_id UUID is stripped first:
+    // its hex groups can spell a code-shaped XXXX-XXXX by chance.)
+    expect(proposedText.replace(/"request_id": "[^"]+"/g, '')).not.toMatch(/[A-Z2-9]{4}-[A-Z2-9]{4}/);
     expect(presentedPages).toHaveLength(1);
     const page = presentedPages[0]!;
     expect(page).toContain('Approve this agent activation change');
