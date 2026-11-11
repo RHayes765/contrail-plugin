@@ -133,7 +133,7 @@ const FILE_TYPES: Record<string, FileSpec> = {
   ConnectedApp: { dir: 'connectedApps', ext: '.connectedApp' },
   NamedCredential: { dir: 'namedCredentials', ext: '.namedCredential' },
   ExternalCredential: { dir: 'externalCredentials', ext: '.externalCredential' },
-  // S33: lowercase dir AND extension — unusual but live-confirmed (personal-dev
+  // S33: lowercase dir AND extension — unusual but live-confirmed (a dev org
   // retrieve 2026-09-24), matching the metadata catalog.
   AuthProvider: { dir: 'authproviders', ext: '.authprovider' },
   PlatformEventChannel: { dir: 'platformEventChannels', ext: '.platformEventChannel' },
@@ -199,6 +199,22 @@ const FILE_TYPES: Record<string, FileSpec> = {
     ext: '.genAiPromptTemplateActivation',
   },
   AiEvaluationDefinition: { dir: 'aiEvaluationDefinitions', ext: '.aiEvaluationDefinition' },
+  // S44: the Agentforce Studio Tests-tab suite and its companion custom-
+  // scorer type. AiTestingDefinition is BETA per Salesforce (the type AND
+  // its runner); AiAgentScorerDefinition is documented (Agentforce dev
+  // guide). Both dir/suffix pairs live-confirmed via describeMetadata
+  // 2026-11-08 at v66 and v68: neither inFolder, neither metaFile, no
+  // children — plain single-file documents, no meta sidecar, no
+  // permission-set block (analyzePermissionCoverage says so). Scorer
+  // VERSIONS are documented append-only org-side — the analyzeChanges arm
+  // carries that honesty — and when a GenAiPromptTemplate a scorer engines
+  // on ships in the same package, MANIFEST_TYPE_AFTER lists the template's
+  // <types> block first (the one documented order-sensitive pair).
+  AiTestingDefinition: { dir: 'aiTestingDefinitions', ext: '.aiTestingDefinition' },
+  AiAgentScorerDefinition: {
+    dir: 'aiAgentScorerDefinitions',
+    ext: '.aiAgentScorerDefinition',
+  },
   BotTemplate: { dir: 'botTemplates', ext: '.botTemplate' },
   BotBlock: { dir: 'botBlocks', ext: '.botBlock' },
   // S34: Agent Script deploys as a DRAFT STAGE (reversing S30's read-only
@@ -695,7 +711,7 @@ export function buildDeployZip(
     validateTypeAndName(d.type, d.api_name);
   }
 
-  const packageXml = manifestXml(members, apiVersionNumber, 'Package');
+  const packageXml = manifestXml(members, apiVersionNumber, 'Package', true);
   files.set('package.xml', strToU8(packageXml));
 
   let destructiveXml: string | null = null;
@@ -710,7 +726,7 @@ export function buildDeployZip(
       list.push(d.api_name);
       delMembers.set(manifestType, list);
     }
-    destructiveXml = manifestXml(delMembers, apiVersionNumber, 'Package');
+    destructiveXml = manifestXml(delMembers, apiVersionNumber, 'Package', false);
     // Post-destructive: additive changes land before deletions, so a rename
     // (add new + delete old) works in one deploy.
     files.set('destructiveChangesPost.xml', strToU8(destructiveXml));
@@ -724,20 +740,57 @@ export function buildDeployZip(
   };
 }
 
+/**
+ * S44: <types> blocks whose package.xml position must FOLLOW another's. No
+ * pair Contrail shipped before this had an ordering mechanism (children
+ * merge into their CustomObject document; folders share their content
+ * type's block; everything else is plain alphabetical), but Salesforce's
+ * custom-scorer guide documents ONE requirement: a
+ * GenAiPromptTemplate deployed with the AiAgentScorerDefinition that engines
+ * on it must appear BEFORE the scorer ("Metadata API deploys types in the
+ * order that they appear"). Alphabetical puts the scorer first, so this table
+ * moves it after the template. Whether alphabetical actually FAILS is
+ * unverified (live pair deploy pending) — the mechanism is harmless if it
+ * turns out unnecessary. Deploy manifest ONLY: the destructive manifest is
+ * left alphabetical because no ordering requirement is documented for
+ * deletes.
+ */
+const MANIFEST_TYPE_AFTER: Record<string, string[]> = {
+  AiAgentScorerDefinition: ['GenAiPromptTemplate'],
+};
+
+/** Alphabetical; then each MANIFEST_TYPE_AFTER key moves just past the last type it must follow. */
+function orderManifestTypes(types: string[], dependencyOrder: boolean): string[] {
+  const sorted = [...types].sort((a, b) => a.localeCompare(b));
+  if (!dependencyOrder) return sorted;
+  for (const [late, befores] of Object.entries(MANIFEST_TYPE_AFTER)) {
+    const i = sorted.indexOf(late);
+    if (i < 0) continue;
+    const lastBefore = Math.max(...befores.map((b) => sorted.indexOf(b)));
+    if (lastBefore > i) {
+      sorted.splice(i, 1);
+      sorted.splice(lastBefore, 0, late);
+    }
+  }
+  return sorted;
+}
+
 function manifestXml(
   members: Map<string, string[]>,
   apiVersionNumber: string,
   root: 'Package',
+  dependencyOrder: boolean,
 ): string {
-  const types = [...members.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(
-      ([type, names]) =>
+  const types = orderManifestTypes([...members.keys()], dependencyOrder)
+    .map((type) => {
+      const names = members.get(type)!;
+      return (
         `    <types>\n${names
           .sort()
           .map((n) => `        <members>${escapeXml(n)}</members>`)
-          .join('\n')}\n        <name>${escapeXml(type)}</name>\n    </types>`,
-    )
+          .join('\n')}\n        <name>${escapeXml(type)}</name>\n    </types>`
+      );
+    })
     .join('\n');
   return (
     `<?xml version="1.0" encoding="UTF-8"?>\n<${root} xmlns="${XMLNS}">\n${types}\n` +
@@ -1163,7 +1216,14 @@ export function analyzeChanges(
           c.type === 'ExternalCredential' ||
           c.type === 'AuthProvider' ||
           c.type === 'PermissionSetGroup' ||
-          c.type === 'MutingPermissionSet') &&
+          c.type === 'MutingPermissionSet' ||
+          // S44: both agent-test suite types are single documents of
+          // <testCase> blocks (the legacy one was a parity gap since S30).
+          // AiAgentScorerDefinition is deliberately NOT here — its versions
+          // are documented append-only, which makes the generic "removed"
+          // sentence false; it has its own arm below.
+          c.type === 'AiEvaluationDefinition' ||
+          c.type === 'AiTestingDefinition') &&
         change === 'modify'
       ) {
         warnings.push(
@@ -1182,7 +1242,10 @@ export function analyzeChanges(
                     : c.type === 'MutingPermissionSet'
                       ? ' A muted permission omitted here is UN-MUTED org-side, silently' +
                         ' RESTORING it to every user assigned the group.'
-                      : ''),
+                      : c.type === 'AiEvaluationDefinition' ||
+                          c.type === 'AiTestingDefinition'
+                        ? ' A <testCase> omitted here is removed from the suite org-side.'
+                        : ''),
         );
       }
       // S30: the activeVersionIdentifier is an org-generated token. Altering
@@ -1200,6 +1263,40 @@ export function analyzeChanges(
           );
         }
       }
+      // S44: scorer versions are documented APPEND-ONLY org-side, which makes
+      // the generic WHOLE-DOCUMENT REPLACE sentence a lie for this type — a
+      // <scorerVersion> the document omits is NOT removed — so the type has
+      // its own arm. Status is documented one-way (Draft → Available →
+      // Archived). What the org does with an omission or a regression
+      // (refuse, ignore) is NOT live-confirmed, so the text names only what
+      // is documented. The version/status scan is bounded regex (the
+      // activeVersionIdentifier precedent): it names what it can see; the
+      // org is the authority.
+      if (c.type === 'AiAgentScorerDefinition' && change === 'modify') {
+        const oldVersions = scorerVersionStatuses(oldContent ?? '');
+        const newVersions = scorerVersionStatuses(c.content);
+        const omitted = [...oldVersions.keys()].filter((n) => !newVersions.has(n));
+        const regressed = [...oldVersions.entries()]
+          .filter(([n, was]) => {
+            const now = newVersions.get(n);
+            return (
+              now !== undefined &&
+              SCORER_STATUS_RANK[was] !== undefined &&
+              SCORER_STATUS_RANK[now] !== undefined &&
+              SCORER_STATUS_RANK[now]! < SCORER_STATUS_RANK[was]!
+            );
+          })
+          .map(([n, was]) => `${n} (${was} → ${newVersions.get(n)})`);
+        warnings.push(
+          `SCORER VERSIONS ARE APPEND-ONLY — the org never deletes a <scorerVersion>: one ` +
+            `omitted from this document is NOT removed` +
+            (omitted.length > 0 ? ` (org-side versions omitted here: ${omitted.join(', ')})` : '') +
+            `. Status is documented one-way (Draft → Available → Archived); a regression ` +
+            `here is not something the org performs` +
+            (regressed.length > 0 ? ` (regressed here: ${regressed.join('; ')})` : '') +
+            `. Retrieve-first, carry every existing version forward, edit only Draft versions.`,
+        );
+      }
       // Folder definitions replace their sharing wholesale: the folderShares
       // in this content ARE the folder's sharing after the deploy.
       if ((c.type === 'ReportFolder' || c.type === 'DashboardFolder') && change === 'modify') {
@@ -1216,6 +1313,51 @@ export function analyzeChanges(
             `null/default on the deployed record.`,
         );
       }
+    }
+    // S44: the Studio suite type is BETA (Salesforce's own label for the type
+    // AND its runner) and a deploy of one runs nothing — fires on add AND
+    // modify (S34 D1 precedent: the honesty rides every deploy).
+    if (c.type === 'AiTestingDefinition') {
+      warnings.push(
+        `BETA SUITE, RUNS NOTHING — this deploy stores an Agentforce Studio test suite; it ` +
+          `executes no test. Runs happen through run_agent_eval (on the org probed a deployed ` +
+          `suite appeared in the Studio Tests tab only after its first run, never in Testing ` +
+          `Center); Salesforce marks both the type and its runner Beta ` +
+          `(grammar and runner can change). Contrail does not validate scorer names; per ` +
+          `Salesforce's library the ` +
+          `org refuses an unknown name at deploy — not yet live-confirmed, so a green deploy ` +
+          `never proves a scorer ran.`,
+      );
+      // S44: Salesforce's guidance keeps single-turn and multi-turn cases in
+      // SEPARATE suites (a mixed suite has been reported to stall, and the
+      // Studio runner has no cancel endpoint). Advisory only: counts
+      // <testCase> blocks with and without <conversationHistory>. No claim
+      // about when a stalled run releases its in-progress slot — that
+      // timing is undocumented.
+      const cases = c.content.match(/<testCase>[\s\S]*?<\/testCase>/g) ?? [];
+      const multi = cases.filter((t) => /<conversationHistory>/.test(t)).length;
+      const single = cases.length - multi;
+      if (multi > 0 && single > 0) {
+        warnings.push(
+          `MIXED SINGLE- AND MULTI-TURN CASES — ${multi} case(s) carry <conversationHistory> ` +
+            `and ${single} do not. Salesforce's guidance keeps them in separate suites (a ` +
+            `mixed suite has been reported to stall, and the Studio runner has no cancel ` +
+            `endpoint). Split the suite unless a mixed one has completed on this org.`,
+        );
+      }
+    }
+    // S44: std_* scorers are system-provisioned per agent (last modified by
+    // Automated Process, live-observed 2026-11-08). What the org does with a
+    // human-authored edit of one is NOT live-confirmed — the advisory hedges
+    // and fires on add AND modify (an add of a std_ name collides with the
+    // org's own provisioning).
+    if (c.type === 'AiAgentScorerDefinition' && /^std_/.test(c.api_name)) {
+      warnings.push(
+        `SYSTEM-PROVISIONED SCORER — Salesforce creates std_* scorers for each agent (last ` +
+          `modified by Automated Process); an edit may be overwritten or refused org-side. ` +
+          `Author your ` +
+          `own scorer name for custom logic.`,
+      );
     }
     // S36: PSG grants are rebuilt asynchronously — fires on add AND modify
     // (S34 D1 precedent: the honesty rides every deploy, by design).
@@ -1448,6 +1590,25 @@ function externalCredentialPrincipals(xml: string): string[] {
   return names;
 }
 
+/** S44: Draft → Available → Archived is the documented one-way status order. */
+const SCORER_STATUS_RANK: Record<string, number> = { Draft: 0, Available: 1, Archived: 2 };
+
+/**
+ * S44: versionNumber → status for each <scorerVersion> of an
+ * AiAgentScorerDefinition (documented grammar; element names live-confirmed
+ * from a retrieved std_* scorer 2026-11-08). Regex, not a parser — the org
+ * validates; this only names what the approval page can see.
+ */
+function scorerVersionStatuses(xml: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const block of xml.match(/<scorerVersion>[\s\S]*?<\/scorerVersion>/g) ?? []) {
+    const n = block.match(/<versionNumber>\s*(\d+)\s*<\/versionNumber>/)?.[1];
+    const s = block.match(/<status>\s*([A-Za-z]+)\s*<\/status>/)?.[1];
+    if (n) out.set(n, s ?? '');
+  }
+  return out;
+}
+
 /** Custom entities (need explicit object permissions); standard objects don't. */
 function isCustomEntity(name: string): boolean {
   return /__(c|b|e|x)$/i.test(name);
@@ -1566,6 +1727,12 @@ export function analyzePermissionCoverage(components: ProposedComponent[]): Perm
       needs.push({ type: 'CustomApplication', api_name: c.api_name, permission: 'app visibility', kind: 'application' });
     } else if (c.type === 'Bot') {
       // S30: users reach an agent through agentAccesses on a permission set.
+      // S44: deliberately NO arm for AiEvaluationDefinition,
+      // AiTestingDefinition or AiAgentScorerDefinition — a test suite or a
+      // custom scorer has no permission-set block at all; who may author and
+      // run them is an Agentforce admin user permission, not a per-component
+      // grant. The agent a suite tests gets its own agentAccesses arm when it
+      // ships in the same package.
       needs.push({ type: 'Bot', api_name: c.api_name, permission: 'agent access (agentAccesses)', kind: 'agent' });
     } else if (c.type === 'CustomPermission') {
       // S36: a custom permission grants nobody anything until a permission

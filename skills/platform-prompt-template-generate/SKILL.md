@@ -250,7 +250,9 @@ user needs it:
    generation tool. The human tests output quality in Prompt Builder's
    preview (and, for agent-wired templates, in the agent's test surface).
    Say so; a green deploy plus a clean round-trip is proof of shape, not of
-   good prose.
+   good prose. A Studio Tests-tab suite with `subjectType PROMPT` (Beta;
+   agentforce-studio-test-generate) can also score a template through
+   Contrail.
 
 ---
 *Grammar mined from the Metadata API catalog (`GenAiPromptTemplate.json`,

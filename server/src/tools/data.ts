@@ -6,7 +6,9 @@ import type { ConnectionRecord } from '../core/types.js';
 import { ConnectionNotFoundError } from '../core/errors.js';
 import { assertGrant } from '../core/gate.js';
 import type { Grant } from '../core/grants.js';
+import { STUDIO_RESULT_LABELS } from '../core/agentforceScorers.js';
 import { RestClient, stripAttributes } from '../salesforce/rest.js';
+import { MetadataSoapClient } from '../salesforce/metadataSoap.js';
 
 /**
  * Setup sObjects that expose metadata or diagnostics content through the
@@ -666,22 +668,37 @@ export function registerDataTools(server: McpServer, deps: ToolDeps): void {
   server.registerTool(
     'run_agent_eval',
     {
-      title: 'Run an Agentforce Testing Center evaluation',
+      title: 'Run an Agentforce agent test (Testing Center or Studio)',
       description:
-        'Start and poll an Agentforce Testing Center evaluation run for an ' +
-        'AiEvaluationDefinition already deployed to the org. Two-step like run_apex_tests: ' +
-        'submit with eval (the definition DeveloperName) for a run_id; call again with ' +
-        'run_id to poll and, once complete, read per-case results — routed topic, executed ' +
-        'action sequence, and each expectation outcome. Side effects, honestly: the agent ' +
-        'under test executes its REAL actions during the run — records they create or ' +
-        'change are NOT rolled back (unlike Apex test runs), so prefer sandboxes for ' +
-        'agents whose actions write. Runs take MINUTES (poll sparingly); orgs allow ~10 ' +
-        'concurrent runs. Polling and results need diagnostics_read; STARTING a run ' +
-        'additionally requires data_write, because it triggers real agent-action ' +
-        'execution — the definition itself was approved through the deploy ritual, which ' +
-        'is why no further confirmation code is needed here. Requires an ACTIVE agent ' +
-        'version. (The newer Studio "AI testing" beta API is undocumented — not available ' +
-        'through Contrail.)',
+        'Start and poll an Agentforce agent test run for a definition already deployed to ' +
+        'the org, on either runner: Testing Center (AiEvaluationDefinition — the documented ' +
+        'Connect API) or the Agentforce Studio Tests tab (AiTestingDefinition — BETA: ' +
+        'Salesforce labels the type and its runner Beta, the runner is absent from the ' +
+        'Connect REST reference, and its result schema may change). Two-step like ' +
+        'run_apex_tests: submit with eval (the definition DeveloperName) for a run_id; call ' +
+        'again with run_id to poll and, once complete, read per-case results — Testing ' +
+        'Center: routed topic, executed action sequence and each expectation outcome; ' +
+        'Studio: the agent\'s response (subject_response) and each scorer\'s outcome, with ' +
+        'an explanation only when the scorer response carries one. Runner selection: a ' +
+        'run_id picks its runner by prefix (4KB = Testing Center, 3A2 = Studio — both ' +
+        'live-confirmed; anything else is refused); a bare eval is looked up live via listMetadata across both ' +
+        'types, which needs the metadata_read grant — one match picks the runner (and the ' +
+        'org\'s exact-case name is what gets submitted), a name held by both is refused as ' +
+        'ambiguous, a name held by neither is refused (check the name or refresh_snapshot), ' +
+        'and a failed lookup is refused too — nothing is ever submitted to a guessed runner. ' +
+        'Pass runner to skip detection (no metadata_read needed then). Side effects, ' +
+        'honestly, on BOTH runners: the agent under test executes its REAL actions during ' +
+        'the run — records they create or change are NOT rolled back (unlike Apex test ' +
+        'runs), so prefer sandboxes for agents whose actions write. Runs take MINUTES (poll ' +
+        'sparingly); orgs allow ~10 concurrent runs. Polling and results need ' +
+        'diagnostics_read; STARTING a run additionally requires data_write, because it ' +
+        'triggers real agent-action execution — the definition itself was approved through ' +
+        'the deploy ritual, which is why no further confirmation code is needed here. ' +
+        'Testing Center requires an ACTIVE agent version; whether a Studio suite\'s ' +
+        'subjectVersion can target a non-active version is unverified — expect a run-level ' +
+        'FAILED with error_message if not. Studio pass/fail is DERIVED from each scorer\'s ' +
+        'JSON response and is null when no explicit verdict exists — read the raw scorer ' +
+        'rows when it matters.',
       inputSchema: {
         connection: z.string().describe('Connection alias (or id).'),
         eval: z
@@ -689,13 +706,27 @@ export function registerDataTools(server: McpServer, deps: ToolDeps): void {
           .regex(/^[A-Za-z][A-Za-z0-9_]*$/)
           .optional()
           .describe(
-            'The AiEvaluationDefinition DeveloperName to run. Exactly one of eval, run_id.',
+            'The test definition DeveloperName to run — an AiEvaluationDefinition (Testing ' +
+              'Center) or an AiTestingDefinition (Agentforce Studio); the runner is detected ' +
+              'live unless runner is passed. Exactly one of eval, run_id.',
           ),
         run_id: z
           .string()
           .regex(/^[a-zA-Z0-9]{15}([a-zA-Z0-9]{3})?$/)
           .optional()
-          .describe('Run id from a previous submit — polls status and, when done, results.'),
+          .describe(
+            'Run id from a previous submit — polls status and, when done, results. The key ' +
+              'prefix picks the runner (4KB = Testing Center, 3A2 = Agentforce Studio; both ' +
+              'live-confirmed — pass runner if the prefix differs).',
+          ),
+        runner: z
+          .enum(['testing_center', 'agentforce_studio'])
+          .optional()
+          .describe(
+            'Force a runner instead of detecting it: testing_center (AiEvaluationDefinition) ' +
+              'or agentforce_studio (AiTestingDefinition — BETA). Needed when both types hold ' +
+              'the same name, or when the connection lacks metadata_read.',
+          ),
         include_details: z
           .boolean()
           .optional()
@@ -706,6 +737,7 @@ export function registerDataTools(server: McpServer, deps: ToolDeps): void {
       connection: string;
       eval?: string;
       run_id?: string;
+      runner?: AgentTestRunner;
       include_details?: boolean;
     }) =>
       guarded(async () => {
@@ -713,15 +745,22 @@ export function registerDataTools(server: McpServer, deps: ToolDeps): void {
         const client = rest(conn);
         const modes = [args.eval, args.run_id].filter((v) => v !== undefined);
         if (modes.length !== 1) return fail('Pass exactly one of eval or run_id.');
+        const details = args.include_details === true;
+        const apiVersion = config.salesforce.apiVersion;
 
         if (args.run_id !== undefined) {
-          return pollAgentEvalRun(
-            client,
-            config.salesforce.apiVersion,
-            conn.alias,
-            args.run_id,
-            args.include_details === true,
-          );
+          // S44: the key prefix names the runner — no network needed to route a poll.
+          const runner = args.runner ?? RUNNER_BY_RUN_ID_PREFIX[args.run_id.slice(0, 3)];
+          if (!runner) {
+            return fail(
+              `Cannot tell which runner issued run_id "${args.run_id}": Testing Center run ids ` +
+                `start with 4KB and Agentforce Studio run ids with 3A2 (both live-confirmed). If ` +
+                `it came from one of them anyway, pass runner explicitly.`,
+            );
+          }
+          return runner === 'agentforce_studio'
+            ? pollAgentStudioRun(client, apiVersion, conn.alias, args.run_id, details)
+            : pollAgentEvalRun(client, apiVersion, conn.alias, args.run_id, details);
         }
 
         // S35: STARTING a run triggers real agent-action execution (the one
@@ -742,29 +781,117 @@ export function registerDataTools(server: McpServer, deps: ToolDeps): void {
           );
         }
 
-        const res = await client.request(
-          `/services/data/${config.salesforce.apiVersion}/einstein/ai-evaluations/runs`,
-          { method: 'POST', body: JSON.stringify({ aiEvaluationDefinitionName: args.eval }) },
-        );
+        // S44: pick the runner. Explicit wins; otherwise ONE live listMetadata
+        // probe across both types — a Metadata-API read, so it sits behind
+        // metadata_read like list_metadata does (the layer-2 rule; a code
+        // comment is not a gate). A probe that fails refuses: a REAL-actions
+        // submit is never sent to a guessed runner.
+        let runner: AgentTestRunner;
+        let definition: string;
+        let detection: RunnerDetection;
+        if (args.runner) {
+          runner = args.runner;
+          definition = args.eval!;
+          detection = { method: 'explicit' };
+        } else {
+          if (!conn.grants.metadata_read) {
+            audit.record('grant.refused', {
+              connectionId: conn.id,
+              tool: 'run_agent_eval',
+              outcome: 'refused',
+              detail: { required: 'metadata_read', reason: 'agent_eval_runner_detection' },
+            });
+            return fail(
+              `Runner detection reads the org's metadata inventory and needs the ` +
+                `"metadata_read" grant on "${conn.alias}" — pass runner: testing_center or ` +
+                `agentforce_studio to say which runner holds "${args.eval}" (no lookup is ` +
+                `made then). Nothing was started.`,
+            );
+          }
+          const soap = new MetadataSoapClient(tokenMgr, conn, apiVersion);
+          const found = await detectAgentTestRunner(soap, args.eval!);
+          if (found.kind === 'lookup_failed') {
+            return fail(
+              `runner detection failed: ${found.error}. Nothing was started; pass runner ` +
+                `explicitly (testing_center or agentforce_studio) or retry.`,
+            );
+          }
+          if (found.kind === 'both') {
+            return fail(
+              `Both an AiEvaluationDefinition (Testing Center) and an AiTestingDefinition ` +
+                `(Agentforce Studio) named "${args.eval}" exist on "${conn.alias}". Pass ` +
+                `runner: "testing_center" or "agentforce_studio" to say which to run.`,
+            );
+          }
+          if (found.kind === 'none') {
+            const gap = found.unsupported.length
+              ? ` (this org/API version does not know: ${found.unsupported.join(', ')})`
+              : '';
+            return fail(
+              `No deployed test definition named "${args.eval}" of either type on ` +
+                `"${conn.alias}"${gap}. Check the name (list_metadata live=true with type ` +
+                `AiEvaluationDefinition or AiTestingDefinition, or refresh_snapshot), or deploy ` +
+                `it first. Nothing was started.`,
+            );
+          }
+          runner = found.runner;
+          definition = found.fullName;
+          detection = { method: 'live_lookup', unsupported_types: found.unsupported };
+        }
+
+        const studio = runner === 'agentforce_studio';
+        const submitPath = studio
+          ? `/services/data/${apiVersion}/einstein/ai-testing/runs`
+          : `/services/data/${apiVersion}/einstein/ai-evaluations/runs`;
+        const submitBody = studio
+          ? { testDefinitionName: definition }
+          : { aiEvaluationDefinitionName: definition };
+        const res = await client.request(submitPath, {
+          method: 'POST',
+          body: JSON.stringify(submitBody),
+        });
         const submitted = (await res.json()) as { runId?: unknown; status?: unknown };
+        if (studio && submitted.runId === undefined) {
+          // Library semantics (@salesforce/agents): a 2xx with no runId means a
+          // run of this definition is already in progress. Nothing new started.
+          return fail(
+            `The Agentforce Studio runner accepted the request but returned no run id — ` +
+              `Salesforce's own client reads this as "a run of ${definition} is already in ` +
+              `progress". Nothing new was started; poll the in-flight run_id if you have it, ` +
+              `or resubmit once it finishes. Raw response: ` +
+              `${JSON.stringify(submitted).slice(0, 200)}`,
+          );
+        }
         if (typeof submitted.runId !== 'string' || !SF_ID_RE.test(submitted.runId)) {
           return fail(
-            `unexpected response from the evaluation runner: ` +
+            `unexpected response from the ${studio ? 'Studio test' : 'evaluation'} runner: ` +
               `${JSON.stringify(submitted).slice(0, 200)}`,
           );
         }
         audit.record('agent_eval.started', {
           connectionId: conn.id,
           tool: 'run_agent_eval',
-          detail: { definition: args.eval, runId: submitted.runId },
+          detail: { definition, runId: submitted.runId, runner },
         });
         return ok({
           connection: conn.alias,
           run_id: submitted.runId,
-          status: typeof submitted.status === 'string' ? submitted.status : 'NEW',
-          note:
-            'Submitted — the agent under test will execute its REAL actions (no rollback). ' +
-            'Runs take minutes; call run_agent_eval again with this run_id to poll, sparingly.',
+          runner,
+          runner_detection: detection,
+          definition,
+          // Testing Center documents NEW as the initial status; the Studio
+          // runner's initial status is unverified, so it is the org's raw
+          // word or null — never an invented literal.
+          status:
+            typeof submitted.status === 'string' ? submitted.status : studio ? null : 'NEW',
+          note: studio
+            ? 'Submitted to the Agentforce Studio runner — BETA: Salesforce labels the type ' +
+              'and its runner Beta and the runner is absent from the Connect REST reference, ' +
+              'so statuses and result fields may change. The agent under test will execute ' +
+              'its REAL actions (no rollback). Runs take minutes; call run_agent_eval again ' +
+              'with this run_id to poll, sparingly.'
+            : 'Submitted — the agent under test will execute its REAL actions (no rollback). ' +
+              'Runs take minutes; call run_agent_eval again with this run_id to poll, sparingly.',
         });
       }),
   );
@@ -1455,6 +1582,93 @@ const TRACE_LEVEL_PRESETS: Record<string, { name: string; body: Record<string, s
   },
 };
 
+/** S44: the two agent-test runners run_agent_eval drives. */
+type AgentTestRunner = 'testing_center' | 'agentforce_studio';
+const RUNNER_TYPE: Readonly<Record<AgentTestRunner, string>> = {
+  testing_center: 'AiEvaluationDefinition',
+  agentforce_studio: 'AiTestingDefinition',
+};
+/**
+ * Run-id key prefixes per runner: 4KB on Testing Center and 3A2 on Studio —
+ * both live-confirmed (a Studio run submitted through Contrail on 2026-11-09
+ * came back 3A2…). Extend this table rather than guess if a run ever yields
+ * another prefix.
+ */
+const RUNNER_BY_RUN_ID_PREFIX: Readonly<Record<string, AgentTestRunner>> = {
+  '4KB': 'testing_center',
+  '3A2': 'agentforce_studio',
+};
+
+/** How run_agent_eval chose the runner for a submit — always echoed in the result. */
+type RunnerDetection =
+  | { method: 'explicit' }
+  | { method: 'live_lookup'; unsupported_types: string[] };
+
+/**
+ * S44: which runner holds this definition name? One listMetadata round trip
+ * for both types. listMetadataDetailed so an org that does not know
+ * AiTestingDefinition (older API version, or ungated) degrades per type
+ * instead of faulting the probe. The match is case-insensitive but the
+ * org's exact-case fullName is what comes back — the Connect runners want
+ * the canonical name. A thrown lookup is reported, not swallowed — the
+ * caller decides what a failed probe means (it refuses).
+ */
+async function detectAgentTestRunner(
+  soap: MetadataSoapClient,
+  name: string,
+): Promise<
+  | { kind: 'one'; runner: AgentTestRunner; fullName: string; unsupported: string[] }
+  | { kind: 'both' }
+  | { kind: 'none'; unsupported: string[] }
+  | { kind: 'lookup_failed'; error: string }
+> {
+  let listed: { props: Array<{ type: string; fullName: string }>; unsupportedTypes: string[] };
+  try {
+    listed = await soap.listMetadataDetailed([
+      RUNNER_TYPE.testing_center,
+      RUNNER_TYPE.agentforce_studio,
+    ]);
+  } catch (err) {
+    return { kind: 'lookup_failed', error: err instanceof Error ? err.message : String(err) };
+  }
+  const wanted = name.toLowerCase();
+  const holders: Array<{ runner: AgentTestRunner; fullName: string }> = [];
+  for (const runner of Object.keys(RUNNER_TYPE) as AgentTestRunner[]) {
+    const hit = listed.props.find(
+      (p) => p.type === RUNNER_TYPE[runner] && p.fullName.toLowerCase() === wanted,
+    );
+    if (hit) holders.push({ runner, fullName: hit.fullName });
+  }
+  if (holders.length === 2) return { kind: 'both' };
+  if (holders.length === 1) {
+    return { kind: 'one', ...holders[0]!, unsupported: listed.unsupportedTypes };
+  }
+  return { kind: 'none', unsupported: listed.unsupportedTypes };
+}
+
+/**
+ * S40 rule, shared by both runners: any failed row fails the case; all rows
+ * passed (and at least one exists) passes it; anything else is indeterminate
+ * — read the rows, never assume.
+ */
+function caseVerdict(
+  rows: ReadonlyArray<{ passed: boolean | null }>,
+): 'passed' | 'failed' | 'indeterminate' {
+  if (rows.some((r) => r.passed === false)) return 'failed';
+  if (rows.length > 0 && rows.every((r) => r.passed === true)) return 'passed';
+  return 'indeterminate';
+}
+
+function tallyVerdicts(cases: ReadonlyArray<{ verdict: string }>) {
+  const totals = { cases: cases.length, passed: 0, failed: 0, indeterminate: 0 };
+  for (const c of cases) {
+    if (c.verdict === 'passed') totals.passed += 1;
+    else if (c.verdict === 'failed') totals.failed += 1;
+    else totals.indeterminate += 1;
+  }
+  return totals;
+}
+
 /**
  * S35: poll an Agentforce Testing Center evaluation run and, when terminal,
  * fetch and map its results. Two schema realities are tolerated on the
@@ -1485,6 +1699,7 @@ async function pollAgentEvalRun(
     return ok({
       connection: alias,
       run_id: runId,
+      runner: 'testing_center',
       status,
       error_message: run.errorMessage ?? null,
       note: 'The RUN ITSELF failed — no case results exist. This is not a test failure.',
@@ -1496,6 +1711,7 @@ async function pollAgentEvalRun(
     return ok({
       connection: alias,
       run_id: runId,
+      runner: 'testing_center',
       status,
       start_time: run.startTime ?? null,
       note: 'Still running — evaluation runs take minutes. Poll again sparingly.',
@@ -1539,19 +1755,11 @@ async function pollAgentEvalRun(
     }));
     // S40: a case's verdict derives from its EXPECTATIONS — the org's case
     // status is a completion marker ("COMPLETED", live-confirmed), not a
-    // pass. Any failed expectation fails the case; all-passed passes it;
-    // anything else (a null-verdict label metric, or no expectations at
-    // all) is indeterminate — read the rows, never assume.
-    const verdict =
-      expectations.some((e) => e.passed === false)
-        ? 'failed'
-        : expectations.length > 0 && expectations.every((e) => e.passed === true)
-          ? 'passed'
-          : 'indeterminate';
+    // pass (caseVerdict, shared with the Studio runner).
     return {
       number: tc.testNumber ?? null,
       status: tc.status ?? null,
-      verdict,
+      verdict: caseVerdict(expectations),
       utterance: tc.inputs?.utterance ?? null,
       topic: tc.generatedData?.topic ?? null,
       actions_sequence: tc.generatedData?.actionsSequence ?? null,
@@ -1559,17 +1767,13 @@ async function pollAgentEvalRun(
       expectations,
     };
   });
-  const totals = { cases: cases.length, passed: 0, failed: 0, indeterminate: 0 };
-  for (const c of cases) {
-    if (c.verdict === 'passed') totals.passed += 1;
-    else if (c.verdict === 'failed') totals.failed += 1;
-    else totals.indeterminate += 1;
-  }
+  const totals = tallyVerdicts(cases);
 
   const { kept, dropped } = fitToBudget(cases.map((c) => truncateDeep(c)), MAX_RESPONSE_CHARS);
   return ok({
     connection: alias,
     run_id: runId,
+    runner: 'testing_center',
     status,
     subject_name: report.subjectName ?? null,
     start_time: run.startTime ?? null,
@@ -1582,6 +1786,251 @@ async function pollAgentEvalRun(
     ...(status === 'TERMINATED'
       ? { note: 'Run TERMINATED before finishing — partial results at best, NOT a pass.' }
       : {}),
+    ...(includeDetails ? { raw_test_cases: truncateDeep(rawCases) } : {}),
+  });
+}
+
+/**
+ * S44: Studio result strings are HTML-entity-encoded JSON (live-observed
+ * 2026-11-11: `{&quot;status&quot;:&quot;Pass&quot;,…}`; Salesforce's own client
+ * HTML-decodes them too). Decode the entities the org emits, then parse; keep
+ * the decoded string when it still is not JSON.
+ */
+const HTML_ENTITIES: Readonly<Record<string, string>> = {
+  quot: '"',
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  apos: "'",
+};
+function decodeHtmlEntities(s: string): string {
+  return s.replace(/&(#x[0-9a-fA-F]+|#\d+|[a-zA-Z]+);/g, (whole, body: string) => {
+    if (body.startsWith('#x')) return String.fromCodePoint(parseInt(body.slice(2), 16));
+    if (body.startsWith('#')) return String.fromCodePoint(parseInt(body.slice(1), 10));
+    return HTML_ENTITIES[body] ?? whole;
+  });
+}
+function parseStudioJson(v: unknown): unknown {
+  if (typeof v !== 'string') return v ?? null;
+  const decoded = /&(#x?[0-9a-fA-F]+|quot|amp|lt|gt|apos);/.test(v) ? decodeHtmlEntities(v) : v;
+  try {
+    return JSON.parse(decoded) as unknown;
+  } catch {
+    return decoded;
+  }
+}
+const asObject = (v: unknown): Record<string, unknown> | null =>
+  v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+
+const normScalar = (x: unknown): string => (typeof x === 'string' ? x.trim() : JSON.stringify(x));
+
+/**
+ * S44: a Studio scorer's pass/fail, from the shapes live-observed 2026-11-11.
+ * LLM-judged scorers carry `status: "Pass" | "Fail"` (plus score, reasoning,
+ * evaluationType, computeStatus — computeStatus is the execution marker and
+ * never a verdict); match scorers (topic / action / handoff) carry only
+ * `actualValue` and `expectedValue`, which the org compares — so do we when
+ * both are present and no verdict field exists. Other verdict-shaped keys
+ * (result | passed | outcome | verdict) are tolerated with PASS|PASSED|true /
+ * FAIL|FAILED|false. Anything else → null: a score alone is telemetry, and
+ * SUCCESS/COMPLETED/ERROR tokens never become a pass (the S40 lesson).
+ */
+function studioPassedOf(parsed: Record<string, unknown> | null): boolean | null {
+  if (!parsed) return null;
+  const status = parsed.status;
+  if (typeof status === 'string') {
+    const u = status.trim().toUpperCase();
+    if (u === 'PASS') return true;
+    if (u === 'FAIL') return false;
+  }
+  for (const key of ['result', 'passed', 'outcome', 'verdict']) {
+    const v = parsed[key];
+    if (v === true) return true;
+    if (v === false) return false;
+    if (typeof v === 'string') {
+      const u = v.trim().toUpperCase();
+      if (u === 'PASS' || u === 'PASSED' || u === 'TRUE') return true;
+      if (u === 'FAIL' || u === 'FAILED' || u === 'FALSE') return false;
+    }
+  }
+  if (parsed.actualValue !== undefined && parsed.expectedValue !== undefined) {
+    return normScalar(parsed.actualValue) === normScalar(parsed.expectedValue);
+  }
+  return null;
+}
+
+/**
+ * S44: `subjectResponse` is the whole agent session, HTML-encoded
+ * (live-observed 2026-11-11): the reply sits at agentMessage.message, the
+ * routed topic(s) at agentResponse.sessionState.runs[].topicName. Summarise;
+ * the raw blob rides in raw_test_cases under include_details.
+ */
+function summarizeSubjectResponse(v: unknown): {
+  text: string | null;
+  routedTopics: string[];
+  sessionId: string | null;
+} {
+  const parsed = parseStudioJson(v);
+  const obj = asObject(parsed);
+  if (!obj) {
+    return { text: typeof parsed === 'string' ? parsed : null, routedTopics: [], sessionId: null };
+  }
+  const message = asObject(obj.agentMessage)?.message;
+  const value = asObject(obj.value)?.fullResponse;
+  const runs = asObject(asObject(obj.agentResponse)?.sessionState)?.runs;
+  const topics = Array.isArray(runs)
+    ? [
+        ...new Set(
+          runs
+            .map((r) => asObject(r)?.topicName)
+            .filter((t): t is string => typeof t === 'string'),
+        ),
+      ]
+    : [];
+  return {
+    text: typeof message === 'string' ? message : typeof value === 'string' ? value : null,
+    routedTopics: topics,
+    sessionId: typeof obj.sessionId === 'string' ? obj.sessionId : null,
+  };
+}
+
+/**
+ * S44: poll an Agentforce Studio (AiTestingDefinition) test run — the BETA
+ * runner Salesforce's own CLI calls (einstein/ai-testing/runs), absent from
+ * the Connect REST reference. Status vocabulary per that client:
+ * CREATED|IN_PROGRESS|SUCCESS|FAILED|TERMINATED (unknown → fail open as
+ * in-progress, raw shown). SUCCESS reads results; FAILED and TERMINATED read
+ * them TOLERANTLY (a missing body is reported, not thrown) and are never a
+ * pass. Every scorer verdict arrives as a JSON string whose shape is
+ * unverified — `passed` is derived from explicit fields only
+ * (studioPassedOf) and the raw response is always kept. Never a fabricated
+ * verdict.
+ */
+async function pollAgentStudioRun(
+  client: RestClient,
+  apiVersion: string,
+  alias: string,
+  runId: string,
+  includeDetails: boolean,
+) {
+  const base = `/services/data/${apiVersion}/einstein/ai-testing/runs/${runId}`;
+  const statusRes = await client.request(base);
+  const run = (await statusRes.json()) as {
+    status?: string;
+    startTime?: string;
+    endTime?: string;
+    errorMessage?: string | null;
+    errorRepresentation?: { errorMessage?: string | null } | null;
+  };
+  const status = typeof run.status === 'string' ? run.status : 'UNKNOWN';
+  const upper = status.toUpperCase();
+  const terminal = upper === 'SUCCESS' || upper === 'FAILED' || upper === 'TERMINATED';
+  if (!terminal) {
+    // CREATED, IN_PROGRESS, or anything unrecognized: fail open as in-progress.
+    return ok({
+      connection: alias,
+      run_id: runId,
+      runner: 'agentforce_studio',
+      status,
+      start_time: run.startTime ?? null,
+      note: 'Still running — Studio test runs take minutes. Poll again sparingly. (Beta runner.)',
+    });
+  }
+
+  type StudioReport = {
+    status?: string;
+    errorRepresentation?: { errorMessage?: string | null } | null;
+    testCases?: Array<{
+      testNumber?: number;
+      subjectResponse?: string;
+      testScorerResults?: Array<{ scorerName?: string; scorerResponse?: unknown }>;
+    }>;
+  };
+  let report: StudioReport = {};
+  let resultsError: string | null = null;
+  try {
+    report = (await (await client.request(`${base}/results`)).json()) as StudioReport;
+  } catch (err) {
+    if (upper === 'SUCCESS') throw err; // a finished run whose results vanish is worth surfacing
+    resultsError = err instanceof Error ? err.message : String(err);
+  }
+  const rawCases = Array.isArray(report.testCases) ? report.testCases : [];
+  const cases = rawCases.map((tc) => {
+    const scorers = (tc.testScorerResults ?? []).map((row) => {
+      const name = typeof row.scorerName === 'string' ? row.scorerName : null;
+      const parsed = parseStudioJson(row.scorerResponse);
+      const obj = asObject(parsed);
+      const explain = obj?.reasoning ?? obj?.explanation ?? obj?.metricExplainability;
+      return {
+        name,
+        // The org reports the Tests-tab column LABEL; map the labels live-observed
+        // back to the catalog scorer, null for anything else (custom scorers included).
+        scorer: name !== null ? (STUDIO_RESULT_LABELS[name] ?? null) : null,
+        passed: studioPassedOf(obj),
+        expected_value: obj?.expectedValue ?? obj?.expected ?? null,
+        actual_value: obj?.actualValue ?? obj?.actual ?? null,
+        score:
+          typeof obj?.score === 'number'
+            ? obj.score
+            : typeof obj?.metricScore === 'number'
+              ? obj.metricScore
+              : null,
+        explanation: typeof explain === 'string' ? explain.slice(0, 500) : null,
+        evaluation_type: typeof obj?.evaluationType === 'string' ? obj.evaluationType : null,
+        compute_status: typeof obj?.computeStatus === 'string' ? obj.computeStatus : null,
+        raw: parsed ?? null,
+      };
+    });
+    const subject = summarizeSubjectResponse(tc.subjectResponse);
+    return {
+      number: tc.testNumber ?? null,
+      verdict: caseVerdict(scorers),
+      subject_response: subject.text,
+      routed_topics: subject.routedTopics,
+      session_id: subject.sessionId,
+      scorers,
+    };
+  });
+  const totals = tallyVerdicts(cases);
+  const { kept, dropped } = fitToBudget(cases.map((c) => truncateDeep(c)), MAX_RESPONSE_CHARS);
+  const notes = [
+    'Agentforce Studio runner is BETA: statuses and the per-scorer response schema are ' +
+      'undocumented (shapes live-observed 2026-11-11); pass/fail is DERIVED — the Pass/Fail ' +
+      'status in a scorer response, or actualValue === expectedValue on match scorers ' +
+      '(null = neither present — read raw).',
+  ];
+  if (upper === 'FAILED') {
+    notes.push(
+      'The RUN reported FAILED — see error_message; case results, if any, are partial. ' +
+        'Observed on this runner: one errored or skipped scorer column (a scorer present on ' +
+        'some cases but not others) fails the run and the API then returns NO case results ' +
+        'even though the Tests tab shows them — give every case the same scorer set.',
+    );
+  }
+  if (upper === 'TERMINATED') {
+    notes.push('Run TERMINATED before finishing — partial results at best, NOT a pass.');
+  }
+  if (resultsError) notes.push(`Results could not be read: ${resultsError}`);
+  return ok({
+    connection: alias,
+    run_id: runId,
+    runner: 'agentforce_studio',
+    status,
+    start_time: run.startTime ?? null,
+    end_time: run.endTime ?? null,
+    // Live-observed 2026-11-09: the org nests the message under errorRepresentation on
+    // both the status and the results body; Salesforce's library typed it top-level.
+    error_message:
+      run.errorMessage ??
+      run.errorRepresentation?.errorMessage ??
+      report.errorRepresentation?.errorMessage ??
+      null,
+    totals,
+    cases: kept,
+    ...(dropped > 0
+      ? { cases_truncated: true, cases_note: `Dropped ${dropped} case(s) to fit the response.` }
+      : {}),
+    note: notes.join(' '),
     ...(includeDetails ? { raw_test_cases: truncateDeep(rawCases) } : {}),
   });
 }

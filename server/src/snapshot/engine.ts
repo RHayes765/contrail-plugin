@@ -623,6 +623,9 @@ const TYPE_DIRS: Record<string, string> = {
   GenAiPromptTemplate: 'genAiPromptTemplates',
   GenAiPromptTemplateActv: 'genAiPromptTemplateActivations',
   AiEvaluationDefinition: 'aiEvaluationDefinitions',
+  // S44: Studio test suites (Beta type) and custom scorers.
+  AiTestingDefinition: 'aiTestingDefinitions',
+  AiAgentScorerDefinition: 'aiAgentScorerDefinitions',
   BotTemplate: 'botTemplates',
   BotBlock: 'botBlocks',
   // S36: permissions & UI-action types (default-manifest members).

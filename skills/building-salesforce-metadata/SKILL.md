@@ -164,17 +164,26 @@ directory** and give `validate_deploy` the path:
   **active** agent version fail: the human deactivates in Agent Builder
   first, then reactivates after (check state with `soql_query` on
   `BotVersion.Status`; activate/deactivate goes through
-  `agent_activation_propose/execute`, each flip its own ritual; eval runs go
-  through `run_agent_eval` (REAL actions execute — see
-  agentforce-eval-generate) — publish and preview stay human: see
-  `agentforce-metadata-generate` for the full lifecycle boundary). `GenAiPromptTemplate.activeVersionIdentifier`
+  `agent_activation_propose/execute`, each flip its own ritual; test runs go
+  through `run_agent_eval` (REAL actions execute; Testing Center suites —
+  agentforce-eval-generate; Agentforce Studio Tests-tab suites and custom
+  scorers — agentforce-studio-test-generate) — publish and preview stay
+  human: see `agentforce-metadata-generate` for the full lifecycle
+  boundary). `GenAiPromptTemplate.activeVersionIdentifier`
   is an org-generated token — retrieve-first, never hand-typed.
   Version-suffixed planner bundles (`Agent_v3`) are published snapshots:
   modified deploys fail, unmodified ones "succeed" as misleading no-ops.
   Bundle types (GenAiFunction, GenAiPlannerBundle, AiAuthoringBundle) deploy
   via the Contrail bundle envelope — AiAuthoringBundle as a DRAFT stage only
   (the script lands in Studio uncompiled; the running agent is unchanged
-  until a human publishes).
+  until a human publishes). Studio test metadata (S44): `AiTestingDefinition`
+  is a **Beta** type, flat and whole-document (a modify replaces the whole
+  suite); `AiAgentScorerDefinition` versions are documented as APPEND-ONLY
+  (a modify never deletes a version — Draft → Available → Archived is
+  one-way), and its `GenAiPromptTemplate` engine must exist before the
+  scorer — Contrail lists the template first in `package.xml` when both
+  ship together; if the org still refuses, deploy the template in its own
+  package first.
 - **LeadConvertSettings is a whole-org singleton.** api_name is literally
   `LeadConvertSettings` (one component per org; it does not exist until the
   org saves custom lead mappings). A modify **replaces every lead field

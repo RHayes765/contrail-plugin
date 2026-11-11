@@ -1,6 +1,6 @@
 ---
 name: agentforce-eval-generate
-description: "Use this skill when users need to author, RUN, or interpret Agentforce agent tests through the Contrail engine — AiEvaluationDefinition metadata, Testing Center test authoring, run_agent_eval runs and their results, or one-off utterance smoke tests against an active agent. Trigger on 'write tests for my agent', 'run the agent evals', 'why did this test case fail', 'hit the agent with an utterance', or asserting which topic/actions an utterance should route to. DO NOT TRIGGER for Apex tests (platform-apex-test-generate) or for debugging agent metadata itself (agentforce-metadata-generate / agentforce-architecture-analyze)."
+description: "Use this skill when users need to author, RUN, or interpret LEGACY Agentforce Testing Center tests through the Contrail engine — AiEvaluationDefinition metadata, Testing Center test authoring, run_agent_eval runs and their results, or one-off utterance smoke tests against an active agent. Trigger on 'write tests for my agent' (legacy-builder agents), 'run the agent evals', 'why did this test case fail', 'hit the agent with an utterance', or asserting which topic/actions an utterance should route to. DO NOT TRIGGER for Agentforce Studio Tests-tab suites, scorers, or custom scorers — AiTestingDefinition / AiAgentScorerDefinition (agentforce-studio-test-generate) — for Apex tests (platform-apex-test-generate), or for debugging agent metadata itself (agentforce-metadata-generate / agentforce-architecture-analyze)."
 metadata:
   domains: ["Agentforce"]
   minApiVersion: "66.0"
@@ -9,9 +9,10 @@ metadata:
     - "building-salesforce-metadata"
     - "agentforce-metadata-generate"
     - "agentforce-architecture-analyze"
+    - "agentforce-studio-test-generate"
 ---
 
-# Agent evaluations (Testing Center) through Contrail
+# Agent evaluations (legacy Testing Center) through Contrail
 
 Use this skill to author `AiEvaluationDefinition` metadata — deployable
 Testing Center evaluation definitions for Agentforce agents. Follow
@@ -32,6 +33,15 @@ the CLI compiles into this metadata — it is **NOT Salesforce metadata** and
 Contrail has no path for it. **Author the AiEvaluationDefinition XML
 directly**; if the user hands you a test-spec YAML, treat it as requirements
 and translate it into the XML below.
+
+And one sibling: Agentforce Studio's **Tests tab** uses a different, **Beta**
+metadata type — `AiTestingDefinition`, with `scorer` blocks instead of
+`expectation`s and its own Beta runner. Salesforce's own guidance tests
+new-builder (Agent Script) agents there and legacy-builder agents here. That
+type, its scorer catalog, custom scorers (`AiAgentScorerDefinition`), and
+converting a suite from this type to that one are
+**agentforce-studio-test-generate**'s territory; this skill stays with
+Testing Center. Both runners sit behind the same `run_agent_eval` (§6).
 
 ## 2. The grammar
 
@@ -181,7 +191,7 @@ every eval deploy summary: "deployed to **dev-org**; run it with
   pass. An `indeterminate` case with labels is "read the labels yourself";
   one with no expectations means the org returned no judgments for it —
   say so, never infer a pass or fail.
-- **Live-confirmed facts (personal-dev run, 2026-10-01, ~2 min for 2
+- **Live-confirmed facts (an Agentforce dev org, 2026-10-01, ~2 min for 2
   cases):** the org emitted the `result: PASS|FAILURE` + numeric `score`
   schema (no `metricScore` field); it RENAMES expectations in results —
   `topic_sequence_match` reports as `topic_assertion`,
@@ -204,8 +214,16 @@ every eval deploy summary: "deployed to **dev-org**; run it with
   best, never a pass.
 - **After a run against a writing agent, check what the actions did** — the
   side effects are real records; `soql_query` them and say so in the summary.
-- The newer Agentforce Studio "AI testing" runner (`AiTestingDefinition`) is
-  an undocumented beta — not available through Contrail; say so if asked.
+- **Which runner?** The Agentforce Studio Tests-tab runner
+  (`AiTestingDefinition`, **Beta**) is behind `run_agent_eval` too since S44.
+  Given a bare `eval` name the tool looks the definition up in the org's
+  metadata (that lookup needs `metadata_read`) and names the runner it used
+  in the result; pass `runner: "testing_center"` or
+  `runner: "agentforce_studio"` to choose explicitly, and when both types
+  hold the name the tool refuses until you do. Run ids tell them apart —
+  `4KB…` here, `3A2…` Studio (both live-confirmed). Authoring, conversion,
+  and Studio
+  result-reading: **agentforce-studio-test-generate**.
 
 ## 7. One-off utterance smoke tests (anonymous Apex, no new machinery)
 
@@ -249,4 +267,4 @@ needs a JWT from a specially configured External Client App; that setup is a
 documented alternative Contrail deliberately does not automate.)
 
 ---
-*Adapted for Contrail from [forcedotcom/sf-skills](https://github.com/forcedotcom/sf-skills) @ 49064f7 (the AiEvaluationDefinition Metadata API catalog entry, with test-design judgment drawn from the agentforce-test skill references; Apache-2.0, © Salesforce, Inc.). Modified: retargeted from the Salesforce CLI test-spec workflow to direct XML authoring through the Contrail engine tools and the human-approval write contract.*
+*Adapted for Contrail from [forcedotcom/sf-skills](https://github.com/forcedotcom/sf-skills) @ 49064f7 (the AiEvaluationDefinition Metadata API catalog entry, with test-design judgment drawn from the agentforce-test skill references; Apache-2.0, © Salesforce, Inc.). Modified: retargeted from the Salesforce CLI test-spec workflow to direct XML authoring through the Contrail engine tools and the human-approval write contract; S44: Studio Tests-tab pointer added (the type and runner live in agentforce-studio-test-generate).*

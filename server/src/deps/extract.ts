@@ -1,4 +1,5 @@
 import { asArray, parseXml } from '../salesforce/xml.js';
+import { isStudioCatalogScorer } from '../core/agentforceScorers.js';
 import type { DependencyEdge } from '../core/types.js';
 import type { IndexedArtifact } from '../snapshot/indexer.js';
 
@@ -317,6 +318,78 @@ export function extractBotRefs(xml: string): Ref[] {
 }
 
 /**
+ * S44: the <subjectType>/<subjectName> pair both agent-test types share.
+ * AGENT subjects are taken to be Bot developer names — the join key is
+ * ASSUMED from Salesforce's agents library, which resolves them through
+ * BotDefinition.DeveloperName (the same key the bots/<Name>.bot index row
+ * and agentAccesses use); not yet live-confirmed from a retrieved suite.
+ * PROMPT subjects are taken to be GenAiPromptTemplate developer names (same
+ * provenance). An absent subjectType types as Bot: AGENT is the documented
+ * default shape, and recall wins here (module header).
+ */
+function addSubjectRef(refs: RefSet, xml: string): void {
+  const subject = xml.match(/<subjectName>\s*([^<]+?)\s*<\/subjectName>/)?.[1];
+  if (!subject) return;
+  const kind = xml.match(/<subjectType>\s*([^<]+?)\s*<\/subjectType>/)?.[1]?.toUpperCase();
+  refs.add(kind === 'PROMPT' ? 'GenAiPromptTemplate' : 'Bot', subject);
+}
+
+/**
+ * S44 (parity — this edge has been missing since S30): legacy Testing Center
+ * definition → the agent it tests.
+ */
+export function extractAiEvaluationDefinitionRefs(xml: string): Ref[] {
+  const refs = new RefSet();
+  addSubjectRef(refs, xml);
+  return refs.list();
+}
+
+/**
+ * S44: Studio test suite → its subject and the CUSTOM scorers its cases
+ * name. A <scorer><name> that is not an exact-case member of the Studio
+ * catalog (core/agentforceScorers.ts) is an AiAgentScorerDefinition developer
+ * name — exact-case on purpose: a custom scorer may legitimately be called
+ * `Coherence`, and recall wins. The <scorer> open tag may carry attributes (a
+ * CLI message says custom scorers retrieve as <scorer scorerType="Custom"> —
+ * attribute vs element is unverified until the live fixture; the regex
+ * tolerates both forms). The suite's own top-level <name> is outside any
+ * <scorer> block and never matches.
+ */
+export function extractAiTestingDefinitionRefs(xml: string): Ref[] {
+  const refs = new RefSet();
+  addSubjectRef(refs, xml);
+  for (const m of xml.matchAll(/<scorer(?:\s[^>]*)?>([\s\S]*?)<\/scorer>/g)) {
+    const name = m[1]!.match(/<name>\s*([^<]+?)\s*<\/name>/)?.[1];
+    if (name && !isStudioCatalogScorer(name)) {
+      refs.add('AiAgentScorerDefinition', name);
+    }
+  }
+  return refs.list();
+}
+
+/**
+ * S44: custom scorer → the prompt template each PromptTemplate engine runs
+ * (<engine><engineRef>, a GenAiPromptTemplate developer name — a managed
+ * template's namespaced name passes through as-is, no join; Manual engines
+ * carry none) and the agent each version is associated with
+ * (<agentAssociation><agentApiName>). Element names live-confirmed from a
+ * retrieved std_* scorer 2026-11-08; that agentApiName joins
+ * BotDefinition.DeveloperName is ASSUMED from Salesforce's agents library,
+ * not live-confirmed. Edges regardless of version status or isActive — the
+ * dependency exists either way (S36 customPermissions precedent).
+ */
+export function extractAiAgentScorerDefinitionRefs(xml: string): Ref[] {
+  const refs = new RefSet();
+  for (const m of xml.matchAll(/<engineRef>([^<]+)<\/engineRef>/g)) {
+    refs.add('GenAiPromptTemplate', m[1]!);
+  }
+  for (const m of xml.matchAll(/<agentApiName>([^<]+)<\/agentApiName>/g)) {
+    refs.add('Bot', m[1]!);
+  }
+  return refs.list();
+}
+
+/**
  * S33: NamedCredential → the ExternalCredential its Authentication parameter
  * names (<namedCredentialParameters><externalCredential>, live-confirmed) and,
  * on legacy NamedCredentials, the AuthProvider (top-level <authProvider>).
@@ -615,6 +688,12 @@ export function extractAllEdges(
       add(a.type, a.apiName, extractGenAiPlannerRefs(a.content));
     } else if (a.type === 'Bot') {
       add(a.type, a.apiName, extractBotRefs(a.content));
+    } else if (a.type === 'AiEvaluationDefinition') {
+      add(a.type, a.apiName, extractAiEvaluationDefinitionRefs(a.content));
+    } else if (a.type === 'AiTestingDefinition') {
+      add(a.type, a.apiName, extractAiTestingDefinitionRefs(a.content));
+    } else if (a.type === 'AiAgentScorerDefinition') {
+      add(a.type, a.apiName, extractAiAgentScorerDefinitionRefs(a.content));
     } else if (a.type === 'NamedCredential') {
       add(a.type, a.apiName, extractNamedCredentialRefs(a.content));
     } else if (a.type === 'ExternalCredential') {

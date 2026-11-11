@@ -557,3 +557,129 @@ describe('S41: Aura edges', () => {
     );
   });
 });
+
+describe('S44: Studio test & scorer extractors', () => {
+  // Grammar per Salesforce's open-source agents library; the subjectName /
+  // agentApiName join to BotDefinition.DeveloperName is assumed from that
+  // library, not yet live-confirmed from a retrieved suite.
+  const agentSuite =
+    '<AiTestingDefinition><name>Order_Tests</name><subjectName>Order_Agent</subjectName>' +
+    '<subjectType>AGENT</subjectType><subjectVersion>v2</subjectVersion>' +
+    '<testCase><number>1</number><inputs><utterance>hi</utterance></inputs>' +
+    '<scorer><name>topic_sequence_match</name><expectedValue>agent_router</expectedValue></scorer>' +
+    '<scorer><name>bot_response_rating</name><expectedValue>polite</expectedValue></scorer>' +
+    '<scorer><name>Tone_Check</name></scorer></testCase></AiTestingDefinition>';
+  const promptSuite =
+    '<AiTestingDefinition><name>Tone_Prompt_Tests</name><subjectName>Tone_Prompt</subjectName>' +
+    '<subjectType>PROMPT</subjectType><testCase><number>1</number><inputs>' +
+    '<promptInput><referenceName>Input:text</referenceName><value>hello</value></promptInput>' +
+    '</inputs><scorer><name>response_match</name><expectedValue>Hi there</expectedValue></scorer>' +
+    '<scorer><name>coherence</name></scorer></testCase></AiTestingDefinition>';
+  const customScorer =
+    '<AiAgentScorerDefinition><dataType>Text</dataType><inputScope>Session</inputScope>' +
+    '<scorerType>OpenEnded</scorerType>' +
+    '<scorerVersion><engine><engineRef>Old_Prompt</engineRef><engineType>PromptTemplate</engineType>' +
+    '</engine><label>v1</label><status>Archived</status><versionNumber>1</versionNumber></scorerVersion>' +
+    '<scorerVersion><agentAssociation><agentApiName>Order_Agent</agentApiName>' +
+    '<inputScope>Session</inputScope><isActive>false</isActive><samplingRate>1.0</samplingRate>' +
+    '</agentAssociation><engine><engineRef>Tone_Prompt</engineRef><engineType>PromptTemplate</engineType>' +
+    '</engine><label>v2</label><status>Draft</status><versionNumber>2</versionNumber></scorerVersion>' +
+    '<semanticType>Quality</semanticType></AiAgentScorerDefinition>';
+
+  it('AiTestingDefinition → Bot (AGENT) or GenAiPromptTemplate (PROMPT) subject; custom scorers → AiAgentScorerDefinition; catalog names → NONE', async () => {
+    const { extractAiTestingDefinitionRefs } = await import('../deps/extract.js');
+    expect(extractAiTestingDefinitionRefs(agentSuite)).toEqual([
+      { toType: 'Bot', toName: 'Order_Agent' },
+      { toType: 'AiAgentScorerDefinition', toName: 'Tone_Check' },
+    ]);
+    // Catalog names produce NOTHING — exact equality is the pin.
+    expect(extractAiTestingDefinitionRefs(promptSuite)).toEqual([
+      { toType: 'GenAiPromptTemplate', toName: 'Tone_Prompt' },
+    ]);
+  });
+
+  it('catalog membership is exact-case: a custom scorer named Coherence keeps its edge', async () => {
+    const { extractAiTestingDefinitionRefs } = await import('../deps/extract.js');
+    const xml =
+      '<AiTestingDefinition><subjectName>Order_Agent</subjectName><subjectType>AGENT</subjectType>' +
+      '<testCase><number>1</number><scorer><name>Coherence</name></scorer>' +
+      '<scorer><name>coherence</name></scorer></testCase></AiTestingDefinition>';
+    const keys = extractAiTestingDefinitionRefs(xml).map((r) => `${r.toType}:${r.toName}`);
+    expect(keys).toContain('AiAgentScorerDefinition:Coherence');
+    expect(keys).not.toContain('AiAgentScorerDefinition:coherence');
+  });
+
+  it('a <scorer scorerType="Custom"> attribute form still yields the custom-scorer edge', async () => {
+    const { extractAiTestingDefinitionRefs } = await import('../deps/extract.js');
+    const xml =
+      '<AiTestingDefinition><subjectName>Order_Agent</subjectName><subjectType>AGENT</subjectType>' +
+      '<testCase><number>1</number><scorer scorerType="Custom"><name>Tone_Check</name></scorer>' +
+      '</testCase></AiTestingDefinition>';
+    const keys = extractAiTestingDefinitionRefs(xml).map((r) => `${r.toType}:${r.toName}`);
+    expect(keys).toContain('AiAgentScorerDefinition:Tone_Check');
+    // The suite's own top-level <name> is outside any <scorer> block.
+    expect(keys).not.toContain('AiAgentScorerDefinition:Order_Tests');
+  });
+
+  it('AiAgentScorerDefinition → engineRef templates and agentApiName bots, regardless of status or isActive', async () => {
+    const { extractAiAgentScorerDefinitionRefs } = await import('../deps/extract.js');
+    const keys = extractAiAgentScorerDefinitionRefs(customScorer)
+      .map((r) => `${r.toType}:${r.toName}`)
+      .sort();
+    expect(keys).toEqual([
+      'Bot:Order_Agent',
+      'GenAiPromptTemplate:Old_Prompt',
+      'GenAiPromptTemplate:Tone_Prompt',
+    ]);
+    // A managed template's namespaced engineRef passes through as-is (recall).
+    const managed =
+      '<AiAgentScorerDefinition><scorerVersion><engine>' +
+      '<engineRef>agentforce_session_tracing__quality_score</engineRef>' +
+      '<engineType>PromptTemplate</engineType></engine></scorerVersion></AiAgentScorerDefinition>';
+    expect(extractAiAgentScorerDefinitionRefs(managed)).toEqual([
+      { toType: 'GenAiPromptTemplate', toName: 'agentforce_session_tracing__quality_score' },
+    ]);
+  });
+
+  it('AiEvaluationDefinition (legacy) → its Bot subject — the parity edge missing since S30', async () => {
+    const { extractAiEvaluationDefinitionRefs } = await import('../deps/extract.js');
+    expect(
+      extractAiEvaluationDefinitionRefs(
+        '<AiEvaluationDefinition><subjectType>AGENT</subjectType>' +
+          '<subjectName>Order_Agent</subjectName><subjectVersion>v1</subjectVersion>' +
+          '<testCase><number>1</number></testCase></AiEvaluationDefinition>',
+      ),
+    ).toEqual([{ toType: 'Bot', toName: 'Order_Agent' }]);
+    // No subjectType → still Bot (AGENT is the documented default shape).
+    expect(
+      extractAiEvaluationDefinitionRefs(
+        '<AiEvaluationDefinition><subjectName>Order_Agent</subjectName></AiEvaluationDefinition>',
+      ),
+    ).toEqual([{ toType: 'Bot', toName: 'Order_Agent' }]);
+  });
+
+  it('indexed suite, scorer, template and bot produce joinable edges through extractAllEdges', () => {
+    const files = new Map(
+      Object.entries({
+        'bots/Order_Agent.bot': strToU8('<Bot><botVersions><fullName>v1</fullName></botVersions></Bot>'),
+        'genAiPromptTemplates/Tone_Prompt.genAiPromptTemplate': strToU8('<GenAiPromptTemplate/>'),
+        'aiAgentScorerDefinitions/Tone_Check.aiAgentScorerDefinition': strToU8(customScorer),
+        'aiTestingDefinitions/Order_Tests.aiTestingDefinition': strToU8(agentSuite),
+        'aiEvaluationDefinitions/Legacy_Tests.aiEvaluationDefinition': strToU8(
+          '<AiEvaluationDefinition><subjectType>AGENT</subjectType>' +
+            '<subjectName>Order_Agent</subjectName></AiEvaluationDefinition>',
+        ),
+      }),
+    );
+    const artifacts = indexSnapshotFiles(files, [], '2026-11-08T00:00:00.000Z');
+    const edges = extractAllEdges('conn1', artifacts);
+    const keys = edges.map((e) => `${e.fromType}:${e.fromName}>${e.toType}:${e.toName}`);
+    expect(keys).toContain('AiTestingDefinition:Order_Tests>Bot:Order_Agent');
+    expect(keys).toContain('AiTestingDefinition:Order_Tests>AiAgentScorerDefinition:Tone_Check');
+    expect(keys).toContain('AiAgentScorerDefinition:Tone_Check>GenAiPromptTemplate:Tone_Prompt');
+    expect(keys).toContain('AiAgentScorerDefinition:Tone_Check>Bot:Order_Agent');
+    expect(keys).toContain('AiEvaluationDefinition:Legacy_Tests>Bot:Order_Agent');
+    expect(keys.some((k) => k.endsWith('>AiAgentScorerDefinition:topic_sequence_match'))).toBe(false);
+    expect(keys.some((k) => k.endsWith('>AiAgentScorerDefinition:bot_response_rating'))).toBe(false);
+  });
+});

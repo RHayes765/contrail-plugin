@@ -13,6 +13,7 @@ metadata:
     - "salesforce-house-rules"
     - "agentforce-metadata-generate"
     - "agentforce-eval-generate"
+    - "agentforce-studio-test-generate"
 ---
 
 # agentforce-architecture-analyze — declared architecture snapshot

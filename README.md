@@ -8,11 +8,44 @@ The Contrail engine shipped as a Claude plugin: a local stdio MCP server (the
 For the narrative overview see [CONTRAIL_OVERVIEW.md](CONTRAIL_OVERVIEW.md); to
 install, see [Getting Started](Getting%20Started.md).
 
-**Status: v0.37.2 — one-click packaging (MCPB)** on top of the completed
+**Status: v0.38.2 — one-click packaging (MCPB)** on top of the completed
 P0.1–P0.6 Phase 0 surface. `npm run mcpb` builds `contrail-<version>.mcpb`, a
 single MCP Bundle that installs into Claude Desktop via Settings → Extensions
 (no Node install, no npm, no config editing on the target machine) and covers
 Windows x64/ARM and macOS Intel/Apple Silicon from one file. 39 tools.
+
+**Agentforce Studio tests (S44).** Agent testing caught up with the new
+builder. `AiTestingDefinition` — the metadata type Salesforce pairs with
+Agentforce Studio's **Tests** tab (on the org probed a deployed suite appeared
+there only after its first run), labelled **Beta** along with its runner —
+is
+deployable, indexed and explicit-refresh, alongside `AiAgentScorerDefinition`
+for custom scorers (folder and suffix live-confirmed from the org's own
+describe; versions are append-only org-side, and the approval page lists any
+version a modify omits or regresses, flags Salesforce's system-provisioned
+`std_*` scorers, says plainly that a suite deploy runs nothing, and warns when
+single-turn and multi-turn cases share a suite). `package.xml` now lists a
+`GenAiPromptTemplate` before the scorer that engines on it — the one
+documented order-sensitive pair, which alphabetical emission got backwards.
+**`run_agent_eval` learned the second runner**: a run id routes by prefix, a
+bare definition name is looked up live across both types (that read needs
+`metadata_read`; collisions and failed lookups are refused, never guessed),
+`runner` overrides, and every result names the runner — with "Beta"
+attached, because the Studio runner is absent from the Connect REST reference
+and is what Salesforce's own Agentforce DX test commands call. Per-scorer
+judgments arrive as JSON strings; pass/fail is derived only from explicit
+verdict fields (a scorer's Pass/Fail status, or actual-vs-expected on the
+match scorers) and the raw response always rides along. Dependency edges now
+join suites and scorers to the agents and prompt templates they reference
+(the legacy type gained the edge it never had). No new tool (still 39). A
+twenty-second skill, `agentforce-studio-test-generate`, carries the three
+Tests-tab suite kinds (Agent Conversation has no metadata type and stays in
+the UI), the scorer catalog, the single-turn/multi-turn split, name-for-name
+conversion from `AiEvaluationDefinition`, and the custom-scorer lifecycle;
+`agentforce-eval-generate` stays the legacy Testing Center skill. One honesty
+note learned on the way: suites authored in the Tests tab UI never surfaced
+as metadata on the org probed — Contrail-authored suites are the deployable
+path.
 
 **Pushes only when they can be used; the code on its own line (S43).** A code
 on a phone is only worth a buzz when it can be typed from the phone, so by
@@ -136,11 +169,14 @@ unlocked-package components no longer count as permanently-missing
 snapshot staleness.
 
 **The agent testing loop (S35).** The full test cycle runs in-conversation:
-author an `AiEvaluationDefinition` (since S30), deploy it through the
-ritual, then **`run_agent_eval`** executes it in Testing Center via the
-documented Connect API and reads back per-case results — routed topic,
-executed action sequence, every expectation outcome (with the judge's
-explanation quoted on failures). Honesty first: the agent under test
+author an `AiEvaluationDefinition` (since S30) or, since S44, an
+`AiTestingDefinition` for the Agentforce Studio Tests tab, deploy it through
+the ritual, then **`run_agent_eval`** executes it on the matching runner —
+Testing Center via the documented Connect API, or Salesforce's Beta Studio
+runner — and reads back per-case results (Testing Center: routed topic,
+executed action sequence, every expectation outcome with the judge's
+explanation quoted on failures; Studio: the subject's response and each
+scorer's derived outcome, raw judgment kept). Honesty first: the agent under test
 executes its **real actions with no rollback** — the tool, the grant page,
 and the skills all say so, starting a run requires `data_write` on top of
 `diagnostics_read`, and subagents never hold the tool. One-off "just ask
@@ -192,8 +228,8 @@ the honesty to match: the approval page warns about the deactivate-first
 gate, org-generated prompt-template version tokens, and Bot version deletes,
 and the **lifecycle boundary** is stated everywhere it matters (publish and
 preview are human steps in Agentforce Studio / Agent Builder;
-activate/deactivate moved behind Contrail's own ritual in S34, eval runs
-behind `run_agent_eval` in S35 — and Contrail still verifies from outside
+activate/deactivate moved behind Contrail's own ritual in S34, agent test
+runs behind `run_agent_eval` in S35 (both runners since S44) — and Contrail still verifies from outside
 via `BotVersion.Status`). Requires API v66+
 (default is v67 since S34) and Agentforce licensing; unlicensed orgs degrade
 per-type with a warning, never a broken refresh. `soql_query` gained `tooling: true` (metadata_read-gated) for the

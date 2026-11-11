@@ -1,6 +1,6 @@
 ---
 name: agentforce-metadata-generate
-description: "Use this skill when users need to create or modify Agentforce agent metadata through the Contrail engine — agent topics (GenAiPlugin), Bot and BotVersion metadata, planner bundles, Agent Script draft staging (AiAuthoringBundle), or activating/deactivating agent versions, or when an agent metadata deploy failed. Trigger on requests like 'add a topic to my agent', 'stage this agent script', 'deactivate the agent so we can deploy', editing topic instructions or action wiring, changing bot versions or channel surfaces, or promoting agent metadata between orgs. DO NOT TRIGGER for running, previewing, or PUBLISHING agents (human-only lifecycle operations — Contrail stages drafts and flips activation, it never compiles or publishes), for prompt templates (platform-prompt-template-generate), for agent evals (agentforce-eval-generate), or for documenting an existing agent (agentforce-architecture-analyze)."
+description: "Use this skill when users need to create or modify Agentforce agent metadata through the Contrail engine — agent topics (GenAiPlugin), Bot and BotVersion metadata, planner bundles, Agent Script draft staging (AiAuthoringBundle), or activating/deactivating agent versions, or when an agent metadata deploy failed. Trigger on requests like 'add a topic to my agent', 'stage this agent script', 'deactivate the agent so we can deploy', editing topic instructions or action wiring, changing bot versions or channel surfaces, or promoting agent metadata between orgs. DO NOT TRIGGER for running, previewing, or PUBLISHING agents (human-only lifecycle operations — Contrail stages drafts and flips activation, it never compiles or publishes), for prompt templates (platform-prompt-template-generate), for agent tests (agentforce-eval-generate for Testing Center suites; agentforce-studio-test-generate for Studio Tests-tab suites and custom scorers), or for documenting an existing agent (agentforce-architecture-analyze)."
 metadata:
   domains: ["Agentforce"]
   minApiVersion: "66.0"
@@ -11,13 +11,14 @@ metadata:
     - "agentforce-architecture-analyze"
     - "platform-prompt-template-generate"
     - "agentforce-eval-generate"
+    - "agentforce-studio-test-generate"
 ---
 
 # Agentforce agent metadata through Contrail
 
 Use this skill to:
 
-- Add or modify agent topics (`GenAiPlugin`) on classic Builder agents
+- Add or modify agent topics (`GenAiPlugin`) on legacy-builder agents
 - Edit `Bot` / `BotVersion` metadata — versions, planner wiring, surfaces
 - Stage Agent Script as a DRAFT (`AiAuthoringBundle` — §3a; compiling stays human)
 - Activate/deactivate agent versions (`agent_activation_propose/execute` — §2, §5)
@@ -77,11 +78,17 @@ ritual (the page warns it changes live behavior immediately). The org refuses
 drafts and explains refusals in the result's `messages[]` — relay them
 verbatim.
 
-**Run evaluations moved to Contrail too** (S35): `run_agent_eval` executes a
-deployed AiEvaluationDefinition and fetches per-case results — the agent
-under test executes its REAL actions (no rollback), so sandbox-first;
-authoring, running, and reading results are agentforce-eval-generate's
-territory.
+**Run tests moved to Contrail too** (S35, widened S44): `run_agent_eval`
+executes a deployed test definition — a Testing Center
+`AiEvaluationDefinition` or an Agentforce Studio Tests-tab
+`AiTestingDefinition` (the Studio runner is **Beta**; the tool detects which
+runner applies when it may read the org's metadata, takes an explicit
+`runner` otherwise, and names the runner it used) — and fetches per-case
+results. The agent under test executes its REAL actions (no rollback), so
+sandbox-first. Authoring, running, and reading results are
+agentforce-eval-generate's territory for Testing Center and
+agentforce-studio-test-generate's for Studio suites, scorers, and custom
+scorers (`AiAgentScorerDefinition`).
 
 What Contrail verifies from outside: activation state via `soql_query`
 — `SELECT Id, DeveloperName, Status FROM BotVersion WHERE
@@ -106,6 +113,8 @@ What Contrail can deploy today, and the shapes live-verified in a real org:
 | `GenAiPlugin` | **Deploy** (single file) | Flat: `Order_Management`; instruction child names are org-generated (`instruction_0_<timestamp>` — see §6) |
 | `GenAiPromptTemplate` (+`Actv`) | **Deploy** — author via platform-prompt-template-generate | Flat; carries live `activeVersionIdentifier` tokens |
 | `AiEvaluationDefinition` | **Deploy** — author via agentforce-eval-generate | Flat |
+| `AiTestingDefinition` | **Deploy** (Studio Tests tab, **Beta** type) — author via agentforce-studio-test-generate | Flat (`aiTestingDefinitions/`, live-confirmed via describeMetadata 2026-11-08; the first deployed suite's retrieve is pending) |
+| `AiAgentScorerDefinition` | **Deploy** — author via agentforce-studio-test-generate | Flat (`aiAgentScorerDefinitions/`); versions inline, written alphabetically by the org; documented as APPEND-ONLY (a modify never deletes one) |
 | `BotTemplate`, `BotBlock` | **Deploy** (single file) | Flat |
 | `GenAiFunction` | **Deploy** (bundle ENVELOPE — §8) | `Name` dir: `Name.genAiFunction-meta.xml` + `input/schema.json` + `output/schema.json` |
 | `GenAiPlannerBundle` | **Deploy** (bundle ENVELOPE — §8; promotion of retrieved bytes, not hand-authoring) | Underscore-versioned: `Support_Agent_v2`, one component per published version |
@@ -380,6 +389,12 @@ skill and permission set), then the agent components. An agent package whose
 `functionName` targets don't resolve fails validation at best — at worst it
 validates green and breaks in conversation.
 
+Custom scorers add one rule of their own: a scorer's `GenAiPromptTemplate`
+engine must exist before the scorer. Contrail lists the template before the
+`AiAgentScorerDefinition` that engines on it in `package.xml` (S44), so the
+pair may ship together; if the org still refuses, deploy the template first
+(agentforce-studio-test-generate §6).
+
 ## 11. Verify after deploy
 
 1. **Round-trip retrieve.** `retrieve_metadata` the deployed component and
@@ -424,4 +439,4 @@ Agent Builder preview can check — say so in every summary.
   supported — say so if asked.)
 
 ---
-*Adapted for Contrail from [forcedotcom/sf-skills](https://github.com/forcedotcom/sf-skills) @ 49064f7 (agent-deployment-guide.md, agent-metadata-and-lifecycle.md, and the Metadata API catalog entries for Bot, BotVersion, GenAiPlugin, GenAiFunction, and GenAiPlannerBundle; Apache-2.0, © Salesforce, Inc.). Modified: mechanism retargeted from the Salesforce CLI to the Contrail engine tools and the human-approval write contract; fullName shapes and file layouts live-verified against an Agentforce Developer Edition org (2026-09); S34 (2026-09-30): Agent Script draft staging and the activation ritual added, lifecycle boundary updated.*
+*Adapted for Contrail from [forcedotcom/sf-skills](https://github.com/forcedotcom/sf-skills) @ 49064f7 (agent-deployment-guide.md, agent-metadata-and-lifecycle.md, and the Metadata API catalog entries for Bot, BotVersion, GenAiPlugin, GenAiFunction, and GenAiPlannerBundle; Apache-2.0, © Salesforce, Inc.). Modified: mechanism retargeted from the Salesforce CLI to the Contrail engine tools and the human-approval write contract; fullName shapes and file layouts live-verified against an Agentforce Developer Edition org (2026-09); S34 (2026-09-30): Agent Script draft staging and the activation ritual added, lifecycle boundary updated; S44 (2026-11-08): Studio test types (AiTestingDefinition, AiAgentScorerDefinition) added to the type map and the test-run paragraph widened to both runners.*

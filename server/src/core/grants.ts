@@ -31,16 +31,17 @@ export const GRANT_DESCRIPTIONS: Readonly<Record<Grant, string>> = {
     'human confirmation.',
   diagnostics_read:
     'Read debug logs and flow error details, run Apex tests (test transactions always ' +
-    'roll back), poll Agentforce agent evaluation runs and read their results, and set ' +
-    'trace flags (for the connected user or any named user, e.g. the Platform ' +
-    'Integration User). May expose incidental record data present in logs.',
+    'roll back), poll Agentforce agent test runs (Testing Center or Agentforce Studio) ' +
+    'and read their results, and set trace flags (for the connected user or any named ' +
+    'user, e.g. the Platform Integration User). May expose incidental record data ' +
+    'present in logs.',
   data_read: 'Run SOQL queries, read records, and run reports for their data (row-capped).',
   data_write:
     'Propose and execute DML and anonymous Apex scripts, and start Agentforce agent ' +
-    'evaluation runs (the agent under test executes its REAL actions — no rollback). ' +
-    'Requires data_read. DML, Apex, and bulk writes each require explicit human ' +
-    'confirmation; an evaluation run executes only a definition a human already approved ' +
-    'through the deploy ritual.',
+    'test runs on Testing Center or Agentforce Studio (the agent under test executes its ' +
+    'REAL actions — no rollback). Requires data_read. DML, Apex, and bulk writes each ' +
+    'require explicit human confirmation; a test run executes only a definition a human ' +
+    'already approved through the deploy ritual.',
 };
 
 export function emptyGrantSet(): GrantSet {
@@ -136,6 +137,9 @@ export const TOOL_GRANT_MAP: Readonly<Record<string, Grant | null>> = {
   // S35: the map carries the poll/results grant; STARTING a run additionally
   // requires data_write via an in-handler check (soql tooling-gate pattern) —
   // never read this map alone as the whole truth for run_agent_eval.
+  // S44: true for both runners (Testing Center and Agentforce Studio);
+  // detection of a bare eval reads listMetadata and therefore also needs
+  // metadata_read (in-handler check).
   run_agent_eval: 'diagnostics_read',
   get_flow_errors: 'diagnostics_read',
   validate_deploy: 'metadata_write',

@@ -807,6 +807,11 @@ describe('S30: Agentforce types', () => {
         'aiEvaluationDefinitions/Agent_Tests.aiEvaluationDefinition': strToU8(
           '<AiEvaluationDefinition/>',
         ),
+        // S44: the Studio suite and custom-scorer types index as flat rows too.
+        'aiTestingDefinitions/Order_Tests.aiTestingDefinition': strToU8('<AiTestingDefinition/>'),
+        'aiAgentScorerDefinitions/Tone_Check.aiAgentScorerDefinition': strToU8(
+          '<AiAgentScorerDefinition/>',
+        ),
         'genAiFunctions/Get_Status/Get_Status.genAiFunction': strToU8('<GenAiFunction/>'),
         'genAiFunctions/Get_Status/input/schema.json': strToU8('{"title":"inputs"}'),
         'genAiFunctions/Get_Status/output/schema.json': strToU8('{"title":"outputs"}'),
@@ -830,6 +835,8 @@ describe('S30: Agentforce types', () => {
     expect(keys.has('GenAiPlugin:Order_Topic')).toBe(true);
     expect(keys.has('GenAiPromptTemplate:Case_Summary')).toBe(true);
     expect(keys.has('AiEvaluationDefinition:Agent_Tests')).toBe(true);
+    expect(keys.has('AiTestingDefinition:Order_Tests')).toBe(true);
+    expect(keys.has('AiAgentScorerDefinition:Tone_Check')).toBe(true);
     // Bundles: exactly ONE row each, main file as filePath, every sibling in content.
     expect(keys.has('GenAiFunction:Get_Status')).toBe(true);
     expect(keys.has('GenAiPlannerBundle:Agent_v1')).toBe(true);
@@ -2048,5 +2055,349 @@ describe('S41: AuraDefinitionBundle', () => {
     const aura = rows.filter((r) => r.type === 'AuraDefinitionBundle');
     expect(aura).toHaveLength(1);
     expect(aura[0]!.filePath).toBe('aura/OpenURL/OpenURL.cmp');
+  });
+});
+
+describe('S44: Agentforce Studio test suites & custom scorers', () => {
+  const conn = { id: 'conn-1', alias: 'dev' } as ConnectionRecord;
+  const V44 = '66.0';
+  const dbAdd = { getArtifact: () => null } as unknown as ContrailDb;
+  const storeNone = {
+    readCurrentFile: () => null,
+    listCurrentFiles: () => [],
+  } as unknown as SnapshotStore;
+  const dbMod = (filePath: string) =>
+    ({ getArtifact: () => ({ filePath }) }) as unknown as ContrailDb;
+  const storeWith = (old: string) =>
+    ({ readCurrentFile: () => old, listCurrentFiles: () => [] }) as unknown as SnapshotStore;
+  const warningsOf = (res: ReturnType<typeof analyzeChanges>) =>
+    res.changes[0]!.warnings.join(' ');
+
+  // Grammar per Salesforce's open-source agents library (the type is Beta;
+  // element order and the custom-scorer marker are unverified until the
+  // live fixture — these strings pin Contrail's own arms, not the org's shape).
+  const singleCase = (n: number) =>
+    `<testCase><number>${n}</number><inputs><utterance>hi</utterance></inputs>` +
+    `<scorer><name>topic_sequence_match</name><expectedValue>agent_router</expectedValue>` +
+    `</scorer></testCase>`;
+  const multiCase = (n: number) =>
+    `<testCase><number>${n}</number><inputs><utterance>and then?</utterance>` +
+    `<conversationHistory><role>user</role><message>hi</message><index>0</index>` +
+    `</conversationHistory></inputs><scorer><name>task_resolution</name></scorer></testCase>`;
+  const suite = (cases: string) =>
+    `<AiTestingDefinition><name>Order_Tests</name><subjectName>Order_Agent</subjectName>` +
+    `<subjectType>AGENT</subjectType><subjectVersion>v2</subjectVersion>${cases}` +
+    `</AiTestingDefinition>`;
+  // Alphabetical element order and samplingRate 1.0 as the org writes them
+  // (live-observed on a retrieved std_* scorer 2026-11-08).
+  const version = (n: number, status: string) =>
+    `<scorerVersion><agentAssociation><agentApiName>Order_Agent</agentApiName>` +
+    `<inputScope>Session</inputScope><isActive>false</isActive>` +
+    `<samplingRate>1.0</samplingRate></agentAssociation><engine>` +
+    `<engineRef>Tone_Prompt</engineRef><engineType>PromptTemplate</engineType></engine>` +
+    `<label>v${n}</label><status>${status}</status><versionNumber>${n}</versionNumber>` +
+    `</scorerVersion>`;
+  const scorer = (versions: string) =>
+    `<AiAgentScorerDefinition><dataType>Text</dataType><inputScope>Session</inputScope>` +
+    `<scorerType>OpenEnded</scorerType>${versions}<semanticType>Quality</semanticType>` +
+    `</AiAgentScorerDefinition>`;
+  const idx = (xml: string, needle: string) => {
+    const i = xml.indexOf(needle);
+    expect(i, `${needle} present`).toBeGreaterThanOrEqual(0);
+    return i;
+  };
+
+  it('places both single-file types in their folders with literal members and NO meta sidecar', () => {
+    const built = buildDeployZip(
+      [
+        comp('AiTestingDefinition', 'Order_Tests', suite(singleCase(1))),
+        comp('AiAgentScorerDefinition', 'Tone_Check', scorer(version(1, 'Draft'))),
+      ],
+      [],
+      V44,
+      noMeta,
+    );
+    expect(built.files).toContain('aiTestingDefinitions/Order_Tests.aiTestingDefinition');
+    expect(built.files).toContain('aiAgentScorerDefinitions/Tone_Check.aiAgentScorerDefinition');
+    expect(built.files.filter((f) => f.endsWith('-meta.xml'))).toEqual([]);
+    expect(built.packageXml).toContain('<name>AiTestingDefinition</name>');
+    expect(built.packageXml).toContain('<members>Order_Tests</members>');
+    expect(built.packageXml).toContain('<name>AiAgentScorerDefinition</name>');
+    expect(built.packageXml).toContain('<members>Tone_Check</members>');
+    expect(zipText(built.zip, 'aiTestingDefinitions/Order_Tests.aiTestingDefinition')).toContain(
+      '<subjectName>Order_Agent</subjectName>',
+    );
+  });
+
+  it('MANIFEST ORDER: GenAiPromptTemplate precedes AiAgentScorerDefinition in package.xml; the rest stays alphabetical; destructive stays alphabetical', () => {
+    const built = buildDeployZip(
+      [
+        comp('ApexClass', 'Util', 'public class Util {}'),
+        comp('AiAgentScorerDefinition', 'Tone_Check', scorer(version(1, 'Draft'))),
+        comp('GenAiPromptTemplate', 'Tone_Prompt', '<GenAiPromptTemplate/>'),
+        comp('Bot', 'Order_Agent', '<Bot/>'),
+      ],
+      [
+        { type: 'AiAgentScorerDefinition', api_name: 'Old_Check' },
+        { type: 'GenAiPromptTemplate', api_name: 'Old_Prompt' },
+      ],
+      V44,
+      noMeta,
+    );
+    const pkg = built.packageXml;
+    // Documented requirement (Salesforce's custom-scorer guide): the template
+    // the scorer engines on appears BEFORE the scorer. Alphabetical would put
+    // the scorer first (Ai… < Gen…).
+    expect(idx(pkg, '<name>ApexClass</name>')).toBeLessThan(idx(pkg, '<name>Bot</name>'));
+    expect(idx(pkg, '<name>Bot</name>')).toBeLessThan(idx(pkg, '<name>GenAiPromptTemplate</name>'));
+    expect(idx(pkg, '<name>GenAiPromptTemplate</name>')).toBeLessThan(
+      idx(pkg, '<name>AiAgentScorerDefinition</name>'),
+    );
+    // The destructive manifest is left alphabetical — no delete ordering is
+    // documented, so nothing is moved there.
+    const del = built.destructiveXml!;
+    expect(idx(del, '<name>AiAgentScorerDefinition</name>')).toBeLessThan(
+      idx(del, '<name>GenAiPromptTemplate</name>'),
+    );
+
+    // A scorer-only package has nothing to follow — its block stays put.
+    const only = buildDeployZip(
+      [comp('AiAgentScorerDefinition', 'Tone_Check', scorer(version(1, 'Draft')))],
+      [],
+      V44,
+      noMeta,
+    );
+    expect(only.packageXml).toContain('<name>AiAgentScorerDefinition</name>');
+    expect(only.packageXml).not.toContain('<name>GenAiPromptTemplate</name>');
+
+    // Everything else is untouched by the table: a package with no scorer is
+    // plain alphabetical.
+    const plain = buildDeployZip(
+      [
+        comp('GenAiPromptTemplate', 'Tone_Prompt', '<GenAiPromptTemplate/>'),
+        comp('Bot', 'Order_Agent', '<Bot/>'),
+      ],
+      [],
+      V44,
+      noMeta,
+    );
+    expect(idx(plain.packageXml, '<name>Bot</name>')).toBeLessThan(
+      idx(plain.packageXml, '<name>GenAiPromptTemplate</name>'),
+    );
+  });
+
+  it('BETA SUITE fires on add AND modify; modify adds WHOLE-DOCUMENT REPLACE with the test-case suffix', () => {
+    const added = analyzeChanges(
+      dbAdd,
+      storeNone,
+      conn,
+      [comp('AiTestingDefinition', 'Order_Tests', suite(singleCase(1)))],
+      [],
+    );
+    const addText = warningsOf(added);
+    expect(addText).toMatch(/BETA SUITE, RUNS NOTHING/);
+    expect(addText).toContain(
+      'this deploy stores an Agentforce Studio test suite; it executes no test. Runs happen ' +
+        'through run_agent_eval (on the org probed a deployed suite appeared in the Studio Tests ' +
+        'tab only after its first run, never in Testing Center); Salesforce marks both the ' +
+        'type and its ' +
+        'runner Beta (grammar and runner can change). Contrail does not validate scorer ' +
+        "names; per Salesforce's library the org refuses an unknown name at deploy — not " +
+        'yet live-confirmed, so a green deploy never proves a scorer ran.',
+    );
+    expect(addText).not.toMatch(/WHOLE-DOCUMENT REPLACE/);
+
+    const modified = analyzeChanges(
+      dbMod('aiTestingDefinitions/Order_Tests.aiTestingDefinition'),
+      storeWith('<AiTestingDefinition>old</AiTestingDefinition>'),
+      conn,
+      [comp('AiTestingDefinition', 'Order_Tests', suite(singleCase(1)))],
+      [],
+    );
+    const modText = warningsOf(modified);
+    expect(modified.changes[0]!.change).toBe('modify');
+    expect(modText).toMatch(/BETA SUITE/);
+    expect(modText).toMatch(/WHOLE-DOCUMENT REPLACE/);
+    expect(modText).toContain(
+      "this deploy fully replaces the org's AiTestingDefinition; anything not present in " +
+        'the proposed content is removed. A <testCase> omitted here is removed from the ' +
+        'suite org-side.',
+    );
+
+    // The legacy type joins the whole-document list with the SAME suffix (a
+    // parity gap since S30) — and the BETA arm is Studio-only.
+    const legacy = analyzeChanges(
+      dbMod('aiEvaluationDefinitions/Legacy_Tests.aiEvaluationDefinition'),
+      storeWith('<AiEvaluationDefinition>old</AiEvaluationDefinition>'),
+      conn,
+      [
+        comp(
+          'AiEvaluationDefinition',
+          'Legacy_Tests',
+          '<AiEvaluationDefinition><subjectName>Order_Agent</subjectName></AiEvaluationDefinition>',
+        ),
+      ],
+      [],
+    );
+    const legacyText = warningsOf(legacy);
+    expect(legacyText).toMatch(/WHOLE-DOCUMENT REPLACE/);
+    expect(legacyText).toContain(
+      "this deploy fully replaces the org's AiEvaluationDefinition; anything not present in " +
+        'the proposed content is removed. A <testCase> omitted here is removed from the ' +
+        'suite org-side.',
+    );
+    expect(legacyText).not.toMatch(/BETA SUITE/);
+  });
+
+  it('MIXED-TURN advisory fires only when single- and multi-turn cases share a suite', () => {
+    const run = (cases: string) =>
+      warningsOf(
+        analyzeChanges(
+          dbAdd,
+          storeNone,
+          conn,
+          [comp('AiTestingDefinition', 'Order_Tests', suite(cases))],
+          [],
+        ),
+      );
+    expect(run(singleCase(1) + singleCase(2))).not.toMatch(/MIXED SINGLE- AND MULTI-TURN/);
+    expect(run(multiCase(1) + multiCase(2))).not.toMatch(/MIXED SINGLE- AND MULTI-TURN/);
+    const mixed = run(singleCase(1) + multiCase(2));
+    expect(mixed).toMatch(/MIXED SINGLE- AND MULTI-TURN CASES/);
+    expect(mixed).toContain('1 case(s) carry <conversationHistory> and 1 do not');
+    // Hedged on purpose: "reported to stall", "no cancel endpoint" — and no
+    // claim about when a stalled run releases its slot.
+    expect(mixed).toContain('has been reported to stall');
+    expect(mixed).toContain('the Studio runner has no cancel endpoint');
+    expect(mixed).not.toMatch(/slot/);
+  });
+
+  it('scorer modify: APPEND-ONLY arm names omitted versions and status regressions; add is silent; never WHOLE-DOCUMENT REPLACE', () => {
+    const added = analyzeChanges(
+      dbAdd,
+      storeNone,
+      conn,
+      [comp('AiAgentScorerDefinition', 'Tone_Check', scorer(version(1, 'Draft')))],
+      [],
+    );
+    expect(warningsOf(added)).not.toMatch(/APPEND-ONLY/);
+    expect(warningsOf(added)).not.toMatch(/WHOLE-DOCUMENT REPLACE/);
+
+    const regressing = analyzeChanges(
+      dbMod('aiAgentScorerDefinitions/Tone_Check.aiAgentScorerDefinition'),
+      storeWith(scorer(version(1, 'Available') + version(2, 'Draft'))),
+      conn,
+      [comp('AiAgentScorerDefinition', 'Tone_Check', scorer(version(1, 'Draft')))],
+      [],
+    );
+    const text = warningsOf(regressing);
+    expect(regressing.changes[0]!.change).toBe('modify');
+    expect(text).toMatch(/SCORER VERSIONS ARE APPEND-ONLY/);
+    expect(text).toContain('omitted here: 2');
+    expect(text).toContain('regressed here: 1 (Available → Draft)');
+    expect(text).toContain('Retrieve-first, carry every existing version forward, edit only Draft versions.');
+    expect(text).not.toMatch(/WHOLE-DOCUMENT REPLACE/);
+    // Documented facts only — never a claim about what the org does with the
+    // omission (unverified until the live probe).
+    expect(text).not.toMatch(/FAILS|REFUSED/);
+
+    const carried = analyzeChanges(
+      dbMod('aiAgentScorerDefinitions/Tone_Check.aiAgentScorerDefinition'),
+      storeWith(scorer(version(1, 'Available') + version(2, 'Draft'))),
+      conn,
+      [
+        comp(
+          'AiAgentScorerDefinition',
+          'Tone_Check',
+          scorer(version(1, 'Available') + version(2, 'Draft') + version(3, 'Draft')),
+        ),
+      ],
+      [],
+    );
+    const carriedText = warningsOf(carried);
+    expect(carriedText).toMatch(/APPEND-ONLY/);
+    expect(carriedText).not.toContain('omitted here');
+    expect(carriedText).not.toContain('regressed here');
+    // Forward motion is not a regression.
+    const promoted = analyzeChanges(
+      dbMod('aiAgentScorerDefinitions/Tone_Check.aiAgentScorerDefinition'),
+      storeWith(scorer(version(1, 'Draft'))),
+      conn,
+      [comp('AiAgentScorerDefinition', 'Tone_Check', scorer(version(1, 'Available')))],
+      [],
+    );
+    expect(warningsOf(promoted)).not.toContain('regressed here');
+  });
+
+  it('std_ scorer names draw the SYSTEM-PROVISIONED advisory on add and modify; custom names do not', () => {
+    const expected =
+      'SYSTEM-PROVISIONED SCORER — Salesforce creates std_* scorers for each agent (last ' +
+      'modified by Automated Process); an edit may be overwritten or refused org-side. ' +
+      'Author your own ' +
+      'scorer name for custom logic.';
+    const added = analyzeChanges(
+      dbAdd,
+      storeNone,
+      conn,
+      [comp('AiAgentScorerDefinition', 'std_Quality_Score_Order_Agent', scorer(version(1, 'Available')))],
+      [],
+    );
+    expect(added.changes[0]!.warnings).toContain(expected);
+
+    const modified = analyzeChanges(
+      dbMod('aiAgentScorerDefinitions/std_Quality_Score_Order_Agent.aiAgentScorerDefinition'),
+      storeWith(scorer(version(1, 'Available'))),
+      conn,
+      [
+        comp(
+          'AiAgentScorerDefinition',
+          'std_Quality_Score_Order_Agent',
+          scorer(version(1, 'Available') + version(2, 'Draft')),
+        ),
+      ],
+      [],
+    );
+    expect(modified.changes[0]!.warnings).toContain(expected);
+    expect(warningsOf(modified)).toMatch(/APPEND-ONLY/);
+
+    const custom = analyzeChanges(
+      dbAdd,
+      storeNone,
+      conn,
+      [comp('AiAgentScorerDefinition', 'Tone_Check', scorer(version(1, 'Draft')))],
+      [],
+    );
+    expect(warningsOf(custom)).not.toMatch(/SYSTEM-PROVISIONED/);
+    // Prefix match is anchored and case-sensitive: "Standard_Tone" is a custom name.
+    const standard = analyzeChanges(
+      dbAdd,
+      storeNone,
+      conn,
+      [comp('AiAgentScorerDefinition', 'Standard_Tone', scorer(version(1, 'Draft')))],
+      [],
+    );
+    expect(warningsOf(standard)).not.toMatch(/SYSTEM-PROVISIONED/);
+  });
+
+  it('AiEvaluationDefinition, AiTestingDefinition and AiAgentScorerDefinition deliberately produce NO permission needs', () => {
+    const res = analyzePermissionCoverage([
+      comp('AiEvaluationDefinition', 'Legacy_Tests', '<AiEvaluationDefinition/>'),
+      comp('AiTestingDefinition', 'Order_Tests', suite(singleCase(1))),
+      comp('AiAgentScorerDefinition', 'Tone_Check', scorer(version(1, 'Draft'))),
+    ]);
+    expect(res.uncovered).toHaveLength(0);
+    expect(res.warning).toBeNull();
+  });
+
+  it('deployZipEntryPath matches the builder for both types', async () => {
+    const { deployZipEntryPath } = await import('../deploy/package.js');
+    expect(deployZipEntryPath('AiTestingDefinition', 'Order_Tests')).toEqual({
+      path: 'aiTestingDefinitions/Order_Tests.aiTestingDefinition',
+      child: false,
+    });
+    expect(deployZipEntryPath('AiAgentScorerDefinition', 'Tone_Check')).toEqual({
+      path: 'aiAgentScorerDefinitions/Tone_Check.aiAgentScorerDefinition',
+      child: false,
+    });
   });
 });

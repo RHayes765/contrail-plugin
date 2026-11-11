@@ -21873,7 +21873,7 @@ var ENGINE_VERSION, SERVER_NAME;
 var init_version = __esm({
   "src/core/version.ts"() {
     "use strict";
-    ENGINE_VERSION = "0.37.2";
+    ENGINE_VERSION = "0.38.2";
     SERVER_NAME = "contrail-engine";
   }
 });
@@ -22108,9 +22108,9 @@ var init_grants = __esm({
     GRANT_DESCRIPTIONS = {
       metadata_read: "Read metadata: retrieve flows, Apex, objects/fields; search, diff, and dependency analysis.",
       metadata_write: "Validate and execute metadata deploys, and activate/deactivate Agentforce agent versions (live behavior). Requires metadata_read. Every change requires explicit human confirmation.",
-      diagnostics_read: "Read debug logs and flow error details, run Apex tests (test transactions always roll back), poll Agentforce agent evaluation runs and read their results, and set trace flags (for the connected user or any named user, e.g. the Platform Integration User). May expose incidental record data present in logs.",
+      diagnostics_read: "Read debug logs and flow error details, run Apex tests (test transactions always roll back), poll Agentforce agent test runs (Testing Center or Agentforce Studio) and read their results, and set trace flags (for the connected user or any named user, e.g. the Platform Integration User). May expose incidental record data present in logs.",
       data_read: "Run SOQL queries, read records, and run reports for their data (row-capped).",
-      data_write: "Propose and execute DML and anonymous Apex scripts, and start Agentforce agent evaluation runs (the agent under test executes its REAL actions \u2014 no rollback). Requires data_read. DML, Apex, and bulk writes each require explicit human confirmation; an evaluation run executes only a definition a human already approved through the deploy ritual."
+      data_write: "Propose and execute DML and anonymous Apex scripts, and start Agentforce agent test runs on Testing Center or Agentforce Studio (the agent under test executes its REAL actions \u2014 no rollback). Requires data_read. DML, Apex, and bulk writes each require explicit human confirmation; a test run executes only a definition a human already approved through the deploy ritual."
     };
     TOOL_GRANT_MAP = {
       connect_org: null,
@@ -22148,6 +22148,9 @@ var init_grants = __esm({
       // S35: the map carries the poll/results grant; STARTING a run additionally
       // requires data_write via an in-handler check (soql tooling-gate pattern) —
       // never read this map alone as the whole truth for run_agent_eval.
+      // S44: true for both runners (Testing Center and Agentforce Studio);
+      // detection of a bare eval reads listMetadata and therefore also needs
+      // metadata_read (in-handler check).
       run_agent_eval: "diagnostics_read",
       get_flow_errors: "diagnostics_read",
       validate_deploy: "metadata_write",
@@ -23108,7 +23111,8 @@ var init_config = __esm({
         // automatically (they share a snapshot directory). S30: Agentforce types
         // (Bot, GenAiPlugin, GenAiFunction, GenAiPlannerBundle,
         // AiAuthoringBundle, GenAiPromptTemplate[Actv], AiEvaluationDefinition,
-        // BotTemplate, BotBlock) are explicit-refresh-only too — they are
+        // BotTemplate, BotBlock — and, S44, AiTestingDefinition and
+        // AiAgentScorerDefinition) are explicit-refresh-only too — they are
         // licensing-gated (unlicensed orgs report them unsupported, degraded
         // per-type with a warning) and need salesforce.apiVersion v66+.
         types: [
@@ -28770,6 +28774,15 @@ var init_indexer = __esm({
         type: "GenAiPromptTemplateActv"
       },
       { dir: "aiEvaluationDefinitions", ext: ".aiEvaluationDefinition", type: "AiEvaluationDefinition" },
+      // S44: Studio test suites (Beta type) and custom scorers — flat single-file
+      // types (dir/suffix live-confirmed via describeMetadata 2026-11-08 at v66
+      // and v68: no metaFile); the generic -meta.xml skip is correct for both.
+      { dir: "aiTestingDefinitions", ext: ".aiTestingDefinition", type: "AiTestingDefinition" },
+      {
+        dir: "aiAgentScorerDefinitions",
+        ext: ".aiAgentScorerDefinition",
+        type: "AiAgentScorerDefinition"
+      },
       { dir: "botTemplates", ext: ".botTemplate", type: "BotTemplate" },
       { dir: "botBlocks", ext: ".botBlock", type: "BotBlock" },
       // S36: permissions & UI-action types. QuickAction file names carry the
@@ -28804,6 +28817,45 @@ var init_indexer = __esm({
         mainExts: [".cmp", ".app", ".evt", ".intf", ".tokens"]
       }
     ];
+  }
+});
+
+// src/core/agentforceScorers.ts
+function isStudioCatalogScorer(name) {
+  return Object.prototype.hasOwnProperty.call(STUDIO_SCORERS, name);
+}
+var STUDIO_SCORERS, STUDIO_RESULT_LABELS, STUDIO_PASS_FAIL_SCORERS;
+var init_agentforceScorers = __esm({
+  "src/core/agentforceScorers.ts"() {
+    "use strict";
+    STUDIO_SCORERS = {
+      topic_sequence_match: { grade: "PASS_FAIL", needsExpected: true, subjects: ["AGENT"] },
+      action_sequence_match: { grade: "PASS_FAIL", needsExpected: true, subjects: ["AGENT"] },
+      agent_handoff_match: { grade: "PASS_FAIL", needsExpected: true, subjects: ["AGENT"] },
+      bot_response_rating: { grade: "LLM_PASS_FAIL", needsExpected: true, subjects: ["AGENT"] },
+      response_match: { grade: "LLM_PASS_FAIL", needsExpected: true, subjects: ["AGENT", "PROMPT"] },
+      coherence: { grade: "LLM_0_100", needsExpected: false, subjects: ["AGENT", "PROMPT"] },
+      conciseness: { grade: "LLM_0_100", needsExpected: false, subjects: ["AGENT", "PROMPT"] },
+      factuality: { grade: "LLM_0_100", needsExpected: false, subjects: ["AGENT", "PROMPT"] },
+      completeness: { grade: "LLM_0_100", needsExpected: false, subjects: ["AGENT", "PROMPT"] },
+      task_resolution: {
+        grade: "LLM_0_5",
+        needsExpected: false,
+        subjects: ["AGENT"],
+        requiresConversationHistory: true
+      },
+      output_latency_milliseconds: { grade: "NUMERIC", needsExpected: false, subjects: ["AGENT"] }
+    };
+    STUDIO_RESULT_LABELS = {
+      "Subagent Evaluation": "topic_sequence_match",
+      "Action Evaluation": "action_sequence_match",
+      "Response Evaluation": "bot_response_rating",
+      "Coherence Evaluation": "coherence",
+      "Conciseness Evaluation": "conciseness"
+    };
+    STUDIO_PASS_FAIL_SCORERS = new Set(
+      Object.entries(STUDIO_SCORERS).filter(([, spec]) => spec.grade === "PASS_FAIL").map(([name]) => name)
+    );
   }
 });
 
@@ -29023,6 +29075,38 @@ function extractBotRefs(xml) {
   }
   return refs.list();
 }
+function addSubjectRef(refs, xml) {
+  const subject = xml.match(/<subjectName>\s*([^<]+?)\s*<\/subjectName>/)?.[1];
+  if (!subject) return;
+  const kind = xml.match(/<subjectType>\s*([^<]+?)\s*<\/subjectType>/)?.[1]?.toUpperCase();
+  refs.add(kind === "PROMPT" ? "GenAiPromptTemplate" : "Bot", subject);
+}
+function extractAiEvaluationDefinitionRefs(xml) {
+  const refs = new RefSet();
+  addSubjectRef(refs, xml);
+  return refs.list();
+}
+function extractAiTestingDefinitionRefs(xml) {
+  const refs = new RefSet();
+  addSubjectRef(refs, xml);
+  for (const m of xml.matchAll(/<scorer(?:\s[^>]*)?>([\s\S]*?)<\/scorer>/g)) {
+    const name = m[1].match(/<name>\s*([^<]+?)\s*<\/name>/)?.[1];
+    if (name && !isStudioCatalogScorer(name)) {
+      refs.add("AiAgentScorerDefinition", name);
+    }
+  }
+  return refs.list();
+}
+function extractAiAgentScorerDefinitionRefs(xml) {
+  const refs = new RefSet();
+  for (const m of xml.matchAll(/<engineRef>([^<]+)<\/engineRef>/g)) {
+    refs.add("GenAiPromptTemplate", m[1]);
+  }
+  for (const m of xml.matchAll(/<agentApiName>([^<]+)<\/agentApiName>/g)) {
+    refs.add("Bot", m[1]);
+  }
+  return refs.list();
+}
 function extractNamedCredentialRefs(xml) {
   const refs = new RefSet();
   for (const m of xml.matchAll(/<externalCredential>([^<]+)<\/externalCredential>/g)) {
@@ -29207,6 +29291,12 @@ function extractAllEdges(connectionId, artifacts, known = buildKnownArtifacts(ar
       add(a.type, a.apiName, extractGenAiPlannerRefs(a.content));
     } else if (a.type === "Bot") {
       add(a.type, a.apiName, extractBotRefs(a.content));
+    } else if (a.type === "AiEvaluationDefinition") {
+      add(a.type, a.apiName, extractAiEvaluationDefinitionRefs(a.content));
+    } else if (a.type === "AiTestingDefinition") {
+      add(a.type, a.apiName, extractAiTestingDefinitionRefs(a.content));
+    } else if (a.type === "AiAgentScorerDefinition") {
+      add(a.type, a.apiName, extractAiAgentScorerDefinitionRefs(a.content));
     } else if (a.type === "NamedCredential") {
       add(a.type, a.apiName, extractNamedCredentialRefs(a.content));
     } else if (a.type === "ExternalCredential") {
@@ -29235,6 +29325,7 @@ var init_extract = __esm({
   "src/deps/extract.ts"() {
     "use strict";
     init_xml();
+    init_agentforceScorers();
     RefSet = class {
       map = /* @__PURE__ */ new Map();
       add(toType, toName) {
@@ -29771,6 +29862,9 @@ var init_engine = __esm({
       GenAiPromptTemplate: "genAiPromptTemplates",
       GenAiPromptTemplateActv: "genAiPromptTemplateActivations",
       AiEvaluationDefinition: "aiEvaluationDefinitions",
+      // S44: Studio test suites (Beta type) and custom scorers.
+      AiTestingDefinition: "aiTestingDefinitions",
+      AiAgentScorerDefinition: "aiAgentScorerDefinitions",
       BotTemplate: "botTemplates",
       BotBlock: "botBlocks",
       // S36: permissions & UI-action types (default-manifest members).
@@ -30771,7 +30865,7 @@ function buildDeployZip(components, deletions, apiVersionNumber, metaXmlLookup) 
   for (const d of deletions) {
     validateTypeAndName(d.type, d.api_name);
   }
-  const packageXml = manifestXml(members, apiVersionNumber, "Package");
+  const packageXml = manifestXml(members, apiVersionNumber, "Package", true);
   files.set("package.xml", strToU8(packageXml));
   let destructiveXml = null;
   if (deletions.length > 0) {
@@ -30782,7 +30876,7 @@ function buildDeployZip(components, deletions, apiVersionNumber, metaXmlLookup) 
       list.push(d.api_name);
       delMembers.set(manifestType, list);
     }
-    destructiveXml = manifestXml(delMembers, apiVersionNumber, "Package");
+    destructiveXml = manifestXml(delMembers, apiVersionNumber, "Package", false);
     files.set("destructiveChangesPost.xml", strToU8(destructiveXml));
   }
   return {
@@ -30792,13 +30886,28 @@ function buildDeployZip(components, deletions, apiVersionNumber, metaXmlLookup) 
     destructiveXml
   };
 }
-function manifestXml(members, apiVersionNumber, root) {
-  const types = [...members.entries()].sort(([a], [b]) => a.localeCompare(b)).map(
-    ([type, names]) => `    <types>
+function orderManifestTypes(types, dependencyOrder) {
+  const sorted = [...types].sort((a, b) => a.localeCompare(b));
+  if (!dependencyOrder) return sorted;
+  for (const [late2, befores] of Object.entries(MANIFEST_TYPE_AFTER)) {
+    const i = sorted.indexOf(late2);
+    if (i < 0) continue;
+    const lastBefore = Math.max(...befores.map((b) => sorted.indexOf(b)));
+    if (lastBefore > i) {
+      sorted.splice(i, 1);
+      sorted.splice(lastBefore, 0, late2);
+    }
+  }
+  return sorted;
+}
+function manifestXml(members, apiVersionNumber, root, dependencyOrder) {
+  const types = orderManifestTypes([...members.keys()], dependencyOrder).map((type) => {
+    const names = members.get(type);
+    return `    <types>
 ${names.sort().map((n) => `        <members>${escapeXml(n)}</members>`).join("\n")}
         <name>${escapeXml(type)}</name>
-    </types>`
-  ).join("\n");
+    </types>`;
+  }).join("\n");
   return `<?xml version="1.0" encoding="UTF-8"?>
 <${root} xmlns="${XMLNS}">
 ${types}
@@ -31006,9 +31115,14 @@ function analyzeChanges(db, store, conn, components, deletions) {
           );
         }
       }
-      if ((c.type === "FlexiPage" || c.type === "CustomApplication" || c.type === "Layout" || c.type === "Report" || c.type === "Dashboard" || c.type === "GenAiPlugin" || c.type === "GenAiPromptTemplate" || c.type === "Bot" || c.type === "LeadConvertSettings" || c.type === "NamedCredential" || c.type === "ExternalCredential" || c.type === "AuthProvider" || c.type === "PermissionSetGroup" || c.type === "MutingPermissionSet") && change === "modify") {
+      if ((c.type === "FlexiPage" || c.type === "CustomApplication" || c.type === "Layout" || c.type === "Report" || c.type === "Dashboard" || c.type === "GenAiPlugin" || c.type === "GenAiPromptTemplate" || c.type === "Bot" || c.type === "LeadConvertSettings" || c.type === "NamedCredential" || c.type === "ExternalCredential" || c.type === "AuthProvider" || c.type === "PermissionSetGroup" || c.type === "MutingPermissionSet" || // S44: both agent-test suite types are single documents of
+      // <testCase> blocks (the legacy one was a parity gap since S30).
+      // AiAgentScorerDefinition is deliberately NOT here — its versions
+      // are documented append-only, which makes the generic "removed"
+      // sentence false; it has its own arm below.
+      c.type === "AiEvaluationDefinition" || c.type === "AiTestingDefinition") && change === "modify") {
         warnings.push(
-          `WHOLE-DOCUMENT REPLACE \u2014 this deploy fully replaces the org's ${c.type}; anything not present in the proposed content is removed.` + (c.type === "Bot" ? " A <botVersions> block omitted from a Bot document is a VERSION DELETE." : c.type === "LeadConvertSettings" ? " An <objectMapping> omitted here is a lead field mapping DELETED org-wide." : c.type === "ExternalCredential" ? " A principal parameter omitted here is DELETED org-side \u2014 along with the credential values a human entered for it in Setup." : c.type === "PermissionSetGroup" ? " A <permissionSets> member omitted here is DETACHED from the group org-side \u2014 users assigned the group lose that permission set." : c.type === "MutingPermissionSet" ? " A muted permission omitted here is UN-MUTED org-side, silently RESTORING it to every user assigned the group." : "")
+          `WHOLE-DOCUMENT REPLACE \u2014 this deploy fully replaces the org's ${c.type}; anything not present in the proposed content is removed.` + (c.type === "Bot" ? " A <botVersions> block omitted from a Bot document is a VERSION DELETE." : c.type === "LeadConvertSettings" ? " An <objectMapping> omitted here is a lead field mapping DELETED org-wide." : c.type === "ExternalCredential" ? " A principal parameter omitted here is DELETED org-side \u2014 along with the credential values a human entered for it in Setup." : c.type === "PermissionSetGroup" ? " A <permissionSets> member omitted here is DETACHED from the group org-side \u2014 users assigned the group lose that permission set." : c.type === "MutingPermissionSet" ? " A muted permission omitted here is UN-MUTED org-side, silently RESTORING it to every user assigned the group." : c.type === "AiEvaluationDefinition" || c.type === "AiTestingDefinition" ? " A <testCase> omitted here is removed from the suite org-side." : "")
         );
       }
       if (c.type === "GenAiPromptTemplate" && change === "modify") {
@@ -31020,6 +31134,18 @@ function analyzeChanges(db, store, conn, components, deletions) {
           );
         }
       }
+      if (c.type === "AiAgentScorerDefinition" && change === "modify") {
+        const oldVersions = scorerVersionStatuses(oldContent ?? "");
+        const newVersions = scorerVersionStatuses(c.content);
+        const omitted = [...oldVersions.keys()].filter((n) => !newVersions.has(n));
+        const regressed = [...oldVersions.entries()].filter(([n, was]) => {
+          const now = newVersions.get(n);
+          return now !== void 0 && SCORER_STATUS_RANK[was] !== void 0 && SCORER_STATUS_RANK[now] !== void 0 && SCORER_STATUS_RANK[now] < SCORER_STATUS_RANK[was];
+        }).map(([n, was]) => `${n} (${was} \u2192 ${newVersions.get(n)})`);
+        warnings.push(
+          `SCORER VERSIONS ARE APPEND-ONLY \u2014 the org never deletes a <scorerVersion>: one omitted from this document is NOT removed` + (omitted.length > 0 ? ` (org-side versions omitted here: ${omitted.join(", ")})` : "") + `. Status is documented one-way (Draft \u2192 Available \u2192 Archived); a regression here is not something the org performs` + (regressed.length > 0 ? ` (regressed here: ${regressed.join("; ")})` : "") + `. Retrieve-first, carry every existing version forward, edit only Draft versions.`
+        );
+      }
       if ((c.type === "ReportFolder" || c.type === "DashboardFolder") && change === "modify") {
         warnings.push(
           `FOLDER REPLACE \u2014 the folderShares in this content fully replace the folder's sharing; shares omitted here are revoked.`
@@ -31030,6 +31156,24 @@ function analyzeChanges(db, store, conn, components, deletions) {
           `FULL-RECORD REPLACE \u2014 fields omitted from this content are reset to null/default on the deployed record.`
         );
       }
+    }
+    if (c.type === "AiTestingDefinition") {
+      warnings.push(
+        `BETA SUITE, RUNS NOTHING \u2014 this deploy stores an Agentforce Studio test suite; it executes no test. Runs happen through run_agent_eval (on the org probed a deployed suite appeared in the Studio Tests tab only after its first run, never in Testing Center); Salesforce marks both the type and its runner Beta (grammar and runner can change). Contrail does not validate scorer names; per Salesforce's library the org refuses an unknown name at deploy \u2014 not yet live-confirmed, so a green deploy never proves a scorer ran.`
+      );
+      const cases = c.content.match(/<testCase>[\s\S]*?<\/testCase>/g) ?? [];
+      const multi = cases.filter((t) => /<conversationHistory>/.test(t)).length;
+      const single = cases.length - multi;
+      if (multi > 0 && single > 0) {
+        warnings.push(
+          `MIXED SINGLE- AND MULTI-TURN CASES \u2014 ${multi} case(s) carry <conversationHistory> and ${single} do not. Salesforce's guidance keeps them in separate suites (a mixed suite has been reported to stall, and the Studio runner has no cancel endpoint). Split the suite unless a mixed one has completed on this org.`
+        );
+      }
+    }
+    if (c.type === "AiAgentScorerDefinition" && /^std_/.test(c.api_name)) {
+      warnings.push(
+        `SYSTEM-PROVISIONED SCORER \u2014 Salesforce creates std_* scorers for each agent (last modified by Automated Process); an edit may be overwritten or refused org-side. Author your own scorer name for custom logic.`
+      );
     }
     if (c.type === "PermissionSetGroup") {
       warnings.push(
@@ -31141,6 +31285,15 @@ function externalCredentialPrincipals(xml) {
     if (name) names.push(name);
   }
   return names;
+}
+function scorerVersionStatuses(xml) {
+  const out = /* @__PURE__ */ new Map();
+  for (const block of xml.match(/<scorerVersion>[\s\S]*?<\/scorerVersion>/g) ?? []) {
+    const n = block.match(/<versionNumber>\s*(\d+)\s*<\/versionNumber>/)?.[1];
+    const s = block.match(/<status>\s*([A-Za-z]+)\s*<\/status>/)?.[1];
+    if (n) out.set(n, s ?? "");
+  }
+  return out;
 }
 function isCustomEntity(name) {
   return /__(c|b|e|x)$/i.test(name);
@@ -31289,7 +31442,7 @@ function readOldContent(store, conn, type, apiName, filePath) {
   }
   return null;
 }
-var FILE_TYPES, XMLNS_META, CHILD_TYPES2, NAME_RE, FOLDER_SEGMENT_RE, BUNDLE_REL_SEGMENT_RE, BUNDLE_MAX_FILES, BUNDLE_MAX_DEPTH, AURA_SECONDARIES, AURA_MAX_FILE_BYTES, AURA_DEFTYPE_FILES, XMLNS;
+var FILE_TYPES, XMLNS_META, CHILD_TYPES2, NAME_RE, FOLDER_SEGMENT_RE, BUNDLE_REL_SEGMENT_RE, BUNDLE_MAX_FILES, BUNDLE_MAX_DEPTH, AURA_SECONDARIES, AURA_MAX_FILE_BYTES, AURA_DEFTYPE_FILES, XMLNS, MANIFEST_TYPE_AFTER, SCORER_STATUS_RANK;
 var init_package = __esm({
   "src/deploy/package.ts"() {
     "use strict";
@@ -31327,7 +31480,7 @@ var init_package = __esm({
       ConnectedApp: { dir: "connectedApps", ext: ".connectedApp" },
       NamedCredential: { dir: "namedCredentials", ext: ".namedCredential" },
       ExternalCredential: { dir: "externalCredentials", ext: ".externalCredential" },
-      // S33: lowercase dir AND extension — unusual but live-confirmed (personal-dev
+      // S33: lowercase dir AND extension — unusual but live-confirmed (a dev org
       // retrieve 2026-09-24), matching the metadata catalog.
       AuthProvider: { dir: "authproviders", ext: ".authprovider" },
       PlatformEventChannel: { dir: "platformEventChannels", ext: ".platformEventChannel" },
@@ -31393,6 +31546,22 @@ var init_package = __esm({
         ext: ".genAiPromptTemplateActivation"
       },
       AiEvaluationDefinition: { dir: "aiEvaluationDefinitions", ext: ".aiEvaluationDefinition" },
+      // S44: the Agentforce Studio Tests-tab suite and its companion custom-
+      // scorer type. AiTestingDefinition is BETA per Salesforce (the type AND
+      // its runner); AiAgentScorerDefinition is documented (Agentforce dev
+      // guide). Both dir/suffix pairs live-confirmed via describeMetadata
+      // 2026-11-08 at v66 and v68: neither inFolder, neither metaFile, no
+      // children — plain single-file documents, no meta sidecar, no
+      // permission-set block (analyzePermissionCoverage says so). Scorer
+      // VERSIONS are documented append-only org-side — the analyzeChanges arm
+      // carries that honesty — and when a GenAiPromptTemplate a scorer engines
+      // on ships in the same package, MANIFEST_TYPE_AFTER lists the template's
+      // <types> block first (the one documented order-sensitive pair).
+      AiTestingDefinition: { dir: "aiTestingDefinitions", ext: ".aiTestingDefinition" },
+      AiAgentScorerDefinition: {
+        dir: "aiAgentScorerDefinitions",
+        ext: ".aiAgentScorerDefinition"
+      },
       BotTemplate: { dir: "botTemplates", ext: ".botTemplate" },
       BotBlock: { dir: "botBlocks", ext: ".botBlock" },
       // S34: Agent Script deploys as a DRAFT STAGE (reversing S30's read-only
@@ -31533,6 +31702,10 @@ var init_package = __esm({
       DOCUMENTATION: ".auradoc"
     };
     XMLNS = "http://soap.sforce.com/2006/04/metadata";
+    MANIFEST_TYPE_AFTER = {
+      AiAgentScorerDefinition: ["GenAiPromptTemplate"]
+    };
+    SCORER_STATUS_RANK = { Draft: 0, Available: 1, Archived: 2 };
   }
 });
 
@@ -35787,14 +35960,19 @@ function registerDataTools(server, deps) {
   server.registerTool(
     "run_agent_eval",
     {
-      title: "Run an Agentforce Testing Center evaluation",
-      description: 'Start and poll an Agentforce Testing Center evaluation run for an AiEvaluationDefinition already deployed to the org. Two-step like run_apex_tests: submit with eval (the definition DeveloperName) for a run_id; call again with run_id to poll and, once complete, read per-case results \u2014 routed topic, executed action sequence, and each expectation outcome. Side effects, honestly: the agent under test executes its REAL actions during the run \u2014 records they create or change are NOT rolled back (unlike Apex test runs), so prefer sandboxes for agents whose actions write. Runs take MINUTES (poll sparingly); orgs allow ~10 concurrent runs. Polling and results need diagnostics_read; STARTING a run additionally requires data_write, because it triggers real agent-action execution \u2014 the definition itself was approved through the deploy ritual, which is why no further confirmation code is needed here. Requires an ACTIVE agent version. (The newer Studio "AI testing" beta API is undocumented \u2014 not available through Contrail.)',
+      title: "Run an Agentforce agent test (Testing Center or Studio)",
+      description: "Start and poll an Agentforce agent test run for a definition already deployed to the org, on either runner: Testing Center (AiEvaluationDefinition \u2014 the documented Connect API) or the Agentforce Studio Tests tab (AiTestingDefinition \u2014 BETA: Salesforce labels the type and its runner Beta, the runner is absent from the Connect REST reference, and its result schema may change). Two-step like run_apex_tests: submit with eval (the definition DeveloperName) for a run_id; call again with run_id to poll and, once complete, read per-case results \u2014 Testing Center: routed topic, executed action sequence and each expectation outcome; Studio: the agent's response (subject_response) and each scorer's outcome, with an explanation only when the scorer response carries one. Runner selection: a run_id picks its runner by prefix (4KB = Testing Center, 3A2 = Studio \u2014 both live-confirmed; anything else is refused); a bare eval is looked up live via listMetadata across both types, which needs the metadata_read grant \u2014 one match picks the runner (and the org's exact-case name is what gets submitted), a name held by both is refused as ambiguous, a name held by neither is refused (check the name or refresh_snapshot), and a failed lookup is refused too \u2014 nothing is ever submitted to a guessed runner. Pass runner to skip detection (no metadata_read needed then). Side effects, honestly, on BOTH runners: the agent under test executes its REAL actions during the run \u2014 records they create or change are NOT rolled back (unlike Apex test runs), so prefer sandboxes for agents whose actions write. Runs take MINUTES (poll sparingly); orgs allow ~10 concurrent runs. Polling and results need diagnostics_read; STARTING a run additionally requires data_write, because it triggers real agent-action execution \u2014 the definition itself was approved through the deploy ritual, which is why no further confirmation code is needed here. Testing Center requires an ACTIVE agent version; whether a Studio suite's subjectVersion can target a non-active version is unverified \u2014 expect a run-level FAILED with error_message if not. Studio pass/fail is DERIVED from each scorer's JSON response and is null when no explicit verdict exists \u2014 read the raw scorer rows when it matters.",
       inputSchema: {
         connection: external_exports.string().describe("Connection alias (or id)."),
         eval: external_exports.string().regex(/^[A-Za-z][A-Za-z0-9_]*$/).optional().describe(
-          "The AiEvaluationDefinition DeveloperName to run. Exactly one of eval, run_id."
+          "The test definition DeveloperName to run \u2014 an AiEvaluationDefinition (Testing Center) or an AiTestingDefinition (Agentforce Studio); the runner is detected live unless runner is passed. Exactly one of eval, run_id."
         ),
-        run_id: external_exports.string().regex(/^[a-zA-Z0-9]{15}([a-zA-Z0-9]{3})?$/).optional().describe("Run id from a previous submit \u2014 polls status and, when done, results."),
+        run_id: external_exports.string().regex(/^[a-zA-Z0-9]{15}([a-zA-Z0-9]{3})?$/).optional().describe(
+          "Run id from a previous submit \u2014 polls status and, when done, results. The key prefix picks the runner (4KB = Testing Center, 3A2 = Agentforce Studio; both live-confirmed \u2014 pass runner if the prefix differs)."
+        ),
+        runner: external_exports.enum(["testing_center", "agentforce_studio"]).optional().describe(
+          "Force a runner instead of detecting it: testing_center (AiEvaluationDefinition) or agentforce_studio (AiTestingDefinition \u2014 BETA). Needed when both types hold the same name, or when the connection lacks metadata_read."
+        ),
         include_details: external_exports.boolean().optional().describe("true: include the org's raw testCases payload alongside the summary.")
       }
     },
@@ -35803,14 +35981,16 @@ function registerDataTools(server, deps) {
       const client = rest(conn);
       const modes = [args.eval, args.run_id].filter((v) => v !== void 0);
       if (modes.length !== 1) return fail("Pass exactly one of eval or run_id.");
+      const details = args.include_details === true;
+      const apiVersion = config2.salesforce.apiVersion;
       if (args.run_id !== void 0) {
-        return pollAgentEvalRun(
-          client,
-          config2.salesforce.apiVersion,
-          conn.alias,
-          args.run_id,
-          args.include_details === true
-        );
+        const runner2 = args.runner ?? RUNNER_BY_RUN_ID_PREFIX[args.run_id.slice(0, 3)];
+        if (!runner2) {
+          return fail(
+            `Cannot tell which runner issued run_id "${args.run_id}": Testing Center run ids start with 4KB and Agentforce Studio run ids with 3A2 (both live-confirmed). If it came from one of them anyway, pass runner explicitly.`
+          );
+        }
+        return runner2 === "agentforce_studio" ? pollAgentStudioRun(client, apiVersion, conn.alias, args.run_id, details) : pollAgentEvalRun(client, apiVersion, conn.alias, args.run_id, details);
       }
       if (!conn.grants.data_write) {
         audit.record("grant.refused", {
@@ -35823,26 +36003,81 @@ function registerDataTools(server, deps) {
           `Starting an evaluation run executes the agent's REAL actions, so it requires the "data_write" grant on "${conn.alias}" in addition to diagnostics_read (polling an existing run_id needs only diagnostics_read). Grants are set on the connection management page (manage_connection).`
         );
       }
-      const res = await client.request(
-        `/services/data/${config2.salesforce.apiVersion}/einstein/ai-evaluations/runs`,
-        { method: "POST", body: JSON.stringify({ aiEvaluationDefinitionName: args.eval }) }
-      );
+      let runner;
+      let definition;
+      let detection;
+      if (args.runner) {
+        runner = args.runner;
+        definition = args.eval;
+        detection = { method: "explicit" };
+      } else {
+        if (!conn.grants.metadata_read) {
+          audit.record("grant.refused", {
+            connectionId: conn.id,
+            tool: "run_agent_eval",
+            outcome: "refused",
+            detail: { required: "metadata_read", reason: "agent_eval_runner_detection" }
+          });
+          return fail(
+            `Runner detection reads the org's metadata inventory and needs the "metadata_read" grant on "${conn.alias}" \u2014 pass runner: testing_center or agentforce_studio to say which runner holds "${args.eval}" (no lookup is made then). Nothing was started.`
+          );
+        }
+        const soap = new MetadataSoapClient(tokenMgr, conn, apiVersion);
+        const found = await detectAgentTestRunner(soap, args.eval);
+        if (found.kind === "lookup_failed") {
+          return fail(
+            `runner detection failed: ${found.error}. Nothing was started; pass runner explicitly (testing_center or agentforce_studio) or retry.`
+          );
+        }
+        if (found.kind === "both") {
+          return fail(
+            `Both an AiEvaluationDefinition (Testing Center) and an AiTestingDefinition (Agentforce Studio) named "${args.eval}" exist on "${conn.alias}". Pass runner: "testing_center" or "agentforce_studio" to say which to run.`
+          );
+        }
+        if (found.kind === "none") {
+          const gap = found.unsupported.length ? ` (this org/API version does not know: ${found.unsupported.join(", ")})` : "";
+          return fail(
+            `No deployed test definition named "${args.eval}" of either type on "${conn.alias}"${gap}. Check the name (list_metadata live=true with type AiEvaluationDefinition or AiTestingDefinition, or refresh_snapshot), or deploy it first. Nothing was started.`
+          );
+        }
+        runner = found.runner;
+        definition = found.fullName;
+        detection = { method: "live_lookup", unsupported_types: found.unsupported };
+      }
+      const studio = runner === "agentforce_studio";
+      const submitPath = studio ? `/services/data/${apiVersion}/einstein/ai-testing/runs` : `/services/data/${apiVersion}/einstein/ai-evaluations/runs`;
+      const submitBody = studio ? { testDefinitionName: definition } : { aiEvaluationDefinitionName: definition };
+      const res = await client.request(submitPath, {
+        method: "POST",
+        body: JSON.stringify(submitBody)
+      });
       const submitted = await res.json();
+      if (studio && submitted.runId === void 0) {
+        return fail(
+          `The Agentforce Studio runner accepted the request but returned no run id \u2014 Salesforce's own client reads this as "a run of ${definition} is already in progress". Nothing new was started; poll the in-flight run_id if you have it, or resubmit once it finishes. Raw response: ${JSON.stringify(submitted).slice(0, 200)}`
+        );
+      }
       if (typeof submitted.runId !== "string" || !SF_ID_RE.test(submitted.runId)) {
         return fail(
-          `unexpected response from the evaluation runner: ${JSON.stringify(submitted).slice(0, 200)}`
+          `unexpected response from the ${studio ? "Studio test" : "evaluation"} runner: ${JSON.stringify(submitted).slice(0, 200)}`
         );
       }
       audit.record("agent_eval.started", {
         connectionId: conn.id,
         tool: "run_agent_eval",
-        detail: { definition: args.eval, runId: submitted.runId }
+        detail: { definition, runId: submitted.runId, runner }
       });
       return ok({
         connection: conn.alias,
         run_id: submitted.runId,
-        status: typeof submitted.status === "string" ? submitted.status : "NEW",
-        note: "Submitted \u2014 the agent under test will execute its REAL actions (no rollback). Runs take minutes; call run_agent_eval again with this run_id to poll, sparingly."
+        runner,
+        runner_detection: detection,
+        definition,
+        // Testing Center documents NEW as the initial status; the Studio
+        // runner's initial status is unverified, so it is the org's raw
+        // word or null — never an invented literal.
+        status: typeof submitted.status === "string" ? submitted.status : studio ? null : "NEW",
+        note: studio ? "Submitted to the Agentforce Studio runner \u2014 BETA: Salesforce labels the type and its runner Beta and the runner is absent from the Connect REST reference, so statuses and result fields may change. The agent under test will execute its REAL actions (no rollback). Runs take minutes; call run_agent_eval again with this run_id to poll, sparingly." : "Submitted \u2014 the agent under test will execute its REAL actions (no rollback). Runs take minutes; call run_agent_eval again with this run_id to poll, sparingly."
       });
     })
   );
@@ -36261,6 +36496,44 @@ async function pollApexTestRun(client, alias, runId) {
     ...coverageNote ? { coverage_note: coverageNote } : {}
   });
 }
+async function detectAgentTestRunner(soap, name) {
+  let listed;
+  try {
+    listed = await soap.listMetadataDetailed([
+      RUNNER_TYPE.testing_center,
+      RUNNER_TYPE.agentforce_studio
+    ]);
+  } catch (err2) {
+    return { kind: "lookup_failed", error: err2 instanceof Error ? err2.message : String(err2) };
+  }
+  const wanted = name.toLowerCase();
+  const holders = [];
+  for (const runner of Object.keys(RUNNER_TYPE)) {
+    const hit = listed.props.find(
+      (p) => p.type === RUNNER_TYPE[runner] && p.fullName.toLowerCase() === wanted
+    );
+    if (hit) holders.push({ runner, fullName: hit.fullName });
+  }
+  if (holders.length === 2) return { kind: "both" };
+  if (holders.length === 1) {
+    return { kind: "one", ...holders[0], unsupported: listed.unsupportedTypes };
+  }
+  return { kind: "none", unsupported: listed.unsupportedTypes };
+}
+function caseVerdict(rows) {
+  if (rows.some((r) => r.passed === false)) return "failed";
+  if (rows.length > 0 && rows.every((r) => r.passed === true)) return "passed";
+  return "indeterminate";
+}
+function tallyVerdicts(cases) {
+  const totals = { cases: cases.length, passed: 0, failed: 0, indeterminate: 0 };
+  for (const c of cases) {
+    if (c.verdict === "passed") totals.passed += 1;
+    else if (c.verdict === "failed") totals.failed += 1;
+    else totals.indeterminate += 1;
+  }
+  return totals;
+}
 async function pollAgentEvalRun(client, apiVersion, alias, runId, includeDetails) {
   const base = `/services/data/${apiVersion}/einstein/ai-evaluations/runs/${runId}`;
   const statusRes = await client.request(base);
@@ -36270,6 +36543,7 @@ async function pollAgentEvalRun(client, apiVersion, alias, runId, includeDetails
     return ok({
       connection: alias,
       run_id: runId,
+      runner: "testing_center",
       status,
       error_message: run.errorMessage ?? null,
       note: "The RUN ITSELF failed \u2014 no case results exist. This is not a test failure."
@@ -36279,6 +36553,7 @@ async function pollAgentEvalRun(client, apiVersion, alias, runId, includeDetails
     return ok({
       connection: alias,
       run_id: runId,
+      runner: "testing_center",
       status,
       start_time: run.startTime ?? null,
       note: "Still running \u2014 evaluation runs take minutes. Poll again sparingly."
@@ -36306,11 +36581,10 @@ async function pollAgentEvalRun(client, apiVersion, alias, runId, includeDetails
       error_code: row.errorCode ?? null,
       error_message: row.errorMessage ?? null
     }));
-    const verdict = expectations.some((e) => e.passed === false) ? "failed" : expectations.length > 0 && expectations.every((e) => e.passed === true) ? "passed" : "indeterminate";
     return {
       number: tc.testNumber ?? null,
       status: tc.status ?? null,
-      verdict,
+      verdict: caseVerdict(expectations),
       utterance: tc.inputs?.utterance ?? null,
       topic: tc.generatedData?.topic ?? null,
       actions_sequence: tc.generatedData?.actionsSequence ?? null,
@@ -36318,16 +36592,12 @@ async function pollAgentEvalRun(client, apiVersion, alias, runId, includeDetails
       expectations
     };
   });
-  const totals = { cases: cases.length, passed: 0, failed: 0, indeterminate: 0 };
-  for (const c of cases) {
-    if (c.verdict === "passed") totals.passed += 1;
-    else if (c.verdict === "failed") totals.failed += 1;
-    else totals.indeterminate += 1;
-  }
+  const totals = tallyVerdicts(cases);
   const { kept, dropped } = fitToBudget(cases.map((c) => truncateDeep(c)), MAX_RESPONSE_CHARS);
   return ok({
     connection: alias,
     run_id: runId,
+    runner: "testing_center",
     status,
     subject_name: report.subjectName ?? null,
     start_time: run.startTime ?? null,
@@ -36339,7 +36609,154 @@ async function pollAgentEvalRun(client, apiVersion, alias, runId, includeDetails
     ...includeDetails ? { raw_test_cases: truncateDeep(rawCases) } : {}
   });
 }
-var GRANT_GATED_SOBJECTS, DEFAULT_ROWS, MAX_ROWS, MAX_RESPONSE_CHARS, LOG_SLICE, DEFAULT_REPORT_ROWS, MAX_REPORT_GROUPS, MAX_STRING_FIELD, SF_ID_RE, TRACE_LEVEL_PRESETS;
+function decodeHtmlEntities(s) {
+  return s.replace(/&(#x[0-9a-fA-F]+|#\d+|[a-zA-Z]+);/g, (whole, body) => {
+    if (body.startsWith("#x")) return String.fromCodePoint(parseInt(body.slice(2), 16));
+    if (body.startsWith("#")) return String.fromCodePoint(parseInt(body.slice(1), 10));
+    return HTML_ENTITIES[body] ?? whole;
+  });
+}
+function parseStudioJson(v) {
+  if (typeof v !== "string") return v ?? null;
+  const decoded = /&(#x?[0-9a-fA-F]+|quot|amp|lt|gt|apos);/.test(v) ? decodeHtmlEntities(v) : v;
+  try {
+    return JSON.parse(decoded);
+  } catch {
+    return decoded;
+  }
+}
+function studioPassedOf(parsed) {
+  if (!parsed) return null;
+  const status = parsed.status;
+  if (typeof status === "string") {
+    const u = status.trim().toUpperCase();
+    if (u === "PASS") return true;
+    if (u === "FAIL") return false;
+  }
+  for (const key2 of ["result", "passed", "outcome", "verdict"]) {
+    const v = parsed[key2];
+    if (v === true) return true;
+    if (v === false) return false;
+    if (typeof v === "string") {
+      const u = v.trim().toUpperCase();
+      if (u === "PASS" || u === "PASSED" || u === "TRUE") return true;
+      if (u === "FAIL" || u === "FAILED" || u === "FALSE") return false;
+    }
+  }
+  if (parsed.actualValue !== void 0 && parsed.expectedValue !== void 0) {
+    return normScalar(parsed.actualValue) === normScalar(parsed.expectedValue);
+  }
+  return null;
+}
+function summarizeSubjectResponse(v) {
+  const parsed = parseStudioJson(v);
+  const obj = asObject(parsed);
+  if (!obj) {
+    return { text: typeof parsed === "string" ? parsed : null, routedTopics: [], sessionId: null };
+  }
+  const message = asObject(obj.agentMessage)?.message;
+  const value = asObject(obj.value)?.fullResponse;
+  const runs = asObject(asObject(obj.agentResponse)?.sessionState)?.runs;
+  const topics = Array.isArray(runs) ? [
+    ...new Set(
+      runs.map((r) => asObject(r)?.topicName).filter((t) => typeof t === "string")
+    )
+  ] : [];
+  return {
+    text: typeof message === "string" ? message : typeof value === "string" ? value : null,
+    routedTopics: topics,
+    sessionId: typeof obj.sessionId === "string" ? obj.sessionId : null
+  };
+}
+async function pollAgentStudioRun(client, apiVersion, alias, runId, includeDetails) {
+  const base = `/services/data/${apiVersion}/einstein/ai-testing/runs/${runId}`;
+  const statusRes = await client.request(base);
+  const run = await statusRes.json();
+  const status = typeof run.status === "string" ? run.status : "UNKNOWN";
+  const upper = status.toUpperCase();
+  const terminal = upper === "SUCCESS" || upper === "FAILED" || upper === "TERMINATED";
+  if (!terminal) {
+    return ok({
+      connection: alias,
+      run_id: runId,
+      runner: "agentforce_studio",
+      status,
+      start_time: run.startTime ?? null,
+      note: "Still running \u2014 Studio test runs take minutes. Poll again sparingly. (Beta runner.)"
+    });
+  }
+  let report = {};
+  let resultsError = null;
+  try {
+    report = await (await client.request(`${base}/results`)).json();
+  } catch (err2) {
+    if (upper === "SUCCESS") throw err2;
+    resultsError = err2 instanceof Error ? err2.message : String(err2);
+  }
+  const rawCases = Array.isArray(report.testCases) ? report.testCases : [];
+  const cases = rawCases.map((tc) => {
+    const scorers = (tc.testScorerResults ?? []).map((row) => {
+      const name = typeof row.scorerName === "string" ? row.scorerName : null;
+      const parsed = parseStudioJson(row.scorerResponse);
+      const obj = asObject(parsed);
+      const explain = obj?.reasoning ?? obj?.explanation ?? obj?.metricExplainability;
+      return {
+        name,
+        // The org reports the Tests-tab column LABEL; map the labels live-observed
+        // back to the catalog scorer, null for anything else (custom scorers included).
+        scorer: name !== null ? STUDIO_RESULT_LABELS[name] ?? null : null,
+        passed: studioPassedOf(obj),
+        expected_value: obj?.expectedValue ?? obj?.expected ?? null,
+        actual_value: obj?.actualValue ?? obj?.actual ?? null,
+        score: typeof obj?.score === "number" ? obj.score : typeof obj?.metricScore === "number" ? obj.metricScore : null,
+        explanation: typeof explain === "string" ? explain.slice(0, 500) : null,
+        evaluation_type: typeof obj?.evaluationType === "string" ? obj.evaluationType : null,
+        compute_status: typeof obj?.computeStatus === "string" ? obj.computeStatus : null,
+        raw: parsed ?? null
+      };
+    });
+    const subject = summarizeSubjectResponse(tc.subjectResponse);
+    return {
+      number: tc.testNumber ?? null,
+      verdict: caseVerdict(scorers),
+      subject_response: subject.text,
+      routed_topics: subject.routedTopics,
+      session_id: subject.sessionId,
+      scorers
+    };
+  });
+  const totals = tallyVerdicts(cases);
+  const { kept, dropped } = fitToBudget(cases.map((c) => truncateDeep(c)), MAX_RESPONSE_CHARS);
+  const notes = [
+    "Agentforce Studio runner is BETA: statuses and the per-scorer response schema are undocumented (shapes live-observed 2026-11-11); pass/fail is DERIVED \u2014 the Pass/Fail status in a scorer response, or actualValue === expectedValue on match scorers (null = neither present \u2014 read raw)."
+  ];
+  if (upper === "FAILED") {
+    notes.push(
+      "The RUN reported FAILED \u2014 see error_message; case results, if any, are partial. Observed on this runner: one errored or skipped scorer column (a scorer present on some cases but not others) fails the run and the API then returns NO case results even though the Tests tab shows them \u2014 give every case the same scorer set."
+    );
+  }
+  if (upper === "TERMINATED") {
+    notes.push("Run TERMINATED before finishing \u2014 partial results at best, NOT a pass.");
+  }
+  if (resultsError) notes.push(`Results could not be read: ${resultsError}`);
+  return ok({
+    connection: alias,
+    run_id: runId,
+    runner: "agentforce_studio",
+    status,
+    start_time: run.startTime ?? null,
+    end_time: run.endTime ?? null,
+    // Live-observed 2026-11-09: the org nests the message under errorRepresentation on
+    // both the status and the results body; Salesforce's library typed it top-level.
+    error_message: run.errorMessage ?? run.errorRepresentation?.errorMessage ?? report.errorRepresentation?.errorMessage ?? null,
+    totals,
+    cases: kept,
+    ...dropped > 0 ? { cases_truncated: true, cases_note: `Dropped ${dropped} case(s) to fit the response.` } : {},
+    note: notes.join(" "),
+    ...includeDetails ? { raw_test_cases: truncateDeep(rawCases) } : {}
+  });
+}
+var GRANT_GATED_SOBJECTS, DEFAULT_ROWS, MAX_ROWS, MAX_RESPONSE_CHARS, LOG_SLICE, DEFAULT_REPORT_ROWS, MAX_REPORT_GROUPS, MAX_STRING_FIELD, SF_ID_RE, TRACE_LEVEL_PRESETS, RUNNER_TYPE, RUNNER_BY_RUN_ID_PREFIX, HTML_ENTITIES, asObject, normScalar;
 var init_data = __esm({
   "src/tools/data.ts"() {
     "use strict";
@@ -36347,7 +36764,9 @@ var init_data = __esm({
     init_register();
     init_errors4();
     init_gate();
+    init_agentforceScorers();
     init_rest();
+    init_metadataSoap();
     GRANT_GATED_SOBJECTS = {
       apexclass: "metadata_read",
       apextrigger: "metadata_read",
@@ -36392,6 +36811,23 @@ var init_data = __esm({
         body: { ApexCode: "INFO", ApexProfiling: "NONE", Callout: "INFO", Database: "INFO", System: "WARN", Validation: "INFO", Visualforce: "NONE", Workflow: "INFO" }
       }
     };
+    RUNNER_TYPE = {
+      testing_center: "AiEvaluationDefinition",
+      agentforce_studio: "AiTestingDefinition"
+    };
+    RUNNER_BY_RUN_ID_PREFIX = {
+      "4KB": "testing_center",
+      "3A2": "agentforce_studio"
+    };
+    HTML_ENTITIES = {
+      quot: '"',
+      amp: "&",
+      lt: "<",
+      gt: ">",
+      apos: "'"
+    };
+    asObject = (v) => v && typeof v === "object" && !Array.isArray(v) ? v : null;
+    normScalar = (x) => typeof x === "string" ? x.trim() : JSON.stringify(x);
   }
 });
 
@@ -36546,7 +36982,7 @@ function registerDeployTools(server, deps) {
         components: external_exports.array(
           external_exports.object({
             type: external_exports.string().describe(
-              `ApexClass, ApexTrigger, ApexPage, Flow, CustomObject, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, GlobalValueSet, ConnectedApp, NamedCredential / ExternalCredential / AuthProvider (credential metadata NEVER carries working secrets: per-principal values are entered in Setup after deploy, retrieves return placeholders, and principals need externalCredentialPrincipalAccesses on a permission set), PlatformEventChannel(Member), ManagedEventSubscription, Layout, CustomMetadata (records, dotted Type.Record names), LeadConvertSettings (SINGLETON \u2014 api_name is literally "LeadConvertSettings"; a modify replaces ALL lead field mappings, retrieve-first), Report / Dashboard (folder-qualified "FolderDevName/Name" api_names; deploy the ReportFolder/DashboardFolder component first or in the same package for a new folder), ReportFolder / DashboardFolder (content = the whole <ReportFolder> doc with folderShares \u2014 folder sharing is what makes reports visible), Agentforce types Bot, GenAiPlugin (agent topics \u2014 modifying one on an ACTIVE agent needs the human to deactivate it first), GenAiPromptTemplate (activeVersionIdentifier is org-generated: retrieve-first, never hand-type it), GenAiPromptTemplateActv, AiEvaluationDefinition (Testing Center test definitions), BotTemplate, BotBlock, CustomPermission (pairs with a customPermissions grant on a permission set \u2014 ungranted it does nothing), PermissionSetGroup (members DETACH if omitted on modify; the org recalculates grants ASYNCHRONOUSLY after deploy \u2014 verify Status via soql_query), MutingPermissionSet (a muted permission omitted on modify is UN-MUTED \u2014 silently restored to every assigned user), QuickAction (object actions dotted "Account.New_X", global actions bare; surfaced by page layouts, global publisher layouts, or Lightning record pages with dynamic actions \u2014 never by the deploy itself), or child types CustomField / ValidationRule / CustomLabel / ListView / RecordType / BotVersion (dotted MyBot.v1). Bundle types GenAiFunction / GenAiPlannerBundle / AiAuthoringBundle / LightningComponentBundle / AuraDefinitionBundle (one component = a directory of files) take a Contrail bundle ENVELOPE as content: JSON {"contrail_bundle":1, "files": {"<relative path>": "<body>", ...}} \u2014 the file set retrieve_metadata's bundle_files listing shows, main file included (e.g. "My_Fn.genAiFunction-meta.xml"). LightningComponentBundle (LWC) requires <Name>.js + <Name>.js-meta.xml; .html/.css/.svg and subdirectories (e.g. secondary templates) are normal, __tests__ and dot-files never deploy, and the org compiles on deploy. AuraDefinitionBundle is FLAT (no subfolders), every file <Name>-prefixed, exactly ONE primary (<Name>.cmp|.app|.evt|.intf|.tokens) plus its required <Name>.<kind>-meta.xml (pins apiVersion); secondaries are <Name>Controller/Helper/Renderer.js, .css, .design (.cmp only), .svg, .auradoc; namespace-free names only. Refresh the snapshot before modifying an org-existing bundle \u2014 the whole directory is replaced (files the envelope omits are DELETED org-side). AiAuthoringBundle deploys as a DRAFT STAGE: exactly <Name>.agent (plaintext Agent Script) + <Name>.bundle-meta.xml; nothing compiles and the running agent is unchanged until a human publishes the draft. Agent publish/preview stay human; activate/deactivate goes through agent_activation_propose/execute (its own ritual), and eval runs through run_agent_eval.`
+              `ApexClass, ApexTrigger, ApexPage, Flow, CustomObject, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, GlobalValueSet, ConnectedApp, NamedCredential / ExternalCredential / AuthProvider (credential metadata NEVER carries working secrets: per-principal values are entered in Setup after deploy, retrieves return placeholders, and principals need externalCredentialPrincipalAccesses on a permission set), PlatformEventChannel(Member), ManagedEventSubscription, Layout, CustomMetadata (records, dotted Type.Record names), LeadConvertSettings (SINGLETON \u2014 api_name is literally "LeadConvertSettings"; a modify replaces ALL lead field mappings, retrieve-first), Report / Dashboard (folder-qualified "FolderDevName/Name" api_names; deploy the ReportFolder/DashboardFolder component first or in the same package for a new folder), ReportFolder / DashboardFolder (content = the whole <ReportFolder> doc with folderShares \u2014 folder sharing is what makes reports visible), Agentforce types Bot, GenAiPlugin (agent topics \u2014 modifying one on an ACTIVE agent needs the human to deactivate it first), GenAiPromptTemplate (activeVersionIdentifier is org-generated: retrieve-first, never hand-type it), GenAiPromptTemplateActv, AiEvaluationDefinition (legacy Testing Center test definitions), AiTestingDefinition (Agentforce Studio Tests-tab suites \u2014 Salesforce marks the type and its runner BETA; a deploy stores the suite and runs nothing \u2014 run_agent_eval runs it (on the org probed a deployed suite appeared in the Tests tab only after its first run); a modify replaces the whole suite), AiAgentScorerDefinition (custom scorers; versions are APPEND-ONLY org-side \u2014 retrieve-first and carry every version forward; a GenAiPromptTemplate it engines on may ship in the same package \u2014 package.xml lists the template first), BotTemplate, BotBlock, CustomPermission (pairs with a customPermissions grant on a permission set \u2014 ungranted it does nothing), PermissionSetGroup (members DETACH if omitted on modify; the org recalculates grants ASYNCHRONOUSLY after deploy \u2014 verify Status via soql_query), MutingPermissionSet (a muted permission omitted on modify is UN-MUTED \u2014 silently restored to every assigned user), QuickAction (object actions dotted "Account.New_X", global actions bare; surfaced by page layouts, global publisher layouts, or Lightning record pages with dynamic actions \u2014 never by the deploy itself), or child types CustomField / ValidationRule / CustomLabel / ListView / RecordType / BotVersion (dotted MyBot.v1). Bundle types GenAiFunction / GenAiPlannerBundle / AiAuthoringBundle / LightningComponentBundle / AuraDefinitionBundle (one component = a directory of files) take a Contrail bundle ENVELOPE as content: JSON {"contrail_bundle":1, "files": {"<relative path>": "<body>", ...}} \u2014 the file set retrieve_metadata's bundle_files listing shows, main file included (e.g. "My_Fn.genAiFunction-meta.xml"). LightningComponentBundle (LWC) requires <Name>.js + <Name>.js-meta.xml; .html/.css/.svg and subdirectories (e.g. secondary templates) are normal, __tests__ and dot-files never deploy, and the org compiles on deploy. AuraDefinitionBundle is FLAT (no subfolders), every file <Name>-prefixed, exactly ONE primary (<Name>.cmp|.app|.evt|.intf|.tokens) plus its required <Name>.<kind>-meta.xml (pins apiVersion); secondaries are <Name>Controller/Helper/Renderer.js, .css, .design (.cmp only), .svg, .auradoc; namespace-free names only. Refresh the snapshot before modifying an org-existing bundle \u2014 the whole directory is replaced (files the envelope omits are DELETED org-side). AiAuthoringBundle deploys as a DRAFT STAGE: exactly <Name>.agent (plaintext Agent Script) + <Name>.bundle-meta.xml; nothing compiles and the running agent is unchanged until a human publishes the draft. Agent publish/preview stay human; activate/deactivate goes through agent_activation_propose/execute (its own ritual), and agent test runs (Testing Center or Studio) through run_agent_eval.`
             ),
             api_name: external_exports.string().describe("Full API name; children dotted (Account.MyField__c)."),
             content: external_exports.string().optional().describe(
@@ -37703,15 +38139,15 @@ function userHookState(file) {
   } catch {
     return "unreadable";
   }
-  const hooks = asObject(settings.hooks);
+  const hooks = asObject2(settings.hooks);
   const pre = hooks && Array.isArray(hooks.PreToolUse) ? hooks.PreToolUse : [];
   return pre.some(isOurEntry) ? "installed" : "not_installed";
 }
 function isOurEntry(entry) {
-  const e = asObject(entry);
+  const e = asObject2(entry);
   if (!e || !Array.isArray(e.hooks)) return false;
   return e.hooks.some((h) => {
-    const handler = asObject(h);
+    const handler = asObject2(h);
     if (!handler) return false;
     const parts = [handler.command, ...Array.isArray(handler.args) ? handler.args : []].filter(
       (v) => typeof v === "string"
@@ -37731,12 +38167,12 @@ function readSettings(file) {
       `${file} is not valid JSON (${err2 instanceof Error ? err2.message : String(err2)}) \u2014 nothing was changed. Fix the file, then try again.`
     );
   }
-  const obj = asObject(parsed);
+  const obj = asObject2(parsed);
   if (!obj) throw new Error(`${file} does not hold a JSON object \u2014 nothing was changed.`);
   return obj;
 }
 function hookLists(settings, file) {
-  const hooks = settings.hooks === void 0 ? {} : asObject(settings.hooks);
+  const hooks = settings.hooks === void 0 ? {} : asObject2(settings.hooks);
   if (!hooks) throw new Error(`${file}: "hooks" is not an object \u2014 fix the file, then try again. Nothing was changed.`);
   const pre = hooks.PreToolUse === void 0 ? [] : hooks.PreToolUse;
   if (!Array.isArray(pre)) {
@@ -37784,7 +38220,7 @@ function writeSettings(file, settings, opts) {
   }
   return backup;
 }
-function asObject(value) {
+function asObject2(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : null;
 }
 function deepEqual2(a, b) {
@@ -37792,8 +38228,8 @@ function deepEqual2(a, b) {
   if (Array.isArray(a) || Array.isArray(b)) {
     return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => deepEqual2(v, b[i]));
   }
-  const oa = asObject(a);
-  const ob = asObject(b);
+  const oa = asObject2(a);
+  const ob = asObject2(b);
   if (!oa || !ob) return false;
   const ka = Object.keys(oa);
   const kb = Object.keys(ob);

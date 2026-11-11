@@ -60,6 +60,15 @@ const SIMPLE_DIR_TYPES: Array<{ dir: string; ext: string; type: string }> = [
     type: 'GenAiPromptTemplateActv',
   },
   { dir: 'aiEvaluationDefinitions', ext: '.aiEvaluationDefinition', type: 'AiEvaluationDefinition' },
+  // S44: Studio test suites (Beta type) and custom scorers — flat single-file
+  // types (dir/suffix live-confirmed via describeMetadata 2026-11-08 at v66
+  // and v68: no metaFile); the generic -meta.xml skip is correct for both.
+  { dir: 'aiTestingDefinitions', ext: '.aiTestingDefinition', type: 'AiTestingDefinition' },
+  {
+    dir: 'aiAgentScorerDefinitions',
+    ext: '.aiAgentScorerDefinition',
+    type: 'AiAgentScorerDefinition',
+  },
   { dir: 'botTemplates', ext: '.botTemplate', type: 'BotTemplate' },
   { dir: 'botBlocks', ext: '.botBlock', type: 'BotBlock' },
   // S36: permissions & UI-action types. QuickAction file names carry the

@@ -35,7 +35,9 @@ deploy fails:
 | Agentforce agent metadata — topics, bots, the deactivate gate | `agentforce-metadata-generate` |
 | Documenting or diagramming an existing agent's architecture | `agentforce-architecture-analyze` |
 | Prompt templates — Prompt Builder metadata, merge fields, versions | `platform-prompt-template-generate` |
-| Agent tests — AiEvaluationDefinition authoring | `agentforce-eval-generate` |
+| Agent tests, legacy Testing Center — AiEvaluationDefinition authoring and results | `agentforce-eval-generate` |
+| Agent tests, Agentforce Studio Tests tab (Beta) — AiTestingDefinition suites, the scorer catalog, converting a Testing Center suite | `agentforce-studio-test-generate` |
+| Custom scorers — AiAgentScorerDefinition, version lifecycle, prompt-template engines | `agentforce-studio-test-generate` |
 | Visualizing a flow, or diffing two flow versions, as an interactive artifact | `salesforce-flow-visualize` |
 | Lightning web components — bundles, base components, wire vs Apex, js-meta targets | `platform-lwc-generate` |
 | LWC security (LWS) and accessibility review of an existing bundle | `platform-lwc-review` |
@@ -178,16 +180,22 @@ rather than inventing what the skill would have said.
   exists. The result's `confirmed_status` is the org's answer (the tool
   re-reads after the write); relay `messages[]` verbatim when the org
   refuses. Publishing/compiling agents stays human, always.
-- **Agent evaluation runs execute REAL actions and do not roll back.**
-  `run_agent_eval` runs a deployed AiEvaluationDefinition: unlike
-  `run_apex_tests` (whose test transactions always roll back), the agent
-  under test executes its actual actions — records they create or change
-  stay. No confirmation code, deliberately: the definition is the run's only
-  input and it already passed the deploy ritual — never treat `run_agent_eval`
-  as a side-effect channel. Polling needs `diagnostics_read`; starting a run
-  needs `data_write` too. Runs take minutes (~10 concurrent max) — poll
-  sparingly, prefer sandboxes for agents whose actions write, and relay org
-  refusals verbatim.
+- **Agent test runs execute REAL actions and do not roll back.**
+  `run_agent_eval` runs a deployed test definition — a Testing Center
+  `AiEvaluationDefinition` or an Agentforce Studio Tests-tab
+  `AiTestingDefinition` (that runner is **Beta**; given a bare name the tool
+  looks the definition up in the org's metadata, which needs `metadata_read`,
+  and otherwise takes `runner: "testing_center"` or
+  `runner: "agentforce_studio"`; it names the runner it used — relay that).
+  Unlike `run_apex_tests` (whose test transactions always roll back), the
+  agent under test executes its actual actions — records they create or
+  change stay. No confirmation code, deliberately: the definition is the
+  run's only input and it already passed the deploy ritual — never treat
+  `run_agent_eval` as a side-effect channel. Polling needs
+  `diagnostics_read`; starting a run needs `data_write` too. Runs take
+  minutes (Salesforce documents a ~10 in-progress ceiling for each runner;
+  whether they share one pool is unconfirmed) — poll sparingly, prefer
+  sandboxes for agents whose actions write, and relay org refusals verbatim.
 - **Anonymous Apex rides the same ritual and commits.** `apex_propose` stages a
   script (max 32k chars); the approval page shows it **verbatim** with the
   warning that it runs with the human's permissions — so present the script in

@@ -167,7 +167,8 @@ export const DEFAULT_CONFIG: ContrailConfig = {
     // automatically (they share a snapshot directory). S30: Agentforce types
     // (Bot, GenAiPlugin, GenAiFunction, GenAiPlannerBundle,
     // AiAuthoringBundle, GenAiPromptTemplate[Actv], AiEvaluationDefinition,
-    // BotTemplate, BotBlock) are explicit-refresh-only too — they are
+    // BotTemplate, BotBlock — and, S44, AiTestingDefinition and
+    // AiAgentScorerDefinition) are explicit-refresh-only too — they are
     // licensing-gated (unlicensed orgs report them unsupported, degraded
     // per-type with a warning) and need salesforce.apiVersion v66+.
     types: [

@@ -31,6 +31,46 @@ let runStatus: Record<string, unknown>;
 let runResults: Record<string, unknown>;
 let resultsGets: number;
 
+/**
+ * S44: a bare `eval` is routed by ONE live listMetadata probe across both
+ * test-definition types (needs metadata_read). This harness answers that
+ * probe with the legacy inventory — every name this suite submits lives
+ * under AiEvaluationDefinition — so each test still reaches the Testing
+ * Center POST it was written against (orgchanges.test.ts pattern).
+ */
+let orgInventory: Array<{ type: string; fullName: string }>;
+
+function soapEnvelope(inner: string): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+<soapenv:Body>${inner}</soapenv:Body></soapenv:Envelope>`;
+}
+
+function soapListMetadata(init?: RequestInit): Response {
+  const body = String(init?.body ?? '');
+  if (!body.includes('<met:listMetadata>')) {
+    return new Response('unexpected SOAP body', { status: 500 });
+  }
+  // Honour the per-call type queries — listMetadata chunks by 3.
+  const requested = new Set(
+    [...body.matchAll(/<met:type>([^<]+)<\/met:type>/g)].map((m) => m[1]!),
+  );
+  const items = orgInventory.filter((i) => requested.has(i.type));
+  return new Response(
+    soapEnvelope(
+      `<listMetadataResponse xmlns="http://soap.sforce.com/2006/04/metadata">
+         ${items
+           .map(
+             (i) =>
+               `<result><fullName>${i.fullName}</fullName><type>${i.type}</type>` +
+               `<fileName>x</fileName><id>1</id></result>`,
+           )
+           .join('\n')}
+       </listMetadataResponse>`,
+    ),
+  );
+}
+
 function stubSalesforce(): void {
   vi.stubGlobal('fetch', async (input: string | URL, init?: RequestInit) => {
     const url = String(input);
@@ -45,6 +85,7 @@ function stubSalesforce(): void {
         }),
       );
     }
+    if (url.includes('/services/Soap/m/')) return soapListMetadata(init);
     if (url.endsWith('/einstein/ai-evaluations/runs') && method === 'POST') {
       submitPosts.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
       return new Response(JSON.stringify(submitResponse));
@@ -78,12 +119,15 @@ beforeEach(async () => {
   runStatus = { status: 'IN_PROGRESS', startTime: '2026-10-01T00:00:00Z' };
   runResults = {};
   resultsGets = 0;
+  orgInventory = [{ type: 'AiEvaluationDefinition', fullName: 'Order_Agent_Smoke' }];
 
   const tokens = new MemoryTokenStore();
   const full = emptyGrantSet();
   full.diagnostics_read = true;
   full.data_read = true;
   full.data_write = true;
+  // S44: runner detection for a bare eval is a Metadata-API read.
+  full.metadata_read = true;
   const conn = db.insertConnection({
     alias: 'eval-org',
     instanceUrl: 'https://eval.stub.salesforce.com',
@@ -323,6 +367,9 @@ describe('run_agent_eval', () => {
 
   it('org refusals relay verbatim: unknown definition and the concurrent-run cap', async () => {
     submitResponse = {}; // unused — the stub below overrides per-status
+    // S44: listMetadata lists the name; the runner's POST is what refuses it
+    // — the org's own message is what must relay. The probe needs its route.
+    orgInventory = [...orgInventory, { type: 'AiEvaluationDefinition', fullName: 'No_Such_Def' }];
     vi.stubGlobal('fetch', async (input: string | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/services/oauth2/token')) {
@@ -334,6 +381,7 @@ describe('run_agent_eval', () => {
           }),
         );
       }
+      if (url.includes('/services/Soap/m/')) return soapListMetadata(init);
       if (url.endsWith('/einstein/ai-evaluations/runs') && (init?.method ?? 'GET') === 'POST') {
         const body = String(init?.body ?? '');
         if (body.includes('No_Such_Def')) {

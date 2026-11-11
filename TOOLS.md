@@ -1,6 +1,6 @@
 # Contrail Reference — tools, features, configuration
 
-Everything Contrail can do, in one place. Current as of **v0.37.2** (39 tools).
+Everything Contrail can do, in one place. Current as of **v0.38.2** (39 tools).
 The same tool surface is available in all three installs — the Claude Desktop
 extension (`.mcpb`), the Claude Code plugin, and the Contrail desktop app —
 with a few desktop-app differences [noted at the end](#the-desktop-app).
@@ -40,7 +40,7 @@ with a few desktop-app differences [noted at the end](#the-desktop-app).
 | [`get_report_data`](#get_report_data) | data_read | Run a saved report and read its results (sync Analytics API) |
 | [`get_debug_logs`](#get_debug_logs) | diagnostics_read | List or read Apex debug logs |
 | [`run_apex_tests`](#run_apex_tests) | diagnostics_read | Run deployed Apex tests standalone (submit + poll) |
-| [`run_agent_eval`](#run_agent_eval) | diagnostics_read (+data_write to start) | Run a Testing Center agent evaluation (REAL actions execute) |
+| [`run_agent_eval`](#run_agent_eval) | diagnostics_read (+data_write to start; +metadata_read to auto-detect the runner) | Run an agent test — Testing Center or Agentforce Studio (Beta); REAL actions execute |
 | [`get_flow_errors`](#get_flow_errors) | diagnostics_read | Persisted flow interview problems |
 | [`set_trace_flag`](#set_trace_flag) | diagnostics_read | Turn on debug logging for a bounded window |
 | [`check_apex`](#check_apex) | — | Free local static Apex check (offline, pre-deploy) |
@@ -71,12 +71,12 @@ management page (and only there); the server re-checks them on every call.
 |---|---|
 | `metadata_read` | Retrieve flows, Apex, objects/fields; search, diff, dependency analysis. |
 | `metadata_write` | Validate and execute metadata deploys, and activate/deactivate Agentforce agent versions (live behavior). Requires `metadata_read`. |
-| `diagnostics_read` | Debug logs, flow errors, standalone Apex test runs, agent evaluation polling and results, trace flags. May expose incidental record data present in logs. |
+| `diagnostics_read` | Debug logs, flow errors, standalone Apex test runs, agent test-run polling and results (Testing Center or Agentforce Studio), trace flags. May expose incidental record data present in logs. |
 | `data_read` | SOQL queries and record reads (row-capped). |
-| `data_write` | DML, anonymous Apex, and bulk loads — propose and execute — plus starting agent evaluation runs (the agent under test executes its REAL actions; the definition was ritual-approved, so a run start needs no code). Requires `data_read`. |
+| `data_write` | DML, anonymous Apex, and bulk loads — propose and execute — plus starting agent test runs on either runner (the agent under test executes its REAL actions; the definition was ritual-approved, so a run start needs no code). Requires `data_read`. |
 
 **Layer 2 — the write approval ritual.** Every write (one carve-out:
-starting an agent evaluation run, whose only input is a definition that
+starting an agent test run, whose only input is a definition that
 already passed this ritual — see `run_agent_eval`), in every environment
 (sandboxes included), is two-step:
 
@@ -535,19 +535,24 @@ class and its tests in one validation).
 
 ### `run_agent_eval`
 
-Runs an **Agentforce Testing Center evaluation** — a deployed
-`AiEvaluationDefinition` — and reads per-case results: routed topic,
-executed action sequence, and every expectation outcome. Same two-step
+Runs a deployed **agent test** — a Testing Center `AiEvaluationDefinition`,
+or (S44) an Agentforce Studio Tests-tab `AiTestingDefinition` — and reads
+per-case results (Testing Center: routed topic, executed action sequence and
+every expectation outcome; Studio: the subject's response and every scorer's
+outcome). Same two-step
 shape as `run_apex_tests` (submit with `eval` → `run_id`; call again to
 poll), with one crucial difference stated everywhere: **the agent under
 test executes its REAL actions — nothing rolls back**, so prefer
 sandboxes/dev orgs for agents whose actions write. Runs take minutes
-(~10 concurrent per org, ≤1,000 cases per definition). Polling and results
+(~10 concurrent per org, documented per runner — whether the two runners
+share one pool is unconfirmed; Testing Center allows ≤1,000 cases per
+definition). Polling and results
 ride `diagnostics_read`; **starting** a run additionally requires
 `data_write` — no confirmation code, because the definition is the run's
-only input and it already passed the deploy ritual. Requires an ACTIVE
-agent version; a run-level `ERROR` is the run failing (not a test verdict),
-and pass/fail mapping tolerates both result schemas Salesforce emits
+only input and it already passed the deploy ritual. Testing Center requires an ACTIVE
+agent version (whether a Studio suite's `subjectVersion` can target a
+non-active version is unverified); a Testing Center run-level `ERROR` is the
+run failing (not a test verdict), and its pass/fail mapping tolerates both result schemas Salesforce emits
 (anything label-shaped — e.g. `instruction_adherence`'s HIGH/LOW/UNCERTAIN —
 comes back as `passed: null` with the label visible). Each case carries an
 expectation-derived `verdict` — `failed` if any expectation failed, `passed`
@@ -557,11 +562,54 @@ case `status` (COMPLETED means ran, not passed) is shown raw but never
 counted as a pass. Costs: Salesforce's
 own sources differ (newer Help says Testing Center is unmetered as of
 Summer '26; older docs mention Einstein Requests) — check your org's
-consumption cards rather than trusting either claim. The newer Studio
-"AI testing" beta API is undocumented and not offered.
+consumption cards rather than trusting either claim; Salesforce's Beta
+documentation says Studio-runner runs consume Einstein Requests.
 
-- `connection`; exactly one of `eval` (definition DeveloperName) or
-  `run_id`; `include_details` *(optional)* for the raw org payload.
+**Two runners (S44).** The same tool also drives **Agentforce Studio test
+suites** — a deployed `AiTestingDefinition` (the type behind the Studio
+Tests tab; on the org probed a Contrail-deployed suite appeared in that tab
+only after this tool had run it once), run through the Studio runner that
+Salesforce's own Agentforce DX test commands call. Salesforce
+labels both the type and that runner **Beta**, and the runner is absent
+from the Connect REST reference, so every Studio result says so and its
+statuses and result fields may change. Runner selection: a `run_id` picks
+its runner by key prefix (`4KB` = Testing Center, `3A2` = Studio — both
+live-confirmed; any other prefix is refused); a bare
+`eval` is looked up live via `listMetadata` across both types — that read
+needs **`metadata_read`** on the connection (without it the tool refuses
+and asks for `runner`), one match picks the runner, a name held by both is
+refused as ambiguous, a name held by neither is refused (naming any type
+the org does not know), and a failed lookup is refused rather than
+defaulted — a real-actions run never starts on a guess. `runner` forces
+either runner and skips the lookup. Every result carries `runner` and
+`runner_detection`, and the submit echoes the canonical `definition` name.
+Studio statuses — `IN_PROGRESS` and `FAILED` observed live, the rest per
+Salesforce's library — are `CREATED | IN_PROGRESS | SUCCESS | FAILED |
+TERMINATED`; `FAILED` reads results tolerantly and says the RUN failed
+(`error_message` — nested under `errorRepresentation` on this runner; the
+one observed cause, a scorer column missing on some case, left the API
+with no case rows while the Tests tab showed them — give every case the
+same scorer set); `TERMINATED` is never a
+pass; an unrecognised status is shown raw as still running. Studio cases
+carry `subject_response` (the agent's reply, lifted out of the org's
+HTML-encoded session blob), `routed_topics` (the session's
+`runs[].topicName`), `session_id`, and one row per scorer, named by the
+Tests tab's column label with the catalog name under `scorer` when known
+(shapes live-observed 2026-11-11). The org returns each scorer's judgment
+as an HTML-entity-encoded JSON string, which the tool decodes into `raw`;
+`passed` is **derived** from exactly two shapes — the `status` Pass/Fail an
+LLM-judged scorer returns (with `score`, `explanation` from its reasoning,
+`evaluation_type` and `compute_status`), or `actualValue === expectedValue`
+on the match scorers — and is `null` otherwise; execution markers such as
+`computeStatus` are never read as verdicts, and the S40 case
+`verdict`/`totals` rules apply unchanged. A 2xx submit without a
+run id is reported as "a run of this definition is already in progress"
+(Salesforce's own client's reading) and starts nothing.
+
+- `connection`; exactly one of `eval` (definition DeveloperName, either
+  type) or `run_id`; `runner` *(optional)* `testing_center` |
+  `agentforce_studio`; `include_details` *(optional)* for the raw org
+  payload.
 
 ### `get_flow_errors`
 
@@ -689,7 +737,19 @@ re-read.
   to deactivate it first; the page warns), `GenAiPromptTemplate`
   (`activeVersionIdentifier` is org-generated — retrieve-first, and the page
   warns on hand-typed/altered tokens), `GenAiPromptTemplateActv`,
-  `AiEvaluationDefinition`, `BotTemplate`, `BotBlock`, `CustomPermission`
+  `AiEvaluationDefinition`, `AiTestingDefinition` (Agentforce Studio
+  Tests-tab suites — a **Beta** type with a Beta runner; on the org probed a
+  deployed suite appeared in the Tests tab only after its first run; the
+  page says a deploy stores the suite and runs nothing, that a modify replaces the
+  whole suite, and warns when single-turn and multi-turn cases share a
+  suite; `AGENT` suites deploy at v66, `PROMPT` suites need API v68 — v66
+  refuses `promptInput`), `AiAgentScorerDefinition` (custom scorers — versions are
+  APPEND-ONLY org-side and the page lists any version a modify omits or
+  regresses; the engine must be a scorer-typed `GenAiPromptTemplate`
+  (`agentforce_session_tracing__scorer*`), which may ship in the same
+  package, listed first in package.xml; `std_*` names are
+  system-provisioned and the page says so), `BotTemplate`, `BotBlock`,
+  `CustomPermission`
   (grants nothing until a permission set's `customPermissions` block enables
   it — the coverage checker counts that grant), `PermissionSetGroup` (a
   modify DETACHES omitted members, and the org recalculates grants
@@ -727,8 +787,9 @@ re-read.
   agent is unchanged until a human publishes the draft. Agent
   **publish / preview** stay org-side human steps;
   **activate / deactivate** goes through
-  `agent_activation_propose`/`execute` behind its own ritual, and eval runs
-  through `run_agent_eval` (the
+  `agent_activation_propose`/`execute` behind its own ritual, and agent test
+  runs — Testing Center or the Agentforce Studio runner (Beta) — through
+  `run_agent_eval` (the
   `agentforce-metadata-generate` skill carries the full boundary).
 - `destructive` *(≤50)* — `{type, api_name}` to DELETE; led prominently on
   the page. Deletions are accepted for **any** metadata type, including
@@ -900,7 +961,7 @@ forever) are swept at the next bulk-load propose.
 
 ## The skill pack
 
-Twenty-one skills ship with Contrail (in `skills/`), encoding the judgment layer —
+Twenty-two skills ship with Contrail (in `skills/`), encoding the judgment layer —
 the difference between an agent that has tools and one that uses them the
 way a careful practitioner would. In Claude Code they load automatically
 with the plugin; in Claude Desktop they are added once via the Skills UI; in
@@ -925,7 +986,8 @@ the desktop app they are bundled and selectable per project.
 | `agentforce-metadata-generate` | The Agentforce hub: two-domain model, the LIFECYCLE BOUNDARY (what only a human can do), topic/bot authoring, the deactivate gate, license traps. |
 | `agentforce-architecture-analyze` | Read-side agent analysis: architecture doc + Mermaid graph from design-time metadata; the Tooling object graph. |
 | `platform-prompt-template-generate` | Prompt Builder templates: grammar, merge-field language, the org-generated activeVersionIdentifier doctrine. |
-| `agentforce-eval-generate` | Testing Center definitions (AiEvaluationDefinition): expectation semantics, grounding against the real agent, test design. |
+| `agentforce-eval-generate` | Legacy Testing Center definitions (AiEvaluationDefinition): expectation semantics, grounding against the real agent, test design. |
+| `agentforce-studio-test-generate` | Agentforce Studio Tests-tab suites (AiTestingDefinition, Beta): the three suite kinds, the scorer catalog, single- vs multi-turn suites, conversion from Testing Center, custom scorers (AiAgentScorerDefinition) and their version lifecycle, Studio-runner results. |
 | `salesforce-flow-visualize` | Interactive flow artifacts: a single version or a two-version diff — layered Flow-Builder-style canvas, go-to pills, parsed node inspector — built from a bundled, live-verified HTML template. |
 | `platform-lwc-generate` | LWC authoring: bundle anatomy, base-component selection, wire vs imperative Apex, js-meta exposure/targets (record pages, Flow screens, quick actions), events, SLDS. |
 | `platform-lwc-review` | Static LWC review: the Lightning Web Security rule catalog and a WCAG 2.2 checklist applied to retrieved bundle source — findings in plain markdown, boundaries stated. |
