@@ -717,8 +717,21 @@ export function extractAllEdges(
 
 /** Strip comments and string literals so their contents don't produce refs. */
 function stripApexNoise(body: string): string {
-  return body
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+  // Block comments through a LINEAR scan, behaviour-identical to the lazy
+  // block-comment regex it replaces (which re-scanned to the end of the body
+  // for every unclosed opener — quadratic on a valid 1,000,000-character
+  // body). An unclosed opener leaves the rest untouched, as the regex did.
+  let out = '';
+  let last = 0;
+  let i = body.indexOf('/*');
+  while (i !== -1) {
+    const end = body.indexOf('*/', i + 2);
+    if (end === -1) break;
+    out += body.slice(last, i) + ' ';
+    last = end + 2;
+    i = body.indexOf('/*', last);
+  }
+  return (out + body.slice(last))
     .replace(/\/\/[^\n]*/g, ' ')
     .replace(/'(?:[^'\\]|\\.)*'/g, (m) => (/\bFROM\b/i.test(m) ? m : "''"));
 }

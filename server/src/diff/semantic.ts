@@ -50,6 +50,20 @@ export interface ArtifactSemanticDiff {
   text?: TextDiff;
 }
 
+/**
+ * Output-size caps, overridable per caller: the defaults are sized for agent
+ * tool results (token budgets), while a UI reading from local disk can afford
+ * far larger listings. MAX_LCS_CELLS is a memory guard, not a display cap,
+ * and is deliberately not configurable.
+ */
+export interface DiffLimits {
+  maxChanges?: number;
+  maxHunks?: number;
+  maxHunkLines?: number;
+  maxLineChars?: number;
+  maxHunkBudgetChars?: number;
+}
+
 const MAX_CHANGES = 200;
 const MAX_HUNKS = 50;
 const MAX_HUNK_LINES = 40;
@@ -57,16 +71,20 @@ const MAX_LINE_CHARS = 500;
 const MAX_HUNK_BUDGET_CHARS = 100_000;
 const MAX_LCS_CELLS = 4_000_000;
 
-export function semanticDiff(aContent: string, bContent: string): ArtifactSemanticDiff {
+export function semanticDiff(
+  aContent: string,
+  bContent: string,
+  limits: DiffLimits = {},
+): ArtifactSemanticDiff {
   if (aContent === bContent) {
     return { format: looksLikeXml(aContent) ? 'xml' : 'text', identical: true };
   }
   if (looksLikeXml(aContent) && looksLikeXml(bContent)) {
-    const xml = diffXml(aContent, bContent);
+    const xml = diffXml(aContent, bContent, limits);
     if (xml) return { format: 'xml', identical: xml.identical, xml };
     // Unparseable on either side — fall through to text.
   }
-  const text = diffText(aContent, bContent);
+  const text = diffText(aContent, bContent, limits);
   return { format: 'text', identical: text.identical, text };
 }
 
@@ -83,7 +101,11 @@ function looksLikeXml(content: string): boolean {
 
 // ── XML structural diff ──────────────────────────────────────────────────
 
-export function diffXml(aXml: string, bXml: string): XmlSemanticDiff | null {
+export function diffXml(
+  aXml: string,
+  bXml: string,
+  limits: DiffLimits = {},
+): XmlSemanticDiff | null {
   let aDoc: Record<string, unknown>;
   let bDoc: Record<string, unknown>;
   try {
@@ -96,15 +118,16 @@ export function diffXml(aXml: string, bXml: string): XmlSemanticDiff | null {
   const bRoot = rootElement(bDoc);
   if (!aRoot || !bRoot) return null;
 
+  const maxChanges = limits.maxChanges ?? MAX_CHANGES;
   const changes: Change[] = [];
-  const state = { truncated: false };
+  const state = { truncated: false, maxChanges };
   diffNode(aRoot.value, bRoot.value, '', changes, state);
   return {
     identical: changes.length === 0,
     root: aRoot.name,
-    changes: changes.slice(0, MAX_CHANGES),
+    changes: changes.slice(0, maxChanges),
     change_count: changes.length,
-    truncated: state.truncated || changes.length > MAX_CHANGES,
+    truncated: state.truncated || changes.length > maxChanges,
   };
 }
 
@@ -120,9 +143,9 @@ function diffNode(
   b: unknown,
   path: string,
   changes: Change[],
-  state: { truncated: boolean },
+  state: { truncated: boolean; maxChanges: number },
 ): void {
-  if (changes.length > MAX_CHANGES) {
+  if (changes.length > state.maxChanges) {
     state.truncated = true;
     return;
   }
@@ -155,7 +178,7 @@ function diffObjectFields(
   b: Record<string, unknown>,
   path: string,
   changes: Change[],
-  state: { truncated: boolean },
+  state: { truncated: boolean; maxChanges: number },
 ): void {
   const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
   for (const key of keys) {
@@ -168,7 +191,7 @@ function diffCollection(
   b: unknown[],
   path: string,
   changes: Change[],
-  state: { truncated: boolean },
+  state: { truncated: boolean; maxChanges: number },
 ): void {
   const aKeyed = keyItems(a);
   const bKeyed = keyItems(b);
@@ -260,7 +283,11 @@ function summarize(value: unknown): unknown {
 
 // ── text (Apex) line diff ────────────────────────────────────────────────
 
-export function diffText(aText: string, bText: string): TextDiff {
+export function diffText(aText: string, bText: string, limits: DiffLimits = {}): TextDiff {
+  const maxHunks = limits.maxHunks ?? MAX_HUNKS;
+  const maxHunkLines = limits.maxHunkLines ?? MAX_HUNK_LINES;
+  const maxLineChars = limits.maxLineChars ?? MAX_LINE_CHARS;
+  const maxHunkBudgetChars = limits.maxHunkBudgetChars ?? MAX_HUNK_BUDGET_CHARS;
   const aLines = aText.split('\n');
   const bLines = bText.split('\n');
   if (aText === bText) {
@@ -330,26 +357,28 @@ export function diffText(aText: string, bText: string): TextDiff {
     }
     if (op === 'del') {
       removed++;
-      if (current.removed.length < MAX_HUNK_LINES) current.removed.push(clampLine(aMid[ai] ?? ''));
+      if (current.removed.length < maxHunkLines)
+        current.removed.push(clampLine(aMid[ai] ?? '', maxLineChars));
       else current.removed_truncated = true;
       ai++;
     } else {
       added++;
-      if (current.added.length < MAX_HUNK_LINES) current.added.push(clampLine(bMid[bi] ?? ''));
+      if (current.added.length < maxHunkLines)
+        current.added.push(clampLine(bMid[bi] ?? '', maxLineChars));
       else current.added_truncated = true;
       bi++;
     }
   }
   // Overall character budget — a minified static resource must not blow out
   // the response even inside per-line and per-hunk caps.
-  let budget = MAX_HUNK_BUDGET_CHARS;
+  let budget = maxHunkBudgetChars;
   let kept = 0;
   for (const h of hunks) {
     budget -= [...h.removed, ...h.added].reduce((n, l) => n + l.length + 1, 0);
     if (budget < 0) break;
     kept++;
   }
-  const cappedHunks = hunks.slice(0, Math.min(kept, MAX_HUNKS));
+  const cappedHunks = hunks.slice(0, Math.min(kept, maxHunks));
   return {
     identical: false,
     lines_a: aLines.length,
@@ -362,8 +391,8 @@ export function diffText(aText: string, bText: string): TextDiff {
   };
 }
 
-function clampLine(line: string): string {
-  return line.length > MAX_LINE_CHARS ? `${line.slice(0, MAX_LINE_CHARS)}…` : line;
+function clampLine(line: string, maxLineChars: number): string {
+  return line.length > maxLineChars ? `${line.slice(0, maxLineChars)}…` : line;
 }
 
 function countLines(lines: string[]): Map<string, number> {

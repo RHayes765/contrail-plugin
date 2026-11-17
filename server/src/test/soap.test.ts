@@ -334,3 +334,144 @@ describe('S30: listMetadataDetailed INVALID_TYPE degrade', () => {
     );
   });
 });
+
+describe('S45: DeployResult org-side stamps + listMetadataQueries', () => {
+  function deployStatusResponse(withDates: boolean): string {
+    return soapEnvelope(
+      `<checkDeployStatusResponse xmlns="http://soap.sforce.com/2006/04/metadata">
+         <result><id>0Af1</id><done>true</done><status>Succeeded</status>
+           <success>true</success><checkOnly>true</checkOnly>
+           ${
+             withDates
+               ? '<createdDate>2026-11-14T15:04:05.000Z</createdDate>' +
+                 '<completedDate>2026-11-14T15:04:09.000Z</completedDate>'
+               : ''
+           }
+           <numberComponentsTotal>1</numberComponentsTotal>
+           <numberComponentsDeployed>1</numberComponentsDeployed>
+           <numberComponentErrors>0</numberComponentErrors>
+           <numberTestsTotal>0</numberTestsTotal>
+           <numberTestsCompleted>0</numberTestsCompleted>
+           <numberTestErrors>0</numberTestErrors>
+           <details><runTestResult><numTestsRun>0</numTestsRun>
+             <numFailures>0</numFailures></runTestResult></details>
+         </result>
+       </checkDeployStatusResponse>`,
+    );
+  }
+
+  it('checkDeployStatus parses createdDate/completedDate as strings; undefined when the org omits them', async () => {
+    let withDates = true;
+    vi.stubGlobal('fetch', async () => new Response(deployStatusResponse(withDates)));
+    const client = new MetadataSoapClient(fakeTokenMgr(['AT']), CONN, 'v66.0');
+
+    const stamped = await client.checkDeployStatus('0Af1');
+    expect(stamped.createdDate).toBe('2026-11-14T15:04:05.000Z');
+    expect(stamped.completedDate).toBe('2026-11-14T15:04:09.000Z');
+    // Org time, comparable as epoch ms (the degrade-path moved check does exactly this).
+    expect(Date.parse(stamped.createdDate!)).toBeLessThan(Date.parse(stamped.completedDate!));
+    expect(stamped.success).toBe(true);
+    expect(stamped.checkOnly).toBe(true);
+
+    withDates = false;
+    const bare = await client.checkDeployStatus('0Af1');
+    expect(bare.createdDate).toBeUndefined();
+    expect(bare.completedDate).toBeUndefined();
+    expect(bare.done).toBe(true);
+  });
+
+  it('listMetadataQueries lists exactly the given queries: a foldered member by ITS folder, <met:folder> before <met:type>, no folder enumeration', async () => {
+    const bodies: string[] = [];
+    vi.stubGlobal('fetch', async (_url: unknown, init?: RequestInit) => {
+      bodies.push(String(init?.body));
+      return new Response(
+        soapEnvelope(
+          `<listMetadataResponse xmlns="http://soap.sforce.com/2006/04/metadata">
+             <result><fullName>Pipeline</fullName><type>Report</type>
+               <fileName>reports/Ops/Pipeline.report</fileName><id>00O1</id>
+               <lastModifiedDate>2026-11-01T00:00:00.000Z</lastModifiedDate>
+               <lastModifiedByName>Ryley</lastModifiedByName></result>
+             <result><fullName>Foo</fullName><type>ApexClass</type>
+               <fileName>classes/Foo.cls</fileName><id>01p1</id>
+               <lastModifiedDate>2026-11-02T00:00:00.000Z</lastModifiedDate>
+               <lastModifiedByName>Ryley</lastModifiedByName></result>
+           </listMetadataResponse>`,
+        ),
+      );
+    });
+    const client = new MetadataSoapClient(fakeTokenMgr(['AT']), CONN, 'v66.0');
+    const { props, unsupportedTypes } = await client.listMetadataQueries([
+      { type: 'Report', folder: 'Ops' },
+      { type: 'ApexClass' },
+      { type: 'Report', folder: 'Ops' }, // a duplicate collapses — one query, one round trip
+    ]);
+
+    expect(bodies).toHaveLength(1);
+    // WSDL sequence order: folder BEFORE type; the flat query carries no folder.
+    expect(bodies[0]).toMatch(
+      /<met:listMetadata><met:queries><met:folder>Ops<\/met:folder><met:type>Report<\/met:type><\/met:queries><met:queries><met:type>ApexClass<\/met:type><\/met:queries><met:asOfVersion>/,
+    );
+    // Never the whole tree: no ReportFolder enumeration, no unfiled$public pass.
+    expect(bodies[0]).not.toContain('ReportFolder');
+    expect(bodies[0]).not.toContain('unfiled$public');
+    expect(unsupportedTypes).toEqual([]);
+    // A bare org name is folder-qualified (exactly one folder for that type in the chunk).
+    expect(props.map((p) => `${p.type}:${p.fullName}`).sort()).toEqual([
+      'ApexClass:Foo',
+      'Report:Ops/Pipeline',
+    ]);
+    expect(props.find((p) => p.type === 'Report')?.lastModifiedDate).toBe(
+      '2026-11-01T00:00:00.000Z',
+    );
+  });
+
+  it('listMetadataQueries degrades INVALID_TYPE per query like listMetadataDetailed; other faults throw', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', async (_url: unknown, init?: RequestInit) => {
+      const body = String(init?.body);
+      calls.push(body);
+      if (body.includes('<met:type>BotVersion</met:type>')) {
+        return new Response(
+          soapEnvelope(
+            `<soapenv:Fault><faultcode>sf:INVALID_TYPE</faultcode>
+             <faultstring>INVALID_TYPE: Cannot use: BotVersion in this version</faultstring></soapenv:Fault>`,
+          ),
+          { status: 500 },
+        );
+      }
+      const type = body.match(/<met:type>(\w+)<\/met:type>/)?.[1] ?? 'CustomField';
+      return new Response(
+        soapEnvelope(
+          `<listMetadataResponse xmlns="http://soap.sforce.com/2006/04/metadata">
+             <result><fullName>Invoice__c.Amount__c</fullName><type>${type}</type>
+               <fileName>objects/Invoice__c.object</fileName><id>00N1</id>
+               <lastModifiedDate>2026-09-01T00:00:00.000Z</lastModifiedDate>
+               <lastModifiedByName>Ryley</lastModifiedByName></result>
+           </listMetadataResponse>`,
+        ),
+      );
+    });
+    const client = new MetadataSoapClient(fakeTokenMgr(['AT']), CONN, 'v66.0');
+    const { props, unsupportedTypes } = await client.listMetadataQueries([
+      { type: 'BotVersion' },
+      { type: 'CustomField' },
+    ]);
+    expect(unsupportedTypes).toEqual(['BotVersion']);
+    expect(props.map((p) => p.type)).toEqual(['CustomField']);
+    // 1 faulted chunk + 2 per-query retries.
+    expect(calls).toHaveLength(3);
+
+    vi.stubGlobal('fetch', async () =>
+      new Response(
+        soapEnvelope(
+          `<soapenv:Fault><faultcode>sf:INSUFFICIENT_ACCESS</faultcode>
+           <faultstring>no metadata api for you</faultstring></soapenv:Fault>`,
+        ),
+        { status: 500 },
+      ),
+    );
+    await expect(client.listMetadataQueries([{ type: 'CustomField' }])).rejects.toThrow(
+      /no metadata api for you/,
+    );
+  });
+});

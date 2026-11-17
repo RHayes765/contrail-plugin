@@ -288,3 +288,19 @@ from the approval page. While a package is still work-in-progress, validate with
 `dry_run: true` — full results, no approval request — and save the real validate
 for the final package. After a successful deploy, `refresh_snapshot` so the local
 index and dependency graph reflect the org's new state.
+
+**Reverting a deploy uses its revert plan, through the same ritual.** A successful
+`execute_deploy` returns `revert_package`, pointing at
+`staging/_reverts/<requestId>/revert-plan.json`: each entry under `components` carries
+the `content_file` of what the org held when the deploy was **validated**, and
+`destructive` lists the components the deploy added. To revert, read the plan's
+`README.txt` first (it says what a revert does not undo — data changes, automation that
+ran, permission effects, changes to components outside the package — and that it
+overwrites anything changed since in the components it restores, another user's edits
+included), then pass those `content_file` paths — and, only if the
+human wants the additions removed, the `destructive` list — to `validate_deploy` as a
+new package; the human approves it like any deploy. Members under `not_restorable`
+cannot be restored from this package (each entry says why: a Profile's captured bytes
+are package-relative, other entries have no bytes) and need another source; members
+under `covered` are restored by their container's document. Contrail never deploys a
+revert on its own.

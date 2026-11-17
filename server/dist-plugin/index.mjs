@@ -235,10 +235,10 @@ function assignProp(target, prop, value) {
     configurable: true
   });
 }
-function getElementAtPath(obj, path13) {
-  if (!path13)
+function getElementAtPath(obj, path14) {
+  if (!path14)
     return obj;
-  return path13.reduce((acc, key2) => acc?.[key2], obj);
+  return path14.reduce((acc, key2) => acc?.[key2], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -487,22 +487,22 @@ function aborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path13, issues) {
+function prefixIssues(path14, issues) {
   return issues.map((iss) => {
     var _a2;
     (_a2 = iss).path ?? (_a2.path = []);
-    iss.path.unshift(path13);
+    iss.path.unshift(path14);
     return iss;
   });
 }
-function unwrapMessage(message) {
-  return typeof message === "string" ? message : message?.message;
+function unwrapMessage(message2) {
+  return typeof message2 === "string" ? message2 : message2?.message;
 }
 function finalizeIssue(iss, ctx, config2) {
   const full = { ...iss, path: iss.path ?? [] };
   if (!iss.message) {
-    const message = unwrapMessage(iss.inst?._zod.def?.error?.(iss)) ?? unwrapMessage(ctx?.error?.(iss)) ?? unwrapMessage(config2.customError?.(iss)) ?? unwrapMessage(config2.localeError?.(iss)) ?? "Invalid input";
-    full.message = message;
+    const message2 = unwrapMessage(iss.inst?._zod.def?.error?.(iss)) ?? unwrapMessage(ctx?.error?.(iss)) ?? unwrapMessage(config2.customError?.(iss)) ?? unwrapMessage(config2.localeError?.(iss)) ?? "Invalid input";
+    full.message = message2;
   }
   delete full.inst;
   delete full.continue;
@@ -772,8 +772,8 @@ function emoji() {
   return new RegExp(_emoji, "u");
 }
 function timeSource(args) {
-  const hhmm = `(?:[01]\\d|2[0-3]):[0-5]\\d`;
-  const regex = typeof args.precision === "number" ? args.precision === -1 ? `${hhmm}` : args.precision === 0 ? `${hhmm}:[0-5]\\d` : `${hhmm}:[0-5]\\d\\.\\d{${args.precision}}` : `${hhmm}(?::[0-5]\\d(?:\\.\\d+)?)?`;
+  const hhmm2 = `(?:[01]\\d|2[0-3]):[0-5]\\d`;
+  const regex = typeof args.precision === "number" ? args.precision === -1 ? `${hhmm2}` : args.precision === 0 ? `${hhmm2}:[0-5]\\d` : `${hhmm2}:[0-5]\\d\\.\\d{${args.precision}}` : `${hhmm2}(?::[0-5]\\d(?:\\.\\d+)?)?`;
   return regex;
 }
 function time(args) {
@@ -6244,8 +6244,8 @@ var init_types = __esm({
       CreateTaskResultSchema
     ]);
     McpError = class _McpError extends Error {
-      constructor(code, message, data) {
-        super(`MCP error ${code}: ${message}`);
+      constructor(code, message2, data) {
+        super(`MCP error ${code}: ${message2}`);
         this.code = code;
         this.data = data;
         this.name = "McpError";
@@ -6253,19 +6253,19 @@ var init_types = __esm({
       /**
        * Factory method to create the appropriate error type based on the error code and data
        */
-      static fromError(code, message, data) {
+      static fromError(code, message2, data) {
         if (code === ErrorCode.UrlElicitationRequired && data) {
           const errorData = data;
           if (errorData.elicitations) {
-            return new UrlElicitationRequiredError(errorData.elicitations, message);
+            return new UrlElicitationRequiredError(errorData.elicitations, message2);
           }
         }
-        return new _McpError(code, message, data);
+        return new _McpError(code, message2, data);
       }
     };
     UrlElicitationRequiredError = class extends McpError {
-      constructor(elicitations, message = `URL elicitation${elicitations.length > 1 ? "s" : ""} required`) {
-        super(ErrorCode.UrlElicitationRequired, message, {
+      constructor(elicitations, message2 = `URL elicitation${elicitations.length > 1 ? "s" : ""} required`) {
+        super(ErrorCode.UrlElicitationRequired, message2, {
           elicitations
         });
       }
@@ -6648,104 +6648,104 @@ var init_en2 = __esm({
     init_ZodError();
     init_util2();
     errorMap = (issue2, _ctx) => {
-      let message;
+      let message2;
       switch (issue2.code) {
         case ZodIssueCode.invalid_type:
           if (issue2.received === ZodParsedType.undefined) {
-            message = "Required";
+            message2 = "Required";
           } else {
-            message = `Expected ${issue2.expected}, received ${issue2.received}`;
+            message2 = `Expected ${issue2.expected}, received ${issue2.received}`;
           }
           break;
         case ZodIssueCode.invalid_literal:
-          message = `Invalid literal value, expected ${JSON.stringify(issue2.expected, util.jsonStringifyReplacer)}`;
+          message2 = `Invalid literal value, expected ${JSON.stringify(issue2.expected, util.jsonStringifyReplacer)}`;
           break;
         case ZodIssueCode.unrecognized_keys:
-          message = `Unrecognized key(s) in object: ${util.joinValues(issue2.keys, ", ")}`;
+          message2 = `Unrecognized key(s) in object: ${util.joinValues(issue2.keys, ", ")}`;
           break;
         case ZodIssueCode.invalid_union:
-          message = `Invalid input`;
+          message2 = `Invalid input`;
           break;
         case ZodIssueCode.invalid_union_discriminator:
-          message = `Invalid discriminator value. Expected ${util.joinValues(issue2.options)}`;
+          message2 = `Invalid discriminator value. Expected ${util.joinValues(issue2.options)}`;
           break;
         case ZodIssueCode.invalid_enum_value:
-          message = `Invalid enum value. Expected ${util.joinValues(issue2.options)}, received '${issue2.received}'`;
+          message2 = `Invalid enum value. Expected ${util.joinValues(issue2.options)}, received '${issue2.received}'`;
           break;
         case ZodIssueCode.invalid_arguments:
-          message = `Invalid function arguments`;
+          message2 = `Invalid function arguments`;
           break;
         case ZodIssueCode.invalid_return_type:
-          message = `Invalid function return type`;
+          message2 = `Invalid function return type`;
           break;
         case ZodIssueCode.invalid_date:
-          message = `Invalid date`;
+          message2 = `Invalid date`;
           break;
         case ZodIssueCode.invalid_string:
           if (typeof issue2.validation === "object") {
             if ("includes" in issue2.validation) {
-              message = `Invalid input: must include "${issue2.validation.includes}"`;
+              message2 = `Invalid input: must include "${issue2.validation.includes}"`;
               if (typeof issue2.validation.position === "number") {
-                message = `${message} at one or more positions greater than or equal to ${issue2.validation.position}`;
+                message2 = `${message2} at one or more positions greater than or equal to ${issue2.validation.position}`;
               }
             } else if ("startsWith" in issue2.validation) {
-              message = `Invalid input: must start with "${issue2.validation.startsWith}"`;
+              message2 = `Invalid input: must start with "${issue2.validation.startsWith}"`;
             } else if ("endsWith" in issue2.validation) {
-              message = `Invalid input: must end with "${issue2.validation.endsWith}"`;
+              message2 = `Invalid input: must end with "${issue2.validation.endsWith}"`;
             } else {
               util.assertNever(issue2.validation);
             }
           } else if (issue2.validation !== "regex") {
-            message = `Invalid ${issue2.validation}`;
+            message2 = `Invalid ${issue2.validation}`;
           } else {
-            message = "Invalid";
+            message2 = "Invalid";
           }
           break;
         case ZodIssueCode.too_small:
           if (issue2.type === "array")
-            message = `Array must contain ${issue2.exact ? "exactly" : issue2.inclusive ? `at least` : `more than`} ${issue2.minimum} element(s)`;
+            message2 = `Array must contain ${issue2.exact ? "exactly" : issue2.inclusive ? `at least` : `more than`} ${issue2.minimum} element(s)`;
           else if (issue2.type === "string")
-            message = `String must contain ${issue2.exact ? "exactly" : issue2.inclusive ? `at least` : `over`} ${issue2.minimum} character(s)`;
+            message2 = `String must contain ${issue2.exact ? "exactly" : issue2.inclusive ? `at least` : `over`} ${issue2.minimum} character(s)`;
           else if (issue2.type === "number")
-            message = `Number must be ${issue2.exact ? `exactly equal to ` : issue2.inclusive ? `greater than or equal to ` : `greater than `}${issue2.minimum}`;
+            message2 = `Number must be ${issue2.exact ? `exactly equal to ` : issue2.inclusive ? `greater than or equal to ` : `greater than `}${issue2.minimum}`;
           else if (issue2.type === "bigint")
-            message = `Number must be ${issue2.exact ? `exactly equal to ` : issue2.inclusive ? `greater than or equal to ` : `greater than `}${issue2.minimum}`;
+            message2 = `Number must be ${issue2.exact ? `exactly equal to ` : issue2.inclusive ? `greater than or equal to ` : `greater than `}${issue2.minimum}`;
           else if (issue2.type === "date")
-            message = `Date must be ${issue2.exact ? `exactly equal to ` : issue2.inclusive ? `greater than or equal to ` : `greater than `}${new Date(Number(issue2.minimum))}`;
+            message2 = `Date must be ${issue2.exact ? `exactly equal to ` : issue2.inclusive ? `greater than or equal to ` : `greater than `}${new Date(Number(issue2.minimum))}`;
           else
-            message = "Invalid input";
+            message2 = "Invalid input";
           break;
         case ZodIssueCode.too_big:
           if (issue2.type === "array")
-            message = `Array must contain ${issue2.exact ? `exactly` : issue2.inclusive ? `at most` : `less than`} ${issue2.maximum} element(s)`;
+            message2 = `Array must contain ${issue2.exact ? `exactly` : issue2.inclusive ? `at most` : `less than`} ${issue2.maximum} element(s)`;
           else if (issue2.type === "string")
-            message = `String must contain ${issue2.exact ? `exactly` : issue2.inclusive ? `at most` : `under`} ${issue2.maximum} character(s)`;
+            message2 = `String must contain ${issue2.exact ? `exactly` : issue2.inclusive ? `at most` : `under`} ${issue2.maximum} character(s)`;
           else if (issue2.type === "number")
-            message = `Number must be ${issue2.exact ? `exactly` : issue2.inclusive ? `less than or equal to` : `less than`} ${issue2.maximum}`;
+            message2 = `Number must be ${issue2.exact ? `exactly` : issue2.inclusive ? `less than or equal to` : `less than`} ${issue2.maximum}`;
           else if (issue2.type === "bigint")
-            message = `BigInt must be ${issue2.exact ? `exactly` : issue2.inclusive ? `less than or equal to` : `less than`} ${issue2.maximum}`;
+            message2 = `BigInt must be ${issue2.exact ? `exactly` : issue2.inclusive ? `less than or equal to` : `less than`} ${issue2.maximum}`;
           else if (issue2.type === "date")
-            message = `Date must be ${issue2.exact ? `exactly` : issue2.inclusive ? `smaller than or equal to` : `smaller than`} ${new Date(Number(issue2.maximum))}`;
+            message2 = `Date must be ${issue2.exact ? `exactly` : issue2.inclusive ? `smaller than or equal to` : `smaller than`} ${new Date(Number(issue2.maximum))}`;
           else
-            message = "Invalid input";
+            message2 = "Invalid input";
           break;
         case ZodIssueCode.custom:
-          message = `Invalid input`;
+          message2 = `Invalid input`;
           break;
         case ZodIssueCode.invalid_intersection_types:
-          message = `Intersection results could not be merged`;
+          message2 = `Intersection results could not be merged`;
           break;
         case ZodIssueCode.not_multiple_of:
-          message = `Number must be a multiple of ${issue2.multipleOf}`;
+          message2 = `Number must be a multiple of ${issue2.multipleOf}`;
           break;
         case ZodIssueCode.not_finite:
-          message = "Number must be finite";
+          message2 = "Number must be finite";
           break;
         default:
-          message = _ctx.defaultError;
+          message2 = _ctx.defaultError;
           util.assertNever(issue2);
       }
-      return { message };
+      return { message: message2 };
     };
     en_default2 = errorMap;
   }
@@ -6792,8 +6792,8 @@ var init_parseUtil = __esm({
     init_errors3();
     init_en2();
     makeIssue = (params) => {
-      const { data, path: path13, errorMaps, issueData } = params;
-      const fullPath = [...path13, ...issueData.path || []];
+      const { data, path: path14, errorMaps, issueData } = params;
+      const fullPath = [...path14, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -6805,15 +6805,15 @@ var init_parseUtil = __esm({
           message: issueData.message
         };
       }
-      let errorMessage = "";
+      let errorMessage2 = "";
       const maps = errorMaps.filter((m) => !!m).slice().reverse();
       for (const map of maps) {
-        errorMessage = map(fullIssue, { data, defaultError: errorMessage }).message;
+        errorMessage2 = map(fullIssue, { data, defaultError: errorMessage2 }).message;
       }
       return {
         ...issueData,
         path: fullPath,
-        message: errorMessage
+        message: errorMessage2
       };
     };
     EMPTY_PATH = [];
@@ -6894,8 +6894,8 @@ var errorUtil;
 var init_errorUtil = __esm({
   "node_modules/zod/v3/helpers/errorUtil.js"() {
     (function(errorUtil2) {
-      errorUtil2.errToObj = (message) => typeof message === "string" ? { message } : message || {};
-      errorUtil2.toString = (message) => typeof message === "string" ? message : message?.message;
+      errorUtil2.errToObj = (message2) => typeof message2 === "string" ? { message: message2 } : message2 || {};
+      errorUtil2.toString = (message2) => typeof message2 === "string" ? message2 : message2?.message;
     })(errorUtil || (errorUtil = {}));
   }
 });
@@ -6911,16 +6911,16 @@ function processCreateParams(params) {
   if (errorMap2)
     return { errorMap: errorMap2, description };
   const customMap = (iss, ctx) => {
-    const { message } = params;
+    const { message: message2 } = params;
     if (iss.code === "invalid_enum_value") {
-      return { message: message ?? ctx.defaultError };
+      return { message: message2 ?? ctx.defaultError };
     }
     if (typeof ctx.data === "undefined") {
-      return { message: message ?? required_error ?? ctx.defaultError };
+      return { message: message2 ?? required_error ?? ctx.defaultError };
     }
     if (iss.code !== "invalid_type")
       return { message: ctx.defaultError };
-    return { message: message ?? invalid_type_error ?? ctx.defaultError };
+    return { message: message2 ?? invalid_type_error ?? ctx.defaultError };
   };
   return { errorMap: customMap, description };
 }
@@ -7101,11 +7101,11 @@ var init_types2 = __esm({
     init_parseUtil();
     init_util2();
     ParseInputLazyPath = class {
-      constructor(parent, value, path13, key2) {
+      constructor(parent, value, path14, key2) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path13;
+        this._path = path14;
         this._key = key2;
       }
       get path() {
@@ -7260,14 +7260,14 @@ var init_types2 = __esm({
         const result = await (isAsync(maybeAsyncResult) ? maybeAsyncResult : Promise.resolve(maybeAsyncResult));
         return handleResult(ctx, result);
       }
-      refine(check2, message) {
+      refine(check2, message2) {
         const getIssueProperties = (val) => {
-          if (typeof message === "string" || typeof message === "undefined") {
-            return { message };
-          } else if (typeof message === "function") {
-            return message(val);
+          if (typeof message2 === "string" || typeof message2 === "undefined") {
+            return { message: message2 };
+          } else if (typeof message2 === "function") {
+            return message2(val);
           } else {
-            return message;
+            return message2;
           }
         };
         return this._refinement((val, ctx) => {
@@ -7740,11 +7740,11 @@ var init_types2 = __esm({
         }
         return { status: status.value, value: input.data };
       }
-      _regex(regex, validation, message) {
+      _regex(regex, validation, message2) {
         return this.refinement((data) => regex.test(data), {
           validation,
           code: ZodIssueCode.invalid_string,
-          ...errorUtil.errToObj(message)
+          ...errorUtil.errToObj(message2)
         });
       }
       _addCheck(check2) {
@@ -7753,37 +7753,37 @@ var init_types2 = __esm({
           checks: [...this._def.checks, check2]
         });
       }
-      email(message) {
-        return this._addCheck({ kind: "email", ...errorUtil.errToObj(message) });
+      email(message2) {
+        return this._addCheck({ kind: "email", ...errorUtil.errToObj(message2) });
       }
-      url(message) {
-        return this._addCheck({ kind: "url", ...errorUtil.errToObj(message) });
+      url(message2) {
+        return this._addCheck({ kind: "url", ...errorUtil.errToObj(message2) });
       }
-      emoji(message) {
-        return this._addCheck({ kind: "emoji", ...errorUtil.errToObj(message) });
+      emoji(message2) {
+        return this._addCheck({ kind: "emoji", ...errorUtil.errToObj(message2) });
       }
-      uuid(message) {
-        return this._addCheck({ kind: "uuid", ...errorUtil.errToObj(message) });
+      uuid(message2) {
+        return this._addCheck({ kind: "uuid", ...errorUtil.errToObj(message2) });
       }
-      nanoid(message) {
-        return this._addCheck({ kind: "nanoid", ...errorUtil.errToObj(message) });
+      nanoid(message2) {
+        return this._addCheck({ kind: "nanoid", ...errorUtil.errToObj(message2) });
       }
-      cuid(message) {
-        return this._addCheck({ kind: "cuid", ...errorUtil.errToObj(message) });
+      cuid(message2) {
+        return this._addCheck({ kind: "cuid", ...errorUtil.errToObj(message2) });
       }
-      cuid2(message) {
-        return this._addCheck({ kind: "cuid2", ...errorUtil.errToObj(message) });
+      cuid2(message2) {
+        return this._addCheck({ kind: "cuid2", ...errorUtil.errToObj(message2) });
       }
-      ulid(message) {
-        return this._addCheck({ kind: "ulid", ...errorUtil.errToObj(message) });
+      ulid(message2) {
+        return this._addCheck({ kind: "ulid", ...errorUtil.errToObj(message2) });
       }
-      base64(message) {
-        return this._addCheck({ kind: "base64", ...errorUtil.errToObj(message) });
+      base64(message2) {
+        return this._addCheck({ kind: "base64", ...errorUtil.errToObj(message2) });
       }
-      base64url(message) {
+      base64url(message2) {
         return this._addCheck({
           kind: "base64url",
-          ...errorUtil.errToObj(message)
+          ...errorUtil.errToObj(message2)
         });
       }
       jwt(options) {
@@ -7813,8 +7813,8 @@ var init_types2 = __esm({
           ...errorUtil.errToObj(options?.message)
         });
       }
-      date(message) {
-        return this._addCheck({ kind: "date", message });
+      date(message2) {
+        return this._addCheck({ kind: "date", message: message2 });
       }
       time(options) {
         if (typeof options === "string") {
@@ -7830,14 +7830,14 @@ var init_types2 = __esm({
           ...errorUtil.errToObj(options?.message)
         });
       }
-      duration(message) {
-        return this._addCheck({ kind: "duration", ...errorUtil.errToObj(message) });
+      duration(message2) {
+        return this._addCheck({ kind: "duration", ...errorUtil.errToObj(message2) });
       }
-      regex(regex, message) {
+      regex(regex, message2) {
         return this._addCheck({
           kind: "regex",
           regex,
-          ...errorUtil.errToObj(message)
+          ...errorUtil.errToObj(message2)
         });
       }
       includes(value, options) {
@@ -7848,46 +7848,46 @@ var init_types2 = __esm({
           ...errorUtil.errToObj(options?.message)
         });
       }
-      startsWith(value, message) {
+      startsWith(value, message2) {
         return this._addCheck({
           kind: "startsWith",
           value,
-          ...errorUtil.errToObj(message)
+          ...errorUtil.errToObj(message2)
         });
       }
-      endsWith(value, message) {
+      endsWith(value, message2) {
         return this._addCheck({
           kind: "endsWith",
           value,
-          ...errorUtil.errToObj(message)
+          ...errorUtil.errToObj(message2)
         });
       }
-      min(minLength, message) {
+      min(minLength, message2) {
         return this._addCheck({
           kind: "min",
           value: minLength,
-          ...errorUtil.errToObj(message)
+          ...errorUtil.errToObj(message2)
         });
       }
-      max(maxLength, message) {
+      max(maxLength, message2) {
         return this._addCheck({
           kind: "max",
           value: maxLength,
-          ...errorUtil.errToObj(message)
+          ...errorUtil.errToObj(message2)
         });
       }
-      length(len, message) {
+      length(len, message2) {
         return this._addCheck({
           kind: "length",
           value: len,
-          ...errorUtil.errToObj(message)
+          ...errorUtil.errToObj(message2)
         });
       }
       /**
        * Equivalent to `.min(1)`
        */
-      nonempty(message) {
-        return this.min(1, errorUtil.errToObj(message));
+      nonempty(message2) {
+        return this.min(1, errorUtil.errToObj(message2));
       }
       trim() {
         return new _ZodString2({
@@ -8072,19 +8072,19 @@ var init_types2 = __esm({
         }
         return { status: status.value, value: input.data };
       }
-      gte(value, message) {
-        return this.setLimit("min", value, true, errorUtil.toString(message));
+      gte(value, message2) {
+        return this.setLimit("min", value, true, errorUtil.toString(message2));
       }
-      gt(value, message) {
-        return this.setLimit("min", value, false, errorUtil.toString(message));
+      gt(value, message2) {
+        return this.setLimit("min", value, false, errorUtil.toString(message2));
       }
-      lte(value, message) {
-        return this.setLimit("max", value, true, errorUtil.toString(message));
+      lte(value, message2) {
+        return this.setLimit("max", value, true, errorUtil.toString(message2));
       }
-      lt(value, message) {
-        return this.setLimit("max", value, false, errorUtil.toString(message));
+      lt(value, message2) {
+        return this.setLimit("max", value, false, errorUtil.toString(message2));
       }
-      setLimit(kind, value, inclusive, message) {
+      setLimit(kind, value, inclusive, message2) {
         return new _ZodNumber({
           ...this._def,
           checks: [
@@ -8093,7 +8093,7 @@ var init_types2 = __esm({
               kind,
               value,
               inclusive,
-              message: errorUtil.toString(message)
+              message: errorUtil.toString(message2)
             }
           ]
         });
@@ -8104,68 +8104,68 @@ var init_types2 = __esm({
           checks: [...this._def.checks, check2]
         });
       }
-      int(message) {
+      int(message2) {
         return this._addCheck({
           kind: "int",
-          message: errorUtil.toString(message)
+          message: errorUtil.toString(message2)
         });
       }
-      positive(message) {
+      positive(message2) {
         return this._addCheck({
           kind: "min",
           value: 0,
           inclusive: false,
-          message: errorUtil.toString(message)
+          message: errorUtil.toString(message2)
         });
       }
-      negative(message) {
+      negative(message2) {
         return this._addCheck({
           kind: "max",
           value: 0,
           inclusive: false,
-          message: errorUtil.toString(message)
+          message: errorUtil.toString(message2)
         });
       }
-      nonpositive(message) {
+      nonpositive(message2) {
         return this._addCheck({
           kind: "max",
           value: 0,
           inclusive: true,
-          message: errorUtil.toString(message)
+          message: errorUtil.toString(message2)
         });
       }
-      nonnegative(message) {
+      nonnegative(message2) {
         return this._addCheck({
           kind: "min",
           value: 0,
           inclusive: true,
-          message: errorUtil.toString(message)
+          message: errorUtil.toString(message2)
         });
       }
-      multipleOf(value, message) {
+      multipleOf(value, message2) {
         return this._addCheck({
           kind: "multipleOf",
           value,
-          message: errorUtil.toString(message)
+          message: errorUtil.toString(message2)
         });
       }
-      finite(message) {
+      finite(message2) {
         return this._addCheck({
           kind: "finite",
-          message: errorUtil.toString(message)
+          message: errorUtil.toString(message2)
         });
       }
-      safe(message) {
+      safe(message2) {
         return this._addCheck({
           kind: "min",
           inclusive: true,
           value: Number.MIN_SAFE_INTEGER,
-          message: errorUtil.toString(message)
+          message: errorUtil.toString(message2)
         })._addCheck({
           kind: "max",
           inclusive: true,
           value: Number.MAX_SAFE_INTEGER,
-          message: errorUtil.toString(message)
+          message: errorUtil.toString(message2)
         });
       }
       get minValue() {
@@ -8288,19 +8288,19 @@ var init_types2 = __esm({
         });
         return INVALID;
       }
-      gte(value, message) {
-        return this.setLimit("min", value, true, errorUtil.toString(message));
+      gte(value, message2) {
+        return this.setLimit("min", value, true, errorUtil.toString(message2));
       }
-      gt(value, message) {
-        return this.setLimit("min", value, false, errorUtil.toString(message));
+      gt(value, message2) {
+        return this.setLimit("min", value, false, errorUtil.toString(message2));
       }
-      lte(value, message) {
-        return this.setLimit("max", value, true, errorUtil.toString(message));
+      lte(value, message2) {
+        return this.setLimit("max", value, true, errorUtil.toString(message2));
       }
-      lt(value, message) {
-        return this.setLimit("max", value, false, errorUtil.toString(message));
+      lt(value, message2) {
+        return this.setLimit("max", value, false, errorUtil.toString(message2));
       }
-      setLimit(kind, value, inclusive, message) {
+      setLimit(kind, value, inclusive, message2) {
         return new _ZodBigInt({
           ...this._def,
           checks: [
@@ -8309,7 +8309,7 @@ var init_types2 = __esm({
               kind,
               value,
               inclusive,
-              message: errorUtil.toString(message)
+              message: errorUtil.toString(message2)
             }
           ]
         });
@@ -8320,43 +8320,43 @@ var init_types2 = __esm({
           checks: [...this._def.checks, check2]
         });
       }
-      positive(message) {
+      positive(message2) {
         return this._addCheck({
           kind: "min",
           value: BigInt(0),
           inclusive: false,
-          message: errorUtil.toString(message)
+          message: errorUtil.toString(message2)
         });
       }
-      negative(message) {
+      negative(message2) {
         return this._addCheck({
           kind: "max",
           value: BigInt(0),
           inclusive: false,
-          message: errorUtil.toString(message)
+          message: errorUtil.toString(message2)
         });
       }
-      nonpositive(message) {
+      nonpositive(message2) {
         return this._addCheck({
           kind: "max",
           value: BigInt(0),
           inclusive: true,
-          message: errorUtil.toString(message)
+          message: errorUtil.toString(message2)
         });
       }
-      nonnegative(message) {
+      nonnegative(message2) {
         return this._addCheck({
           kind: "min",
           value: BigInt(0),
           inclusive: true,
-          message: errorUtil.toString(message)
+          message: errorUtil.toString(message2)
         });
       }
-      multipleOf(value, message) {
+      multipleOf(value, message2) {
         return this._addCheck({
           kind: "multipleOf",
           value,
-          message: errorUtil.toString(message)
+          message: errorUtil.toString(message2)
         });
       }
       get minValue() {
@@ -8479,18 +8479,18 @@ var init_types2 = __esm({
           checks: [...this._def.checks, check2]
         });
       }
-      min(minDate, message) {
+      min(minDate, message2) {
         return this._addCheck({
           kind: "min",
           value: minDate.getTime(),
-          message: errorUtil.toString(message)
+          message: errorUtil.toString(message2)
         });
       }
-      max(maxDate, message) {
+      max(maxDate, message2) {
         return this._addCheck({
           kind: "max",
           value: maxDate.getTime(),
-          message: errorUtil.toString(message)
+          message: errorUtil.toString(message2)
         });
       }
       get minDate() {
@@ -8722,26 +8722,26 @@ var init_types2 = __esm({
       get element() {
         return this._def.type;
       }
-      min(minLength, message) {
+      min(minLength, message2) {
         return new _ZodArray({
           ...this._def,
-          minLength: { value: minLength, message: errorUtil.toString(message) }
+          minLength: { value: minLength, message: errorUtil.toString(message2) }
         });
       }
-      max(maxLength, message) {
+      max(maxLength, message2) {
         return new _ZodArray({
           ...this._def,
-          maxLength: { value: maxLength, message: errorUtil.toString(message) }
+          maxLength: { value: maxLength, message: errorUtil.toString(message2) }
         });
       }
-      length(len, message) {
+      length(len, message2) {
         return new _ZodArray({
           ...this._def,
-          exactLength: { value: len, message: errorUtil.toString(message) }
+          exactLength: { value: len, message: errorUtil.toString(message2) }
         });
       }
-      nonempty(message) {
-        return this.min(1, message);
+      nonempty(message2) {
+        return this.min(1, message2);
       }
     };
     ZodArray2.create = (schema, params) => {
@@ -8858,17 +8858,17 @@ var init_types2 = __esm({
       get shape() {
         return this._def.shape();
       }
-      strict(message) {
+      strict(message2) {
         errorUtil.errToObj;
         return new _ZodObject({
           ...this._def,
           unknownKeys: "strict",
-          ...message !== void 0 ? {
+          ...message2 !== void 0 ? {
             errorMap: (issue2, ctx) => {
               const defaultError = this._def.errorMap?.(issue2, ctx).message ?? ctx.defaultError;
               if (issue2.code === "unrecognized_keys")
                 return {
-                  message: errorUtil.errToObj(message).message ?? defaultError
+                  message: errorUtil.errToObj(message2).message ?? defaultError
                 };
               return {
                 message: defaultError
@@ -9586,23 +9586,23 @@ var init_types2 = __esm({
           return finalizeSet(elements);
         }
       }
-      min(minSize, message) {
+      min(minSize, message2) {
         return new _ZodSet({
           ...this._def,
-          minSize: { value: minSize, message: errorUtil.toString(message) }
+          minSize: { value: minSize, message: errorUtil.toString(message2) }
         });
       }
-      max(maxSize, message) {
+      max(maxSize, message2) {
         return new _ZodSet({
           ...this._def,
-          maxSize: { value: maxSize, message: errorUtil.toString(message) }
+          maxSize: { value: maxSize, message: errorUtil.toString(message2) }
         });
       }
-      size(size, message) {
-        return this.min(size, message).max(size, message);
+      size(size, message2) {
+        return this.min(size, message2).max(size, message2);
       }
-      nonempty(message) {
-        return this.min(1, message);
+      nonempty(message2) {
+        return this.min(1, message2);
       }
     };
     ZodSet.create = (valueType, params) => {
@@ -10676,11 +10676,11 @@ function normalizeObjectSchema(schema) {
   }
   return void 0;
 }
-function getDotPath(path13) {
-  if (path13.length === 0) {
+function getDotPath(path14) {
+  if (path14.length === 0) {
     return "object root";
   }
-  return path13.reduce((acc, seg, index) => {
+  return path14.reduce((acc, seg, index) => {
     if (index === 0) {
       return String(seg);
     }
@@ -10834,19 +10834,19 @@ var init_Refs = __esm({
 });
 
 // node_modules/zod-to-json-schema/dist/esm/errorMessages.js
-function addErrorMessage(res, key2, errorMessage, refs) {
+function addErrorMessage(res, key2, errorMessage2, refs) {
   if (!refs?.errorMessages)
     return;
-  if (errorMessage) {
+  if (errorMessage2) {
     res.errorMessage = {
       ...res.errorMessage,
-      [key2]: errorMessage
+      [key2]: errorMessage2
     };
   }
 }
-function setResponseValueAndErrors(res, key2, value, errorMessage, refs) {
+function setResponseValueAndErrors(res, key2, value, errorMessage2, refs) {
   res[key2] = value;
-  addErrorMessage(res, key2, errorMessage, refs);
+  addErrorMessage(res, key2, errorMessage2, refs);
 }
 var init_errorMessages = __esm({
   "node_modules/zod-to-json-schema/dist/esm/errorMessages.js"() {
@@ -11320,7 +11320,7 @@ function escapeNonAlphaNumeric(source) {
   }
   return result;
 }
-function addFormat(schema, value, message, refs) {
+function addFormat(schema, value, message2, refs) {
   if (schema.format || schema.anyOf?.some((x) => x.format)) {
     if (!schema.anyOf) {
       schema.anyOf = [];
@@ -11342,13 +11342,13 @@ function addFormat(schema, value, message, refs) {
     }
     schema.anyOf.push({
       format: value,
-      ...message && refs.errorMessages && { errorMessage: { format: message } }
+      ...message2 && refs.errorMessages && { errorMessage: { format: message2 } }
     });
   } else {
-    setResponseValueAndErrors(schema, "format", value, message, refs);
+    setResponseValueAndErrors(schema, "format", value, message2, refs);
   }
 }
-function addPattern(schema, regex, message, refs) {
+function addPattern(schema, regex, message2, refs) {
   if (schema.pattern || schema.allOf?.some((x) => x.pattern)) {
     if (!schema.allOf) {
       schema.allOf = [];
@@ -11370,10 +11370,10 @@ function addPattern(schema, regex, message, refs) {
     }
     schema.allOf.push({
       pattern: stringifyRegExpWithFlags(regex, refs),
-      ...message && refs.errorMessages && { errorMessage: { pattern: message } }
+      ...message2 && refs.errorMessages && { errorMessage: { pattern: message2 } }
     });
   } else {
-    setResponseValueAndErrors(schema, "pattern", stringifyRegExpWithFlags(regex, refs), message, refs);
+    setResponseValueAndErrors(schema, "pattern", stringifyRegExpWithFlags(regex, refs), message2, refs);
   }
 }
 function stringifyRegExpWithFlags(regex, refs) {
@@ -12460,16 +12460,16 @@ var init_protocol = __esm({
                 let queuedMessage;
                 while (queuedMessage = await this._taskMessageQueue.dequeue(taskId, extra.sessionId)) {
                   if (queuedMessage.type === "response" || queuedMessage.type === "error") {
-                    const message = queuedMessage.message;
-                    const requestId = message.id;
+                    const message2 = queuedMessage.message;
+                    const requestId = message2.id;
                     const resolver = this._requestResolvers.get(requestId);
                     if (resolver) {
                       this._requestResolvers.delete(requestId);
                       if (queuedMessage.type === "response") {
-                        resolver(message);
+                        resolver(message2);
                       } else {
-                        const errorMessage = message;
-                        const error2 = new McpError(errorMessage.error.code, errorMessage.error.message, errorMessage.error.data);
+                        const errorMessage2 = message2;
+                        const error2 = new McpError(errorMessage2.error.code, errorMessage2.error.message, errorMessage2.error.data);
                         resolver(error2);
                       }
                     } else {
@@ -12607,16 +12607,16 @@ var init_protocol = __esm({
           this._onerror(error2);
         };
         const _onmessage = this._transport?.onmessage;
-        this._transport.onmessage = (message, extra) => {
-          _onmessage?.(message, extra);
-          if (isJSONRPCResultResponse(message) || isJSONRPCErrorResponse(message)) {
-            this._onresponse(message);
-          } else if (isJSONRPCRequest(message)) {
-            this._onrequest(message, extra);
-          } else if (isJSONRPCNotification(message)) {
-            this._onnotification(message);
+        this._transport.onmessage = (message2, extra) => {
+          _onmessage?.(message2, extra);
+          if (isJSONRPCResultResponse(message2) || isJSONRPCErrorResponse(message2)) {
+            this._onresponse(message2);
+          } else if (isJSONRPCRequest(message2)) {
+            this._onrequest(message2, extra);
+          } else if (isJSONRPCNotification(message2)) {
+            this._onnotification(message2);
           } else {
-            this._onerror(new Error(`Unknown message type: ${JSON.stringify(message)}`));
+            this._onerror(new Error(`Unknown message type: ${JSON.stringify(message2)}`));
           }
         };
         await this._transport.start();
@@ -13226,12 +13226,12 @@ var init_protocol = __esm({
        * the error appropriately (e.g., by failing the task, logging, etc.). The Protocol layer
        * simply propagates the error.
        */
-      async _enqueueTaskMessage(taskId, message, sessionId) {
+      async _enqueueTaskMessage(taskId, message2, sessionId) {
         if (!this._taskStore || !this._taskMessageQueue) {
           throw new Error("Cannot enqueue task message: taskStore and taskMessageQueue are not configured");
         }
         const maxQueueSize = this._options?.maxTaskQueueSize;
-        await this._taskMessageQueue.enqueue(taskId, message, sessionId, maxQueueSize);
+        await this._taskMessageQueue.enqueue(taskId, message2, sessionId, maxQueueSize);
       }
       /**
        * Clears the message queue for a task and rejects any pending request resolvers.
@@ -13241,9 +13241,9 @@ var init_protocol = __esm({
       async _clearTaskQueue(taskId, sessionId) {
         if (this._taskMessageQueue) {
           const messages = await this._taskMessageQueue.dequeueAll(taskId, sessionId);
-          for (const message of messages) {
-            if (message.type === "request" && isJSONRPCRequest(message.message)) {
-              const requestId = message.message.id;
+          for (const message2 of messages) {
+            if (message2.type === "request" && isJSONRPCRequest(message2.message)) {
+              const requestId = message2.message.id;
               const resolver = this._requestResolvers.get(requestId);
               if (resolver) {
                 resolver(new McpError(ErrorCode.InternalError, "Task cancelled or completed"));
@@ -14683,12 +14683,12 @@ var require_errors = __commonJS({
       }
       return [E.schemaPath, schPath];
     }
-    function extraErrorProps(cxt, { params, message }, keyValues) {
+    function extraErrorProps(cxt, { params, message: message2 }, keyValues) {
       const { keyword, data, schemaValue, it } = cxt;
       const { opts, propertyName, topSchemaRef, schemaPath } = it;
       keyValues.push([E.keyword, keyword], [E.params, typeof params == "function" ? params(cxt) : params || (0, codegen_1._)`{}`]);
       if (opts.messages) {
-        keyValues.push([E.message, typeof message == "function" ? message(cxt) : message]);
+        keyValues.push([E.message, typeof message2 == "function" ? message2(cxt) : message2]);
       }
       if (opts.verbose) {
         keyValues.push([E.schema, schemaValue], [E.parentSchema, (0, codegen_1._)`${topSchemaRef}${schemaPath}`], [names_1.default.data, data]);
@@ -16548,8 +16548,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path13) {
-      let input = path13;
+    function removeDotSegments(path14) {
+      let input = path14;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -16801,8 +16801,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path13, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path13 && path13 !== "/" ? path13 : void 0;
+        const [path14, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path14 && path14 !== "/" ? path14 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -17534,11 +17534,11 @@ var require_core = __commonJS({
         }
         const valid = this.validate($schema, schema);
         if (!valid && throwOrLogError) {
-          const message = "schema is invalid: " + this.errorsText();
+          const message2 = "schema is invalid: " + this.errorsText();
           if (this.opts.validateSchema === "log")
-            this.logger.error(message);
+            this.logger.error(message2);
           else
-            throw new Error(message);
+            throw new Error(message2);
         }
         return valid;
       }
@@ -17660,7 +17660,7 @@ var require_core = __commonJS({
       errorsText(errors = this.errors, { separator = ", ", dataVar = "data" } = {}) {
         if (!errors || errors.length === 0)
           return "No errors";
-        return errors.map((e) => `${dataVar}${e.instancePath} ${e.message}`).reduce((text, msg) => text + separator + msg);
+        return errors.map((e) => `${dataVar}${e.instancePath} ${e.message}`).reduce((text2, msg) => text2 + separator + msg);
       }
       $dataMetaSchema(metaSchema, keywordsJsonPointers) {
         const rules = this.RULES.all;
@@ -19624,9 +19624,9 @@ var require_discriminator = __commonJS({
         function validateMapping() {
           const mapping = getMapping();
           gen.if(false);
-          for (const tagValue in mapping) {
-            gen.elseIf((0, codegen_1._)`${tag} === ${tagValue}`);
-            gen.assign(valid, applyTagSchema(mapping[tagValue]));
+          for (const tagValue2 in mapping) {
+            gen.elseIf((0, codegen_1._)`${tag} === ${tagValue2}`);
+            gen.assign(valid, applyTagSchema(mapping[tagValue2]));
           }
           gen.else();
           cxt.error(false, { discrError: types_1.DiscrError.Mapping, tag, tagName });
@@ -19670,18 +19670,18 @@ var require_discriminator = __commonJS({
             if (sch.const) {
               addMapping(sch.const, i);
             } else if (sch.enum) {
-              for (const tagValue of sch.enum) {
-                addMapping(tagValue, i);
+              for (const tagValue2 of sch.enum) {
+                addMapping(tagValue2, i);
               }
             } else {
               throw new Error(`discriminator: "properties/${tagName}" must have "const" or "enum"`);
             }
           }
-          function addMapping(tagValue, i) {
-            if (typeof tagValue != "string" || tagValue in oneOfMapping) {
+          function addMapping(tagValue2, i) {
+            if (typeof tagValue2 != "string" || tagValue2 in oneOfMapping) {
               throw new Error(`discriminator: "${tagName}" values must be unique strings`);
             }
-            oneOfMapping[tagValue] = i;
+            oneOfMapping[tagValue2] = i;
           }
         }
       }
@@ -20221,12 +20221,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs16, exportName) {
+    function addFormats(ajv, list, fs17, exportName) {
       var _a2;
       var _b2;
       (_a2 = (_b2 = ajv.opts.code).formats) !== null && _a2 !== void 0 ? _a2 : _b2.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs16[f]);
+        ajv.addFormat(f, fs17[f]);
     }
     module.exports = exports = formatsPlugin;
     Object.defineProperty(exports, "__esModule", { value: true });
@@ -20649,23 +20649,23 @@ var init_server2 = __esm({
           const wrappedHandler = async (request, extra) => {
             const validatedRequest = safeParse3(CallToolRequestSchema, request);
             if (!validatedRequest.success) {
-              const errorMessage = validatedRequest.error instanceof Error ? validatedRequest.error.message : String(validatedRequest.error);
-              throw new McpError(ErrorCode.InvalidParams, `Invalid tools/call request: ${errorMessage}`);
+              const errorMessage2 = validatedRequest.error instanceof Error ? validatedRequest.error.message : String(validatedRequest.error);
+              throw new McpError(ErrorCode.InvalidParams, `Invalid tools/call request: ${errorMessage2}`);
             }
             const { params } = validatedRequest.data;
             const result = await Promise.resolve(handler(request, extra));
             if (params.task) {
               const taskValidationResult = safeParse3(CreateTaskResultSchema, result);
               if (!taskValidationResult.success) {
-                const errorMessage = taskValidationResult.error instanceof Error ? taskValidationResult.error.message : String(taskValidationResult.error);
-                throw new McpError(ErrorCode.InvalidParams, `Invalid task creation result: ${errorMessage}`);
+                const errorMessage2 = taskValidationResult.error instanceof Error ? taskValidationResult.error.message : String(taskValidationResult.error);
+                throw new McpError(ErrorCode.InvalidParams, `Invalid task creation result: ${errorMessage2}`);
               }
               return taskValidationResult.data;
             }
             const validationResult = safeParse3(CallToolResultSchema, result);
             if (!validationResult.success) {
-              const errorMessage = validationResult.error instanceof Error ? validationResult.error.message : String(validationResult.error);
-              throw new McpError(ErrorCode.InvalidParams, `Invalid tools/call result: ${errorMessage}`);
+              const errorMessage2 = validationResult.error instanceof Error ? validationResult.error.message : String(validationResult.error);
+              throw new McpError(ErrorCode.InvalidParams, `Invalid tools/call result: ${errorMessage2}`);
             }
             return validationResult.data;
           };
@@ -21266,12 +21266,12 @@ var init_mcp = __esm({
        * @param errorMessage - The error message.
        * @returns The tool error result.
        */
-      createToolError(errorMessage) {
+      createToolError(errorMessage2) {
         return {
           content: [
             {
               type: "text",
-              text: errorMessage
+              text: errorMessage2
             }
           ],
           isError: true
@@ -21289,8 +21289,8 @@ var init_mcp = __esm({
         const parseResult = await safeParseAsync3(schemaToParse, args);
         if (!parseResult.success) {
           const error2 = "error" in parseResult ? parseResult.error : "Unknown error";
-          const errorMessage = getParseErrorMessage(error2);
-          throw new McpError(ErrorCode.InvalidParams, `Input validation error: Invalid arguments for tool ${toolName}: ${errorMessage}`);
+          const errorMessage2 = getParseErrorMessage(error2);
+          throw new McpError(ErrorCode.InvalidParams, `Input validation error: Invalid arguments for tool ${toolName}: ${errorMessage2}`);
         }
         return parseResult.data;
       }
@@ -21314,8 +21314,8 @@ var init_mcp = __esm({
         const parseResult = await safeParseAsync3(outputObj, result.structuredContent);
         if (!parseResult.success) {
           const error2 = "error" in parseResult ? parseResult.error : "Unknown error";
-          const errorMessage = getParseErrorMessage(error2);
-          throw new McpError(ErrorCode.InvalidParams, `Output validation error: Invalid structured content for tool ${toolName}: ${errorMessage}`);
+          const errorMessage2 = getParseErrorMessage(error2);
+          throw new McpError(ErrorCode.InvalidParams, `Output validation error: Invalid structured content for tool ${toolName}: ${errorMessage2}`);
         }
       }
       /**
@@ -21527,8 +21527,8 @@ var init_mcp = __esm({
             const parseResult = await safeParseAsync3(argsObj, request.params.arguments);
             if (!parseResult.success) {
               const error2 = "error" in parseResult ? parseResult.error : "Unknown error";
-              const errorMessage = getParseErrorMessage(error2);
-              throw new McpError(ErrorCode.InvalidParams, `Invalid arguments for prompt ${request.params.name}: ${errorMessage}`);
+              const errorMessage2 = getParseErrorMessage(error2);
+              throw new McpError(ErrorCode.InvalidParams, `Invalid arguments for prompt ${request.params.name}: ${errorMessage2}`);
             }
             const args = parseResult.data;
             const cb = prompt.callback;
@@ -21873,7 +21873,7 @@ var ENGINE_VERSION, SERVER_NAME;
 var init_version = __esm({
   "src/core/version.ts"() {
     "use strict";
-    ENGINE_VERSION = "0.38.2";
+    ENGINE_VERSION = "0.39.0";
     SERVER_NAME = "contrail-engine";
   }
 });
@@ -21890,11 +21890,11 @@ function safeJson(value) {
     return String(value);
   }
 }
-function log(level, message, extra) {
+function log(level, message2, extra) {
   if (LEVEL_ORDER[level] < LEVEL_ORDER[activeLevel()]) return;
   const suffix = extra === void 0 ? "" : ` ${safeJson(extra)}`;
   process.stderr.write(
-    `[contrail ${(/* @__PURE__ */ new Date()).toISOString()}] ${level.toUpperCase()} ${message}${suffix}
+    `[contrail ${(/* @__PURE__ */ new Date()).toISOString()}] ${level.toUpperCase()} ${message2}${suffix}
 `
   );
 }
@@ -21912,8 +21912,8 @@ var init_errors4 = __esm({
   "src/core/errors.ts"() {
     "use strict";
     ContrailError = class extends Error {
-      constructor(message, code) {
-        super(message);
+      constructor(message2, code) {
+        super(message2);
         this.code = code;
         this.name = new.target.name;
       }
@@ -21935,13 +21935,13 @@ var init_errors4 = __esm({
       }
     };
     FlowInProgressError = class extends ContrailError {
-      constructor(message) {
-        super(message, "flow_in_progress");
+      constructor(message2) {
+        super(message2, "flow_in_progress");
       }
     };
     OAuthFlowError = class extends ContrailError {
-      constructor(message) {
-        super(message, "oauth_flow_failed");
+      constructor(message2) {
+        super(message2, "oauth_flow_failed");
       }
     };
   }
@@ -22724,6 +22724,51 @@ var init_db = __esm({
         ).run(connectionId, kind);
         return result.changes;
       }
+      /**
+       * S45: void ONE still-pending request and store the reason as its result
+       * (the execute-time "target moved" guard — re-sending the code replays this
+       * text, never "a newer validation replaced it"). Atomic against a concurrent
+       * claimRequestForExecution: both UPDATEs predicate on status = 'validated',
+       * so exactly one of them can match — a voided request is never also
+       * claimed. Returns false when the row was no longer 'validated' (claimed,
+       * superseded, expired or locked first), and the caller falls through.
+       */
+      voidRequestWithResult(id, resultJson) {
+        const result = this.db.prepare(
+          `UPDATE deploy_requests SET status = 'superseded', result_json = ?
+         WHERE id = ? AND status = 'validated'`
+        ).run(resultJson, id);
+        return result.changes === 1;
+      }
+      /**
+       * S45: claimCode's lazy expiry of ONE request — predicated on status =
+       * 'validated' like voidRequestWithResult, so a request another process
+       * claimed (the plugin and the desktop share this database) is never
+       * flipped back to 'expired' under its running execution. Returns true only
+       * when this call expired it; the caller removes the payload and pre-images
+       * only then. Hand-mirror to the desktop db.ts beside voidRequestWithResult,
+       * together with registerFailedAttempt's status-predicated UPDATEs.
+       */
+      expireValidatedRequest(id) {
+        const result = this.db.prepare(`UPDATE deploy_requests SET status = 'expired' WHERE id = ? AND status = 'validated'`).run(id);
+        return result.changes === 1;
+      }
+      /**
+       * S45: flip every past-due 'validated' request — any connection, any kind —
+       * to 'expired' and return the rows so the caller can remove their payloads
+       * and pre-images. Expiry used to be lazy (only a claim attempt noticed a
+       * stale code, claimCode's path is untouched), so never-executed
+       * validations stayed 'validated' forever. ISO-8601 UTC stamps compare
+       * lexicographically; RETURNING is supported by the bundled SQLite (3.35+).
+       */
+      expireStaleValidatedRequests(nowIso) {
+        const rows = this.db.prepare(
+          `UPDATE deploy_requests SET status = 'expired'
+         WHERE status = 'validated' AND expires_at < ?
+         RETURNING id, payload_path`
+        ).all(nowIso);
+        return rows.map((r) => ({ id: r.id, payloadPath: r.payload_path }));
+      }
       /** Lookup by code regardless of status; the caller branches on request.status. */
       findRequestByCode(connectionId, kind, code) {
         const row = this.db.prepare(
@@ -22758,6 +22803,16 @@ var init_db = __esm({
       setDeployRequestPayloadPath(id, payloadPath) {
         this.db.prepare(`UPDATE deploy_requests SET payload_path = ? WHERE id = ?`).run(payloadPath, id);
       }
+      /**
+       * S45: re-persist a validated request's summary — the deploy validate
+       * writes its revert pre-images AFTER the row exists (the directory is
+       * keyed by the request id) and records what it wrote here.
+       * S45: hand-mirror to the desktop db.ts with voidRequestWithResult and
+       * expireStaleValidatedRequests (engine.ts calls it).
+       */
+      setDeployRequestSummaryJson(id, summaryJson) {
+        this.db.prepare(`UPDATE deploy_requests SET summary_json = ? WHERE id = ?`).run(summaryJson, id);
+      }
       updateDeployRequestStatus(id, status) {
         this.db.prepare(`UPDATE deploy_requests SET status = ?, executed_at = ? WHERE id = ?`).run(status, status === "executed" ? (/* @__PURE__ */ new Date()).toISOString() : null, id);
       }
@@ -22767,6 +22822,12 @@ var init_db = __esm({
        * threshold is reached the request is locked so even the correct code can no
        * longer execute it — the human must re-validate. Returns what happened so
        * the caller can shape the refusal message and audit.
+       * S45: both UPDATEs predicate on status = 'validated' (the plugin and the
+       * desktop share this database): a row another process claimed between the
+       * SELECT and the UPDATE is never flipped to 'locked' under its running
+       * execution — the caller then deletes nothing, because locked is reported
+       * only when the lock UPDATE matched. Hand-mirror to the desktop db.ts with
+       * expireValidatedRequest.
        */
       registerFailedAttempt(connectionId, kind, maxAttempts) {
         const row = this.db.prepare(
@@ -22775,9 +22836,17 @@ var init_db = __esm({
          ORDER BY created_at DESC LIMIT 1`
         ).get(connectionId, kind);
         if (!row) return { pendingExisted: false, locked: false, attemptsRemaining: 0 };
-        const attempts = row.failed_attempts + 1;
+        const bumped = this.db.prepare(
+          `UPDATE deploy_requests SET failed_attempts = failed_attempts + 1
+         WHERE id = ? AND status = 'validated' RETURNING failed_attempts`
+        ).get(row.id);
+        if (!bumped) return { pendingExisted: false, locked: false, attemptsRemaining: 0 };
+        const attempts = bumped.failed_attempts;
         if (attempts >= maxAttempts) {
-          this.db.prepare(`UPDATE deploy_requests SET status = 'locked', failed_attempts = ? WHERE id = ?`).run(attempts, row.id);
+          const locked = this.db.prepare(`UPDATE deploy_requests SET status = 'locked' WHERE id = ? AND status = 'validated'`).run(row.id);
+          if (locked.changes !== 1) {
+            return { pendingExisted: false, locked: false, attemptsRemaining: 0 };
+          }
           return {
             pendingExisted: true,
             locked: true,
@@ -22786,7 +22855,6 @@ var init_db = __esm({
             payloadPath: row.payload_path
           };
         }
-        this.db.prepare(`UPDATE deploy_requests SET failed_attempts = ? WHERE id = ?`).run(attempts, row.id);
         return {
           pendingExisted: true,
           locked: false,
@@ -23174,7 +23242,9 @@ var init_config = __esm({
         maxFailedAttempts: 5,
         // Empty by default: staging/ and snapshots/ are always allowed, and
         // anything wider is an explicit decision the human writes down.
-        allowedSourceRoots: []
+        allowedSourceRoots: [],
+        preImageTimeoutMs: 12e4,
+        revertRetentionDays: 30
       },
       bulkLoad: {
         pollIntervalMs: 5e3,
@@ -23865,18 +23935,18 @@ async function postToken(loginBase, body) {
   } catch (err2) {
     throw new OAuthFlowError(`Could not reach ${loginBase}: ${String(err2)}`);
   }
-  const text = await res.text();
+  const text2 = await res.text();
   if (!res.ok) {
-    let detail = text;
+    let detail = text2;
     try {
-      const parsed = JSON.parse(text);
-      detail = [parsed.error, parsed.error_description].filter(Boolean).join(": ") || text;
+      const parsed = JSON.parse(text2);
+      detail = [parsed.error, parsed.error_description].filter(Boolean).join(": ") || text2;
     } catch {
     }
     throw new OAuthFlowError(`Token request failed (${res.status}): ${detail}`);
   }
   try {
-    return JSON.parse(text);
+    return JSON.parse(text2);
   } catch {
     throw new OAuthFlowError("Token endpoint returned a non-JSON response.");
   }
@@ -24034,6 +24104,7 @@ function renderApprovalPage(opts) {
       <div class="chg-label">${esc2(c.label)}</div>
       ${c.detail ? `<div class="chg-detail">${esc2(c.detail)}</div>` : ""}
       ${c.warnings.map((w) => `<div class="chg-warn">\u26A0 ${esc2(w)}</div>`).join("")}
+      ${c.diff ? renderRowDiff(c.diff) : ""}
     </div>`;
   return page(
     title,
@@ -24053,6 +24124,7 @@ function renderApprovalPage(opts) {
     ${opts.warnings && opts.warnings.length ? `<div class="warn">${opts.warnings.map((w) => esc2(w)).join("<br><br>")}</div>` : ""}
     ${opts.destructive.length ? `<div class="card danger-card"><h2>Destructive changes</h2>${opts.destructive.map((c) => row(c, true)).join("")}</div>` : ""}
     ${opts.changes.length ? `<div class="card"><h2>Changes</h2>${opts.changes.map((c) => row(c, false)).join("")}</div>` : ""}
+    ${opts.automation && opts.automation.length || opts.kind === "apex" && opts.automationNotCovered && opts.automationNotCovered.length ? renderAutomationCard(opts.kind, opts.automation ?? [], opts.automationNotCovered ?? []) : ""}
     ${opts.results.length ? `<div class="card"><h2>Validation</h2>${opts.results.map(
       (r) => `<div class="org-row"><span class="k">${esc2(r.label)}</span><span class="v${r.bad ? " bad" : ""}">${esc2(r.value)}</span></div>`
     ).join("")}</div>` : ""}
@@ -24081,7 +24153,9 @@ function renderApprovalPage(opts) {
         var reasons = {
           executed: 'This change has already been executed.',
           executing: 'This change is currently being executed.',
-          superseded: 'A newer validation replaced this code.',
+          superseded:
+            'This code was replaced \u2014 by a newer validation, or because Contrail found the ' +
+            'target had changed before executing.',
           expired: 'This code has expired.',
           locked: 'This code was locked after too many incorrect attempts.',
           execution_failed: 'The execution failed; this code is spent.',
@@ -24123,13 +24197,74 @@ function renderApprovalPage(opts) {
     </script>`
   );
 }
-function renderErrorPage(message) {
+function renderRowDiff(d) {
+  if (d.identical) return `<div class="chg-diff">${esc2(d.summary)}</div>`;
+  const value = (v) => v === null || v === void 0 ? "(absent)" : typeof v === "string" ? v : JSON.stringify(v);
+  const parts = [];
+  for (const ch of d.xml_changes ?? []) {
+    const where = `<span class="dh-file">${esc2(ch.path || "(root)")}</span>`;
+    if (ch.kind === "scalar") {
+      parts.push(
+        `<div class="dh">${where} <del>${esc2(value(ch.a))}</del> \u2192 <ins>${esc2(value(ch.b))}</ins></div>`
+      );
+    } else if (ch.kind === "added") {
+      parts.push(`<div class="dh">${where} <ins>+ ${esc2(ch.key)}</ins></div>`);
+    } else if (ch.kind === "removed") {
+      parts.push(`<div class="dh">${where} <del>\u2212 ${esc2(ch.key)}</del></div>`);
+    } else {
+      parts.push(`<div class="dh">${where} ${esc2(ch.note)}</div>`);
+    }
+  }
+  if (d.counts?.files_added?.length) {
+    parts.push(`<div class="dh">added: ${esc2(d.counts.files_added.join(", "))}</div>`);
+  }
+  if (d.counts?.files_removed?.length) {
+    parts.push(`<div class="dh">removed: ${esc2(d.counts.files_removed.join(", "))}</div>`);
+  }
+  for (const h of d.text_hunks ?? []) {
+    const lines = [];
+    if (h.file) lines.push(`<span class="dh-file">${esc2(h.file)}</span>`);
+    lines.push(esc2(`@@ \u2212${h.a_line} +${h.b_line} @@`));
+    for (const l of h.removed) lines.push(`<span class="dh-del">- ${esc2(l)}</span>`);
+    if (h.removed_truncated) lines.push(`<span class="dh-del">  \u2026 more removed lines</span>`);
+    for (const l of h.added) lines.push(`<span class="dh-add">+ ${esc2(l)}</span>`);
+    if (h.added_truncated) lines.push(`<span class="dh-add">  \u2026 more added lines</span>`);
+    parts.push(`<pre class="dh-hunk">${lines.join("\n")}</pre>`);
+  }
+  if (d.note) parts.push(`<div class="dh">${esc2(d.note)}</div>`);
+  else if (d.truncated) {
+    parts.push(`<div class="dh">\u2026 truncated \u2014 more differences than this page shows</div>`);
+  }
+  return `<details class="chg-diff"><summary>${esc2(d.summary)}</summary>${parts.join("")}</details>`;
+}
+function renderAutomationCard(kind, list, extraNotCovered) {
+  const pad = (n) => String(n).padStart(2, "0");
+  const stamp = (iso) => {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+  const dates = [
+    ...new Set(list.flatMap((a) => a.snapshot_at ? [stamp(a.snapshot_at)] : []))
+  ];
+  const heading = (list.length ? `AUTOMATION IN YOUR SNAPSHOT (from ${dates.length ? dates.join(", ") : "an unknown date"})` : "AUTOMATION IN YOUR SNAPSHOT") + " \u2014 read from the local snapshot, not the live org";
+  const prefix = kind === "apex" ? `<div class="auto-line">${esc2(
+    `Objects this script MAY touch (parsed from the text; dynamic SOQL and called Apex hide more): ${list.length ? list.map((a) => a.object).join(", ") : "none found in the text"}`
+  )}</div>` : "";
+  const objects = list.map(
+    (a) => `<div class="chg"><div class="chg-label">${esc2(a.object)}</div>` + a.summary_lines.map((l) => `<div class="auto-line">${esc2(l)}</div>`).join("") + a.notes.map((n) => `<div class="auto-note">${esc2(n)}</div>`).join("") + "</div>"
+  ).join("");
+  const notCovered = [.../* @__PURE__ */ new Set([...list.flatMap((a) => a.not_covered), ...extraNotCovered])];
+  const nc = notCovered.length ? `<div class="auto-nc">Not visible in the snapshot:<ul>${notCovered.map((l) => `<li>${esc2(l)}</li>`).join("")}</ul></div>` : "";
+  return `<div class="card"><h2>${esc2(heading)}</h2>${prefix}${objects}${nc}</div>`;
+}
+function renderErrorPage(message2) {
   return page(
     "Contrail error",
     `
     <div class="card">
       <h1>Something went wrong</h1>
-      <div class="error">${esc2(message)}</div>
+      <div class="error">${esc2(message2)}</div>
       <p class="note">Close this tab and ask the agent to open the page again. Details are in
         the server log (stderr) if you need them.</p>
     </div>`
@@ -24207,6 +24342,23 @@ var init_pages = __esm({
   .code-card { text-align: center; }
   .code { font-family: ui-monospace, Consolas, monospace; font-size: 1.9rem; font-weight: 700;
           letter-spacing: 0.12em; padding: 0.7rem 0; user-select: all; }
+  .chg-diff { font-size: 0.78rem; margin-top: 0.25rem; }
+  .chg-diff summary { cursor: pointer; color: light-dark(#5a6570, #8b949e); }
+  .dh { font-family: ui-monospace, Consolas, monospace; font-size: 0.74rem; margin-top: 0.2rem;
+        overflow-wrap: anywhere; }
+  .dh del { color: light-dark(#a32c2c, #e88c7c); }
+  .dh ins { color: light-dark(#176b33, #8ce8a8); text-decoration: none; }
+  .dh-hunk { font-family: ui-monospace, Consolas, monospace; overflow-x: auto; overflow-y: auto;
+             white-space: pre; max-height: 18rem; font-size: 0.72rem; margin: 0.3rem 0 0;
+             padding: 0.4rem 0.5rem; border-radius: 6px; background: light-dark(#f0f2f5, #23262d); }
+  .dh-file { font-weight: 600; }
+  .dh-del { color: light-dark(#a32c2c, #e88c7c); }
+  .dh-add { color: light-dark(#176b33, #8ce8a8); }
+  .auto-line { font-size: 0.82rem; margin-top: 0.15rem; overflow-wrap: anywhere; }
+  .auto-note { font-size: 0.78rem; color: light-dark(#5b6472, #9aa4b2); margin-top: 0.15rem;
+               overflow-wrap: anywhere; }
+  .auto-nc { font-size: 0.78rem; color: light-dark(#5b6472, #9aa4b2); margin-top: 0.6rem; }
+  .auto-nc ul { margin: 0.2rem 0 0; padding-left: 1.1rem; }
 `;
   }
 });
@@ -24499,14 +24651,14 @@ var init_flow = __esm({
         const errParam = url.searchParams.get("error");
         if (errParam) {
           const desc = url.searchParams.get("error_description") ?? "";
-          const message = `Salesforce returned "${errParam}"${desc ? `: ${desc}` : ""}.`;
-          safeRespond(res, 400, renderErrorPage(message));
+          const message2 = `Salesforce returned "${errParam}"${desc ? `: ${desc}` : ""}.`;
+          safeRespond(res, 400, renderErrorPage(message2));
           this.audit.record("oauth.flow_failed", {
             tool: "connect_org",
             outcome: "error",
             detail: { reason: errParam }
           });
-          this.failConnectFlow(flow, "error", message);
+          this.failConnectFlow(flow, "error", message2);
           return;
         }
         const code = url.searchParams.get("code");
@@ -24535,14 +24687,14 @@ var init_flow = __esm({
           flow.orgType = classifyOrgType(orgInfo);
           redirect2(res, `/setup?s=${flow.sessionId}`);
         } catch (err2) {
-          const message = err2 instanceof Error ? err2.message : String(err2);
-          safeRespond(res, 502, renderErrorPage(message));
+          const message2 = err2 instanceof Error ? err2.message : String(err2);
+          safeRespond(res, 502, renderErrorPage(message2));
           this.audit.record("oauth.flow_failed", {
             tool: "connect_org",
             outcome: "error",
-            detail: { reason: "token_exchange", message }
+            detail: { reason: "token_exchange", message: message2 }
           });
-          this.failConnectFlow(flow, "error", message);
+          this.failConnectFlow(flow, "error", message2);
         }
       }
       renderConnectForm(flow, error2) {
@@ -24633,14 +24785,14 @@ var init_flow = __esm({
             eventType = "connection.created";
           }
         } catch (err2) {
-          const message = `Could not save the connection: ${String(err2)}`;
-          safeRespond(res, 500, renderErrorPage(message));
+          const message2 = `Could not save the connection: ${String(err2)}`;
+          safeRespond(res, 500, renderErrorPage(message2));
           this.audit.record("oauth.flow_failed", {
             tool: "connect_org",
             outcome: "error",
-            detail: { reason: "persist", message }
+            detail: { reason: "persist", message: message2 }
           });
-          this.failConnectFlow(flow, "error", message);
+          this.failConnectFlow(flow, "error", message2);
           return;
         }
         this.audit.record(eventType, {
@@ -24657,11 +24809,11 @@ var init_flow = __esm({
         this.activeConnect = null;
         setTimeout(() => flow.server.close(), 250).unref?.();
       }
-      failConnectFlow(flow, status, message) {
+      failConnectFlow(flow, status, message2) {
         if (flow.completed) return;
         flow.completed = true;
         clearTimeout(flow.hardTimeout);
-        flow.resolve({ status, message });
+        flow.resolve({ status, message: message2 });
         if (this.activeConnect === flow) this.activeConnect = null;
         setTimeout(() => flow.server.close(), 250).unref?.();
       }
@@ -26360,11 +26512,11 @@ var require_validator = __commonJS({
       }
       return i;
     }
-    function getErrorObject(code, message, lineNumber) {
+    function getErrorObject(code, message2, lineNumber) {
       return {
         err: {
           code,
-          msg: message,
+          msg: message2,
           line: lineNumber.line || lineNumber,
           col: lineNumber.col
         }
@@ -27557,7 +27709,7 @@ var require_node2json = __commonJS({
       return compress(node, options);
     }
     function compress(arr, options, jPath) {
-      let text;
+      let text2;
       const compressedObj = {};
       for (let i = 0; i < arr.length; i++) {
         const tagObj = arr[i];
@@ -27566,8 +27718,8 @@ var require_node2json = __commonJS({
         if (jPath === void 0) newJpath = property;
         else newJpath = jPath + "." + property;
         if (property === options.textNodeName) {
-          if (text === void 0) text = tagObj[property];
-          else text += "" + tagObj[property];
+          if (text2 === void 0) text2 = tagObj[property];
+          else text2 += "" + tagObj[property];
         } else if (property === void 0) {
           continue;
         } else if (tagObj[property]) {
@@ -27595,9 +27747,9 @@ var require_node2json = __commonJS({
           }
         }
       }
-      if (typeof text === "string") {
-        if (text.length > 0) compressedObj[options.textNodeName] = text;
-      } else if (text !== void 0) compressedObj[options.textNodeName] = text;
+      if (typeof text2 === "string") {
+        if (text2.length > 0) compressedObj[options.textNodeName] = text2;
+      } else if (text2 !== void 0) compressedObj[options.textNodeName] = text2;
       return compressedObj;
     }
     function propName(obj) {
@@ -27710,9 +27862,9 @@ var require_orderedJs2Xml = __commonJS({
       let isPreviousElementTag = false;
       if (!Array.isArray(arr)) {
         if (arr !== void 0 && arr !== null) {
-          let text = arr.toString();
-          text = replaceEntitiesValue(text, options);
-          return text;
+          let text2 = arr.toString();
+          text2 = replaceEntitiesValue(text2, options);
+          return text2;
         }
         return "";
       }
@@ -27763,20 +27915,20 @@ var require_orderedJs2Xml = __commonJS({
         }
         const attStr = attr_to_str(tagObj[":@"], options);
         const tagStart = indentation + `<${tagName}${attStr}`;
-        const tagValue = arrToStr(tagObj[tagName], options, newJPath, newIdentation);
+        const tagValue2 = arrToStr(tagObj[tagName], options, newJPath, newIdentation);
         if (options.unpairedTags.indexOf(tagName) !== -1) {
           if (options.suppressUnpairedNode) xmlStr += tagStart + ">";
           else xmlStr += tagStart + "/>";
-        } else if ((!tagValue || tagValue.length === 0) && options.suppressEmptyNode) {
+        } else if ((!tagValue2 || tagValue2.length === 0) && options.suppressEmptyNode) {
           xmlStr += tagStart + "/>";
-        } else if (tagValue && tagValue.endsWith(">")) {
-          xmlStr += tagStart + `>${tagValue}${indentation}</${tagName}>`;
+        } else if (tagValue2 && tagValue2.endsWith(">")) {
+          xmlStr += tagStart + `>${tagValue2}${indentation}</${tagName}>`;
         } else {
           xmlStr += tagStart + ">";
-          if (tagValue && indentation !== "" && (tagValue.includes("/>") || tagValue.includes("</"))) {
-            xmlStr += indentation + options.indentBy + tagValue + indentation;
+          if (tagValue2 && indentation !== "" && (tagValue2.includes("/>") || tagValue2.includes("</"))) {
+            xmlStr += indentation + options.indentBy + tagValue2 + indentation;
           } else {
-            xmlStr += tagValue;
+            xmlStr += tagValue2;
           }
           xmlStr += `</${tagName}>`;
         }
@@ -27816,14 +27968,14 @@ var require_orderedJs2Xml = __commonJS({
       }
       return false;
     }
-    function replaceEntitiesValue(textValue, options) {
-      if (textValue && textValue.length > 0 && options.processEntities) {
+    function replaceEntitiesValue(textValue2, options) {
+      if (textValue2 && textValue2.length > 0 && options.processEntities) {
         for (let i = 0; i < options.entities.length; i++) {
           const entity = options.entities[i];
-          textValue = textValue.replace(entity.regex, entity.val);
+          textValue2 = textValue2.replace(entity.regex, entity.val);
         }
       }
-      return textValue;
+      return textValue2;
     }
     module.exports = toXml;
   }
@@ -27961,9 +28113,9 @@ var require_json2xml = __commonJS({
               }
             } else {
               if (this.options.oneListGroup) {
-                let textValue = this.options.tagValueProcessor(key2, item);
-                textValue = this.replaceEntitiesValue(textValue);
-                listTagVal += textValue;
+                let textValue2 = this.options.tagValueProcessor(key2, item);
+                textValue2 = this.replaceEntitiesValue(textValue2);
+                listTagVal += textValue2;
               } else {
                 listTagVal += this.buildTextValNode(item, key2, "", level);
               }
@@ -28046,23 +28198,23 @@ var require_json2xml = __commonJS({
       } else if (key2[0] === "?") {
         return this.indentate(level) + "<" + key2 + attrStr + "?" + this.tagEndChar;
       } else {
-        let textValue = this.options.tagValueProcessor(key2, val);
-        textValue = this.replaceEntitiesValue(textValue);
-        if (textValue === "") {
+        let textValue2 = this.options.tagValueProcessor(key2, val);
+        textValue2 = this.replaceEntitiesValue(textValue2);
+        if (textValue2 === "") {
           return this.indentate(level) + "<" + key2 + attrStr + this.closeTag(key2) + this.tagEndChar;
         } else {
-          return this.indentate(level) + "<" + key2 + attrStr + ">" + textValue + "</" + key2 + this.tagEndChar;
+          return this.indentate(level) + "<" + key2 + attrStr + ">" + textValue2 + "</" + key2 + this.tagEndChar;
         }
       }
     };
-    Builder.prototype.replaceEntitiesValue = function(textValue) {
-      if (textValue && textValue.length > 0 && this.options.processEntities) {
+    Builder.prototype.replaceEntitiesValue = function(textValue2) {
+      if (textValue2 && textValue2.length > 0 && this.options.processEntities) {
         for (let i = 0; i < this.options.entities.length; i++) {
           const entity = this.options.entities[i];
-          textValue = textValue.replace(entity.regex, entity.val);
+          textValue2 = textValue2.replace(entity.regex, entity.val);
         }
       }
-      return textValue;
+      return textValue2;
     };
     function indentate(level) {
       return this.options.indentBy.repeat(level);
@@ -28112,9 +28264,9 @@ function asArray(value) {
   if (value === void 0 || value === null) return [];
   return Array.isArray(value) ? value : [value];
 }
-function xmlDig(node, ...path13) {
+function xmlDig(node, ...path14) {
   let current = node;
-  for (const key2 of path13) {
+  for (const key2 of path14) {
     if (current === null || typeof current !== "object") return void 0;
     const obj = current;
     if (key2 in obj) {
@@ -28184,6 +28336,27 @@ var init_metadataSoap = __esm({
        */
       async listMetadataDetailed(types) {
         return this.listAll(types, true);
+      }
+      /**
+       * S45: list exactly the given {type, folder?} queries — no folder
+       * enumeration, no fan-out. A foldered member (Report/Dashboard) is listed
+       * by ITS folder only, never the whole tree. The validate-time pre-image and
+       * the execute-time moved check both call this, so their last-modified
+       * stamps come from one source. Duplicate queries collapse; INVALID_TYPE
+       * degrades per query like listMetadataDetailed (the type lands in
+       * unsupportedTypes); every other fault throws.
+       */
+      async listMetadataQueries(queries) {
+        const seen = /* @__PURE__ */ new Set();
+        const distinct = queries.filter((q) => {
+          const key2 = `${q.type}\0${q.folder ?? ""}`;
+          if (seen.has(key2)) return false;
+          seen.add(key2);
+          return true;
+        });
+        const unsupported = /* @__PURE__ */ new Set();
+        const props = await this.listQueries(distinct, true, unsupported);
+        return { props, unsupportedTypes: [...unsupported] };
       }
       async listAll(types, degradeInvalidTypes) {
         const flat = [];
@@ -28389,6 +28562,8 @@ var init_metadataSoap = __esm({
           checkOnly: bool(result.checkOnly),
           stateDetail: typeof result.stateDetail === "string" ? result.stateDetail : void 0,
           errorMessage: typeof result.errorMessage === "string" ? result.errorMessage : void 0,
+          createdDate: typeof result.createdDate === "string" ? result.createdDate : void 0,
+          completedDate: typeof result.completedDate === "string" ? result.completedDate : void 0,
           numberComponentsTotal: num(result.numberComponentsTotal),
           numberComponentsDeployed: num(result.numberComponentsDeployed),
           numberComponentErrors: num(result.numberComponentErrors),
@@ -28437,8 +28612,8 @@ var init_metadataSoap = __esm({
             "salesforce_unreachable"
           );
         }
-        const text = await res.text();
-        const parsed = parseXml(text);
+        const text2 = await res.text();
+        const parsed = parseXml(text2);
         const fault = xmlDig(parsed, "Envelope", "Body", "Fault");
         if (fault) {
           const code = String(fault.faultcode ?? "");
@@ -28491,9 +28666,13 @@ var init_rest = __esm({
       async query(soql, maxRows = 2e3) {
         return (await this.runQuery(`/services/data/${this.apiVersion}/query`, soql, maxRows)).records;
       }
-      /** Like query(), but also returns the org-side total row count (pre-cap). */
-      async queryWithCount(soql, maxRows = 2e3) {
-        return this.runQuery(`/services/data/${this.apiVersion}/query`, soql, maxRows);
+      /**
+       * Like query(), but also returns the org-side total row count (pre-cap).
+       * S45: an optional `init.signal` lets a caller with a time budget abort the
+       * fetch(es) — forwarded to request() as-is.
+       */
+      async queryWithCount(soql, maxRows = 2e3, init) {
+        return this.runQuery(`/services/data/${this.apiVersion}/query`, soql, maxRows, init);
       }
       async toolingQuery(soql, maxRows = 2e3) {
         return (await this.runQuery(`/services/data/${this.apiVersion}/tooling/query`, soql, maxRows)).records;
@@ -28532,38 +28711,38 @@ var init_rest = __esm({
         });
         return await res.json();
       }
-      async runQuery(basePath, soql, maxRows) {
+      async runQuery(basePath, soql, maxRows, init) {
         const records = [];
         let totalSize = null;
-        let path13 = `${basePath}?q=${encodeURIComponent(soql)}`;
-        while (path13 && records.length < maxRows) {
-          const res = await this.request(path13);
+        let path14 = `${basePath}?q=${encodeURIComponent(soql)}`;
+        while (path14 && records.length < maxRows) {
+          const res = await this.request(path14, init);
           const data = await res.json();
           if (totalSize === null && typeof data.totalSize === "number") totalSize = data.totalSize;
           records.push(...data.records ?? []);
-          path13 = data.done === false && data.nextRecordsUrl ? data.nextRecordsUrl : null;
+          path14 = data.done === false && data.nextRecordsUrl ? data.nextRecordsUrl : null;
         }
         return { records: records.slice(0, maxRows), totalSize };
       }
       /** Authenticated request against the connection's instance; 401 → refresh once and retry. */
-      async request(path13, init) {
-        let res = await this.rawRequest(path13, init);
+      async request(path14, init) {
+        let res = await this.rawRequest(path14, init);
         if (res.status === 401) {
           this.tokenMgr.invalidate(this.conn.id);
-          res = await this.rawRequest(path13, init);
+          res = await this.rawRequest(path14, init);
         }
         if (!res.ok) {
           const body = await res.text();
           throw new ContrailError(
-            `Salesforce API error ${res.status} on ${path13.split("?")[0]}: ${truncate(body, 500)}`,
+            `Salesforce API error ${res.status} on ${path14.split("?")[0]}: ${truncate(body, 500)}`,
             "salesforce_api_error"
           );
         }
         return res;
       }
-      async rawRequest(path13, init) {
+      async rawRequest(path14, init) {
         const accessToken = await this.tokenMgr.getAccessToken(this.conn);
-        const url = path13.startsWith("http") ? path13 : new URL(path13, this.conn.instanceUrl).toString();
+        const url = path14.startsWith("http") ? path14 : new URL(path14, this.conn.instanceUrl).toString();
         return fetch(url, {
           ...init,
           headers: {
@@ -29318,7 +29497,17 @@ function extractAllEdges(connectionId, artifacts, known = buildKnownArtifacts(ar
   return edges;
 }
 function stripApexNoise(body) {
-  return body.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ").replace(/'(?:[^'\\]|\\.)*'/g, (m) => /\bFROM\b/i.test(m) ? m : "''");
+  let out = "";
+  let last = 0;
+  let i = body.indexOf("/*");
+  while (i !== -1) {
+    const end = body.indexOf("*/", i + 2);
+    if (end === -1) break;
+    out += body.slice(last, i) + " ";
+    last = end + 2;
+    i = body.indexOf("/*", last);
+  }
+  return (out + body.slice(last)).replace(/\/\/[^\n]*/g, " ").replace(/'(?:[^'\\]|\\.)*'/g, (m) => /\bFROM\b/i.test(m) ? m : "''");
 }
 var RefSet;
 var init_extract = __esm({
@@ -29964,8 +30153,8 @@ var init_bulk = __esm({
 // src/deploy/csv.ts
 function scanCsv(bytes, delimiter = ",") {
   const hadBom = bytes.length >= 3 && bytes.subarray(0, 3).equals(UTF8_BOM);
-  const text = (hadBom ? bytes.subarray(3) : bytes).toString("utf8");
-  if (text.trim().length === 0) throw new ContrailError("the CSV file is empty", "bad_csv");
+  const text2 = (hadBom ? bytes.subarray(3) : bytes).toString("utf8");
+  if (text2.trim().length === 0) throw new ContrailError("the CSV file is empty", "bad_csv");
   const warnings = [];
   const warnOnce = (msg) => {
     if (!warnings.includes(msg)) warnings.push(msg);
@@ -30038,11 +30227,11 @@ function scanCsv(bytes, delimiter = ",") {
       );
     }
   };
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
+  for (let i = 0; i < text2.length; i++) {
+    const ch = text2[i];
     if (inQuotes) {
       if (ch === '"') {
-        if (text[i + 1] === '"') {
+        if (text2[i + 1] === '"') {
           if (headers === null) field += '"';
           i += 1;
         } else {
@@ -30076,7 +30265,7 @@ function scanCsv(bytes, delimiter = ",") {
       continue;
     }
     if (ch === "\r") {
-      if (text[i + 1] !== "\n") {
+      if (text2[i + 1] !== "\n") {
         throw new ContrailError(
           `bare CR record delimiter at line ${line} \u2014 only LF or CRLF endings are supported`,
           "bad_csv"
@@ -30084,14 +30273,14 @@ function scanCsv(bytes, delimiter = ",") {
       }
       noteLineEnding("CRLF");
       line += 1;
-      endRecord(i + 2 >= text.length);
+      endRecord(i + 2 >= text2.length);
       i += 1;
       continue;
     }
     if (ch === "\n") {
       noteLineEnding("LF");
       line += 1;
-      endRecord(i + 1 >= text.length);
+      endRecord(i + 1 >= text2.length);
       continue;
     }
     if (headers === null) field += ch;
@@ -30210,6 +30399,587 @@ var init_graph = __esm({
   }
 });
 
+// src/deps/automation.ts
+function tagValue(block, tag) {
+  const match = block.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`));
+  return match?.[1]?.trim() ?? null;
+}
+function textValue(block, tag) {
+  const raw = tagValue(block, tag);
+  if (!raw) return null;
+  return raw.replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&quot;", '"').replaceAll("&apos;", "'").replaceAll("&amp;", "&");
+}
+function stripBlocks(xml, tags) {
+  let out = xml;
+  for (const tag of tags) out = out.replace(new RegExp(`<${tag}>[\\s\\S]*?</${tag}>`, "g"), "");
+  return out;
+}
+function parseFlowStart(xml) {
+  const outer = stripBlocks(xml, NON_TOP_LEVEL_BLOCKS);
+  let processObject = null;
+  for (const block of extractChildBlocks(outer, "processMetadataValues")) {
+    if (tagValue(block, "name") === "ObjectType") {
+      processObject = textValue(block, "stringValue");
+      break;
+    }
+  }
+  const start = extractChildBlocks(xml, "start")[0] ?? null;
+  const own = start ? stripBlocks(start, ["scheduledPaths", "filters", "schedule", "connector"]) : "";
+  const schedule = start ? extractChildBlocks(start, "schedule")[0] ?? null : null;
+  return {
+    label: textValue(outer, "label"),
+    status: textValue(outer, "status"),
+    process_type: textValue(outer, "processType"),
+    object: start ? textValue(own, "object") : null,
+    trigger_type: start ? textValue(own, "triggerType") : null,
+    record_trigger_type: start ? textValue(own, "recordTriggerType") : null,
+    entry_criteria: start ? extractChildBlocks(start, "filters").length > 0 || textValue(own, "filterFormula") !== null : false,
+    scheduled_paths: start ? extractChildBlocks(start, "scheduledPaths").length : 0,
+    schedule: schedule ? {
+      frequency: textValue(schedule, "frequency"),
+      start_date: textValue(schedule, "startDate")
+    } : null,
+    process_object: processObject
+  };
+}
+function stripApexNoise2(body) {
+  let out = "";
+  let last = 0;
+  let i = body.indexOf("/*");
+  while (i !== -1) {
+    const end = body.indexOf("*/", i + 2);
+    if (end === -1) break;
+    out += body.slice(last, i) + " ";
+    last = end + 2;
+    i = body.indexOf("/*", last);
+  }
+  return (out + body.slice(last)).replace(/\/\/[^\n]*/g, " ");
+}
+function parseTriggerHeader(body) {
+  const m = stripApexNoise2(body).match(/\btrigger\s+(\w+)\s+on\s+(\w+)\s*\(([^)]*)\)/i);
+  if (!m) return null;
+  return {
+    name: m[1],
+    object: m[2],
+    events: m[3].split(",").map((e) => e.trim().replace(/\s+/g, " ").toLowerCase()).filter(Boolean)
+  };
+}
+function parseApexObjectTargets(script, knownApexClasses) {
+  const text2 = script.replace(
+    /\/\*[\s\S]*?\*\/|\/\/[^\n]*|'(?:[^'\\]|\\.)*'/g,
+    (m) => m.startsWith("'") ? "''" : " "
+  );
+  const known = /* @__PURE__ */ new Set();
+  for (const c of knownApexClasses) known.add(c.toLowerCase());
+  for (const m of text2.matchAll(/\b(?:class|interface|enum)\s+([A-Za-z_]\w*)/gi)) {
+    known.add(m[1].toLowerCase());
+  }
+  const candidate = (name) => {
+    if (!name || !/^[A-Za-z]\w*$/.test(name)) return null;
+    const lower = name.toLowerCase();
+    if (APEX_NON_SOBJECT_TYPES.has(lower) || APEX_KEYWORDS.has(lower)) return null;
+    if (lower.endsWith("exception") || known.has(lower)) return null;
+    return name;
+  };
+  const declared = /* @__PURE__ */ new Map();
+  for (const m of text2.matchAll(
+    /\b(?:(?:List|Set)\s*<\s*([A-Za-z_]\w*)\s*>|([A-Za-z_]\w*)(?:\s*\[\s*\])?)\s+([A-Za-z_]\w*)\s*(?=[=;,):])/g
+  )) {
+    const type = m[1] ?? m[2];
+    const name = m[3].toLowerCase();
+    if (!type || APEX_KEYWORDS.has(type.toLowerCase()) || declared.has(name)) continue;
+    declared.set(name, type);
+  }
+  const found = [];
+  for (const m of text2.matchAll(/\bnew\s+([A-Za-z_]\w*)\s*\(/g)) {
+    found.push({ at: m.index ?? 0, name: m[1] });
+  }
+  for (const m of text2.matchAll(/\[\s*SELECT\b[\s\S]*?\]/gi)) {
+    let soql = m[0];
+    for (let prev = ""; prev !== soql; ) {
+      prev = soql;
+      soql = soql.replace(/\([^()]*\)/g, " ");
+    }
+    const from = soql.match(/\bFROM\s+([A-Za-z_]\w*)/i);
+    if (from) found.push({ at: m.index ?? 0, name: from[1] });
+  }
+  for (const m of text2.matchAll(
+    /\bDatabase\s*\.\s*(?:insert|update|upsert|delete|undelete|merge)\s*\(\s*([A-Za-z_]\w*)/gi
+  )) {
+    const v = declared.get(m[1].toLowerCase());
+    if (v) found.push({ at: m.index ?? 0, name: v });
+  }
+  for (const m of text2.matchAll(
+    /\b(?:insert|update|upsert|delete|undelete|merge)\s+([A-Za-z_]\w*)(?=[\s;,])/gi
+  )) {
+    const v = declared.get(m[1].toLowerCase());
+    if (v) found.push({ at: m.index ?? 0, name: v });
+  }
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const f of found.sort((a, b) => a.at - b.at)) {
+    const name = candidate(f.name);
+    if (!name || seen.has(name.toLowerCase())) continue;
+    seen.add(name.toLowerCase());
+    out.push(name);
+    if (out.length === APEX_TARGETS_MAX) break;
+  }
+  return out;
+}
+function message(err2) {
+  return err2 instanceof Error ? err2.message : String(err2);
+}
+function newest(rows) {
+  let max2 = "";
+  for (const r of rows) if (r.retrievedAt > max2) max2 = r.retrievedAt;
+  return max2;
+}
+function oldest(rows) {
+  let min = null;
+  for (const r of rows) if (min === null || r.retrievedAt < min) min = r.retrievedAt;
+  return min;
+}
+function automationIndex(db, store, connectionId, cap) {
+  const errors = [];
+  let flowRows = [];
+  let triggerRows = [];
+  try {
+    flowRows = db.listArtifacts(connectionId, "Flow");
+  } catch (err2) {
+    errors.push(`the snapshot's Flow rows could not be listed (${message(err2)})`);
+  }
+  try {
+    triggerRows = db.listArtifacts(connectionId, "ApexTrigger");
+  } catch (err2) {
+    errors.push(`the snapshot's ApexTrigger rows could not be listed (${message(err2)})`);
+  }
+  const signature = JSON.stringify([
+    cap,
+    flowRows.length,
+    newest(flowRows),
+    oldest(flowRows),
+    triggerRows.length,
+    newest(triggerRows),
+    oldest(triggerRows),
+    errors.length
+  ]);
+  let perStore = MEMO.get(store);
+  if (!perStore) {
+    perStore = /* @__PURE__ */ new Map();
+    MEMO.set(store, perStore);
+  }
+  const memo = perStore.get(connectionId);
+  if (memo && memo.signature === signature) return memo.index;
+  const index = {
+    flows: [],
+    flow_files_total: flowRows.length,
+    flow_files_read: 0,
+    oldest_flow_at: oldest(flowRows),
+    oldest_trigger_at: oldest(triggerRows),
+    unread_flows: [],
+    triggers: [],
+    errors
+  };
+  let threw = false;
+  for (const row of flowRows.slice(0, cap)) {
+    try {
+      const xml = store.readCurrentFile(connectionId, row.filePath ?? `flows/${row.apiName}.flow`);
+      if (xml === null) {
+        index.unread_flows.push(row.apiName);
+        continue;
+      }
+      index.flows.push({
+        name: row.apiName,
+        retrieved_at: row.retrievedAt,
+        start: parseFlowStart(xml)
+      });
+      index.flow_files_read += 1;
+    } catch {
+      index.unread_flows.push(row.apiName);
+      threw = true;
+    }
+  }
+  for (const row of triggerRows) {
+    const facts = {
+      name: row.apiName,
+      retrieved_at: row.retrievedAt,
+      header: null,
+      status: "unknown",
+      meta_xml: false,
+      raw_status: null,
+      read_error: null
+    };
+    try {
+      const body = store.readCurrentFile(
+        connectionId,
+        row.filePath ?? `triggers/${row.apiName}.trigger`
+      );
+      facts.header = body === null ? null : parseTriggerHeader(body);
+      const meta = store.readCurrentFile(connectionId, `triggers/${row.apiName}.trigger-meta.xml`);
+      if (meta !== null) {
+        facts.meta_xml = true;
+        const status = textValue(meta, "status");
+        if (status === "Active" || status === "Inactive") facts.status = status;
+        else facts.raw_status = status;
+      }
+    } catch (err2) {
+      facts.read_error = message(err2);
+      threw = true;
+    }
+    index.triggers.push(facts);
+  }
+  if (errors.length === 0 && !threw) perStore.set(connectionId, { signature, index });
+  else perStore.delete(connectionId);
+  return index;
+}
+function isEventObject(object3) {
+  const lower = object3.toLowerCase();
+  return lower.endsWith("__e") || lower.endsWith("event") && lower !== "event";
+}
+function same(a, b) {
+  return typeof a === "string" && a.toLowerCase() === b.toLowerCase();
+}
+function collectObjectAutomation(input) {
+  const { db, store, connectionId, object: object3 } = input;
+  const a = {
+    object: object3,
+    snapshot_at: null,
+    source_dates: { flows: null, triggers: null },
+    flows: [],
+    scheduled_flows: [],
+    event_flows: [],
+    triggers: [],
+    validation_rules: [],
+    processes: [],
+    inactive_flow_count: 0,
+    flow_files_read: 0,
+    flow_files_total: 0,
+    unread_sources: [],
+    not_covered: [...NOT_COVERED],
+    notes: [],
+    summary_lines: []
+  };
+  const finish = () => {
+    try {
+      a.summary_lines = formatAutomationLines(a);
+    } catch (err2) {
+      a.notes.push(`The card's lines could not be composed (${message(err2)}).`);
+    }
+    return a;
+  };
+  if (!/^[A-Za-z0-9_]+$/.test(object3)) {
+    a.unread_sources.push("everything (not an object API name)");
+    a.notes.push("Not an object API name \u2014 nothing was read for it.");
+    return finish();
+  }
+  try {
+    if (Object.keys(db.countArtifactsByType(connectionId)).length === 0) {
+      a.unread_sources.push("the snapshot (none exists for this connection)");
+      a.notes.push(
+        "This connection has no metadata snapshot \u2014 nothing was read. Run refresh_snapshot first."
+      );
+      return finish();
+    }
+  } catch (err2) {
+    a.unread_sources.push("the snapshot index");
+    a.notes.push(`The snapshot index could not be read (${message(err2)}).`);
+    return finish();
+  }
+  let index = null;
+  const onObject = [];
+  try {
+    const cap = input.maxFlowFiles ?? AUTOMATION_FLOW_FILE_CAP;
+    index = automationIndex(db, store, connectionId, cap);
+    a.flow_files_total = index.flow_files_total;
+    a.flow_files_read = index.flow_files_read;
+    a.source_dates = { flows: index.oldest_flow_at, triggers: index.oldest_trigger_at };
+    for (const e of index.errors) {
+      a.unread_sources.push(e);
+      a.notes.push(`Not read: ${e}.`);
+    }
+    if (index.unread_flows.length > 0) {
+      const shown = index.unread_flows.slice(0, 5).join(", ");
+      const more = index.unread_flows.length > 5 ? ", \u2026" : "";
+      a.notes.push(
+        `${index.unread_flows.length} flow file(s) listed in the snapshot index could not be read: ${shown}${more}.`
+      );
+    }
+    for (const f of index.flows) {
+      const s = f.start;
+      if (s.process_type && PROCESS_BUILDER_TYPES.has(s.process_type)) {
+        if (same(s.process_object, object3)) {
+          onObject.push(f);
+          a.processes.push({
+            name: f.name,
+            status: s.status,
+            object_source: "processMetadataValues"
+          });
+        }
+        continue;
+      }
+      if (!same(s.object, object3)) continue;
+      onObject.push(f);
+      const type = s.trigger_type;
+      if (type && RECORD_TRIGGER_TYPES.has(type)) {
+        if (s.status === "Active") {
+          a.flows.push({
+            name: f.name,
+            label: s.label,
+            status: s.status,
+            trigger_type: type,
+            record_trigger_type: s.record_trigger_type,
+            entry_criteria: s.entry_criteria,
+            scheduled_paths: s.scheduled_paths,
+            calls: []
+          });
+        } else {
+          a.inactive_flow_count += 1;
+        }
+      } else if (type === "Scheduled") {
+        a.scheduled_flows.push({
+          name: f.name,
+          status: s.status,
+          frequency: s.schedule?.frequency ?? null,
+          start_date: s.schedule?.start_date ?? null
+        });
+      } else if (type === "PlatformEvent") {
+        if (isEventObject(object3)) {
+          a.event_flows.push({ name: f.name, status: s.status, event: s.object ?? object3 });
+        } else {
+          a.notes.push(
+            `Flow ${f.name} names ${object3} with trigger type PlatformEvent, but ${object3} is not named like an event (no __e suffix, not a standard *Event) \u2014 not listed.`
+          );
+        }
+      } else {
+        a.notes.push(
+          `Flow ${f.name} starts on ${object3} with trigger type ${type ?? "(none)"}, which this card does not classify \u2014 not listed.`
+        );
+      }
+    }
+  } catch (err2) {
+    a.unread_sources.push("flows");
+    a.notes.push(`The snapshot's flows could not be read (${message(err2)}).`);
+  }
+  for (const flow of a.flows.slice(0, FANOUT_FLOWS)) {
+    try {
+      flow.calls = queryDependencies(db, connectionId, "Flow", flow.name, "uses", 1).nodes.filter((n) => n.depth === 1 && (n.type === "Flow" || n.type === "ApexClass")).slice(0, FANOUT_CALLS).map((n) => ({ type: n.type, name: n.name }));
+    } catch (err2) {
+      a.notes.push(`What flow ${flow.name} calls could not be read (${message(err2)}).`);
+    }
+  }
+  if (a.flows.length > FANOUT_FLOWS) {
+    a.notes.push(`Called subflows/Apex are named for the first ${FANOUT_FLOWS} active flows only.`);
+  }
+  const triggersOnObject = [];
+  if (index) {
+    for (const t of index.triggers) {
+      if (t.header === null) {
+        a.unread_sources.push(`trigger ${t.name}`);
+        a.notes.push(
+          t.read_error !== null ? `Trigger ${t.name} could not be read (${t.read_error}), so the object it fires on is unknown \u2014 not listed.` : `Trigger ${t.name}: its body is missing from the snapshot or its header did not parse, so the object it fires on is unknown \u2014 not listed.`
+        );
+        continue;
+      }
+      if (!same(t.header.object, object3)) continue;
+      triggersOnObject.push(t);
+      a.triggers.push({
+        name: t.name,
+        status: t.status,
+        // A copy: the header belongs to the memoized pass later pages share.
+        events: [...t.header.events],
+        meta_xml: t.meta_xml
+      });
+      if (t.status === "unknown" && t.meta_xml) {
+        a.notes.push(
+          `Trigger ${t.name}: trigger-meta.xml gives status ${t.raw_status ?? "(none)"}, not Active or Inactive.`
+        );
+      }
+    }
+  }
+  let objectRow = null;
+  try {
+    objectRow = db.getArtifact(connectionId, "CustomObject", object3);
+    const rel = objectRow?.filePath ?? `objects/${objectRow?.apiName ?? object3}.object`;
+    const xml = store.readCurrentFile(connectionId, rel);
+    if (xml === null) {
+      a.unread_sources.push(rel);
+      a.notes.push(
+        `The snapshot holds no object file for ${object3} (${rel}), so its validation rules were not read \u2014 this card cannot say whether any exist.`
+      );
+    } else {
+      for (const block of extractChildBlocks(xml, "validationRules")) {
+        const name = textValue(block, "fullName");
+        if (!name) continue;
+        const formula = textValue(block, "errorConditionFormula");
+        a.validation_rules.push({
+          name,
+          active: tagValue(block, "active") === "true",
+          ...formula ? { error_condition: formula.length > 200 ? `${formula.slice(0, 199)}\u2026` : formula } : {}
+        });
+      }
+    }
+  } catch (err2) {
+    a.unread_sources.push("validation rules");
+    a.notes.push(`${object3}'s validation rules could not be read (${message(err2)}).`);
+  }
+  a.snapshot_at = objectRow?.retrievedAt ?? onObject[0]?.retrieved_at ?? triggersOnObject[0]?.retrieved_at ?? null;
+  if (a.snapshot_at === null) {
+    a.notes.push(
+      `Nothing read from the snapshot (object row, flows, triggers) is about ${object3}, so this card has no snapshot date.`
+    );
+  }
+  return finish();
+}
+function eventsText(events) {
+  return events.length > 0 ? ` \xB7 ${events.join(", ")}` : "";
+}
+function formatAutomationLines(a) {
+  const lines = [];
+  for (const f of a.flows) {
+    const how = [
+      "record-triggered",
+      f.trigger_type ? WHEN[f.trigger_type] ?? f.trigger_type : null,
+      f.record_trigger_type ? ON[f.record_trigger_type] ?? `on ${f.record_trigger_type}` : null
+    ].filter(Boolean).join(", ");
+    const parts = [
+      `Flow ${f.name} \u2014 ${f.status ?? "Active"}`,
+      how,
+      `entry criteria: ${f.entry_criteria ? "yes" : "no"}`
+    ];
+    if (f.scheduled_paths > 0) parts.push(`scheduled paths: ${f.scheduled_paths}`);
+    if (f.calls.length > 0) {
+      const callees = f.calls.map((c) => `${c.type === "ApexClass" ? "Apex" : c.type} ${c.name}`);
+      parts.push(`calls ${callees.join(", ")}`);
+    }
+    lines.push(parts.join(" \xB7 "));
+  }
+  for (const s of a.scheduled_flows) {
+    lines.push(
+      `Flow ${s.name} \u2014 ${s.status ?? "status unknown"} \xB7 scheduled (${s.frequency ?? "unknown frequency"} from ${s.start_date ?? "an unknown start date"}) \u2014 runs on a schedule, not on save`
+    );
+  }
+  for (const e of a.event_flows) {
+    lines.push(
+      `Flow ${e.name} \u2014 ${e.status ?? "status unknown"} \xB7 platform-event-triggered \u2014 fires when ${e.event} is published`
+    );
+  }
+  for (const t of a.triggers) {
+    const status = t.status !== "unknown" ? t.status : t.meta_xml ? "status unknown" : "status unknown (no trigger-meta.xml in the snapshot)";
+    lines.push(`Trigger ${t.name} \u2014 ${status}${eventsText(t.events)}`);
+  }
+  const activeRules = a.validation_rules.filter((r) => r.active);
+  for (const r of activeRules) lines.push(`Validation rule ${r.name} \u2014 active`);
+  const inactiveRules = a.validation_rules.length - activeRules.length;
+  if (inactiveRules > 0) lines.push(`${inactiveRules} inactive validation rules not listed`);
+  for (const p of a.processes) {
+    if (p.status !== "Active") continue;
+    lines.push(
+      `Process (Process Builder) ${p.name} \u2014 Active \xB7 object read from processMetadataValues (best-effort, unverified)`
+    );
+  }
+  if (a.inactive_flow_count > 0) {
+    lines.push(
+      `${a.inactive_flow_count} other record-triggered flows on ${a.object} are not Active in the snapshot (latest version Draft, Obsolete, InvalidDraft or UnderReview)`
+    );
+  }
+  const truncated = a.flow_files_read < a.flow_files_total;
+  if (truncated) {
+    lines.push(
+      `Only ${a.flow_files_read} of ${a.flow_files_total} flow files were read; the flow list above may be incomplete`
+    );
+  }
+  const snapMs = a.snapshot_at !== null ? Date.parse(a.snapshot_at) : NaN;
+  const olderThanHeading = (d) => typeof d === "string" && !Number.isNaN(snapMs) && Date.parse(d) < snapMs;
+  const dates = a.source_dates ?? { flows: null, triggers: null };
+  const olderFlows = olderThanHeading(dates.flows) ? dates.flows : null;
+  const olderTriggers = olderThanHeading(dates.triggers) ? dates.triggers : null;
+  if (olderFlows !== null || olderTriggers !== null) {
+    const which = olderFlows !== null && olderTriggers !== null ? `Flows in the snapshot were last retrieved ${olderFlows} and Apex triggers ${olderTriggers}` : olderFlows !== null ? `Flows in the snapshot were last retrieved ${olderFlows}` : `Apex triggers in the snapshot were last retrieved ${olderTriggers}`;
+    lines.push(
+      `${which} \u2014 earlier than the date above; anything added or changed in the org since then is not visible either.`
+    );
+  }
+  const nothing = a.flows.length === 0 && a.triggers.every((t) => t.status === "Inactive") && activeRules.length === 0;
+  if (nothing && !truncated && a.unread_sources.length === 0) {
+    lines.push(
+      `No active record-triggered flows, Apex triggers, or validation rules for ${a.object} in the snapshot.`
+    );
+  }
+  return lines;
+}
+var AUTOMATION_FLOW_FILE_CAP, FANOUT_FLOWS, FANOUT_CALLS, NOT_COVERED, NON_TOP_LEVEL_BLOCKS, APEX_NON_SOBJECT_TYPES, APEX_KEYWORDS, APEX_TARGETS_MAX, MEMO, RECORD_TRIGGER_TYPES, PROCESS_BUILDER_TYPES, WHEN, ON;
+var init_automation = __esm({
+  "src/deps/automation.ts"() {
+    "use strict";
+    init_indexer();
+    init_graph();
+    AUTOMATION_FLOW_FILE_CAP = 2e3;
+    FANOUT_FLOWS = 10;
+    FANOUT_CALLS = 5;
+    NOT_COVERED = [
+      "Workflow rules and email alerts (Workflow is not snapshotted)",
+      "Assignment, escalation, auto-response, duplicate and matching rules",
+      "Managed-package automation (hidden or namespaced code)",
+      "Dynamic Apex, and anything invoked indirectly \u2014 Apex called from the flows and triggers above is named, not expanded",
+      "Anything added or changed in the org since the snapshot date above",
+      "Older flow versions \u2014 the snapshot holds each flow's latest version; a flow shown as Draft or Obsolete may still have an older active version"
+    ];
+    NON_TOP_LEVEL_BLOCKS = [
+      "actionCalls",
+      "apexPluginCalls",
+      "assignments",
+      "choices",
+      "collectionProcessors",
+      "constants",
+      "customErrors",
+      "decisions",
+      "dynamicChoiceSets",
+      "formulas",
+      "loops",
+      "orchestratedStages",
+      "recordCreates",
+      "recordDeletes",
+      "recordLookups",
+      "recordRollbacks",
+      "recordUpdates",
+      "screens",
+      "stages",
+      "start",
+      "steps",
+      "subflows",
+      "textTemplates",
+      "transforms",
+      "variables",
+      "waits"
+    ];
+    APEX_NON_SOBJECT_TYPES = new Set(
+      "string integer long decimal double boolean date datetime time id blob object sobject list set map void database system schema test json jsonparser jsongenerator math limits userinfo messaging http httprequest httpresponse savepoint type pattern matcher crypto encodingutil url pagereference apexpages search".split(" ")
+    );
+    APEX_KEYWORDS = new Set(
+      "return new else throw insert update upsert delete undelete merge final static public private global protected transient virtual abstract override with without inherited sharing class interface enum extends implements this super null true false if for while do try catch finally break continue instanceof select from where and or not in like limit order by group having as on when switch trigger get".split(" ")
+    );
+    APEX_TARGETS_MAX = 200;
+    MEMO = /* @__PURE__ */ new WeakMap();
+    RECORD_TRIGGER_TYPES = /* @__PURE__ */ new Set([
+      "RecordBeforeSave",
+      "RecordAfterSave",
+      "RecordBeforeDelete"
+    ]);
+    PROCESS_BUILDER_TYPES = /* @__PURE__ */ new Set(["Workflow", "InvocableProcess"]);
+    WHEN = {
+      RecordBeforeSave: "before save",
+      RecordAfterSave: "after save",
+      RecordBeforeDelete: "before delete"
+    };
+    ON = {
+      Create: "on create",
+      Update: "on update",
+      CreateAndUpdate: "on create or update",
+      Delete: "on delete"
+    };
+  }
+});
+
 // src/deploy/codes.ts
 import { randomInt } from "node:crypto";
 function generateConfirmationCode() {
@@ -30315,338 +31085,309 @@ var init_approval = __esm({
   }
 });
 
-// src/core/notify.ts
-function describePhoneOutcome(outcome, opts) {
-  if (outcome.status === "off") return { status: "off" };
-  const settings = opts.includeCode ? "via open_settings" : "in the app's Settings \u2192 Notifications";
-  if (outcome.status === "skipped") {
+// src/diff/semantic.ts
+function semanticDiff(aContent, bContent, limits = {}) {
+  if (aContent === bContent) {
+    return { format: looksLikeXml(aContent) ? "xml" : "text", identical: true };
+  }
+  if (looksLikeXml(aContent) && looksLikeXml(bContent)) {
+    const xml = diffXml(aContent, bContent, limits);
+    if (xml) return { format: "xml", identical: xml.identical, xml };
+  }
+  const text2 = diffText(aContent, bContent, limits);
+  return { format: "text", identical: text2.identical, text: text2 };
+}
+function looksLikeXml(content) {
+  const t = content.trimStart();
+  if (t.startsWith("<!-- contrail:file ")) return false;
+  return t.startsWith("<");
+}
+function diffXml(aXml, bXml, limits = {}) {
+  let aDoc;
+  let bDoc;
+  try {
+    aDoc = parseXml(aXml);
+    bDoc = parseXml(bXml);
+  } catch {
+    return null;
+  }
+  const aRoot = rootElement(aDoc);
+  const bRoot = rootElement(bDoc);
+  if (!aRoot || !bRoot) return null;
+  const maxChanges = limits.maxChanges ?? MAX_CHANGES;
+  const changes = [];
+  const state = { truncated: false, maxChanges };
+  diffNode(aRoot.value, bRoot.value, "", changes, state);
+  return {
+    identical: changes.length === 0,
+    root: aRoot.name,
+    changes: changes.slice(0, maxChanges),
+    change_count: changes.length,
+    truncated: state.truncated || changes.length > maxChanges
+  };
+}
+function rootElement(doc) {
+  const keys = Object.keys(doc).filter((k) => k !== "?xml");
+  const name = keys[0];
+  if (!name) return null;
+  return { name, value: doc[name] };
+}
+function diffNode(a, b, path14, changes, state) {
+  if (changes.length > state.maxChanges) {
+    state.truncated = true;
+    return;
+  }
+  if (deepEqual(a, b)) return;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    diffCollection(asArray(a), asArray(b), path14, changes, state);
+    return;
+  }
+  const aKeyed = isObject2(a) && itemKey(a) !== null;
+  const bKeyed = isObject2(b) && itemKey(b) !== null;
+  if ((aKeyed || bKeyed) && (a == null || isObject2(a)) && (b == null || isObject2(b))) {
+    diffCollection(a == null ? [] : [a], b == null ? [] : [b], path14, changes, state);
+    return;
+  }
+  if (isObject2(a) && isObject2(b)) {
+    diffObjectFields(a, b, path14, changes, state);
+    return;
+  }
+  changes.push({ kind: "scalar", path: path14, a: summarize(a), b: summarize(b) });
+}
+function diffObjectFields(a, b, path14, changes, state) {
+  const keys = /* @__PURE__ */ new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const key2 of keys) {
+    diffNode(a[key2], b[key2], path14 ? `${path14}.${key2}` : key2, changes, state);
+  }
+}
+function diffCollection(a, b, path14, changes, state) {
+  const aKeyed = keyItems(a);
+  const bKeyed = keyItems(b);
+  if (!aKeyed || !bKeyed) {
+    changes.push({
+      kind: "unkeyed",
+      path: path14,
+      note: `list changed (${a.length} \u2192 ${b.length} items; no stable key to match on)`
+    });
+    return;
+  }
+  for (const [key2, aItem] of aKeyed) {
+    const bItem = bKeyed.get(key2);
+    if (bItem === void 0) {
+      changes.push({ kind: "removed", path: path14, key: key2 });
+    } else if (isObject2(aItem) && isObject2(bItem)) {
+      diffObjectFields(aItem, bItem, `${path14}[${key2}]`, changes, state);
+    } else {
+      diffNode(aItem, bItem, `${path14}[${key2}]`, changes, state);
+    }
+  }
+  for (const key2 of bKeyed.keys()) {
+    if (!aKeyed.has(key2)) changes.push({ kind: "added", path: path14, key: key2 });
+  }
+}
+function keyItems(items) {
+  const map = /* @__PURE__ */ new Map();
+  for (const item of items) {
+    if (!isObject2(item)) return null;
+    const key2 = itemKey(item);
+    if (key2 === null) return null;
+    map.set(key2, item);
+  }
+  return map;
+}
+function itemKey(item) {
+  for (const f of ITEM_KEY_FIELDS) {
+    const v = item[f];
+    if (typeof v === "string" && v !== "") return v;
+  }
+  return null;
+}
+function isObject2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function deepEqual(a, b) {
+  if (a === b) return true;
+  if (typeof a !== typeof b) return false;
+  if (typeof a !== "object" || a === null || b === null) return false;
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+function summarize(value) {
+  if (value === void 0) return null;
+  if (typeof value === "string" && value.length > 200) return `${value.slice(0, 200)}\u2026`;
+  if (isObject2(value) || Array.isArray(value)) {
+    const json2 = JSON.stringify(value);
+    return json2.length > 200 ? `${json2.slice(0, 200)}\u2026` : JSON.parse(json2);
+  }
+  return value;
+}
+function diffText(aText, bText, limits = {}) {
+  const maxHunks = limits.maxHunks ?? MAX_HUNKS;
+  const maxHunkLines = limits.maxHunkLines ?? MAX_HUNK_LINES;
+  const maxLineChars = limits.maxLineChars ?? MAX_LINE_CHARS;
+  const maxHunkBudgetChars = limits.maxHunkBudgetChars ?? MAX_HUNK_BUDGET_CHARS;
+  const aLines = aText.split("\n");
+  const bLines = bText.split("\n");
+  if (aText === bText) {
     return {
-      status: "skipped",
-      reason: outcome.reason,
-      note: outcome.reason === "remote_control_off" ? 'Phone notification skipped: Remote Control was not connected when this was proposed, so the code was not pushed (phone delivery is set to "only while Remote Control is on"). The human approves from the page on their desktop as usual; nothing to do.' : `Phone notification skipped: phone delivery is set to "only while Remote Control is on", but Contrail's Remote Control hook did not report for this call \u2014 it is not installed, or this is not a Claude Code session. The code is on the approval page as always. If the human expected a push, they can install the hook or switch delivery to Always ${settings}.`
+      identical: true,
+      lines_a: aLines.length,
+      lines_b: bLines.length,
+      lines_added: 0,
+      lines_removed: 0,
+      hunks: [],
+      hunks_truncated: false,
+      counts_only: false
     };
   }
-  if (outcome.status === "sent") {
+  let start = 0;
+  while (start < aLines.length && start < bLines.length && aLines[start] === bLines[start]) {
+    start++;
+  }
+  let aEnd = aLines.length;
+  let bEnd = bLines.length;
+  while (aEnd > start && bEnd > start && aLines[aEnd - 1] === bLines[bEnd - 1]) {
+    aEnd--;
+    bEnd--;
+  }
+  const aMid = aLines.slice(start, aEnd);
+  const bMid = bLines.slice(start, bEnd);
+  if (aMid.length * bMid.length > MAX_LCS_CELLS) {
+    const aSet = countLines(aMid);
+    const bSet = countLines(bMid);
+    let removed2 = 0;
+    for (const [line, n] of aSet) removed2 += Math.max(0, n - (bSet.get(line) ?? 0));
+    let added2 = 0;
+    for (const [line, n] of bSet) added2 += Math.max(0, n - (aSet.get(line) ?? 0));
     return {
-      status: "sent",
-      note: opts.includeCode ? "The approval summary and code were also pushed to the human's phone. The code still only counts when the human types it into this chat." : "A code-free summary was pushed to the human's phone; they approve in the app's Deploy Review screen as usual."
+      identical: false,
+      lines_a: aLines.length,
+      lines_b: bLines.length,
+      lines_added: added2,
+      lines_removed: removed2,
+      hunks: [],
+      hunks_truncated: false,
+      counts_only: true
     };
   }
-  const hint = {
-    not_configured: `phone notifications are switched on but the Pushover keys are missing \u2014 the human can set them ${settings}`,
-    store_unavailable: "the OS keychain could not be read on this machine, so the stored Pushover keys are unreachable",
-    rejected: `Pushover rejected the stored keys \u2014 the human should re-check them ${settings}`,
-    quota: "Pushover's monthly message quota is exhausted",
-    timeout: "Pushover did not answer in time from this machine",
-    network: "Pushover was unreachable from this machine",
-    circuit_open: `notifications are paused after a recent rejection \u2014 the human can fix the keys ${settings}`
-  };
-  return {
-    status: "failed",
-    reason: outcome.reason,
-    note: `Phone notification failed (${hint[outcome.reason]}). ` + (opts.includeCode ? "The code is only on the approval page in the human's browser." : "The proposal is still waiting in the app's Deploy Review screen.")
-  };
-}
-function approvalKindNoun(kind) {
-  return kind === "deploy" ? "deploy" : kind === "apex" ? "Apex script" : kind === "bulk" ? "bulk data load" : kind === "activation" ? "agent activation" : "data change";
-}
-function plural(n, noun) {
-  return `${n} ${noun}${n === 1 ? "" : "s"}`;
-}
-function squash(text) {
-  return text.replace(/\s+/g, " ").trim();
-}
-function truncate2(text, max2) {
-  return text.length <= max2 ? text : `${text.slice(0, Math.max(0, max2 - 1))}\u2026`;
-}
-function expiryClock(expiresAt) {
-  const t = Date.parse(expiresAt);
-  if (Number.isNaN(t)) return "soon";
-  return new Date(t).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
-}
-function remainingSeconds(expiresAt) {
-  const t = Date.parse(expiresAt);
-  if (Number.isNaN(t)) return 3600;
-  return Math.max(60, Math.ceil((t - Date.now()) / 1e3));
-}
-function phoneLabel(kind, label) {
-  const flat = squash(label);
-  if (kind !== "dml") return flat;
-  const colon = flat.indexOf(":");
-  return colon === -1 ? flat : flat.slice(0, colon).trim();
-}
-function composePushover(view, opts) {
-  const title = truncate2(
-    `Contrail: approve ${approvalKindNoun(view.kind)} \u2192 ${view.org.alias} (${view.org.orgType})`,
-    TITLE_MAX
-  );
-  const rowWarnings = [...view.destructive, ...view.changes].flatMap((r) => r.warnings);
-  const warningCount = (view.warnings ?? []).length + rowWarnings.length;
-  const head = [
-    [
-      plural(view.changes.length, "change"),
-      plural(view.destructive.length, "deletion"),
-      plural(warningCount, "warning")
-    ].join(" \xB7 ")
-  ];
-  if (view.org.orgType === "production") head.push("PRODUCTION org.");
-  if (view.destructive.length > 0) head.push("Includes DELETIONS.");
-  if (opts.summary === "full") {
-    const labels = [...view.destructive, ...view.changes].map((r) => phoneLabel(view.kind, r.label));
-    head.push(...labels.slice(0, FULL_LABELS_MAX).map((l) => `\u2022 ${l}`));
-    if (labels.length > FULL_LABELS_MAX) head.push(`\u2022 \u2026 ${labels.length - FULL_LABELS_MAX} more`);
-    const warns = [...view.warnings ?? [], ...rowWarnings].slice(0, FULL_WARNINGS_MAX);
-    head.push(...warns.map((w) => `\u26A0 ${truncate2(squash(w), 140)}`));
+  const ops = lcsOps(aMid, bMid);
+  const hunks = [];
+  let current = null;
+  let ai = 0;
+  let bi = 0;
+  let added = 0;
+  let removed = 0;
+  for (const op of ops) {
+    if (op === "same") {
+      current = null;
+      ai++;
+      bi++;
+      continue;
+    }
+    if (!current) {
+      current = { a_line: start + ai + 1, b_line: start + bi + 1, removed: [], added: [] };
+      hunks.push(current);
+    }
+    if (op === "del") {
+      removed++;
+      if (current.removed.length < maxHunkLines)
+        current.removed.push(clampLine(aMid[ai] ?? "", maxLineChars));
+      else current.removed_truncated = true;
+      ai++;
+    } else {
+      added++;
+      if (current.added.length < maxHunkLines)
+        current.added.push(clampLine(bMid[bi] ?? "", maxLineChars));
+      else current.added_truncated = true;
+      bi++;
+    }
   }
-  const clock = expiryClock(view.expiresAt);
-  const expiry = clock === "soon" ? "it expires soon" : `it expires at ${clock}`;
-  const tail = opts.includeCode ? [
-    `Type the code below into your Contrail session to approve \u2014 ${expiry}. Full details are on the approval page on your desktop.`,
-    "",
-    view.code
-  ] : ["Waiting in Deploy Review \u2014 open the Contrail desktop app to approve."];
-  const tailText = tail.join("\n");
-  const headText = truncate2(head.join("\n"), Math.max(0, MESSAGE_MAX - tailText.length - 1));
+  let budget = maxHunkBudgetChars;
+  let kept = 0;
+  for (const h of hunks) {
+    budget -= [...h.removed, ...h.added].reduce((n, l) => n + l.length + 1, 0);
+    if (budget < 0) break;
+    kept++;
+  }
+  const cappedHunks = hunks.slice(0, Math.min(kept, maxHunks));
   return {
-    title,
-    message: `${headText}
-${tailText}`,
-    ttl: remainingSeconds(view.expiresAt)
+    identical: false,
+    lines_a: aLines.length,
+    lines_b: bLines.length,
+    lines_added: added,
+    lines_removed: removed,
+    hunks: cappedHunks,
+    hunks_truncated: cappedHunks.length < hunks.length,
+    counts_only: false
   };
 }
-function sanitizeErrors(json2) {
-  const raw = json2?.errors;
-  if (!Array.isArray(raw)) return [];
-  return raw.filter((e) => typeof e === "string").map(
-    (e) => e.replace(/[\u0000-\u001f]/g, " ").replace(/[A-Za-z0-9]{30,}/g, "[redacted]").slice(0, 160)
-  );
+function clampLine(line, maxLineChars) {
+  return line.length > maxLineChars ? `${line.slice(0, maxLineChars)}\u2026` : line;
 }
-var NOTIFY_ACCOUNTS, PUSHOVER_KEY_RE, PUSHOVER_MESSAGES_URL, PUSHOVER_VALIDATE_URL, TIMEOUT_MS, REJECTED_PAUSE_MS, QUOTA_PAUSE_MS, MESSAGE_MAX, TITLE_MAX, FULL_LABELS_MAX, FULL_WARNINGS_MAX, PushoverNotifier, NullNotifier;
-var init_notify = __esm({
-  "src/core/notify.ts"() {
+function countLines(lines) {
+  const map = /* @__PURE__ */ new Map();
+  for (const l of lines) map.set(l, (map.get(l) ?? 0) + 1);
+  return map;
+}
+function lcsOps(a, b) {
+  const n = a.length;
+  const m = b.length;
+  const width = m + 1;
+  const table = new Int32Array((n + 1) * width);
+  for (let i2 = n - 1; i2 >= 0; i2--) {
+    for (let j2 = m - 1; j2 >= 0; j2--) {
+      table[i2 * width + j2] = a[i2] === b[j2] ? table[(i2 + 1) * width + j2 + 1] + 1 : Math.max(table[(i2 + 1) * width + j2], table[i2 * width + j2 + 1]);
+    }
+  }
+  const ops = [];
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) {
+      ops.push("same");
+      i++;
+      j++;
+    } else if (table[(i + 1) * width + j] >= table[i * width + j + 1]) {
+      ops.push("del");
+      i++;
+    } else {
+      ops.push("add");
+      j++;
+    }
+  }
+  while (i < n) {
+    ops.push("del");
+    i++;
+  }
+  while (j < m) {
+    ops.push("add");
+    j++;
+  }
+  return ops;
+}
+var MAX_CHANGES, MAX_HUNKS, MAX_HUNK_LINES, MAX_LINE_CHARS, MAX_HUNK_BUDGET_CHARS, MAX_LCS_CELLS, ITEM_KEY_FIELDS;
+var init_semantic = __esm({
+  "src/diff/semantic.ts"() {
     "use strict";
-    init_log();
-    NOTIFY_ACCOUNTS = {
-      pushoverUser: "notify:pushover:user",
-      pushoverToken: "notify:pushover:token"
-    };
-    PUSHOVER_KEY_RE = /^[A-Za-z0-9]{30}$/;
-    PUSHOVER_MESSAGES_URL = "https://api.pushover.net/1/messages.json";
-    PUSHOVER_VALIDATE_URL = "https://api.pushover.net/1/users/validate.json";
-    TIMEOUT_MS = 5e3;
-    REJECTED_PAUSE_MS = 10 * 60 * 1e3;
-    QUOTA_PAUSE_MS = 60 * 60 * 1e3;
-    MESSAGE_MAX = 1024;
-    TITLE_MAX = 250;
-    FULL_LABELS_MAX = 10;
-    FULL_WARNINGS_MAX = 3;
-    PushoverNotifier = class {
-      /**
-       * @param syncFromDisk the plugin and the desktop app share config.json but
-       *   each holds its own loaded copy; before every send/status the notifier
-       *   folds the on-disk `notifications` section into the live object so a
-       *   change saved on either surface reaches the other without a restart.
-       *   Production wiring passes a disk reader; tests (which inject their config
-       *   object) leave the default, which syncs nothing.
-       */
-      constructor(config2, secrets, fetchImpl = fetch, syncFromDisk = () => null) {
-        this.config = config2;
-        this.secrets = secrets;
-        this.fetchImpl = fetchImpl;
-        this.syncFromDisk = syncFromDisk;
-      }
-      pausedUntil = 0;
-      sync() {
-        let disk = null;
-        try {
-          disk = this.syncFromDisk();
-        } catch {
-          disk = null;
-        }
-        if (disk && typeof disk === "object") {
-          if (disk.method === "none" || disk.method === "pushover") {
-            this.config.notifications.method = disk.method;
-          }
-          if (disk.summary === "minimal" || disk.summary === "full") {
-            this.config.notifications.summary = disk.summary;
-          }
-          if (disk.when === "remote_control" || disk.when === "always") {
-            this.config.notifications.when = disk.when;
-          }
-        }
-      }
-      status() {
-        this.sync();
-        const creds = this.credentials();
-        return {
-          method: this.config.notifications.method,
-          when: this.config.notifications.when,
-          configured: creds.kind === "ok",
-          ...creds.kind === "unavailable" ? { storeError: creds.error } : {}
-        };
-      }
-      resetCircuit() {
-        this.pausedUntil = 0;
-      }
-      credentials() {
-        try {
-          const user = this.secrets.getSecret(NOTIFY_ACCOUNTS.pushoverUser);
-          const token = this.secrets.getSecret(NOTIFY_ACCOUNTS.pushoverToken);
-          return user && token ? { kind: "ok", user, token } : { kind: "missing" };
-        } catch (err2) {
-          return { kind: "unavailable", error: String(err2 instanceof Error ? err2.message : err2).slice(0, 200) };
-        }
-      }
-      async notify(view, opts) {
-        this.sync();
-        if (this.config.notifications.method !== "pushover") return { status: "off" };
-        const creds = this.credentials();
-        if (creds.kind === "unavailable") {
-          log("warn", "approval notification skipped: OS keychain unreadable", { reason: creds.error });
-          return { status: "failed", reason: "store_unavailable" };
-        }
-        if (creds.kind === "missing") return { status: "failed", reason: "not_configured" };
-        if (Date.now() < this.pausedUntil) return { status: "failed", reason: "circuit_open" };
-        const msg = composePushover(view, {
-          includeCode: opts.includeCode,
-          summary: this.config.notifications.summary
-        });
-        const result = await this.call(PUSHOVER_MESSAGES_URL, {
-          token: creds.token,
-          user: creds.user,
-          title: msg.title,
-          message: msg.message,
-          ttl: msg.ttl,
-          priority: 0
-        });
-        return this.outcomeOf(result);
-      }
-      async sendTest() {
-        const creds = this.credentials();
-        if (creds.kind === "unavailable") {
-          return {
-            ok: false,
-            message: `Your OS keychain could not be read, so the stored keys are unreachable: ${creds.error}`
-          };
-        }
-        if (creds.kind === "missing") {
-          return {
-            ok: false,
-            message: "Enter both the Pushover user key and the application token first."
-          };
-        }
-        const check2 = await this.call(PUSHOVER_VALIDATE_URL, { token: creds.token, user: creds.user });
-        if (check2.kind === "transport") {
-          return {
-            ok: false,
-            message: `Could not reach Pushover (${check2.reason}). Check this machine's network and try again.`
-          };
-        }
-        if (!check2.ok) {
-          return {
-            ok: false,
-            message: `Pushover rejected the keys: ${check2.errors.join("; ") || `HTTP ${check2.status}`}. Nothing was sent.`
-          };
-        }
-        const devices = Array.isArray(check2.json?.devices) ? check2.json.devices.filter((d) => typeof d === "string") : [];
-        const sent = await this.call(PUSHOVER_MESSAGES_URL, {
-          token: creds.token,
-          user: creds.user,
-          title: "Contrail test notification",
-          message: "Phone notifications are working. Approval codes will arrive here, with the review summary, whenever Contrail proposes a change.",
-          ttl: 600,
-          priority: 0
-        });
-        if (sent.kind === "transport") {
-          return {
-            ok: false,
-            message: `Keys are valid, but the test message could not be delivered (${sent.reason}).`
-          };
-        }
-        if (!sent.ok) {
-          return {
-            ok: false,
-            message: `Keys validated, but Pushover refused the message: ${sent.errors.join("; ") || `HTTP ${sent.status}`}.`
-          };
-        }
-        this.pausedUntil = 0;
-        return {
-          ok: true,
-          message: `Test notification sent to ${devices.length > 0 ? devices.join(", ") : "your devices"}. Check your phone.`
-        };
-      }
-      outcomeOf(result) {
-        if (result.kind === "transport") {
-          log("warn", "approval notification not delivered", { reason: result.reason });
-          return { status: "failed", reason: result.reason };
-        }
-        if (result.ok) return { status: "sent" };
-        if (result.status < 400) {
-          log("warn", "approval notification refused by Pushover despite a 2xx", {
-            status: result.status,
-            errors: result.errors
-          });
-          return { status: "failed", reason: "rejected" };
-        }
-        if (result.status === 429) {
-          const usable = result.resetAt !== null && result.resetAt > Date.now() + 6e4;
-          this.pausedUntil = usable ? result.resetAt : Date.now() + QUOTA_PAUSE_MS;
-          log("warn", "approval notification refused: Pushover quota exhausted", {
-            pausedUntil: new Date(this.pausedUntil).toISOString()
-          });
-          return { status: "failed", reason: "quota" };
-        }
-        if (result.status >= 400 && result.status < 500) {
-          this.pausedUntil = Date.now() + REJECTED_PAUSE_MS;
-          log("warn", "approval notification rejected by Pushover; pausing notifications", {
-            status: result.status,
-            errors: result.errors
-          });
-          return { status: "failed", reason: "rejected" };
-        }
-        log("warn", "approval notification failed: Pushover server error", { status: result.status });
-        return { status: "failed", reason: "network" };
-      }
-      async call(url, body) {
-        let res;
-        try {
-          res = await this.fetchImpl(url, {
-            method: "POST",
-            headers: { "content-type": "application/json", accept: "application/json" },
-            body: JSON.stringify(body),
-            signal: AbortSignal.timeout(TIMEOUT_MS)
-          });
-        } catch (err2) {
-          const name = err2 instanceof Error ? err2.name : "";
-          const timeout = name === "TimeoutError" || name === "AbortError";
-          return { kind: "transport", reason: timeout ? "timeout" : "network" };
-        }
-        let json2 = null;
-        try {
-          const parsed = await res.json();
-          if (parsed && typeof parsed === "object") json2 = parsed;
-        } catch {
-          json2 = null;
-        }
-        const resetHeader = Number(res.headers.get("x-limit-app-reset"));
-        const resetAt = Number.isFinite(resetHeader) && resetHeader > 0 ? Math.min(resetHeader * 1e3, Date.now() + 31 * 24 * 60 * 60 * 1e3) : null;
-        const ok2 = res.ok && (json2 === null || json2.status === void 0 || json2.status === 1);
-        return { kind: "http", ok: ok2, status: res.status, errors: sanitizeErrors(json2), json: json2, resetAt };
-      }
-    };
-    NullNotifier = class {
-      async notify() {
-        return { status: "off" };
-      }
-      async sendTest() {
-        return { ok: false, message: "Notifications are not available in this build." };
-      }
-      status() {
-        return { method: "none", when: "remote_control", configured: false };
-      }
-      resetCircuit() {
-      }
-    };
+    init_xml();
+    MAX_CHANGES = 200;
+    MAX_HUNKS = 50;
+    MAX_HUNK_LINES = 40;
+    MAX_LINE_CHARS = 500;
+    MAX_HUNK_BUDGET_CHARS = 1e5;
+    MAX_LCS_CELLS = 4e6;
+    ITEM_KEY_FIELDS = [
+      "fullName",
+      "name",
+      "field",
+      "object",
+      "apexClass",
+      "apexPage",
+      "flow",
+      "tab",
+      "recordType",
+      "application",
+      "layout"
+    ];
   }
 });
 
@@ -30660,6 +31401,16 @@ function flowDeactivationXml() {
 }
 function isRegisteredType(type) {
   return type in FILE_TYPES || type in CHILD_TYPES2;
+}
+function retrieveMemberFor(type, apiName) {
+  const fileSpec = FILE_TYPES[type];
+  if (fileSpec) return { type: fileSpec.manifestType ?? type, member: apiName };
+  const childSpec = CHILD_TYPES2[type];
+  if (childSpec) {
+    const parent = childSpec.parentFromName(apiName);
+    return parent ? { type: childSpec.containerRoot, member: parent } : null;
+  }
+  return null;
 }
 function parseEnvelopeFor(type, apiName, content) {
   const spec = FILE_TYPES[type];
@@ -30812,8 +31563,8 @@ function buildDeployZip(components, deletions, apiVersionNumber, metaXmlLookup) 
           "bad_component"
         );
       }
-      const path13 = zipPathFor(fileSpec, c.api_name);
-      files.set(path13, strToU8(c.content));
+      const path14 = zipPathFor(fileSpec, c.api_name);
+      files.set(path14, strToU8(c.content));
       if (fileSpec.metaRoot) {
         const meta = metaXmlLookup(c.type, c.api_name) ?? fileSpec.metaXml?.(apiVersionNumber, c.api_name) ?? `<?xml version="1.0" encoding="UTF-8"?>
 <${fileSpec.metaRoot} xmlns="${XMLNS}">
@@ -30821,7 +31572,7 @@ function buildDeployZip(components, deletions, apiVersionNumber, metaXmlLookup) 
     <status>Active</status>
 </${fileSpec.metaRoot}>
 `;
-        files.set(`${path13}-meta.xml`, strToU8(meta));
+        files.set(`${path14}-meta.xml`, strToU8(meta));
       }
       addMember(fileSpec.manifestType ?? c.type, c.api_name);
       continue;
@@ -30835,9 +31586,9 @@ function buildDeployZip(components, deletions, apiVersionNumber, metaXmlLookup) 
           "bad_component"
         );
       }
-      const path13 = `${childSpec.dir}/${parent}${childSpec.ext}`;
-      const key2 = `${childSpec.containerRoot}:${path13}`;
-      const container = containers.get(key2) ?? { root: childSpec.containerRoot, path: path13, blocks: [] };
+      const path14 = `${childSpec.dir}/${parent}${childSpec.ext}`;
+      const key2 = `${childSpec.containerRoot}:${path14}`;
+      const container = containers.get(key2) ?? { root: childSpec.containerRoot, path: path14, blocks: [] };
       container.blocks.push(c.content.trim());
       containers.set(key2, container);
       addMember(c.type, c.api_name);
@@ -30932,6 +31683,32 @@ function zipPathFor(spec, apiName) {
   const name = spec.foldered ? apiName.split("/").map(fileSafeSegment).join("/") : fileSafeName(apiName);
   return `${spec.dir}/${name}${spec.ext}`;
 }
+function deployZipEntryPath(type, apiName, opts) {
+  const childSpec = CHILD_TYPES2[type];
+  if (childSpec) {
+    const parent = childSpec.parentFromName(apiName);
+    if (!parent) return null;
+    return {
+      path: `${childSpec.dir}/${fileSafeName(parent)}${childSpec.ext}`,
+      child: true,
+      childTag: childSpec.tag,
+      childName: apiName.includes(".") ? apiName.slice(apiName.indexOf(".") + 1) : apiName
+    };
+  }
+  const spec = FILE_TYPES[type];
+  if (!spec) return null;
+  if (spec.envelope) {
+    const dirPrefix = `${spec.dir}/${fileSafeSegment(apiName)}/`;
+    const suffixes = Array.isArray(spec.envelopeMainSuffix) ? spec.envelopeMainSuffix : [spec.envelopeMainSuffix ?? spec.ext];
+    const candidates = suffixes.map((s) => `${dirPrefix}${apiName}${s}`);
+    const resolved = candidates.length === 1 ? candidates[0] : candidates.find((p) => opts?.zipEntries?.includes(p));
+    if (resolved === void 0) {
+      return { path: "", child: false, bundleDir: dirPrefix, mainCandidates: candidates };
+    }
+    return { path: resolved, child: false, bundleDir: dirPrefix };
+  }
+  return { path: zipPathFor(spec, apiName), child: false };
+}
 function validateTypeAndName(type, name) {
   if (!/^[A-Za-z]+$/.test(type)) throw new ContrailError(`invalid type "${type}"`, "bad_component");
   if (name.includes("\\") || name.includes("..")) {
@@ -30976,6 +31753,146 @@ function validateTypeAndName(type, name) {
     throw new ContrailError(`invalid component name "${name}"`, "bad_component");
   }
 }
+function changeDependentWarnings(input) {
+  const { type, api_name, change, proposed, before } = input;
+  const warnings = [];
+  if (input.bundleFiles) {
+    const { proposed: newFiles, main: main2, before: oldFiles } = input.bundleFiles;
+    if (change === "modify") {
+      const added = Object.keys(newFiles).filter((k) => !(k in oldFiles));
+      const removed = Object.keys(oldFiles).filter((k) => !(k in newFiles));
+      const changed = Object.keys(newFiles).filter(
+        (k) => k in oldFiles && oldFiles[k].trim() !== newFiles[k].trim()
+      );
+      const describe = (label, list) => list.length > 0 ? `${label} ${list.slice(0, 8).join(", ")}${list.length > 8 ? "\u2026" : ""}` : "";
+      const delta = [
+        describe("changed:", changed),
+        describe("added:", added),
+        describe("removed:", removed)
+      ].filter(Boolean).join("; ");
+      warnings.push(
+        `BUNDLE REPLACE \u2014 this deploy replaces the org's whole ${type} directory (${Object.keys(newFiles).length} files; ${delta}).`
+      );
+    }
+    if (type === "GenAiPlannerBundle" && change === "modify") {
+      warnings.push(
+        `AGENT MUST BE DEACTIVATED FIRST \u2014 deploying GenAiPlannerBundle changes for an ACTIVE agent version fails, and version-suffixed bundles are PUBLISHED SNAPSHOTS: a modified deploy of one fails org-side even deactivated (unmodified re-deploys "succeed" as no-ops). Deactivate first (agent_activation_propose/execute, or Agent Builder), deploy, then reactivate; verify with BotVersion.Status. On Agent-Script agents the next publish overwrites hand-edits.`
+      );
+    }
+    if (type === "AuraDefinitionBundle") {
+      const kind = main2.slice(api_name.length);
+      const oldMain = [".cmp", ".app", ".evt", ".intf", ".tokens"].map((s) => `${api_name}${s}`).find((f) => f in oldFiles);
+      const verOf = (files, mainName) => mainName ? parseFloat(files[`${mainName}-meta.xml`]?.match(/<apiVersion>\s*([\d.]+)/)?.[1] ?? "") : NaN;
+      const newVer = verOf(newFiles, main2);
+      const oldVer = verOf(oldFiles, oldMain);
+      if (Number.isFinite(newVer) && Number.isFinite(oldVer) && newVer < 40 !== oldVer < 40) {
+        warnings.push(
+          `API VERSION ${oldVer} \u2192 ${newVer} crosses the 39/40 boundary \u2014 in orgs still on Lightning Locker this toggles Locker for the component (LWS is an org setting, unaffected by apiVersion).`
+        );
+      }
+      const mainBody = newFiles[main2] ?? "";
+      const isBackgroundItem = /lightning:backgroundUtilityItem/.test(mainBody);
+      if (change === "add" && (kind === ".cmp" || kind === ".app") && /lightning:(backgroundUtilityItem|utilityItem|availableForFlow(Actions|Screens))|flexipage:availableFor\w*|force:lightningQuickAction/.test(
+        mainBody
+      ) && input.referenced !== void 0 && !input.referenced()) {
+        warnings.push(
+          `INERT UNTIL PLACED \u2014 this component declares surface interfaces but nothing in this package or the snapshot references c:${api_name}; it renders NOWHERE until host metadata places it` + (isBackgroundItem ? ` (a background utility item sits in a utility bar's Background region, and the bar needs at least one VISIBLE item or it does not appear).` : `.`)
+        );
+      }
+      if (change !== "unchanged_content") {
+        warnings.push(
+          `The deploy compiles markup and design (each design:attribute must match an aura:attribute) and parses the JS; runtime errors in a background item surface only in the browser console. Consoles already open keep the OLD definition until reloaded.`
+        );
+      }
+    }
+    return warnings;
+  }
+  if (type === "CustomField" && before) {
+    const oldType = before.match(/<type>([^<]+)<\/type>/)?.[1];
+    const newType = proposed.match(/<type>([^<]+)<\/type>/)?.[1];
+    if (oldType && newType && oldType !== newType) {
+      warnings.push(
+        `FIELD TYPE CHANGE ${oldType} \u2192 ${newType} \u2014 possible irreversible data loss`
+      );
+    }
+  }
+  if ((type === "FlexiPage" || type === "CustomApplication" || type === "Layout" || type === "Report" || type === "Dashboard" || type === "GenAiPlugin" || type === "GenAiPromptTemplate" || type === "Bot" || type === "LeadConvertSettings" || type === "NamedCredential" || type === "ExternalCredential" || type === "AuthProvider" || type === "PermissionSetGroup" || type === "MutingPermissionSet" || // S44: both agent-test suite types are single documents of
+  // <testCase> blocks (the legacy one was a parity gap since S30).
+  // AiAgentScorerDefinition is deliberately NOT here — its versions
+  // are documented append-only, which makes the generic "removed"
+  // sentence false; it has its own arm below.
+  type === "AiEvaluationDefinition" || type === "AiTestingDefinition") && change === "modify") {
+    warnings.push(
+      `WHOLE-DOCUMENT REPLACE \u2014 this deploy fully replaces the org's ${type}; anything not present in the proposed content is removed.` + (type === "Bot" ? " A <botVersions> block omitted from a Bot document is a VERSION DELETE." : type === "LeadConvertSettings" ? " An <objectMapping> omitted here is a lead field mapping DELETED org-wide." : type === "ExternalCredential" ? " A principal parameter omitted here is DELETED org-side \u2014 along with the credential values a human entered for it in Setup." : type === "PermissionSetGroup" ? " A <permissionSets> member omitted here is DETACHED from the group org-side \u2014 users assigned the group lose that permission set." : type === "MutingPermissionSet" ? " A muted permission omitted here is UN-MUTED org-side, silently RESTORING it to every user assigned the group." : type === "AiEvaluationDefinition" || type === "AiTestingDefinition" ? " A <testCase> omitted here is removed from the suite org-side." : "")
+    );
+  }
+  if (type === "GenAiPromptTemplate" && change === "modify") {
+    const oldId = before?.match(/<activeVersionIdentifier>([^<]*)</)?.[1];
+    const newId = proposed.match(/<activeVersionIdentifier>([^<]*)</)?.[1];
+    if (oldId && newId && oldId !== newId) {
+      warnings.push(
+        `activeVersionIdentifier ALTERED (${oldId.slice(0, 12)}\u2026 \u2192 ${newId.slice(0, 12)}\u2026) \u2014 these tokens are org-generated; a hand-edited value is rejected or mis-targets the active version. To activate a new version, retrieve after deploying it and repoint using the versionIdentifier the org minted.`
+      );
+    }
+  }
+  if (type === "AiAgentScorerDefinition" && change === "modify") {
+    const oldVersions = scorerVersionStatuses(before ?? "");
+    const newVersions = scorerVersionStatuses(proposed);
+    const omitted = [...oldVersions.keys()].filter((n) => !newVersions.has(n));
+    const regressed = [...oldVersions.entries()].filter(([n, was]) => {
+      const now = newVersions.get(n);
+      return now !== void 0 && SCORER_STATUS_RANK[was] !== void 0 && SCORER_STATUS_RANK[now] !== void 0 && SCORER_STATUS_RANK[now] < SCORER_STATUS_RANK[was];
+    }).map(([n, was]) => `${n} (${was} \u2192 ${newVersions.get(n)})`);
+    warnings.push(
+      `SCORER VERSIONS ARE APPEND-ONLY \u2014 the org never deletes a <scorerVersion>: one omitted from this document is NOT removed` + (omitted.length > 0 ? ` (org-side versions omitted here: ${omitted.join(", ")})` : "") + `. Status is documented one-way (Draft \u2192 Available \u2192 Archived); a regression here is not something the org performs` + (regressed.length > 0 ? ` (regressed here: ${regressed.join("; ")})` : "") + `. Retrieve-first, carry every existing version forward, edit only Draft versions.`
+    );
+  }
+  if ((type === "ReportFolder" || type === "DashboardFolder") && change === "modify") {
+    warnings.push(
+      `FOLDER REPLACE \u2014 the folderShares in this content fully replace the folder's sharing; shares omitted here are revoked.`
+    );
+  }
+  if (type === "CustomMetadata" && change === "modify") {
+    warnings.push(
+      `FULL-RECORD REPLACE \u2014 fields omitted from this content are reset to null/default on the deployed record.`
+    );
+  }
+  if (type === "QuickAction" && change === "add") {
+    warnings.push(
+      `NEW QUICK ACTION is surfaced NOWHERE until a page layout, a global publisher layout, or a Lightning record page using dynamic actions includes it \u2014 this deploy creates the action but places it on no UI.`
+    );
+  }
+  if (type === "Layout" && change === "add") {
+    warnings.push(
+      `NEW LAYOUT IS NOT ASSIGNED by this deploy \u2014 profiles keep their current layout until layoutAssignments change (Profile metadata or Setup).`
+    );
+  }
+  if ((type === "Report" || type === "Dashboard") && change === "add") {
+    warnings.push(
+      `NEW ${type.toUpperCase()} visibility is governed by its FOLDER's sharing (folderShares on the folder component), not by permission sets \u2014 this deploy grants nobody new access by itself.`
+    );
+  }
+  if (type === "GenAiPromptTemplate" && change === "add" && /<activeVersionIdentifier>[^<]/.test(proposed)) {
+    warnings.push(
+      `activeVersionIdentifier on a NET-NEW template \u2014 this token is org-generated and cannot be authored from scratch. Omit it (the org mints one on deploy), or retrieve-first if this template already exists under another name.`
+    );
+  }
+  if (type === "GenAiPlugin" && change === "modify") {
+    warnings.push(
+      `AGENT MUST BE DEACTIVATED FIRST \u2014 deploying ${type} changes for an ACTIVE agent version fails. Deactivate first (agent_activation_propose/execute, or Agent Builder), deploy, then reactivate \u2014 each flip its own approval; verify with BotVersion.Status.`
+    );
+  }
+  if (type === "ExternalCredential" && change === "add") {
+    warnings.push(
+      `NEW EXTERNAL CREDENTIAL carries no secrets and grants nobody access \u2014 a human enters each principal's credential values in Setup (External Credentials) after the deploy, and callouts fail until a permission set grants externalCredentialPrincipalAccesses for its principals.`
+    );
+  }
+  return warnings;
+}
+function auraBundleReferenced(db, conn, components, c) {
+  const refRe = new RegExp(`c:${c.api_name}\\b`);
+  return components.some((o) => o !== c && refRe.test(o.content)) || db.edgesTo(conn.id, "AuraDefinitionBundle", c.api_name).length > 0;
+}
 function analyzeChanges(db, store, conn, components, deletions) {
   const changes = [];
   for (const c of components) {
@@ -31000,33 +31917,28 @@ function analyzeChanges(db, store, conn, components, deletions) {
       const existingBundle = db.getArtifact(conn.id, c.type, c.api_name);
       const warnings2 = [];
       let change2;
+      const old = existingBundle ? readBundleFiles(store, conn, envSpec.dir, c.api_name) : {};
       if (!existingBundle) {
         change2 = "add";
       } else {
-        const old = readBundleFiles(store, conn, envSpec.dir, c.api_name);
         const added = Object.keys(proposed).filter((k) => !(k in old));
         const removed = Object.keys(old).filter((k) => !(k in proposed));
         const changed = Object.keys(proposed).filter(
           (k) => k in old && old[k].trim() !== proposed[k].trim()
         );
         change2 = added.length + removed.length + changed.length === 0 ? "unchanged_content" : "modify";
-        if (change2 === "modify") {
-          const describe = (label, list) => list.length > 0 ? `${label} ${list.slice(0, 8).join(", ")}${list.length > 8 ? "\u2026" : ""}` : "";
-          const delta = [
-            describe("changed:", changed),
-            describe("added:", added),
-            describe("removed:", removed)
-          ].filter(Boolean).join("; ");
-          warnings2.push(
-            `BUNDLE REPLACE \u2014 this deploy replaces the org's whole ${c.type} directory (${Object.keys(proposed).length} files; ${delta}).`
-          );
-        }
       }
-      if (c.type === "GenAiPlannerBundle" && change2 === "modify") {
-        warnings2.push(
-          `AGENT MUST BE DEACTIVATED FIRST \u2014 deploying GenAiPlannerBundle changes for an ACTIVE agent version fails, and version-suffixed bundles are PUBLISHED SNAPSHOTS: a modified deploy of one fails org-side even deactivated (unmodified re-deploys "succeed" as no-ops). Deactivate first (agent_activation_propose/execute, or Agent Builder), deploy, then reactivate; verify with BotVersion.Status. On Agent-Script agents the next publish overwrites hand-edits.`
-        );
-      }
+      warnings2.push(
+        ...changeDependentWarnings({
+          type: c.type,
+          api_name: c.api_name,
+          change: change2,
+          proposed: c.content,
+          before: null,
+          bundleFiles: { proposed, main: mainFile, before: old },
+          referenced: () => auraBundleReferenced(db, conn, components, c)
+        })
+      );
       if (c.type === "AiAuthoringBundle") {
         warnings2.push(
           `DRAFT STAGE ONLY \u2014 this deploy stages Agent Script as a draft in Agentforce Studio. Nothing is compiled and the RUNNING AGENT IS UNCHANGED: topics, actions, and behavior go live only when a human publishes the draft (Agentforce Studio, or Salesforce's Agentforce DX publish command). A green deploy here is a staged draft, not a shipped agent.`
@@ -31047,7 +31959,6 @@ function analyzeChanges(db, store, conn, components, deletions) {
       }
       if (c.type === "AuraDefinitionBundle") {
         const kind = mainFile.slice(c.api_name.length);
-        const old = existingBundle ? readBundleFiles(store, conn, envSpec.dir, c.api_name) : {};
         const oldMain = [".cmp", ".app", ".evt", ".intf", ".tokens"].map((s) => `${c.api_name}${s}`).find((f) => f in old);
         if (oldMain && oldMain.slice(c.api_name.length) !== kind) {
           throw new ContrailError(
@@ -31055,33 +31966,7 @@ function analyzeChanges(db, store, conn, components, deletions) {
             "bad_component"
           );
         }
-        const verOf = (files, main2) => main2 ? parseFloat(files[`${main2}-meta.xml`]?.match(/<apiVersion>\s*([\d.]+)/)?.[1] ?? "") : NaN;
-        const newVer = verOf(proposed, mainFile);
-        const oldVer = verOf(old, oldMain);
-        if (Number.isFinite(newVer) && Number.isFinite(oldVer) && newVer < 40 !== oldVer < 40) {
-          warnings2.push(
-            `API VERSION ${oldVer} \u2192 ${newVer} crosses the 39/40 boundary \u2014 in orgs still on Lightning Locker this toggles Locker for the component (LWS is an org setting, unaffected by apiVersion).`
-          );
-        }
         const mainBody = proposed[mainFile] ?? "";
-        const isBackgroundItem = /lightning:backgroundUtilityItem/.test(mainBody);
-        if (change2 === "add" && (kind === ".cmp" || kind === ".app") && /lightning:(backgroundUtilityItem|utilityItem|availableForFlow(Actions|Screens))|flexipage:availableFor\w*|force:lightningQuickAction/.test(
-          mainBody
-        )) {
-          const refRe = new RegExp(`c:${c.api_name}\\b`);
-          const referencedInPackage = components.some((o) => o !== c && refRe.test(o.content));
-          const referencedInOrg = db.edgesTo(conn.id, "AuraDefinitionBundle", c.api_name).length > 0;
-          if (!referencedInPackage && !referencedInOrg) {
-            warnings2.push(
-              `INERT UNTIL PLACED \u2014 this component declares surface interfaces but nothing in this package or the snapshot references c:${c.api_name}; it renders NOWHERE until host metadata places it` + (isBackgroundItem ? ` (a background utility item sits in a utility bar's Background region, and the bar needs at least one VISIBLE item or it does not appear).` : `.`)
-            );
-          }
-        }
-        if (change2 !== "unchanged_content") {
-          warnings2.push(
-            `The deploy compiles markup and design (each design:attribute must match an aura:attribute) and parses the JS; runtime errors in a background item surface only in the browser console. Consoles already open keep the OLD definition until reloaded.`
-          );
-        }
         const controller = mainBody.match(/\bcontroller="([A-Za-z][A-Za-z0-9_]*)"/)?.[1];
         if (controller) {
           const containerText = components.filter((p) => p.type === "PermissionSet" || p.type === "Profile").map((p) => p.content).join("\n");
@@ -31101,62 +31986,22 @@ function analyzeChanges(db, store, conn, components, deletions) {
     const existing = db.getArtifact(conn.id, c.type, c.api_name);
     const warnings = [];
     let change;
+    let oldContent = null;
     if (!existing) {
       change = "add";
     } else {
-      const oldContent = existing.filePath ? readOldContent(store, conn, c.type, c.api_name, existing.filePath) : null;
+      oldContent = existing.filePath ? readOldContent(store, conn, c.type, c.api_name, existing.filePath) : null;
       change = oldContent !== null && oldContent.trim() === c.content.trim() ? "unchanged_content" : "modify";
-      if (c.type === "CustomField" && oldContent) {
-        const oldType = oldContent.match(/<type>([^<]+)<\/type>/)?.[1];
-        const newType = c.content.match(/<type>([^<]+)<\/type>/)?.[1];
-        if (oldType && newType && oldType !== newType) {
-          warnings.push(
-            `FIELD TYPE CHANGE ${oldType} \u2192 ${newType} \u2014 possible irreversible data loss`
-          );
-        }
-      }
-      if ((c.type === "FlexiPage" || c.type === "CustomApplication" || c.type === "Layout" || c.type === "Report" || c.type === "Dashboard" || c.type === "GenAiPlugin" || c.type === "GenAiPromptTemplate" || c.type === "Bot" || c.type === "LeadConvertSettings" || c.type === "NamedCredential" || c.type === "ExternalCredential" || c.type === "AuthProvider" || c.type === "PermissionSetGroup" || c.type === "MutingPermissionSet" || // S44: both agent-test suite types are single documents of
-      // <testCase> blocks (the legacy one was a parity gap since S30).
-      // AiAgentScorerDefinition is deliberately NOT here — its versions
-      // are documented append-only, which makes the generic "removed"
-      // sentence false; it has its own arm below.
-      c.type === "AiEvaluationDefinition" || c.type === "AiTestingDefinition") && change === "modify") {
-        warnings.push(
-          `WHOLE-DOCUMENT REPLACE \u2014 this deploy fully replaces the org's ${c.type}; anything not present in the proposed content is removed.` + (c.type === "Bot" ? " A <botVersions> block omitted from a Bot document is a VERSION DELETE." : c.type === "LeadConvertSettings" ? " An <objectMapping> omitted here is a lead field mapping DELETED org-wide." : c.type === "ExternalCredential" ? " A principal parameter omitted here is DELETED org-side \u2014 along with the credential values a human entered for it in Setup." : c.type === "PermissionSetGroup" ? " A <permissionSets> member omitted here is DETACHED from the group org-side \u2014 users assigned the group lose that permission set." : c.type === "MutingPermissionSet" ? " A muted permission omitted here is UN-MUTED org-side, silently RESTORING it to every user assigned the group." : c.type === "AiEvaluationDefinition" || c.type === "AiTestingDefinition" ? " A <testCase> omitted here is removed from the suite org-side." : "")
-        );
-      }
-      if (c.type === "GenAiPromptTemplate" && change === "modify") {
-        const oldId = oldContent?.match(/<activeVersionIdentifier>([^<]*)</)?.[1];
-        const newId = c.content.match(/<activeVersionIdentifier>([^<]*)</)?.[1];
-        if (oldId && newId && oldId !== newId) {
-          warnings.push(
-            `activeVersionIdentifier ALTERED (${oldId.slice(0, 12)}\u2026 \u2192 ${newId.slice(0, 12)}\u2026) \u2014 these tokens are org-generated; a hand-edited value is rejected or mis-targets the active version. To activate a new version, retrieve after deploying it and repoint using the versionIdentifier the org minted.`
-          );
-        }
-      }
-      if (c.type === "AiAgentScorerDefinition" && change === "modify") {
-        const oldVersions = scorerVersionStatuses(oldContent ?? "");
-        const newVersions = scorerVersionStatuses(c.content);
-        const omitted = [...oldVersions.keys()].filter((n) => !newVersions.has(n));
-        const regressed = [...oldVersions.entries()].filter(([n, was]) => {
-          const now = newVersions.get(n);
-          return now !== void 0 && SCORER_STATUS_RANK[was] !== void 0 && SCORER_STATUS_RANK[now] !== void 0 && SCORER_STATUS_RANK[now] < SCORER_STATUS_RANK[was];
-        }).map(([n, was]) => `${n} (${was} \u2192 ${newVersions.get(n)})`);
-        warnings.push(
-          `SCORER VERSIONS ARE APPEND-ONLY \u2014 the org never deletes a <scorerVersion>: one omitted from this document is NOT removed` + (omitted.length > 0 ? ` (org-side versions omitted here: ${omitted.join(", ")})` : "") + `. Status is documented one-way (Draft \u2192 Available \u2192 Archived); a regression here is not something the org performs` + (regressed.length > 0 ? ` (regressed here: ${regressed.join("; ")})` : "") + `. Retrieve-first, carry every existing version forward, edit only Draft versions.`
-        );
-      }
-      if ((c.type === "ReportFolder" || c.type === "DashboardFolder") && change === "modify") {
-        warnings.push(
-          `FOLDER REPLACE \u2014 the folderShares in this content fully replace the folder's sharing; shares omitted here are revoked.`
-        );
-      }
-      if (c.type === "CustomMetadata" && change === "modify") {
-        warnings.push(
-          `FULL-RECORD REPLACE \u2014 fields omitted from this content are reset to null/default on the deployed record.`
-        );
-      }
     }
+    warnings.push(
+      ...changeDependentWarnings({
+        type: c.type,
+        api_name: c.api_name,
+        change,
+        proposed: c.content,
+        before: oldContent
+      })
+    );
     if (c.type === "AiTestingDefinition") {
       warnings.push(
         `BETA SUITE, RUNS NOTHING \u2014 this deploy stores an Agentforce Studio test suite; it executes no test. Runs happen through run_agent_eval (on the org probed a deployed suite appeared in the Studio Tests tab only after its first run, never in Testing Center); Salesforce marks both the type and its runner Beta (grammar and runner can change). Contrail does not validate scorer names; per Salesforce's library the org refuses an unknown name at deploy \u2014 not yet live-confirmed, so a green deploy never proves a scorer ran.`
@@ -31178,36 +32023,6 @@ function analyzeChanges(db, store, conn, components, deletions) {
     if (c.type === "PermissionSetGroup") {
       warnings.push(
         `PERMISSION SET GROUP RECALCULATES ASYNCHRONOUSLY \u2014 after this deploy the org rebuilds the group's aggregated permissions (Status: Updating \u2192 Updated). Verify with soql_query (SELECT Status FROM PermissionSetGroup WHERE DeveloperName = '${c.api_name}') before relying on the grants.`
-      );
-    }
-    if (c.type === "QuickAction" && change === "add") {
-      warnings.push(
-        `NEW QUICK ACTION is surfaced NOWHERE until a page layout, a global publisher layout, or a Lightning record page using dynamic actions includes it \u2014 this deploy creates the action but places it on no UI.`
-      );
-    }
-    if (c.type === "Layout" && change === "add") {
-      warnings.push(
-        `NEW LAYOUT IS NOT ASSIGNED by this deploy \u2014 profiles keep their current layout until layoutAssignments change (Profile metadata or Setup).`
-      );
-    }
-    if ((c.type === "Report" || c.type === "Dashboard") && change === "add") {
-      warnings.push(
-        `NEW ${c.type.toUpperCase()} visibility is governed by its FOLDER's sharing (folderShares on the folder component), not by permission sets \u2014 this deploy grants nobody new access by itself.`
-      );
-    }
-    if (c.type === "GenAiPromptTemplate" && change === "add" && /<activeVersionIdentifier>[^<]/.test(c.content)) {
-      warnings.push(
-        `activeVersionIdentifier on a NET-NEW template \u2014 this token is org-generated and cannot be authored from scratch. Omit it (the org mints one on deploy), or retrieve-first if this template already exists under another name.`
-      );
-    }
-    if (c.type === "GenAiPlugin" && change === "modify") {
-      warnings.push(
-        `AGENT MUST BE DEACTIVATED FIRST \u2014 deploying ${c.type} changes for an ACTIVE agent version fails. Deactivate first (agent_activation_propose/execute, or Agent Builder), deploy, then reactivate \u2014 each flip its own approval; verify with BotVersion.Status.`
-      );
-    }
-    if (c.type === "ExternalCredential" && change === "add") {
-      warnings.push(
-        `NEW EXTERNAL CREDENTIAL carries no secrets and grants nobody access \u2014 a human enters each principal's credential values in Setup (External Credentials) after the deploy, and callouts fail until a permission set grants externalCredentialPrincipalAccesses for its principals.`
       );
     }
     {
@@ -31306,8 +32121,8 @@ function inlineFieldNames(objectXml) {
   }
   return names;
 }
-function permissionBlocks(text, tag) {
-  return text.match(new RegExp(`<${tag}>[\\s\\S]*?</${tag}>`, "g")) ?? [];
+function permissionBlocks(text2, tag) {
+  return text2.match(new RegExp(`<${tag}>[\\s\\S]*?</${tag}>`, "g")) ?? [];
 }
 function isGranted(containerText, need) {
   const named = (block, tag, name) => new RegExp(`<${tag}>\\s*${escapeRegex2(name)}\\s*</${tag}>`, "i").test(block);
@@ -31709,18 +32524,806 @@ var init_package = __esm({
   }
 });
 
-// src/deploy/engine.ts
+// src/deploy/preimage.ts
 import crypto3 from "node:crypto";
 import fs10 from "node:fs";
 import path5 from "node:path";
+function preImageKey(type, apiName) {
+  return `${type}:${apiName}`;
+}
+function buildPreImageRetrieveMembers(members) {
+  const out = {};
+  for (const m of members) {
+    const target = retrieveMemberFor(m.type, m.api_name);
+    if (!target) continue;
+    const list = out[target.type] ?? [];
+    if (!list.includes(target.member)) list.push(target.member);
+    out[target.type] = list;
+  }
+  return out;
+}
+function preImageListQueryFor(member) {
+  const slash = member.api_name.indexOf("/");
+  if (FOLDERED_TYPES[member.type]) {
+    if (slash <= 0) return null;
+    return { type: member.type, folder: member.api_name.slice(0, slash) };
+  }
+  if (slash >= 0) return null;
+  return { type: member.type };
+}
+function buildPreImageListQueries(members) {
+  const types = [];
+  const folderQueries = [];
+  const seenFolders = /* @__PURE__ */ new Set();
+  for (const m of members) {
+    const q = preImageListQueryFor(m);
+    if (!q) continue;
+    if (q.folder !== void 0) {
+      const key2 = `${q.type}\0${q.folder}`;
+      if (seenFolders.has(key2)) continue;
+      seenFolders.add(key2);
+      folderQueries.push(q);
+    } else if (!types.includes(q.type)) {
+      types.push(q.type);
+    }
+  }
+  return { types, folderQueries };
+}
+function listedPropFor(props, type, apiName) {
+  const want = apiName.toLowerCase();
+  return props.find((p) => p.type === type && p.fullName.toLowerCase() === want);
+}
+function summarizePreImage(image) {
+  const out = {
+    present: image.present,
+    source: image.source,
+    last_modified_date: image.last_modified_date,
+    last_modified_by: image.last_modified_by,
+    comparable: image.comparable,
+    restorable: image.restorable
+  };
+  if (image.sha256 !== void 0) out.sha256 = image.sha256;
+  return out;
+}
+function bundleEnvelopeJson(files) {
+  const sorted = {};
+  for (const rel of [...files.keys()].sort()) sorted[rel] = files.get(rel);
+  return JSON.stringify({ contrail_bundle: 1, files: sorted }, null, 2);
+}
+async function retrievePreImages(soap, members, opts) {
+  const started_at = opts.startedAt;
+  const manifest = buildPreImageRetrieveMembers(members);
+  const listingP = listDates(soap, members);
+  const retrieveP = Object.keys(manifest).length === 0 ? Promise.resolve({ ok: true, files: /* @__PURE__ */ new Map() }) : runRetrieve(soap, manifest, opts);
+  const [retrieved, listing] = await Promise.all([retrieveP, listingP]);
+  const at = (/* @__PURE__ */ new Date()).toISOString();
+  if (!retrieved.ok) return { status: "unavailable", started_at, at, reason: retrieved.reason };
+  const zipEntries = [...retrieved.files.keys()];
+  const images = /* @__PURE__ */ new Map();
+  for (const m of members) {
+    const key2 = preImageKey(m.type, m.api_name);
+    if (images.has(key2)) continue;
+    images.set(key2, resolveMember(m, retrieved.files, zipEntries, listing));
+  }
+  const result = {
+    status: "ok",
+    started_at,
+    at,
+    images,
+    dates_unavailable_types: [...listing.unsupported].sort()
+  };
+  if (listing.failure !== void 0) result.dates_unavailable = listing.failure;
+  return result;
+}
+async function runRetrieve(soap, manifest, opts) {
+  if (opts.signal?.aborted) return { ok: false, reason: "cancelled" };
+  try {
+    const retrieveId = await soap.retrieve(manifest);
+    const deadline = Date.now() + opts.timeoutMs;
+    let poll = 0;
+    for (; ; ) {
+      if (opts.signal?.aborted) return { ok: false, reason: "cancelled" };
+      const status = await soap.checkRetrieveStatus(retrieveId, true);
+      if (status.done) {
+        if (!status.success || !status.zipFile) {
+          return { ok: false, reason: `retrieve_failed:${status.errorMessage ?? status.status}` };
+        }
+        return { ok: true, files: opts.extractZip(status.zipFile) };
+      }
+      if (Date.now() > deadline) return { ok: false, reason: "timeout" };
+      poll += 1;
+      opts.onProgress?.(`retrieving live pre-images (poll ${poll}, status ${status.status})`);
+      if (opts.signal?.aborted) return { ok: false, reason: "cancelled" };
+      await delay3(opts.pollIntervalMs, opts.signal);
+    }
+  } catch (err2) {
+    return { ok: false, reason: `retrieve_failed:${errorMessage(err2)}` };
+  }
+}
+async function listDates(soap, members) {
+  const { types, folderQueries } = buildPreImageListQueries(members);
+  const unsupported = /* @__PURE__ */ new Set();
+  try {
+    const none = { props: [], unsupportedTypes: [] };
+    const [flat, foldered] = await Promise.all([
+      types.length > 0 ? soap.listMetadataDetailed(types) : Promise.resolve(none),
+      folderQueries.length > 0 ? soap.listMetadataQueries(folderQueries) : Promise.resolve(none)
+    ]);
+    for (const t of [...flat.unsupportedTypes, ...foldered.unsupportedTypes]) unsupported.add(t);
+    return { props: [...flat.props, ...foldered.props], unsupported };
+  } catch (err2) {
+    return { props: null, unsupported, failure: errorMessage(err2) };
+  }
+}
+function resolveMember(m, files, zipEntries, listing) {
+  const listed = listing.props ? listedPropFor(listing.props, m.type, m.api_name) : void 0;
+  const enumerable = listing.props !== null && !listing.unsupported.has(m.type) && preImageListQueryFor(m) !== null;
+  const dates = {
+    last_modified_date: listed?.lastModifiedDate ? listed.lastModifiedDate : null,
+    last_modified_by: listed?.lastModifiedByName ? listed.lastModifiedByName : null
+  };
+  const entry = retrieveMemberFor(m.type, m.api_name) === null ? null : deployZipEntryPath(m.type, m.api_name, { zipEntries });
+  if (!entry) {
+    return {
+      present: enumerable ? listed !== void 0 : null,
+      source: "list",
+      ...dates,
+      comparable: false,
+      restorable: false
+    };
+  }
+  const captured = captureFromZip(entry, files);
+  const present = captured !== null || listed !== void 0;
+  if (captured === null) {
+    return { present, source: "retrieve", ...dates, comparable: false, restorable: false };
+  }
+  const usable = m.type !== "Profile";
+  return {
+    present: true,
+    source: "retrieve",
+    ...captured,
+    ...dates,
+    comparable: usable,
+    restorable: usable
+  };
+}
+function captureFromZip(entry, files) {
+  if (entry.child) {
+    const parent = files.get(entry.path);
+    if (!parent) return null;
+    const block = findChildBlock(text(parent), entry.childTag, entry.childName);
+    if (block === null) return null;
+    return { content: block, sha256: sha2562(block) };
+  }
+  if (entry.bundleDir) {
+    const bundle = /* @__PURE__ */ new Map();
+    for (const [name, bytes] of files) {
+      if (name.startsWith(entry.bundleDir) && name.length > entry.bundleDir.length) {
+        bundle.set(name.slice(entry.bundleDir.length), text(bytes));
+      }
+    }
+    if (bundle.size === 0) return null;
+    return { files: bundle, sha256: sha2562(bundleEnvelopeJson(bundle)) };
+  }
+  const main2 = files.get(entry.path);
+  if (!main2) return null;
+  const content = text(main2);
+  const out = { content, sha256: sha2562(content) };
+  const meta = files.get(`${entry.path}-meta.xml`);
+  if (meta) out.files = /* @__PURE__ */ new Map([[`${entry.path}-meta.xml`, text(meta)]]);
+  return out;
+}
+function text(bytes) {
+  return Buffer.from(bytes).toString("utf8");
+}
+function sha2562(content) {
+  return crypto3.createHash("sha256").update(content, "utf8").digest("hex");
+}
+function errorMessage(err2) {
+  return String(err2 instanceof Error ? err2.message : err2);
+}
+function delay3(ms, signal) {
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    timer.unref?.();
+    signal?.addEventListener("abort", done, { once: true });
+  });
+}
+function revertDirFor(stagingDir2, requestId) {
+  if (!/^[A-Za-z0-9-]+$/.test(requestId)) {
+    throw new ContrailError(`invalid request id "${requestId}"`, "bad_request_id");
+  }
+  return path5.join(stagingDir2, "_reverts", requestId);
+}
+function writeRevertPreImages(dir, entries) {
+  const result = {
+    components: [],
+    not_restorable: [],
+    absent: [],
+    covered: []
+  };
+  const root = path5.resolve(dir);
+  fs10.mkdirSync(root, { recursive: true });
+  const rootReal = fs10.realpathSync(root);
+  const written = /* @__PURE__ */ new Set();
+  const unsafe = (rel) => new ContrailError(`unsafe revert path: ${rel}`, "unsafe_zip_entry");
+  const write = (rel, body) => {
+    const target = path5.resolve(root, rel);
+    if (target !== root && !target.startsWith(root + path5.sep)) throw unsafe(rel);
+    if (written.has(target)) return target;
+    let cur = root;
+    for (const seg of path5.relative(root, path5.dirname(target)).split(path5.sep)) {
+      if (!seg) continue;
+      cur = path5.join(cur, seg);
+      try {
+        fs10.mkdirSync(cur);
+      } catch (err2) {
+        if (err2.code !== "EEXIST") throw err2;
+        const stat = fs10.lstatSync(cur);
+        if (stat.isSymbolicLink() || !stat.isDirectory()) throw unsafe(rel);
+      }
+    }
+    const parentReal = fs10.realpathSync(path5.dirname(target));
+    if (parentReal !== rootReal && !parentReal.startsWith(rootReal + path5.sep)) {
+      throw unsafe(rel);
+    }
+    fs10.writeFileSync(target, body, { encoding: "utf8", flag: "wx" });
+    written.add(target);
+    return target;
+  };
+  const seen = /* @__PURE__ */ new Set();
+  const unique = entries.filter((e) => {
+    const key2 = preImageKey(e.type, e.api_name);
+    if (seen.has(key2)) return false;
+    seen.add(key2);
+    return true;
+  });
+  const wholeDocuments = /* @__PURE__ */ new Map();
+  for (const { type, api_name, image } of unique) {
+    if (image.present !== true || !image.restorable) continue;
+    const entry = deployZipEntryPath(type, api_name);
+    if (!entry || entry.child || entry.bundleDir) continue;
+    const target = retrieveMemberFor(type, api_name);
+    if (target) wholeDocuments.set(`${target.type}:${target.member}`, { type, api_name });
+  }
+  for (const { type, api_name, image } of unique) {
+    const member = { type, api_name };
+    if (image.present === false) {
+      result.absent.push(member);
+      continue;
+    }
+    if (image.present === null) {
+      result.not_restorable.push({ ...member, reason: NOT_RESTORABLE_UNENUMERABLE });
+      continue;
+    }
+    if (!image.restorable) {
+      const reason = type === "Profile" ? NOT_RESTORABLE_PROFILE : image.source === "list" ? NOT_RESTORABLE_LIST_ONLY : NOT_RESTORABLE_NO_BYTES;
+      result.not_restorable.push({ ...member, reason });
+      continue;
+    }
+    const entry = deployZipEntryPath(type, api_name);
+    if (!entry) {
+      result.not_restorable.push({ ...member, reason: NOT_RESTORABLE_LIST_ONLY });
+      continue;
+    }
+    let contentFile;
+    if (entry.child) {
+      const target = retrieveMemberFor(type, api_name);
+      const container = target ? wholeDocuments.get(`${target.type}:${target.member}`) : void 0;
+      if (container) {
+        result.covered.push({ ...member, container });
+        continue;
+      }
+      contentFile = write(`children/${type}/${api_name}.xml`, image.content ?? "");
+    } else if (entry.bundleDir && image.files) {
+      contentFile = write(
+        `bundles/${type}/${fileSafePathSegment(api_name)}.contrail-bundle.json`,
+        bundleEnvelopeJson(image.files)
+      );
+    } else {
+      contentFile = write(entry.path, image.content ?? "");
+      for (const [rel, body] of image.files ?? []) write(rel, body);
+    }
+    result.components.push({ ...member, content_file: contentFile });
+  }
+  return result;
+}
+function fileSafePathSegment(name) {
+  return name.replace(
+    /[^A-Za-z0-9 _.\-$]/g,
+    (ch) => Array.from(new TextEncoder().encode(ch)).map((b) => "%" + b.toString(16).toUpperCase().padStart(2, "0")).join("")
+  );
+}
+function finalizeRevertPackage(dir, plan) {
+  fs10.mkdirSync(dir, { recursive: true });
+  const plan_path = path5.join(dir, "revert-plan.json");
+  const readme_path = path5.join(dir, "README.txt");
+  const readme = revertReadmeText(plan);
+  fs10.writeFileSync(plan_path, JSON.stringify(plan, null, 2) + "\n", {
+    encoding: "utf8",
+    flag: "wx"
+  });
+  try {
+    fs10.writeFileSync(readme_path, readme + "\n", { encoding: "utf8", flag: "wx" });
+  } catch (err2) {
+    try {
+      fs10.rmSync(plan_path, { force: true });
+    } catch {
+    }
+    throw err2;
+  }
+  return { plan_path, readme_path, readme };
+}
+function reasonList(items) {
+  return items.map((i) => `${i.type} ${i.api_name} \u2014 ${i.reason}`).join(", ");
+}
+function revertReadmeText(plan) {
+  const check2 = plan.target_check;
+  const passed = check2 !== null && check2.status === "ok" && check2.checked.length > 0 ? check2 : null;
+  const considered = passed ? passed.checked.length + passed.unchecked.length : 0;
+  const when = plan.executed_at === null ? "Before submitting this deploy (whose outcome Contrail lost track of \u2014 see the note in revert-plan.json)" : `Before executing at ${plan.executed_at}`;
+  const compared = passed ? `${when}, Contrail compared the org's last-modified stamps against that retrieve for ${passed.checked.length} of ${considered} members and found them unchanged; it did not re-read their contents, and a matching stamp is evidence, not a byte comparison.` : check2 !== null && check2.status === "unavailable" ? `${when}, Contrail could not re-read the org to compare last-modified stamps (${check2.reason}); the deploy was submitted unverified, and these files describe the org as of the validate-time retrieve only.` : `${when}, Contrail did not re-check the org's last-modified stamps; these files describe the org as of the validate-time retrieve only.`;
+  let text2 = `A revert re-deploys what Contrail retrieved from "${plan.connection}" at ${plan.retrieved_at}, when this deploy was validated. ${compared} It does not undo data changes, automation that ran, permission effects, or changes made since to components outside this package. For the components it restores it is a wholesale replace: re-deploying these files OVERWRITES anything changed in them since that retrieve, another user's edits included \u2014 the revert's own validate_deploy page diffs it against the org as it is then (or against the local snapshot when the org cannot be re-read). Re-deploying a Flow whose latest version is active creates a NEW version; an inactive latest version is overwritten in place. Deleting the components this deploy added is destructive; revert-plan.json lists them under "destructive". Contrail never deploys a revert on its own: pass each component's content_file (and the destructive list) to validate_deploy, and a human approves it like any deploy. DML is out of scope \u2014 the persisted before-values and created_ids make a manual revert possible.`;
+  if (passed && passed.unchecked.length > 0) {
+    text2 += ` ${passed.unchecked.length} member(s) could not be re-checked (${reasonList(passed.unchecked)}); their pre-image is as of ${plan.retrieved_at} only.`;
+  }
+  if (plan.not_restorable.length > 0) {
+    text2 += ` ${plan.not_restorable.length} member(s) cannot be restored from this package (${reasonList(plan.not_restorable)}) \u2014 if this deploy changed or deleted them, reverting that needs another source.`;
+  }
+  const covered = plan.covered ?? [];
+  if (covered.length > 0) {
+    const children = covered.map((c) => `${c.type} ${c.api_name}`).join(", ");
+    const containers = [
+      ...new Set(covered.map((c) => `${c.container.type} ${c.container.api_name}`))
+    ].join(", ");
+    text2 += ` ${covered.length} child member(s) (${children}) are restored by their container's document (${containers}), whose retrieved bytes include them; they have no file of their own because validate_deploy refuses a container document and its own children in one package.`;
+  }
+  if (plan.outcome === "unknown" && plan.note) text2 += `
+
+${plan.note}`;
+  return text2;
+}
+function hhmm(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function targetMovedRefusalText(kind, details) {
+  const head = "TARGET MOVED \u2014 not executed, and this code is now void. ";
+  if (kind === "deploy") {
+    const d = details;
+    const clauses = d.moved.map((m) => deployMovedClause(m, d.degrade));
+    const degrade = d.degrade;
+    const inMargin = degrade !== void 0 && d.moved.some((m) => withinMargin(m, degrade));
+    return head + `listMetadata (${d.at}) reports members changed in "${d.alias}" since` + (inMargin ? ", or within 5 seconds before," : "") + ` this package was validated: ${clauses.join("; ")}. The approved diff no longer describes what this deploy would overwrite. Re-run validate_deploy to see the current state and get a fresh code. This check is best-effort: Contrail re-reads the org immediately before claiming the code and compares last-modified stamps, not bytes; a change landing after that read \u2014 while the deploy is submitted and processed by the org \u2014 is not caught.`;
+  }
+  if (kind === "dml") {
+    const d = details;
+    const clauses = d.changed.map(
+      (c) => `${c.object} ${c.id} ${c.field} is now ${c.now} (the approval showed ${c.before})`
+    );
+    d.missing.forEach((m, i) => {
+      let clause = `${m.object} ${m.id} was returned by the preview query at propose but not at ${d.at}`;
+      if (i === d.missing.length - 1) {
+        clause += (d.missing.length > 1 ? " \u2014 each" : " \u2014 it") + ` was deleted, or is no longer visible to this connection's user (a converted Lead also drops out); those cases look identical from here`;
+      }
+      clauses.push(clause);
+    });
+    return head + `Re-running the preview query at ${d.at} shows the records you approved have changed since dml_propose: ${clauses.join("; ")}. Re-run dml_propose to see the current values and get a fresh code.`;
+  }
+  const a = details;
+  return head + `SELECT Status at ${a.at} reports BotVersion ${a.version} of ${a.agent} is ${a.now}; the approval was for a change from ${a.from}. Re-run agent_activation_propose.`;
+}
+function deployMovedClause(m, degrade) {
+  const who = m.last_modified_by ?? "an unknown user";
+  const when = m.last_modified_date ?? "an unknown time";
+  const name = `${m.type} ${m.api_name}`;
+  const baseline = m.frozen_date !== null ? `the approval was based on the version last modified at ${m.frozen_date}` : "the approval was based on the version then in the org";
+  switch (m.state ?? "changed") {
+    case "gone":
+      return `${name} \u2014 listMetadata no longer reports it (${baseline})`;
+    case "created":
+      return `${name} \u2014 listMetadata now reports it, last modified by ${who} at ${when} (the approval was based on the org reporting no such member)`;
+    default:
+      if (degrade && !withinMargin(m, degrade)) {
+        return `${name} \u2014 last modified by ${who} at ${when}, after this package was validated at ${degrade.org_clock_created_date} (no live baseline was captured at validate: ${degrade.live_check_reason}; Contrail compared against the org-side validation time, minus a 5-second ordering margin)`;
+      }
+      if (degrade) {
+        return `${name} \u2014 last modified by ${who} at ${when}, within 5 seconds before this package's org-side validation started at ${degrade.org_clock_created_date}, too close to rule out that the approved diff missed it (no live baseline was captured at validate: ${degrade.live_check_reason}; Contrail compared against the org-side validation time, minus a 5-second ordering margin)`;
+      }
+      return `${name} \u2014 last modified by ${who} at ${when} (${baseline})`;
+  }
+}
+function withinMargin(m, degrade) {
+  if ((m.state ?? "changed") !== "changed") return false;
+  const stamp = Date.parse(m.last_modified_date ?? "");
+  const created = Date.parse(degrade.org_clock_created_date);
+  return Number.isNaN(stamp) || Number.isNaN(created) || stamp < created;
+}
+var NOT_RESTORABLE_PROFILE, NOT_RESTORABLE_LIST_ONLY, NOT_RESTORABLE_UNENUMERABLE, NOT_RESTORABLE_NO_BYTES;
+var init_preimage = __esm({
+  "src/deploy/preimage.ts"() {
+    "use strict";
+    init_errors4();
+    init_metadataSoap();
+    init_indexer();
+    init_package();
+    NOT_RESTORABLE_PROFILE = "Profile \u2014 a single-member retrieve is package-relative, so the captured bytes are not a restorable image";
+    NOT_RESTORABLE_LIST_ONLY = "not a type Contrail can read or author \u2014 only the org listing was consulted, no bytes were captured";
+    NOT_RESTORABLE_UNENUMERABLE = "the org could not enumerate this type, so Contrail cannot say whether the member existed";
+    NOT_RESTORABLE_NO_BYTES = "the org listing names it, but the retrieve returned no bytes for it";
+  }
+});
+
+// src/core/notify.ts
+function describePhoneOutcome(outcome, opts) {
+  if (outcome.status === "off") return { status: "off" };
+  const settings = opts.includeCode ? "via open_settings" : "in the app's Settings \u2192 Notifications";
+  if (outcome.status === "skipped") {
+    return {
+      status: "skipped",
+      reason: outcome.reason,
+      note: outcome.reason === "remote_control_off" ? 'Phone notification skipped: Remote Control was not connected when this was proposed, so the code was not pushed (phone delivery is set to "only while Remote Control is on"). The human approves from the page on their desktop as usual; nothing to do.' : `Phone notification skipped: phone delivery is set to "only while Remote Control is on", but Contrail's Remote Control hook did not report for this call \u2014 it is not installed, or this is not a Claude Code session. The code is on the approval page as always. If the human expected a push, they can install the hook or switch delivery to Always ${settings}.`
+    };
+  }
+  if (outcome.status === "sent") {
+    return {
+      status: "sent",
+      note: opts.includeCode ? "The approval summary and code were also pushed to the human's phone. The code still only counts when the human types it into this chat." : "A code-free summary was pushed to the human's phone; they approve in the app's Deploy Review screen as usual."
+    };
+  }
+  const hint = {
+    not_configured: `phone notifications are switched on but the Pushover keys are missing \u2014 the human can set them ${settings}`,
+    store_unavailable: "the OS keychain could not be read on this machine, so the stored Pushover keys are unreachable",
+    rejected: `Pushover rejected the stored keys \u2014 the human should re-check them ${settings}`,
+    quota: "Pushover's monthly message quota is exhausted",
+    timeout: "Pushover did not answer in time from this machine",
+    network: "Pushover was unreachable from this machine",
+    circuit_open: `notifications are paused after a recent rejection \u2014 the human can fix the keys ${settings}`
+  };
+  return {
+    status: "failed",
+    reason: outcome.reason,
+    note: `Phone notification failed (${hint[outcome.reason]}). ` + (opts.includeCode ? "The code is only on the approval page in the human's browser." : "The proposal is still waiting in the app's Deploy Review screen.")
+  };
+}
+function approvalKindNoun(kind) {
+  return kind === "deploy" ? "deploy" : kind === "apex" ? "Apex script" : kind === "bulk" ? "bulk data load" : kind === "activation" ? "agent activation" : "data change";
+}
+function plural(n, noun) {
+  return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
+function squash(text2) {
+  return text2.replace(/\s+/g, " ").trim();
+}
+function truncate2(text2, max2) {
+  return text2.length <= max2 ? text2 : `${text2.slice(0, Math.max(0, max2 - 1))}\u2026`;
+}
+function expiryClock(expiresAt) {
+  const t = Date.parse(expiresAt);
+  if (Number.isNaN(t)) return "soon";
+  return new Date(t).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+}
+function remainingSeconds(expiresAt) {
+  const t = Date.parse(expiresAt);
+  if (Number.isNaN(t)) return 3600;
+  return Math.max(60, Math.ceil((t - Date.now()) / 1e3));
+}
+function phoneLabel(kind, label) {
+  const flat = squash(label);
+  if (kind !== "dml") return flat;
+  const colon = flat.indexOf(":");
+  return colon === -1 ? flat : flat.slice(0, colon).trim();
+}
+function composePushover(view, opts) {
+  const title = truncate2(
+    `Contrail: approve ${approvalKindNoun(view.kind)} \u2192 ${view.org.alias} (${view.org.orgType})`,
+    TITLE_MAX
+  );
+  const rowWarnings = [...view.destructive, ...view.changes].flatMap((r) => r.warnings);
+  const warningCount = (view.warnings ?? []).length + rowWarnings.length;
+  const head = [
+    [
+      plural(view.changes.length, "change"),
+      plural(view.destructive.length, "deletion"),
+      plural(warningCount, "warning")
+    ].join(" \xB7 ")
+  ];
+  if (view.org.orgType === "production") head.push("PRODUCTION org.");
+  if (view.destructive.length > 0) head.push("Includes DELETIONS.");
+  if (opts.summary === "full") {
+    const labels = [...view.destructive, ...view.changes].map((r) => phoneLabel(view.kind, r.label));
+    head.push(...labels.slice(0, FULL_LABELS_MAX).map((l) => `\u2022 ${l}`));
+    if (labels.length > FULL_LABELS_MAX) head.push(`\u2022 \u2026 ${labels.length - FULL_LABELS_MAX} more`);
+    const warns = [...view.warnings ?? [], ...rowWarnings].slice(0, FULL_WARNINGS_MAX);
+    head.push(...warns.map((w) => `\u26A0 ${truncate2(squash(w), 140)}`));
+  }
+  const clock = expiryClock(view.expiresAt);
+  const expiry = clock === "soon" ? "it expires soon" : `it expires at ${clock}`;
+  const tail = opts.includeCode ? [
+    `Type the code below into your Contrail session to approve \u2014 ${expiry}. Full details are on the approval page on your desktop.`,
+    "",
+    view.code
+  ] : ["Waiting in Deploy Review \u2014 open the Contrail desktop app to approve."];
+  const tailText = tail.join("\n");
+  const headText = truncate2(head.join("\n"), Math.max(0, MESSAGE_MAX - tailText.length - 1));
+  return {
+    title,
+    message: `${headText}
+${tailText}`,
+    ttl: remainingSeconds(view.expiresAt)
+  };
+}
+function sanitizeErrors(json2) {
+  const raw = json2?.errors;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((e) => typeof e === "string").map(
+    (e) => e.replace(/[\u0000-\u001f]/g, " ").replace(/[A-Za-z0-9]{30,}/g, "[redacted]").slice(0, 160)
+  );
+}
+var NOTIFY_ACCOUNTS, PUSHOVER_KEY_RE, PUSHOVER_MESSAGES_URL, PUSHOVER_VALIDATE_URL, TIMEOUT_MS, REJECTED_PAUSE_MS, QUOTA_PAUSE_MS, MESSAGE_MAX, TITLE_MAX, FULL_LABELS_MAX, FULL_WARNINGS_MAX, PushoverNotifier, NullNotifier;
+var init_notify = __esm({
+  "src/core/notify.ts"() {
+    "use strict";
+    init_log();
+    NOTIFY_ACCOUNTS = {
+      pushoverUser: "notify:pushover:user",
+      pushoverToken: "notify:pushover:token"
+    };
+    PUSHOVER_KEY_RE = /^[A-Za-z0-9]{30}$/;
+    PUSHOVER_MESSAGES_URL = "https://api.pushover.net/1/messages.json";
+    PUSHOVER_VALIDATE_URL = "https://api.pushover.net/1/users/validate.json";
+    TIMEOUT_MS = 5e3;
+    REJECTED_PAUSE_MS = 10 * 60 * 1e3;
+    QUOTA_PAUSE_MS = 60 * 60 * 1e3;
+    MESSAGE_MAX = 1024;
+    TITLE_MAX = 250;
+    FULL_LABELS_MAX = 10;
+    FULL_WARNINGS_MAX = 3;
+    PushoverNotifier = class {
+      /**
+       * @param syncFromDisk the plugin and the desktop app share config.json but
+       *   each holds its own loaded copy; before every send/status the notifier
+       *   folds the on-disk `notifications` section into the live object so a
+       *   change saved on either surface reaches the other without a restart.
+       *   Production wiring passes a disk reader; tests (which inject their config
+       *   object) leave the default, which syncs nothing.
+       */
+      constructor(config2, secrets, fetchImpl = fetch, syncFromDisk = () => null) {
+        this.config = config2;
+        this.secrets = secrets;
+        this.fetchImpl = fetchImpl;
+        this.syncFromDisk = syncFromDisk;
+      }
+      pausedUntil = 0;
+      sync() {
+        let disk = null;
+        try {
+          disk = this.syncFromDisk();
+        } catch {
+          disk = null;
+        }
+        if (disk && typeof disk === "object") {
+          if (disk.method === "none" || disk.method === "pushover") {
+            this.config.notifications.method = disk.method;
+          }
+          if (disk.summary === "minimal" || disk.summary === "full") {
+            this.config.notifications.summary = disk.summary;
+          }
+          if (disk.when === "remote_control" || disk.when === "always") {
+            this.config.notifications.when = disk.when;
+          }
+        }
+      }
+      status() {
+        this.sync();
+        const creds = this.credentials();
+        return {
+          method: this.config.notifications.method,
+          when: this.config.notifications.when,
+          configured: creds.kind === "ok",
+          ...creds.kind === "unavailable" ? { storeError: creds.error } : {}
+        };
+      }
+      resetCircuit() {
+        this.pausedUntil = 0;
+      }
+      credentials() {
+        try {
+          const user = this.secrets.getSecret(NOTIFY_ACCOUNTS.pushoverUser);
+          const token = this.secrets.getSecret(NOTIFY_ACCOUNTS.pushoverToken);
+          return user && token ? { kind: "ok", user, token } : { kind: "missing" };
+        } catch (err2) {
+          return { kind: "unavailable", error: String(err2 instanceof Error ? err2.message : err2).slice(0, 200) };
+        }
+      }
+      async notify(view, opts) {
+        this.sync();
+        if (this.config.notifications.method !== "pushover") return { status: "off" };
+        const creds = this.credentials();
+        if (creds.kind === "unavailable") {
+          log("warn", "approval notification skipped: OS keychain unreadable", { reason: creds.error });
+          return { status: "failed", reason: "store_unavailable" };
+        }
+        if (creds.kind === "missing") return { status: "failed", reason: "not_configured" };
+        if (Date.now() < this.pausedUntil) return { status: "failed", reason: "circuit_open" };
+        const msg = composePushover(view, {
+          includeCode: opts.includeCode,
+          summary: this.config.notifications.summary
+        });
+        const result = await this.call(PUSHOVER_MESSAGES_URL, {
+          token: creds.token,
+          user: creds.user,
+          title: msg.title,
+          message: msg.message,
+          ttl: msg.ttl,
+          priority: 0
+        });
+        return this.outcomeOf(result);
+      }
+      async sendTest() {
+        const creds = this.credentials();
+        if (creds.kind === "unavailable") {
+          return {
+            ok: false,
+            message: `Your OS keychain could not be read, so the stored keys are unreachable: ${creds.error}`
+          };
+        }
+        if (creds.kind === "missing") {
+          return {
+            ok: false,
+            message: "Enter both the Pushover user key and the application token first."
+          };
+        }
+        const check2 = await this.call(PUSHOVER_VALIDATE_URL, { token: creds.token, user: creds.user });
+        if (check2.kind === "transport") {
+          return {
+            ok: false,
+            message: `Could not reach Pushover (${check2.reason}). Check this machine's network and try again.`
+          };
+        }
+        if (!check2.ok) {
+          return {
+            ok: false,
+            message: `Pushover rejected the keys: ${check2.errors.join("; ") || `HTTP ${check2.status}`}. Nothing was sent.`
+          };
+        }
+        const devices = Array.isArray(check2.json?.devices) ? check2.json.devices.filter((d) => typeof d === "string") : [];
+        const sent = await this.call(PUSHOVER_MESSAGES_URL, {
+          token: creds.token,
+          user: creds.user,
+          title: "Contrail test notification",
+          message: "Phone notifications are working. Approval codes will arrive here, with the review summary, whenever Contrail proposes a change.",
+          ttl: 600,
+          priority: 0
+        });
+        if (sent.kind === "transport") {
+          return {
+            ok: false,
+            message: `Keys are valid, but the test message could not be delivered (${sent.reason}).`
+          };
+        }
+        if (!sent.ok) {
+          return {
+            ok: false,
+            message: `Keys validated, but Pushover refused the message: ${sent.errors.join("; ") || `HTTP ${sent.status}`}.`
+          };
+        }
+        this.pausedUntil = 0;
+        return {
+          ok: true,
+          message: `Test notification sent to ${devices.length > 0 ? devices.join(", ") : "your devices"}. Check your phone.`
+        };
+      }
+      outcomeOf(result) {
+        if (result.kind === "transport") {
+          log("warn", "approval notification not delivered", { reason: result.reason });
+          return { status: "failed", reason: result.reason };
+        }
+        if (result.ok) return { status: "sent" };
+        if (result.status < 400) {
+          log("warn", "approval notification refused by Pushover despite a 2xx", {
+            status: result.status,
+            errors: result.errors
+          });
+          return { status: "failed", reason: "rejected" };
+        }
+        if (result.status === 429) {
+          const usable = result.resetAt !== null && result.resetAt > Date.now() + 6e4;
+          this.pausedUntil = usable ? result.resetAt : Date.now() + QUOTA_PAUSE_MS;
+          log("warn", "approval notification refused: Pushover quota exhausted", {
+            pausedUntil: new Date(this.pausedUntil).toISOString()
+          });
+          return { status: "failed", reason: "quota" };
+        }
+        if (result.status >= 400 && result.status < 500) {
+          this.pausedUntil = Date.now() + REJECTED_PAUSE_MS;
+          log("warn", "approval notification rejected by Pushover; pausing notifications", {
+            status: result.status,
+            errors: result.errors
+          });
+          return { status: "failed", reason: "rejected" };
+        }
+        log("warn", "approval notification failed: Pushover server error", { status: result.status });
+        return { status: "failed", reason: "network" };
+      }
+      async call(url, body) {
+        let res;
+        try {
+          res = await this.fetchImpl(url, {
+            method: "POST",
+            headers: { "content-type": "application/json", accept: "application/json" },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(TIMEOUT_MS)
+          });
+        } catch (err2) {
+          const name = err2 instanceof Error ? err2.name : "";
+          const timeout = name === "TimeoutError" || name === "AbortError";
+          return { kind: "transport", reason: timeout ? "timeout" : "network" };
+        }
+        let json2 = null;
+        try {
+          const parsed = await res.json();
+          if (parsed && typeof parsed === "object") json2 = parsed;
+        } catch {
+          json2 = null;
+        }
+        const resetHeader = Number(res.headers.get("x-limit-app-reset"));
+        const resetAt = Number.isFinite(resetHeader) && resetHeader > 0 ? Math.min(resetHeader * 1e3, Date.now() + 31 * 24 * 60 * 60 * 1e3) : null;
+        const ok2 = res.ok && (json2 === null || json2.status === void 0 || json2.status === 1);
+        return { kind: "http", ok: ok2, status: res.status, errors: sanitizeErrors(json2), json: json2, resetAt };
+      }
+    };
+    NullNotifier = class {
+      async notify() {
+        return { status: "off" };
+      }
+      async sendTest() {
+        return { ok: false, message: "Notifications are not available in this build." };
+      }
+      status() {
+        return { method: "none", when: "remote_control", configured: false };
+      }
+      resetCircuit() {
+      }
+    };
+  }
+});
+
+// src/deploy/engine.ts
+import crypto4 from "node:crypto";
+import fs11 from "node:fs";
+import path6 from "node:path";
 function isDmlPlan(input) {
   return input.plan === true;
 }
 function stepReferenceId(step, index) {
   return step.ref ?? `step_${index + 1}`;
 }
+function nothingComparedReason(checked, unchecked) {
+  if (checked.length > 0 || unchecked.length === 0) return null;
+  if (unchecked.some((u) => EXISTENCE_CHECKED_REASONS.has(u.reason))) return null;
+  return unchecked.every((u) => NO_BASELINE_REASONS.has(u.reason)) ? "no_baseline" : "nothing_compared";
+}
+function targetCheckOf(checkedAt, checked, unchecked, noBaselineNote) {
+  const nothing = nothingComparedReason(checked, unchecked);
+  if (nothing === null) return { status: "ok", checked_at: checkedAt, checked, unchecked };
+  return {
+    status: "not_checked",
+    checked_at: checkedAt,
+    checked,
+    unchecked,
+    note: nothing === "no_baseline" && noBaselineNote ? noBaselineNote : NOTHING_COMPARED_NOTE
+  };
+}
 function validateJobId(input) {
-  const h = crypto3.createHash("sha256");
+  const h = crypto4.createHash("sha256");
   h.update(
     `${JSON.stringify([
       input.dryRun === true,
@@ -31731,13 +33334,216 @@ function validateJobId(input) {
 `
   );
   for (const c of input.components) {
-    const contentSha = crypto3.createHash("sha256").update(c.content).digest("hex");
+    const contentSha = crypto4.createHash("sha256").update(c.content).digest("hex");
     h.update(`${JSON.stringify(["C", c.type, c.api_name, contentSha])}
 `);
   }
   for (const d of input.destructive) h.update(`${JSON.stringify(["D", d.type, d.api_name])}
 `);
   return `${input.dryRun ? "vdry" : "val"}-${h.digest("hex").slice(0, 12)}`;
+}
+function sourceProvenance(components) {
+  const sourced = components.filter((c) => c.source_path);
+  return {
+    source_paths: sourced.map((c) => c.source_path),
+    source_sha256s: sourced.map((c) => c.source_sha256 ?? "")
+  };
+}
+function existsInTargetText(type, name, at, comparable) {
+  return `EXISTS IN TARGET \u2014 this deploy OVERWRITES a live ${type} ${name} that your snapshot does not have (retrieved ${at})` + // A member whose retrieved bytes cannot be compared (Profile) gets no
+  // live diff, so the sentence that promises one is dropped.
+  (comparable ? "; the diff below is against the live version." : ".");
+}
+function notInTargetText(type, name, at) {
+  return `NOT IN TARGET \u2014 your snapshot has ${type} ${name}, but the org does not (retrieved ${at}). This deploy CREATES it rather than modifying it.`;
+}
+function changedInTargetText(at, snapshotFrom, comparable) {
+  return comparable ? `CHANGED IN TARGET SINCE YOUR SNAPSHOT \u2014 the diff below is against the LIVE version (retrieved ${at}); your snapshot is from ${snapshotFrom}.` : `CHANGED IN TARGET SINCE YOUR SNAPSHOT \u2014 the org's copy (retrieved ${at}) was modified after your snapshot from ${snapshotFrom}; this type's retrieved bytes cannot be compared, so any diff below is against your snapshot.`;
+}
+function liveBytesDifferText(at, cause) {
+  return `live bytes differ from your snapshot (retrieved ${at}) \u2014 ` + (cause === "no_dates" ? `last-modified stamps were unavailable for this type, so Contrail cannot say who or when.` : `this member's last-modified stamp is within a minute of when your snapshot was taken, too close to tell apart from clock differences between this computer and the org, so Contrail cannot say who or when.`);
+}
+function destructiveAbsentText(at) {
+  return `not present in the target (retrieved ${at}) \u2014 listMetadata reports no such member; the org decides whether this delete fails or no-ops`;
+}
+function changedSummaryText(n, alias, at) {
+  return `${n} component(s) changed in "${alias}" since your snapshot \u2014 rows marked CHANGED IN TARGET show when (and, in their detail, who); every diff on this page is against the live version retrieved at ${at}, except rows labelled "diff vs your snapshot".`;
+}
+function liveUnavailableText(reason, snapshotFrom) {
+  return `LIVE COMPARISON UNAVAILABLE (${reason}) \u2014 compared against your snapshot ` + (snapshotFrom !== null ? `from ${snapshotFrom}` : "(which holds none of these members)") + `; the org was not re-read. Classifications (ADD/MODIFY) and diffs below come from the local snapshot only.`;
+}
+function datesUnavailableText(at, types, reason) {
+  return `Live diff is against the org (retrieved ${at}); last-modified stamps were unavailable for ${types.join(", ")} (${reason}), so CHANGED-IN-TARGET detection for those members relies on content only and the execute-time check will report them as unchecked.`;
+}
+function lastModifiedDetail(image) {
+  if (!image.last_modified_date) return null;
+  return `last modified in the org by ${image.last_modified_by ?? "an unknown user"} at ${shortStamp(image.last_modified_date)}`;
+}
+function shortStamp(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hhmm(iso)}`;
+}
+function entryFor(entries, index, member) {
+  const e = entries[index];
+  if (e && e.type === member.type && e.api_name === member.api_name) return e;
+  return entries.find((x) => x.type === member.type && x.api_name === member.api_name);
+}
+function isFlowDeactivation(c) {
+  return c.type === "FlowDefinition" && /<activeVersionNumber>\s*0\s*<\/activeVersionNumber>/.test(c.content);
+}
+function listingCovers(live, member) {
+  return live.dates_unavailable === void 0 && !live.dates_unavailable_types.includes(member.type) && preImageListQueryFor(member) !== null;
+}
+function bundleRootOf(type, apiName) {
+  const entry = deployZipEntryPath(type, apiName);
+  if (!entry || entry.child || !entry.bundleDir) return null;
+  const trimmed = entry.bundleDir.replace(/\/$/, "");
+  return trimmed.slice(0, trimmed.lastIndexOf("/"));
+}
+function proposedBundleFiles(c) {
+  return parseEnvelopeFor(c.type, c.api_name, c.content).files;
+}
+function liveMatchesProposal(c, image) {
+  if (bundleRootOf(c.type, c.api_name) !== null) {
+    const proposed = proposedBundleFiles(c);
+    const liveFiles = image.files ?? /* @__PURE__ */ new Map();
+    for (const [rel, body] of Object.entries(proposed)) {
+      const liveBody = liveFiles.get(rel);
+      if (liveBody === void 0 || liveBody.trim() !== body.trim()) return false;
+    }
+    for (const rel of liveFiles.keys()) if (!(rel in proposed)) return false;
+    return true;
+  }
+  return image.content !== void 0 && image.content.trim() === c.content.trim();
+}
+function documentRowDiff(before, after, label, live) {
+  const format = before.trimStart().startsWith("<") ? "xml" : "text";
+  if (before.trim() === after.trim()) {
+    return {
+      format,
+      identical: true,
+      baseline_label: label,
+      summary: live ? "identical to the live version" : `${label} \xB7 identical`,
+      truncated: false
+    };
+  }
+  const d = semanticDiff(before, after, PAGE_DIFF_LIMITS);
+  if (d.format === "xml" && d.xml) {
+    const n = d.xml.change_count;
+    return {
+      format: "xml",
+      identical: false,
+      baseline_label: label,
+      // n === 0 with differing bytes: the structural diff ignores XML
+      // attributes, comments and the declaration as well as whitespace and
+      // keyed-element order (salesforce/xml.ts parser options) — the line
+      // must not claim the difference is whitespace alone.
+      summary: n === 0 ? `${label} \xB7 no structural differences (formatting, element order, attributes or comments only)` : `${label} \xB7 ${n} change${n === 1 ? "" : "s"}`,
+      xml_changes: d.xml.changes,
+      counts: { changes: n },
+      truncated: d.xml.truncated
+    };
+  }
+  const t = d.text ?? diffText(before, after, PAGE_DIFF_LIMITS);
+  return {
+    format: "text",
+    identical: false,
+    baseline_label: label,
+    summary: `${label} \xB7 +${t.lines_added} / \u2212${t.lines_removed} lines`,
+    text_hunks: t.hunks,
+    counts: { lines_added: t.lines_added, lines_removed: t.lines_removed },
+    truncated: t.hunks_truncated || t.counts_only,
+    ...t.counts_only ? { note: "too large for a line-by-line diff \u2014 counts only" } : {}
+  };
+}
+function bundleRowDiff(baseline, proposed, label, live) {
+  const rels = [.../* @__PURE__ */ new Set([...baseline.keys(), ...Object.keys(proposed)])].sort();
+  const changed = [];
+  const added = [];
+  const removed = [];
+  const hunks = [];
+  const maxHunks = PAGE_DIFF_LIMITS.maxHunks ?? 12;
+  let truncated = false;
+  let linesAdded = 0;
+  let linesRemoved = 0;
+  for (const rel of rels) {
+    const a = baseline.get(rel);
+    const b = proposed[rel];
+    if (a === void 0) {
+      added.push(rel);
+      continue;
+    }
+    if (b === void 0) {
+      removed.push(rel);
+      continue;
+    }
+    if (a.trim() === b.trim()) continue;
+    changed.push(rel);
+    const t = diffText(a, b, PAGE_DIFF_LIMITS);
+    linesAdded += t.lines_added;
+    linesRemoved += t.lines_removed;
+    if (t.hunks_truncated || t.counts_only) truncated = true;
+    for (const h of t.hunks) {
+      if (hunks.length >= maxHunks) {
+        truncated = true;
+        break;
+      }
+      hunks.push({ file: rel, ...h });
+    }
+  }
+  const files = [...changed, ...added, ...removed];
+  if (files.length === 0) {
+    return {
+      format: "bundle",
+      identical: true,
+      baseline_label: label,
+      summary: live ? "identical to the live version" : `${label} \xB7 identical`,
+      truncated: false
+    };
+  }
+  const names = files.slice(0, 8).join(", ") + (files.length > 8 ? ", \u2026" : "");
+  return {
+    format: "bundle",
+    identical: false,
+    baseline_label: label,
+    summary: `${label} \xB7 ${files.length} file${files.length === 1 ? "" : "s"} changed (${names})`,
+    text_hunks: hunks,
+    counts: {
+      files_changed: changed,
+      files_added: added,
+      files_removed: removed,
+      lines_added: linesAdded,
+      lines_removed: linesRemoved
+    },
+    truncated
+  };
+}
+function samePath(a, b) {
+  return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+function revertsRootReal() {
+  const reverts = path6.join(stagingDir(), "_reverts");
+  const stat = fs11.lstatSync(reverts);
+  const real = fs11.realpathSync(reverts);
+  if (!stat.isDirectory() || stat.isSymbolicLink() || !samePath(real, path6.join(fs11.realpathSync(stagingDir()), "_reverts"))) {
+    throw new ContrailError(
+      `${reverts} is not a real directory directly under Contrail's staging directory \u2014 revert files are never written or removed through it`,
+      "unsafe_path"
+    );
+  }
+  return real;
+}
+function assertRealRevertDir(root, name) {
+  const dir = path6.join(stagingDir(), "_reverts", name);
+  const stat = fs11.lstatSync(dir);
+  if (!stat.isDirectory() || stat.isSymbolicLink() || !samePath(fs11.realpathSync(dir), path6.join(root, name))) {
+    throw new ContrailError(
+      `revert directory ${dir} is not a real directory directly under ${root}`,
+      "unsafe_path"
+    );
+  }
 }
 function approvalForAgent(kind, approval) {
   if (approval.opened) return { opened: true };
@@ -31754,12 +33560,46 @@ function approvalForAgent(kind, approval) {
 function proposeToolFor(kind) {
   return kind === "deploy" ? "validate_deploy" : kind === "dml" ? "dml_propose" : kind === "apex" ? "apex_propose" : kind === "activation" ? "agent_activation_propose" : "bulk_load_propose";
 }
+async function withDeadline(ms, work) {
+  const ctl = new AbortController();
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      ctl.abort();
+      reject(new TargetCheckDeadline(`no answer within ${ms} ms`));
+    }, ms);
+  });
+  try {
+    return await Promise.race([work(ctl.signal), deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+function targetCheckUnavailableNote(kind, reason) {
+  return `Contrail could not re-read the org to confirm nothing had moved before executing (${reason}); this ${kindNoun(kind)} ran against whatever the org held at that moment, and the approval page's diff may not describe what was overwritten.`;
+}
+function dmlUpdatePreviewSoql(object3, fields, ids) {
+  return `SELECT Id${fields.length ? ", " + fields.join(", ") : ""} FROM ${object3} WHERE Id IN (${ids.map((i) => `'${i}'`).join(",")})`;
+}
+function dmlDeletePreviewSoql(object3, ids) {
+  return `SELECT Id FROM ${object3} WHERE Id IN (${ids.map((i) => `'${i}'`).join(",")})`;
+}
+function dmlPlanStepSoql(object3, id, fields) {
+  return fields === null ? `SELECT Id FROM ${object3} WHERE Id = '${id}'` : `SELECT Id${fields.length ? ", " + fields.join(", ") : ""} FROM ${object3} WHERE Id = '${id}'`;
+}
+function dmlValueText(value) {
+  const text2 = value === void 0 ? "null" : JSON.stringify(value);
+  return text2.length > 120 ? `${text2.slice(0, 120)}\u2026` : text2;
+}
+function soqlQuote(value) {
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
 function kindNoun(kind) {
   return kind === "deploy" ? "deploy" : kind === "apex" ? "Apex script" : kind === "bulk" ? "bulk data load" : kind === "activation" ? "agent activation change" : "change";
 }
 function safeUnlink(filePath) {
   try {
-    fs10.rmSync(filePath, { recursive: true, force: true });
+    fs11.rmSync(filePath, { recursive: true, force: true });
   } catch (err2) {
     log("warn", "could not delete deploy payload", { filePath, err: String(err2) });
   }
@@ -31781,10 +33621,10 @@ function summarizeOps(steps) {
   for (const s of steps) counts.set(s.operation, (counts.get(s.operation) ?? 0) + 1);
   return [...counts.entries()].map(([op, n]) => `${n} ${op}`).join(" / ");
 }
-function delay3(ms) {
+function delay4(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms).unref?.());
 }
-var REF_TOKEN_RE, STALE_JOB_MS2, DeployEngine;
+var REF_TOKEN_RE, STALE_JOB_MS2, TARGET_CHECK_DEADLINE_MS, ORG_CLOCK_MARGIN_MS, CHILD_STAMP_MARGIN_MS, TARGET_CHECK_NOT_APPLICABLE, TARGET_CHECK_NOT_APPLICABLE_BULK, NO_BASELINE_REASONS, EXISTENCE_CHECKED_REASONS, NOTHING_COMPARED_NOTE, DeployEngine, AUTOMATION_CARD_MAX_OBJECTS, PAGE_DIFF_LIMITS, PAGE_DIFF_BUDGET_CHARS, PAGE_DIFF_BUDGET_NOTE, REQUEST_ID_RE, TargetCheckDeadline;
 var init_engine2 = __esm({
   "src/deploy/engine.ts"() {
     "use strict";
@@ -31793,16 +33633,38 @@ var init_engine2 = __esm({
     init_bulk();
     init_csv();
     init_graph();
+    init_automation();
     init_paths();
     init_errors4();
     init_codes();
     init_approval();
     init_pages();
+    init_semantic();
+    init_preimage();
     init_notify();
     init_package();
     init_log();
     REF_TOKEN_RE = /^@\{([A-Za-z][A-Za-z0-9_]*)\.id\}$/;
     STALE_JOB_MS2 = 30 * 6e4;
+    TARGET_CHECK_DEADLINE_MS = 15e3;
+    ORG_CLOCK_MARGIN_MS = 5e3;
+    CHILD_STAMP_MARGIN_MS = 6e4;
+    TARGET_CHECK_NOT_APPLICABLE = {
+      status: "not_applicable",
+      note: "no fixed org target to re-check"
+    };
+    TARGET_CHECK_NOT_APPLICABLE_BULK = {
+      status: "not_applicable",
+      note: "bulk loads are not re-checked before executing \u2014 the approval page showed no current values for their rows, so there is nothing to compare against"
+    };
+    NO_BASELINE_REASONS = /* @__PURE__ */ new Set([
+      "live_check_unavailable_no_org_clock",
+      "no_precheck_recorded",
+      "precheck_failed_at_propose",
+      "no_baseline_recorded"
+    ]);
+    EXISTENCE_CHECKED_REASONS = /* @__PURE__ */ new Set(["no_before_value_shown"]);
+    NOTHING_COMPARED_NOTE = "No member could be compared (each one's reason is under unchecked), so this write ran without a target check.";
     DeployEngine = class {
       constructor(db, store, tokenMgr, config2, audit, approvals = new ApprovalPageServer()) {
         this.db = db;
@@ -31914,8 +33776,15 @@ var init_engine2 = __esm({
        * LWC bundles, so only a live check answers. Best-effort by design: a
        * failed live check degrades to an honest "could not check" warning and
        * never blocks the validation (the org gate still has the final word).
+       * S45: returns the entries it flipped ADD → MODIFY, so the live pre-image
+       * pass does not stack a second "exists in the org" warning on them, and
+       * the entries whose Tooling check FAILED (with the warning it attached),
+       * so that pass can correct the "classification is from the local
+       * snapshot only" sentence when its own retrieve classified the row.
        */
       async auraLiveChecks(conn, input, changes) {
+        const flipped = /* @__PURE__ */ new Set();
+        const toolingFailed = /* @__PURE__ */ new Map();
         const rest = new RestClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
         for (const c of input.components) {
           if (c.type !== "AuraDefinitionBundle") continue;
@@ -31953,6 +33822,7 @@ var init_engine2 = __esm({
             }
             entry.change = "modify";
             entry.warnings = entry.warnings.filter((w) => !w.startsWith("INERT UNTIL PLACED"));
+            flipped.add(entry);
             const metaName = `${main2}-meta.xml`;
             const live = new Map(
               defs.map((d) => [
@@ -31982,9 +33852,10 @@ var init_engine2 = __esm({
             );
           } catch (err2) {
             if (!liveKindConflict) {
-              entry.warnings.push(
-                `could not live-check "${c.api_name}" against the org (${String(err2 instanceof Error ? err2.message : err2).slice(0, 120)}) \u2014 the ADD/MODIFY classification is from the local snapshot only.`
-              );
+              const reason = String(err2 instanceof Error ? err2.message : err2).slice(0, 120);
+              const warning = `could not live-check "${c.api_name}" against the org (${reason}) \u2014 the ADD/MODIFY classification is from the local snapshot only.`;
+              entry.warnings.push(warning);
+              toolingFailed.set(entry, { warning, reason });
             }
           }
           if (liveKindConflict) {
@@ -31993,6 +33864,589 @@ var init_engine2 = __esm({
               "bad_component"
             );
           }
+        }
+        return { flipped, toolingFailed };
+      }
+      /**
+       * S45 hook 3: apply the live pre-image to the change entries IN PLACE (the
+       * auraLiveChecks precedent), PRESENCE and CONTENT apart. Presence comes
+       * from the org for every member it could enumerate: absent → ADD (NOT IN
+       * TARGET when the snapshot had it); present where the snapshot said ADD →
+       * MODIFY (EXISTS IN TARGET — skipped for Aura entries auraLiveChecks
+       * already flipped). Content comes from the org only for COMPARABLE
+       * members: documents and children trim-compared, bundles PER FILE against
+       * the retrieved file map (never as envelopes). CHANGED IN TARGET is driven
+       * by last-modified DATES, never by a byte mismatch; with a date missing on
+       * either side the row gets only the neutral note, and only when the bytes
+       * differ. The FlowDefinition deactivation entry is never reclassified
+       * (analyzeChanges forces its MODIFY + DEACTIVATES). The change-dependent
+       * warnings are recomputed against the live copy (refreshChangeWarnings)
+       * for every reclassified entry AND every MODIFY that stays a MODIFY
+       * against a comparable live copy — its diff is against the live version,
+       * so its warnings must be too. Every entry gets its frozen pre_image.
+       * Who/when go to `attributions` (the row detail), never into a warning.
+       * Aura: the S41 KIND CHANGE refusal is re-run against the LIVE bundle
+       * files first (throws before anything is reclassified, so no code is
+       * issued), and a failed Tooling check's "classification is from the
+       * local snapshot only" sentence is corrected where this retrieve
+       * classified the row.
+       */
+      applyLivePreImages(conn, input, changes, destructive, live, aura) {
+        const attributions = /* @__PURE__ */ new Map();
+        let changedInTarget = 0;
+        if (live.status !== "ok") return { attributions, changedInTarget };
+        const auraFlipped = aura.flipped;
+        const at = hhmm(live.at);
+        for (const c of input.components) {
+          if (c.type !== "AuraDefinitionBundle") continue;
+          const image = live.images.get(preImageKey(c.type, c.api_name));
+          if (image?.present !== true || !image.files) continue;
+          const files = image.files;
+          const livePrimary = [".cmp", ".app", ".evt", ".intf", ".tokens"].map((s) => c.api_name + s).find((f) => files.has(f));
+          if (!livePrimary) continue;
+          const { main: main2 } = parseEnvelopeFor(c.type, c.api_name, c.content);
+          if (livePrimary !== main2) {
+            throw new ContrailError(
+              `AuraDefinitionBundle ${c.api_name}: the ORG's bundle is ${livePrimary.slice(c.api_name.length)} (live retrieve) and this envelope is ${main2.slice(c.api_name.length)} \u2014 changing a bundle's kind under the same name is untested platform behavior. Delete the old bundle first (its own destructive approval) or use a new name.`,
+              "bad_component"
+            );
+          }
+        }
+        input.components.forEach((c, i) => {
+          const entry = entryFor(changes, i, c);
+          const image = live.images.get(preImageKey(c.type, c.api_name));
+          if (!entry || !image) return;
+          entry.pre_image = summarizePreImage(image);
+          const analyzed = auraFlipped.has(entry) ? "add" : entry.change;
+          const startedAs = entry.change;
+          const lead = [];
+          if (image.present !== null && !isFlowDeactivation(c)) {
+            if (image.present === false) {
+              if (entry.change !== "add") {
+                entry.change = "add";
+                lead.push(notInTargetText(c.type, c.api_name, at));
+              }
+            } else {
+              if (entry.change === "add" && !auraFlipped.has(entry)) {
+                entry.change = "modify";
+                lead.push(existsInTargetText(c.type, c.api_name, at, image.comparable));
+                const who = lastModifiedDetail(image);
+                if (who) attributions.set(entry, who);
+              }
+              if (image.comparable) {
+                entry.change = liveMatchesProposal(c, image) ? "unchanged_content" : "modify";
+              }
+            }
+          }
+          if (entry.change !== startedAs || entry.change === "modify" && analyzed === "modify" && image.present === true && image.comparable) {
+            this.refreshChangeWarnings(conn, input.components, c, entry, analyzed, image);
+          }
+          const tooling = aura.toolingFailed.get(entry);
+          if (tooling && image.present !== null) {
+            const idx = entry.warnings.indexOf(tooling.warning);
+            if (idx >= 0) {
+              entry.warnings[idx] = `the Tooling live check for "${c.api_name}" could not complete (${tooling.reason}) \u2014 the LWC NAME COLLISION check may not have run; the ADD/MODIFY classification above comes from the live Metadata API retrieve.`;
+            }
+          }
+          const row = image.present === true ? this.db.getArtifact(conn.id, c.type, c.api_name) : null;
+          if (row) {
+            const moved = this.changedSinceSnapshot(conn, c, row, image);
+            if (moved === true) {
+              changedInTarget += 1;
+              lead.push(changedInTargetText(at, shortStamp(row.retrievedAt), image.comparable));
+              const who = lastModifiedDetail(image);
+              if (who) attributions.set(entry, who);
+            } else if ((moved === null || moved === "within_margin") && image.comparable && this.snapshotBytesDiffer(conn, c, row, image)) {
+              lead.push(liveBytesDifferText(at, moved === null ? "no_dates" : "within_margin"));
+            }
+          }
+          entry.warnings.unshift(...lead);
+        });
+        input.destructive.forEach((d, i) => {
+          const entry = entryFor(destructive, i, d);
+          const image = live.images.get(preImageKey(d.type, d.api_name));
+          if (!entry || !image) return;
+          entry.pre_image = summarizePreImage(image);
+          if (image.present === false && listingCovers(live, d)) {
+            entry.warnings.push(destructiveAbsentText(at));
+          }
+        });
+        return { attributions, changedInTarget };
+      }
+      /**
+       * S45: a row the live check reclassified (ADD→MODIFY, MODIFY↔UNCHANGED,
+       * MODIFY→ADD) — and a MODIFY that stayed a MODIFY against a comparable
+       * live copy — must carry the change-dependent warnings analyzeChanges
+       * would have produced for its classification, computed against the LIVE
+       * copy — not the ones it produced for the snapshot verdict against the
+       * snapshot copy (a WHOLE-DOCUMENT REPLACE on what is now an ADD, an
+       * add-only "surfaced nowhere" advisory on what is now an overwrite, a
+       * FIELD TYPE CHANGE read from a snapshot type the org no longer has). The
+       * stale set is recomputed with the same pure helper and the same inputs
+       * analyzeChanges had, removed, and the fresh set takes its place — the
+       * change-dependent arms lead a row's own warnings, so position is kept.
+       * When the live copy equals the snapshot copy the two sets are identical
+       * and this is a no-op.
+       */
+      refreshChangeWarnings(conn, components, c, entry, analyzed, image) {
+        const row = analyzed === "add" ? null : this.db.getArtifact(conn.id, c.type, c.api_name);
+        const liveBaseline = entry.change !== "add" && image.comparable;
+        const referenced = () => auraBundleReferenced(this.db, conn, components, c);
+        const common = { type: c.type, api_name: c.api_name, proposed: c.content, referenced };
+        const root = bundleRootOf(c.type, c.api_name);
+        let stale;
+        let fresh;
+        if (root !== null) {
+          const { files, main: main2 } = parseEnvelopeFor(c.type, c.api_name, c.content);
+          stale = changeDependentWarnings({
+            ...common,
+            change: analyzed,
+            before: null,
+            bundleFiles: {
+              proposed: files,
+              main: main2,
+              before: row ? readBundleFiles(this.store, conn, root, c.api_name) : {}
+            }
+          });
+          fresh = changeDependentWarnings({
+            ...common,
+            change: entry.change,
+            before: null,
+            bundleFiles: {
+              proposed: files,
+              main: main2,
+              before: liveBaseline && image.files ? Object.fromEntries(image.files) : {}
+            }
+          });
+        } else {
+          stale = changeDependentWarnings({
+            ...common,
+            change: analyzed,
+            before: row?.filePath ? readOldContent(this.store, conn, c.type, c.api_name, row.filePath) : null
+          });
+          fresh = changeDependentWarnings({
+            ...common,
+            change: entry.change,
+            before: liveBaseline ? image.content ?? null : null
+          });
+        }
+        const positions = stale.map((w) => entry.warnings.indexOf(w)).filter((i) => i >= 0);
+        const at = positions.length > 0 ? Math.min(...positions) : 0;
+        const drop = new Set(positions);
+        entry.warnings = entry.warnings.filter((_, i) => !drop.has(i));
+        entry.warnings.splice(at, 0, ...fresh);
+      }
+      /**
+       * S45: did the org's copy change since the snapshot? true/false from the
+       * last-modified DATES; null when a date is missing on either side (or a
+       * stamp does not parse) — the caller then shows only the neutral note.
+       * A child row the indexer stamped with its CONTAINER's date (the refresh
+       * lists top-level types, so CustomField rows inherit their object's
+       * stamp) holds no stamp of its own to compare with the child's live
+       * stamp; for those, the live stamp is compared with the time the snapshot
+       * was retrieved instead — "modified after your snapshot was taken".
+       * 'within_margin' — that comparison sets an ORG stamp against the HOST's
+       * retrievedAt, two different clocks: only a stamp more than
+       * CHILD_STAMP_MARGIN_MS after the snapshot (or before it) is decisive;
+       * inside the margin the caller falls back to the byte comparison and the
+       * neutral note, never the attributed warning.
+       */
+      changedSinceSnapshot(conn, c, row, image) {
+        const liveMs = image.last_modified_date ? Date.parse(image.last_modified_date) : NaN;
+        const snapMs = row.lastModifiedDate ? Date.parse(row.lastModifiedDate) : NaN;
+        if (Number.isNaN(liveMs) || Number.isNaN(snapMs)) return null;
+        const entry = deployZipEntryPath(c.type, c.api_name);
+        const container = entry?.child ? retrieveMemberFor(c.type, c.api_name) : null;
+        const parent = container ? this.db.getArtifact(conn.id, container.type, container.member) : null;
+        if (parent && parent.lastModifiedDate === row.lastModifiedDate && parent.lastModifiedBy === row.lastModifiedBy) {
+          const retrievedMs = Date.parse(row.retrievedAt);
+          if (Number.isNaN(retrievedMs)) return null;
+          if (liveMs > retrievedMs + CHILD_STAMP_MARGIN_MS) return true;
+          if (liveMs < retrievedMs - CHILD_STAMP_MARGIN_MS) return false;
+          return "within_margin";
+        }
+        return liveMs !== snapMs;
+      }
+      /**
+       * S45: do the live bytes differ from the snapshot's copy? Bundles compare
+       * PER FILE against readBundleFiles — never readOldContent, whose bundle
+       * copy is the main file alone.
+       */
+      snapshotBytesDiffer(conn, c, row, image) {
+        const root = bundleRootOf(c.type, c.api_name);
+        if (root !== null) {
+          const snap = readBundleFiles(this.store, conn, root, c.api_name);
+          const liveFiles = image.files ?? /* @__PURE__ */ new Map();
+          if (Object.keys(snap).length !== liveFiles.size) return true;
+          for (const [rel, body] of liveFiles) {
+            const old2 = snap[rel];
+            if (old2 === void 0 || old2.trim() !== body.trim()) return true;
+          }
+          return false;
+        }
+        const old = row.filePath ? readOldContent(this.store, conn, c.type, c.api_name, row.filePath) : null;
+        return old !== null && image.content !== void 0 && old.trim() !== image.content.trim();
+      }
+      /**
+       * S45 hook 5: each component row's collapsed diff. Against the live
+       * version when the retrieve succeeded and the member is comparable; else
+       * against the snapshot copy (labelled "diff vs your snapshot"); none for
+       * true adds. Bundles diff per file. A page-wide budget bounds the page:
+       * once it is spent, rows keep their summary line and counts only.
+       */
+      rowDiffs(conn, input, changes, live) {
+        const out = /* @__PURE__ */ new Map();
+        let budget = PAGE_DIFF_BUDGET_CHARS;
+        input.components.forEach((c, i) => {
+          const entry = entryFor(changes, i, c);
+          if (!entry || entry.change === "add") return;
+          let diff;
+          try {
+            diff = this.rowDiff(conn, c, live);
+          } catch (err2) {
+            log("warn", "approval-page diff failed", {
+              type: c.type,
+              err: String(err2 instanceof Error ? err2.message : err2).slice(0, 200)
+            });
+            diff = null;
+          }
+          if (!diff) return;
+          const body = diff.xml_changes ?? diff.text_hunks ?? [];
+          if (body.length > 0) {
+            const size = JSON.stringify(body).length;
+            if (size > budget) {
+              budget = 0;
+              delete diff.xml_changes;
+              delete diff.text_hunks;
+              diff.truncated = true;
+              diff.note = PAGE_DIFF_BUDGET_NOTE;
+            } else {
+              budget -= size;
+            }
+          }
+          out.set(entry, diff);
+        });
+        return out;
+      }
+      rowDiff(conn, c, live) {
+        const image = live.status === "ok" ? live.images.get(preImageKey(c.type, c.api_name)) : void 0;
+        const root = bundleRootOf(c.type, c.api_name);
+        if (live.status === "ok" && image?.present === true && image.comparable) {
+          const label2 = `diff vs live org (retrieved ${hhmm(live.at)})`;
+          return root !== null ? bundleRowDiff(image.files ?? /* @__PURE__ */ new Map(), proposedBundleFiles(c), label2, true) : documentRowDiff(image.content ?? "", c.content, label2, true);
+        }
+        const row = this.db.getArtifact(conn.id, c.type, c.api_name);
+        if (!row) return null;
+        const label = `diff vs your snapshot (${shortStamp(row.retrievedAt)})`;
+        if (root !== null) {
+          const old2 = readBundleFiles(this.store, conn, root, c.api_name);
+          if (Object.keys(old2).length === 0) return null;
+          return bundleRowDiff(new Map(Object.entries(old2)), proposedBundleFiles(c), label, false);
+        }
+        const old = row.filePath ? readOldContent(this.store, conn, c.type, c.api_name, row.filePath) : null;
+        return old === null ? null : documentRowDiff(old, c.content, label, false);
+      }
+      /**
+       * S45 hook 6: the page-top live-check lines — the UNAVAILABLE banner when
+       * the retrieve failed (the only case where "the org was not re-read" is
+       * true), else the CHANGED-IN-TARGET summary and the dates-unavailable line.
+       */
+      liveCheckWarnings(conn, input, live, changedInTarget) {
+        if (live.status === "unavailable") {
+          let oldest2 = null;
+          let newest2 = null;
+          for (const m of [...input.components, ...input.destructive]) {
+            const row = this.db.getArtifact(conn.id, m.type, m.api_name);
+            if (!row) continue;
+            if (oldest2 === null || row.retrievedAt < oldest2) oldest2 = row.retrievedAt;
+            if (newest2 === null || row.retrievedAt > newest2) newest2 = row.retrievedAt;
+          }
+          const from = oldest2 === null || newest2 === null ? null : shortStamp(oldest2) === shortStamp(newest2) ? shortStamp(oldest2) : `${shortStamp(oldest2)} to ${shortStamp(newest2)}`;
+          return [liveUnavailableText(live.reason.slice(0, 200), from)];
+        }
+        const at = hhmm(live.at);
+        const out = [];
+        if (changedInTarget > 0) out.push(changedSummaryText(changedInTarget, conn.alias, at));
+        if (live.dates_unavailable !== void 0) {
+          const types = [
+            ...new Set([...input.components, ...input.destructive].map((m) => m.type))
+          ];
+          out.push(datesUnavailableText(at, types, live.dates_unavailable.slice(0, 160)));
+        } else if (live.dates_unavailable_types.length > 0) {
+          out.push(
+            datesUnavailableText(
+              at,
+              live.dates_unavailable_types,
+              "listMetadata reported INVALID_TYPE"
+            )
+          );
+        }
+        return out;
+      }
+      /**
+       * S45 hook 7: write the pre-image files a revert re-deploys into
+       * staging/_reverts/<requestId>/ — every present member's bytes (restorable
+       * ones written, the rest listed with a reason), the package's adds listed
+       * as absent. Deletions contribute only what existed: a delete of a member
+       * the org lacks is not a revert ADD. `_reverts` must be the REAL
+       * staging/_reverts (revertsRootReal — never a link, never staging itself
+       * or a folder inside it), and `_reverts/<id>` is created non-recursively,
+       * so an entry an agent planted there first aborts the write instead of
+       * being written through. Never fails the validation: a failure is
+       * returned (and persisted) for the execute-time revert package to
+       * disclose.
+       */
+      writeRevertFiles(requestId, input, live) {
+        const entries = [];
+        for (const c of input.components) {
+          const image = live.images.get(preImageKey(c.type, c.api_name));
+          if (image) entries.push({ type: c.type, api_name: c.api_name, image });
+        }
+        for (const d of input.destructive) {
+          const image = live.images.get(preImageKey(d.type, d.api_name));
+          if (image && image.present !== false) {
+            entries.push({ type: d.type, api_name: d.api_name, image });
+          }
+        }
+        let dir = null;
+        let contained = false;
+        try {
+          fs11.mkdirSync(path6.join(stagingDir(), "_reverts"), { recursive: true });
+          const root = revertsRootReal();
+          dir = revertDirFor(stagingDir(), requestId);
+          fs11.mkdirSync(dir);
+          assertRealRevertDir(root, requestId);
+          contained = true;
+          return { dir, ...writeRevertPreImages(dir, entries) };
+        } catch (err2) {
+          const error2 = String(err2 instanceof Error ? err2.message : err2).slice(0, 300);
+          log("warn", "could not write revert pre-images", { requestId, error: error2 });
+          if (contained && dir) fs11.rmSync(dir, { recursive: true, force: true });
+          return { dir, error: error2 };
+        }
+      }
+      /**
+       * S45 F4: remove one request's revert package (staging/_reverts/<id>) —
+       * the inline cleanup a return site decides (payload missing, org-reported
+       * rollback, supersede, expired or locked code). Best-effort and contained:
+       * removed only when `_reverts` is the real staging/_reverts and the entry
+       * is a real directory directly under it — a link (at either level) is
+       * never followed and never removed; the skip is logged.
+       */
+      removeRevertDir(requestId) {
+        try {
+          const dir = revertDirFor(stagingDir(), requestId);
+          if (!fs11.lstatSync(dir, { throwIfNoEntry: false })) return;
+          assertRealRevertDir(revertsRootReal(), requestId);
+          fs11.rmSync(dir, { recursive: true, force: true });
+        } catch (err2) {
+          log("warn", "could not remove revert package", {
+            requestId,
+            error: String(err2 instanceof Error ? err2.message : err2).slice(0, 300)
+          });
+        }
+      }
+      /**
+       * S45 F4: the revert-package sweep. Runs only where a new deploy code is
+       * about to be issued — never on a dry run. It first expires stale
+       * 'validated' requests of every kind and connection (expiry used to be
+       * lazy, so a never-executed validation kept its payload and pre-images
+       * forever), then removes each staging/_reverts/<id> its request can no
+       * longer use: no request, superseded, expired or locked; execution_failed
+       * without a revert-plan.json (rollback or missing payload — nothing
+       * committed); executed, or an outcome-unknown plan, older than
+       * deploy.revertRetentionDays (0 = never). validated and executing are kept
+       * (execute finalizes into the dir). Best-effort: never blocks a validation.
+       * Containment: links are never followed — `_reverts` must be the real
+       * staging/_reverts (revertsRootReal), only UUID-named real directories
+       * directly under it are ever removed (any other entry is skipped and
+       * logged), and both facts are re-checked immediately before each removal;
+       * a mismatch stops the sweep. A residual microsecond race between that
+       * re-check and the removal can at worst hit a UUID-named directory.
+       */
+      sweepRevertDirs() {
+        try {
+          const expired = this.db.expireStaleValidatedRequests((/* @__PURE__ */ new Date()).toISOString());
+          for (const e of expired) if (e.payloadPath) safeUnlink(e.payloadPath);
+          if (expired.length > 0) {
+            this.audit.record("deploy.expired", {
+              tool: "validate_deploy",
+              detail: { count: expired.length, requestIds: expired.map((e) => e.id) }
+            });
+          }
+        } catch (err2) {
+          log("warn", "could not expire stale validations", { err: String(err2) });
+        }
+        let root;
+        let entries;
+        try {
+          if (!fs11.lstatSync(path6.join(stagingDir(), "_reverts"), { throwIfNoEntry: false })) return;
+          root = revertsRootReal();
+          entries = fs11.readdirSync(root, { withFileTypes: true });
+        } catch (err2) {
+          log("warn", "could not sweep revert packages", { err: String(err2) });
+          return;
+        }
+        const days = this.config.deploy.revertRetentionDays;
+        const cutoff = days > 0 ? Date.now() - days * 24 * 60 * 60 * 1e3 : null;
+        let skippedNames = 0;
+        for (const d of entries) {
+          if (d.isSymbolicLink() || !d.isDirectory()) continue;
+          if (!REQUEST_ID_RE.test(d.name)) {
+            skippedNames += 1;
+            continue;
+          }
+          const dir = path6.join(stagingDir(), "_reverts", d.name);
+          try {
+            const status = this.db.getDeployRequestStatus(d.name);
+            const planFile = path6.join(dir, "revert-plan.json");
+            let reason = null;
+            if (status === null || status === "superseded" || status === "expired" || status === "locked") {
+              reason = status ?? "no_request";
+            } else if (status === "execution_failed" && !fs11.existsSync(planFile)) {
+              reason = "execution_failed";
+            } else if ((status === "executed" || status === "execution_failed") && cutoff !== null) {
+              const age = fs11.statSync(fs11.existsSync(planFile) ? planFile : dir).mtimeMs;
+              if (age < cutoff) reason = "retention";
+            }
+            if (reason === null) continue;
+            try {
+              if (!samePath(revertsRootReal(), root)) throw new Error("_reverts moved");
+              assertRealRevertDir(root, d.name);
+            } catch (err2) {
+              log("warn", "revert sweep stopped: _reverts changed under it", {
+                dir: d.name,
+                err: String(err2)
+              });
+              return;
+            }
+            fs11.rmSync(dir, { recursive: true, force: true });
+            this.audit.record("deploy.revert_swept", {
+              tool: "validate_deploy",
+              detail: { requestId: d.name, reason }
+            });
+          } catch (err2) {
+            log("warn", "could not sweep a revert package", { dir: d.name, err: String(err2) });
+          }
+        }
+        if (skippedNames > 0) {
+          log("warn", "revert sweep skipped entries that are not request ids", {
+            count: skippedNames
+          });
+        }
+      }
+      /**
+       * S45 F4: finalize the frozen revert package beside the pre-images
+       * validate wrote — revert-plan.json + README.txt — on 'executed', and with
+       * outcome:'unknown' when Contrail lost track of the deploy (it MAY have
+       * committed). Returns the payload fields: `revert_package`, or null plus a
+       * `revert_note` when no package exists — never a snapshot-based revert,
+       * which could restore a state the org never had. `targetCheck` is the
+       * execute-time guard's pass result (null until that guard runs). Never
+       * throws: the deploy's own outcome stands whatever happens here.
+       */
+      finalizeRevert(conn, request, summary, opts) {
+        const live = summary.live_check;
+        if (!live) {
+          return {
+            revert_package: null,
+            revert_note: "No revert package: this request was validated without a live pre-image retrieve, so Contrail holds no copy of what the org had before."
+          };
+        }
+        if (live.status !== "ok") {
+          return {
+            revert_package: null,
+            revert_note: `No revert package: the live pre-image retrieve was unavailable when this deploy was validated (${live.reason ?? "no reason recorded"}), so Contrail holds no copy of what the org had before. It does not build a revert from the local snapshot \u2014 that could restore a state the org never had.`
+          };
+        }
+        const pre = summary.revert_preimages;
+        if (!pre || "error" in pre) {
+          return {
+            revert_package: null,
+            revert_note: `No revert package: Contrail could not write the pre-image files when this deploy was validated (${pre?.error ?? "none were recorded"}).`
+          };
+        }
+        let dir = null;
+        try {
+          dir = revertDirFor(stagingDir(), request.id);
+          const stat = fs11.lstatSync(dir, { throwIfNoEntry: false });
+          if (!stat || !stat.isDirectory()) {
+            return {
+              revert_package: null,
+              revert_note: `No revert package: the pre-image files Contrail wrote at validate are no longer under ${dir}.`
+            };
+          }
+          assertRealRevertDir(revertsRootReal(), request.id);
+          for (const name of ["revert-plan.json", "README.txt"]) {
+            const target = path6.join(dir, name);
+            const st = fs11.lstatSync(target, { throwIfNoEntry: false });
+            if (!st) continue;
+            if (st.isDirectory() && !st.isSymbolicLink()) {
+              throw new ContrailError(`${target} is a directory, not a revert file`, "unsafe_path");
+            }
+            fs11.unlinkSync(target);
+          }
+          const unknown2 = opts.unknown;
+          const plan = {
+            request_id: request.id,
+            connection: conn.alias,
+            executed_at: unknown2 ? null : (/* @__PURE__ */ new Date()).toISOString(),
+            retrieved_at: live.at,
+            retrieve_started_at: live.started_at,
+            target_check: opts.targetCheck ?? null,
+            components: pre.components,
+            destructive: pre.absent,
+            not_restorable: pre.not_restorable,
+            // Requests validated before covered existed carry none.
+            covered: pre.covered ?? [],
+            note: unknown2 ? `Contrail lost track of this deploy (${unknown2.error.slice(0, 300)}); check Setup \u2192 Deployment Status. If it committed, these files are what the org held when this package was validated.` : "Pre-images retrieved when this deploy was validated; README.txt says what a revert does and does not undo. Contrail never deploys a revert on its own.",
+            ...unknown2 ? {
+              outcome: "unknown",
+              ...unknown2.deployId ? { deploy_id: unknown2.deployId } : {}
+            } : {}
+          };
+          const finalized = finalizeRevertPackage(dir, plan);
+          this.audit.record("deploy.revert_written", {
+            connectionId: conn.id,
+            tool: "execute_deploy",
+            detail: {
+              requestId: request.id,
+              dir,
+              restores: plan.components.length,
+              deletes: plan.destructive.length,
+              not_restorable: plan.not_restorable.length,
+              ...unknown2 ? { outcome: "unknown" } : {}
+            }
+          });
+          return {
+            revert_package: {
+              dir,
+              ...unknown2 ? { outcome: "unknown" } : {},
+              restores: plan.components,
+              deletes: plan.destructive,
+              not_restorable: plan.not_restorable,
+              ...plan.covered.length > 0 ? { covered: plan.covered } : {},
+              plan: finalized.plan_path,
+              note: finalized.readme
+            }
+          };
+        } catch (err2) {
+          const error2 = String(err2 instanceof Error ? err2.message : err2).slice(0, 300);
+          log("warn", "could not finalize the revert package", { requestId: request.id, error: error2 });
+          let planOnDisk = null;
+          if (dir) {
+            try {
+              planOnDisk = fs11.lstatSync(path6.join(dir, "revert-plan.json"), {
+                throwIfNoEntry: false
+              }) ? "present" : "absent";
+            } catch {
+              planOnDisk = "unknown";
+            }
+          }
+          return {
+            revert_package: null,
+            revert_note: `No revert package: Contrail could not finalize the revert files` + (dir ? ` under ${dir}` : "") + ` (${error2})` + (planOnDisk === "present" ? `; a revert-plan.json is still there, but this package was not finished \u2014 do not treat it as complete.` : planOnDisk === "absent" ? `; any pre-image files there have no revert-plan.json.` : planOnDisk === "unknown" ? `; Contrail could not check whether a revert-plan.json is there.` : `.`)
+          };
         }
       }
       async doValidate(conn, input, job) {
@@ -32031,9 +34485,13 @@ var init_engine2 = __esm({
           input.destructive
         );
         const permCoverage = analyzePermissionCoverage(input.components);
+        let aura = {
+          flipped: /* @__PURE__ */ new Set(),
+          toolingFailed: /* @__PURE__ */ new Map()
+        };
         if (input.components.some((c) => c.type === "AuraDefinitionBundle")) {
           if (job) job.progress = "live-checking Aura bundles against the org";
-          await this.auraLiveChecks(conn, input, changes);
+          aura = await this.auraLiveChecks(conn, input, changes);
         }
         const blast = [];
         for (const item of [...changes, ...destructive]) {
@@ -32050,14 +34508,44 @@ var init_engine2 = __esm({
             }
           }
         }
-        if (job) job.progress = "validating with Salesforce (checkOnly)";
         const soap = new MetadataSoapClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
-        const validationId = await soap.deploy(built.zip, {
-          checkOnly: true,
-          testLevel: input.testLevel,
-          runTests: input.runTests
-        });
-        const result = await this.pollDeploy(soap, validationId, job);
+        const liveCheckStartedAt = (/* @__PURE__ */ new Date()).toISOString();
+        const ctl = new AbortController();
+        let awaitingPreImages = false;
+        let preImagesP = null;
+        if (!input.dryRun) {
+          preImagesP = retrievePreImages(soap, [...input.components, ...input.destructive], {
+            startedAt: liveCheckStartedAt,
+            timeoutMs: this.config.deploy.preImageTimeoutMs,
+            pollIntervalMs: this.config.snapshot.pollIntervalMs,
+            extractZip: (zip) => this.store.extractRetrieveZip(zip),
+            signal: ctl.signal,
+            onProgress: (p) => {
+              if (job && awaitingPreImages) job.progress = p;
+            }
+          });
+        }
+        if (job) {
+          job.progress = input.dryRun ? "validating with Salesforce (checkOnly)" : "validating with Salesforce (checkOnly) \xB7 retrieving live pre-images";
+        }
+        let validationId;
+        let result;
+        let pre = null;
+        try {
+          validationId = await soap.deploy(built.zip, {
+            checkOnly: true,
+            testLevel: input.testLevel,
+            runTests: input.runTests
+          });
+          result = await this.pollDeploy(soap, validationId, job);
+          if (result.success && preImagesP) {
+            awaitingPreImages = true;
+            if (job) job.progress = "retrieving live pre-images";
+            pre = await preImagesP;
+          }
+        } finally {
+          ctl.abort();
+        }
         if (!result.success) {
           this.audit.record("deploy.validation_failed", {
             connectionId: conn.id,
@@ -32095,7 +34583,8 @@ var init_engine2 = __esm({
               validationId,
               components: input.components.length,
               deletions: input.destructive.length,
-              testLevel: input.testLevel
+              testLevel: input.testLevel,
+              ...sourceProvenance(input.components)
             }
           });
           const drySummary = {
@@ -32114,14 +34603,41 @@ var init_engine2 = __esm({
             code_coverage_warnings: result.codeCoverageWarnings.slice(0, 10),
             blast_radius: blast,
             permission_warning: permCoverage.warning,
-            expires_at: null
+            expires_at: null,
+            live_check: null
           };
           return { summary: drySummary, validation_passed: true, approval: null };
         }
+        const live = pre ?? {
+          status: "unavailable",
+          started_at: liveCheckStartedAt,
+          at: (/* @__PURE__ */ new Date()).toISOString(),
+          reason: "retrieve_failed:not started"
+        };
+        const liveCheck = {
+          status: live.status,
+          ...live.status === "unavailable" ? { reason: live.reason } : {},
+          started_at: live.started_at,
+          at: live.at,
+          ...result.createdDate ? {
+            org_clock: {
+              created_date: result.createdDate,
+              ...result.completedDate ? { completed_date: result.completedDate } : {}
+            }
+          } : {},
+          dates_unavailable_types: live.status === "ok" ? live.dates_unavailable_types : [],
+          ...live.status === "ok" && live.dates_unavailable !== void 0 ? { dates_unavailable: live.dates_unavailable } : {},
+          members: input.components.length + input.destructive.length
+        };
+        const review = this.applyLivePreImages(conn, input, changes, destructive, live, aura);
+        this.sweepRevertDirs();
         {
           const superseded = this.db.supersedePendingRequests(conn.id, "deploy");
           if (superseded > 0) {
-            for (const p of this.db.takeSupersededPayloadPaths(conn.id, "deploy")) safeUnlink(p);
+            for (const p of this.db.takeSupersededPayloadPaths(conn.id, "deploy")) {
+              safeUnlink(p);
+              this.removeRevertDir(path6.basename(p, ".zip"));
+            }
             this.audit.record("deploy.superseded", {
               connectionId: conn.id,
               tool: "validate_deploy",
@@ -32137,12 +34653,25 @@ var init_engine2 = __esm({
           confirmationCode: code,
           expiresAt,
           payloadJson: JSON.stringify({ testLevel: input.testLevel, runTests: input.runTests }),
-          summaryJson: JSON.stringify({ changes, destructive, blast }),
+          summaryJson: JSON.stringify({ changes, destructive, blast, live_check: liveCheck }),
           validationId
         });
-        const zipPath = path5.join(deploysDir(), `${request.id}.zip`);
-        fs10.writeFileSync(zipPath, built.zip);
+        const zipPath = path6.join(deploysDir(), `${request.id}.zip`);
+        fs11.writeFileSync(zipPath, built.zip);
         this.db.setDeployRequestPayloadPath(request.id, zipPath);
+        if (live.status === "ok") {
+          const revert = this.writeRevertFiles(request.id, input, live);
+          this.db.setDeployRequestSummaryJson(
+            request.id,
+            JSON.stringify({
+              changes,
+              destructive,
+              blast,
+              live_check: liveCheck,
+              revert_preimages: revert
+            })
+          );
+        }
         const summary = {
           connection: conn.alias,
           org_type: conn.orgType,
@@ -32159,8 +34688,10 @@ var init_engine2 = __esm({
           code_coverage_warnings: result.codeCoverageWarnings.slice(0, 10),
           blast_radius: blast,
           permission_warning: permCoverage.warning,
-          expires_at: expiresAt
+          expires_at: expiresAt,
+          live_check: liveCheck
         };
+        const diffs = this.rowDiffs(conn, input, changes, live);
         const view = {
           kind: "deploy",
           code,
@@ -32171,11 +34702,19 @@ var init_engine2 = __esm({
             orgType: conn.orgType,
             instanceUrl: conn.instanceUrl
           },
-          changes: changes.map((c) => ({
-            label: `${c.change.toUpperCase()}  ${c.type}:${c.api_name}`,
-            warnings: c.warnings,
-            ...c.source_path ? { detail: `from ${c.source_path}  \xB7  sha256 ${(c.source_sha256 ?? "").slice(0, 16)}\u2026` } : {}
-          })),
+          changes: changes.map((c) => {
+            const detail = [
+              c.source_path ? `from ${c.source_path}  \xB7  sha256 ${(c.source_sha256 ?? "").slice(0, 16)}\u2026` : null,
+              review.attributions.get(c) ?? null
+            ].filter((d) => d !== null).join("\n");
+            const diff = diffs.get(c);
+            return {
+              label: `${c.change.toUpperCase()}  ${c.type}:${c.api_name}`,
+              warnings: c.warnings,
+              ...detail ? { detail } : {},
+              ...diff ? { diff } : {}
+            };
+          }),
           destructive: destructive.map((c) => ({
             label: `DELETE  ${c.type}:${c.api_name}`,
             warnings: c.warnings
@@ -32190,7 +34729,12 @@ var init_engine2 = __esm({
             }
           ],
           blast,
-          warnings: permCoverage.warning ? [permCoverage.warning] : []
+          // S45 hook 6: the live-check lines ride view.warnings, so the phone's
+          // warning count includes them with notify.ts untouched.
+          warnings: [
+            ...permCoverage.warning ? [permCoverage.warning] : [],
+            ...this.liveCheckWarnings(conn, input, live, review.changedInTarget)
+          ]
         };
         const approval = await this.approvals.present(
           renderApprovalPage(view),
@@ -32206,7 +34750,8 @@ var init_engine2 = __esm({
             validationId,
             components: input.components.length,
             deletions: input.destructive.length,
-            testLevel: input.testLevel
+            testLevel: input.testLevel,
+            ...sourceProvenance(input.components)
           }
         });
         return {
@@ -32216,30 +34761,85 @@ var init_engine2 = __esm({
         };
       }
       async executeDeploy(conn, code) {
-        const claim = this.claimCode(conn, "deploy", code, "execute_deploy");
-        if (claim.kind === "terminal") {
-          return { status: "complete", result: claim.result };
+        const peek = this.db.findRequestByCode(conn.id, "deploy", code);
+        if (!peek || peek.status !== "validated" || new Date(peek.expiresAt).getTime() < Date.now()) {
+          if (peek && peek.status === "superseded" && this.jobs.has(`deploy-exec:${peek.id}`)) {
+            return this.runDeployExecJob(`deploy-exec:${peek.id}`, peek, async () => ({
+              kind: "running"
+            }));
+          }
+          const claim = this.claimCode(conn, "deploy", code, "execute_deploy");
+          if (claim.kind === "terminal") {
+            return { status: "complete", result: claim.result };
+          }
+          const jobKey = `deploy-exec:${claim.request.id}`;
+          if (claim.kind === "running" && !this.jobs.has(jobKey)) {
+            return {
+              status: "in_progress",
+              progress: "a deploy for this code is already in progress",
+              started_at: claim.request.createdAt
+            };
+          }
+          return this.runDeployExecJob(jobKey, claim.request, async (job) => ({
+            kind: "result",
+            result: await this.doExecute(conn, claim.request, job)
+          }));
         }
-        const jobKey = `deploy-exec:${claim.request.id}`;
-        if (claim.kind === "running" && !this.jobs.has(jobKey)) {
+        const request = peek;
+        return this.runDeployExecJob(`deploy-exec:${request.id}`, request, async (job) => {
+          job.progress = "re-checking the target org before claiming the code";
+          const guard = await this.preflightTargetMoved(conn, "deploy", request, "execute_deploy", {
+            deadlineMs: TARGET_CHECK_DEADLINE_MS
+          });
+          if (guard.verdict === "moved") return { kind: "result", result: guard.result };
+          let claim;
+          try {
+            claim = this.claimCode(conn, "deploy", code, "execute_deploy");
+          } catch (err2) {
+            if (err2 instanceof ContrailError) return { kind: "refused", error: err2 };
+            throw err2;
+          }
+          if (claim.kind === "terminal") return { kind: "result", result: claim.result };
+          if (claim.kind === "running") return { kind: "running" };
+          const targetCheck = guard.verdict === "proceed" ? guard.targetCheck : void 0;
+          return {
+            kind: "result",
+            result: await this.doExecute(conn, claim.request, job, targetCheck)
+          };
+        });
+      }
+      /**
+       * S45 F2: run (or re-attach to) the deploy-exec job and map its step to
+       * the tool's outcome. A claim refusal raised inside the job is re-thrown
+       * here, exactly as the synchronous path throws it; a claim another caller
+       * won maps to the same poll-again shape as today's 'running' case.
+       */
+      async runDeployExecJob(jobKey, request, work) {
+        const outcome = await this.runJob(jobKey, work);
+        if (outcome.status !== "complete") return outcome;
+        const step = outcome.result;
+        if (step.kind === "refused") throw step.error;
+        if (step.kind === "running") {
           return {
             status: "in_progress",
             progress: "a deploy for this code is already in progress",
-            started_at: claim.request.createdAt
+            started_at: request.createdAt
           };
         }
-        return this.runJob(jobKey, (job) => this.doExecute(conn, claim.request, job));
+        return { status: "complete", result: step.result };
       }
-      async doExecute(conn, request, job) {
+      async doExecute(conn, request, job, targetCheck) {
         const summary = JSON.parse(request.summaryJson);
+        const checkField = targetCheck ? { target_check: targetCheck } : {};
         const soap = new MetadataSoapClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
-        if (!request.payloadPath || !fs10.existsSync(request.payloadPath)) {
+        if (!request.payloadPath || !fs11.existsSync(request.payloadPath)) {
           this.audit.record("deploy.execution_failed", {
             connectionId: conn.id,
             tool: "execute_deploy",
             outcome: "error",
             detail: { requestId: request.id, reason: "payload_missing" }
           });
+          this.removeRevertDir(request.id);
           return this.finishExecution(conn, request, "execution_failed", {
             connection: conn.alias,
             deployed: false,
@@ -32247,7 +34847,7 @@ var init_engine2 = __esm({
             note: "Re-validate to produce a fresh package and code."
           });
         }
-        const zip = fs10.readFileSync(request.payloadPath);
+        const zip = fs11.readFileSync(request.payloadPath);
         const options = JSON.parse(request.payloadJson ?? "{}");
         if (job) job.progress = "deploying (checkOnly=false)";
         const quickEligible = typeof request.validationId === "string" && request.validationId.length > 0 && (options.testLevel !== void 0 ? options.testLevel !== "NoTestRun" : conn.orgType === "production");
@@ -32279,18 +34879,25 @@ var init_engine2 = __esm({
             await soap.cancelDeploy(id);
           });
         } catch (err2) {
-          const message = String(err2 instanceof Error ? err2.message : err2);
+          const message2 = String(err2 instanceof Error ? err2.message : err2);
           this.audit.record("deploy.execution_failed", {
             connectionId: conn.id,
             tool: "execute_deploy",
             outcome: "error",
-            detail: { requestId: request.id, error: message }
+            detail: { requestId: request.id, error: message2 }
           });
+          const revert = this.finalizeRevert(conn, request, summary, {
+            targetCheck,
+            unknown: { error: message2, ...deployId ? { deployId } : {} }
+          });
+          const kept = revert.revert_package?.dir;
           return this.finishExecution(conn, request, "execution_failed", {
             connection: conn.alias,
             deployed: false,
-            error_message: message,
-            note: "The deploy did not complete cleanly. The confirmation code is spent \u2014 check the org (Setup \u2192 Deployment Status) before retrying, and re-validate for a new code."
+            error_message: message2,
+            note: "The deploy did not complete cleanly. The confirmation code is spent \u2014 check the org (Setup \u2192 Deployment Status) before retrying, and re-validate for a new code." + (typeof kept === "string" ? ` If it committed, what the org held when this package was validated is kept under ${kept} (revert-plan.json, outcome "unknown").` : ""),
+            ...checkField,
+            ...revert
           });
         }
         const payload = {
@@ -32307,6 +34914,7 @@ var init_engine2 = __esm({
           test_failure_detail: this.gateTestDetail(conn, result),
           changes: summary.changes,
           destructive: summary.destructive,
+          ...checkField,
           ...result.success ? { note: "Deployed. Run refresh_snapshot to bring the local snapshot up to date." } : {
             error_message: result.errorMessage ?? null,
             note: "Deploy failed and rolled back (rollbackOnError)."
@@ -32324,6 +34932,11 @@ var init_engine2 = __esm({
             status: result.status
           }
         });
+        if (result.success) {
+          Object.assign(payload, this.finalizeRevert(conn, request, summary, { targetCheck }));
+        } else {
+          this.removeRevertDir(request.id);
+        }
         return this.finishExecution(
           conn,
           request,
@@ -32402,6 +35015,10 @@ var init_engine2 = __esm({
           },
           changes,
           destructive,
+          automation: this.automationCard(
+            conn,
+            isDmlPlan(input) ? input.steps.map((s) => s.object) : [input.object]
+          ),
           results,
           blast: [],
           ...isDmlPlan(input) && !input.all_or_none ? {
@@ -32432,16 +35049,26 @@ var init_engine2 = __esm({
             rows: preview.row_count
           }
         });
+        const { before, found, precheck, ...shown } = preview;
         return {
           connection: conn.alias,
           org_type: conn.orgType,
           request_id: request.id,
-          ...preview,
+          ...shown,
           expires_at: expiresAt,
           approval_page: { ...approvalForAgent("dml", approval), phone_notification: phone }
         };
       }
       async executeDml(conn, code) {
+        let targetCheck;
+        const peek = this.db.findRequestByCode(conn.id, "dml", code);
+        if (peek && peek.status === "validated" && new Date(peek.expiresAt).getTime() >= Date.now()) {
+          const guard = await this.preflightTargetMoved(conn, "dml", peek, "dml_execute", {
+            deadlineMs: TARGET_CHECK_DEADLINE_MS
+          });
+          if (guard.verdict === "moved") return guard.result;
+          if (guard.verdict === "proceed") targetCheck = guard.targetCheck;
+        }
         const claim = this.claimCode(conn, "dml", code, "dml_execute");
         if (claim.kind === "terminal") return claim.result;
         if (claim.kind === "running") {
@@ -32455,9 +35082,10 @@ var init_engine2 = __esm({
         const input = JSON.parse(request.payloadJson ?? "{}");
         const rest = new RestClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
         if (isDmlPlan(input)) {
-          return this.executeDmlPlan(conn, rest, request, input);
+          return this.executeDmlPlan(conn, rest, request, input, targetCheck);
         }
         const version2 = this.config.salesforce.apiVersion;
+        const checkField = targetCheck ? { target_check: targetCheck } : {};
         let results;
         try {
           if (input.operation === "delete") {
@@ -32479,21 +35107,22 @@ var init_engine2 = __esm({
             results = await res.json();
           }
         } catch (err2) {
-          const message = String(err2 instanceof Error ? err2.message : err2);
+          const message2 = String(err2 instanceof Error ? err2.message : err2);
           const payload2 = {
             connection: conn.alias,
             operation: input.operation,
             object: input.object,
             executed: false,
-            error_message: message,
-            note: "The change did not complete. The confirmation code is spent \u2014 verify the org state and re-propose for a fresh code if you still want the change."
+            error_message: message2,
+            note: "The change did not complete. The confirmation code is spent \u2014 verify the org state and re-propose for a fresh code if you still want the change.",
+            ...checkField
           };
           this.db.finishDeployRequest(request.id, "execution_failed", JSON.stringify(payload2));
           this.audit.record("dml.execution_failed", {
             connectionId: conn.id,
             tool: "dml_execute",
             outcome: "error",
-            detail: { requestId: request.id, error: message }
+            detail: { requestId: request.id, error: message2 }
           });
           return payload2;
         }
@@ -32508,6 +35137,7 @@ var init_engine2 = __esm({
           rows: results.length,
           ...createdIds.length ? { created_ids: createdIds } : {},
           failures: failures.slice(0, 25).map((f) => stripAttributes(f)),
+          ...checkField,
           ...succeeded ? {} : { note: "all-or-none: every row was rolled back because at least one failed." }
         };
         this.db.finishDeployRequest(request.id, succeeded ? "executed" : "execution_failed", JSON.stringify(payload));
@@ -32533,8 +35163,9 @@ var init_engine2 = __esm({
        * subrequest httpStatusCode (the top-level call returns 200 even when steps
        * failed — there is no `success` flag to read here).
        */
-      async executeDmlPlan(conn, rest, request, input) {
+      async executeDmlPlan(conn, rest, request, input, targetCheck) {
         const version2 = this.config.salesforce.apiVersion;
+        const checkField = targetCheck ? { target_check: targetCheck } : {};
         const refIds = input.steps.map((s, i) => stepReferenceId(s, i));
         const subrequests = input.steps.map((step, i) => {
           const base = `/services/data/${version2}/sobjects/${step.object}`;
@@ -32555,21 +35186,22 @@ var init_engine2 = __esm({
         try {
           responses = (await rest.composite(subrequests, input.all_or_none)).compositeResponse;
         } catch (err2) {
-          const message = String(err2 instanceof Error ? err2.message : err2);
+          const message2 = String(err2 instanceof Error ? err2.message : err2);
           const payload2 = {
             connection: conn.alias,
             plan: true,
             all_or_none: input.all_or_none,
             executed: false,
-            error_message: message,
-            note: "The plan did not complete. The confirmation code is spent \u2014 verify the org state and re-propose for a fresh code if you still want the change."
+            error_message: message2,
+            note: "The plan did not complete. The confirmation code is spent \u2014 verify the org state and re-propose for a fresh code if you still want the change.",
+            ...checkField
           };
           this.db.finishDeployRequest(request.id, "execution_failed", JSON.stringify(payload2));
           this.audit.record("dml.execution_failed", {
             connectionId: conn.id,
             tool: "dml_execute",
             outcome: "error",
-            detail: { requestId: request.id, plan: true, error: message }
+            detail: { requestId: request.id, plan: true, error: message2 }
           });
           return payload2;
         }
@@ -32614,6 +35246,7 @@ var init_engine2 = __esm({
           steps,
           ...Object.keys(createdIds).length ? { created_ids: createdIds } : {},
           failures: steps.filter((s) => s.status === "failed"),
+          ...checkField,
           ...executed ? {} : {
             note: input.all_or_none ? "all-or-none: every step was rolled back because at least one failed." : "continue-on-failure: successful steps were KEPT; failed/dependent steps were not applied."
           }
@@ -32662,6 +35295,7 @@ var init_engine2 = __esm({
           payloadJson: JSON.stringify({ apex: true, code: script }),
           summaryJson: JSON.stringify({ lines, chars: script.length })
         });
+        const apexObjects = this.apexScriptObjects(conn, script);
         const view = {
           kind: "apex",
           code,
@@ -32682,6 +35316,10 @@ var init_engine2 = __esm({
             }
           ],
           destructive: [],
+          automation: this.automationCard(conn, apexObjects ?? []),
+          // No object found in the text: the card still renders, saying so, with
+          // the not_covered lines (a failed parse keeps today's no-card page).
+          ...apexObjects !== null && apexObjects.length === 0 ? { automationNotCovered: [...NOT_COVERED] } : {},
           results: [
             {
               label: "Validation",
@@ -32733,7 +35371,8 @@ var init_engine2 = __esm({
             connection: conn.alias,
             executed: false,
             error_message: "The approved script is missing from the request payload.",
-            note: "Propose again for a fresh code."
+            note: "Propose again for a fresh code.",
+            target_check: { ...TARGET_CHECK_NOT_APPLICABLE }
           };
           this.db.finishDeployRequest(request.id, "execution_failed", JSON.stringify(result2));
           this.audit.record("apex.execution_failed", {
@@ -32752,19 +35391,20 @@ var init_engine2 = __esm({
           );
           exec = await res.json();
         } catch (err2) {
-          const message = String(err2 instanceof Error ? err2.message : err2);
+          const message2 = String(err2 instanceof Error ? err2.message : err2);
           const result2 = {
             connection: conn.alias,
             executed: false,
-            error_message: message,
-            note: "The request did not complete cleanly \u2014 the script may or may not have run. The confirmation code is spent; check the org (debug logs, affected records) before proposing it again."
+            error_message: message2,
+            note: "The request did not complete cleanly \u2014 the script may or may not have run. The confirmation code is spent; check the org (debug logs, affected records) before proposing it again.",
+            target_check: { ...TARGET_CHECK_NOT_APPLICABLE }
           };
           this.db.finishDeployRequest(request.id, "execution_failed", JSON.stringify(result2));
           this.audit.record("apex.execution_failed", {
             connectionId: conn.id,
             tool: "apex_execute",
             outcome: "error",
-            detail: { requestId: request.id, error: message }
+            detail: { requestId: request.id, error: message2 }
           });
           return result2;
         }
@@ -32787,6 +35427,8 @@ var init_engine2 = __esm({
           connection: conn.alias,
           executed: status === "executed",
           status,
+          // S45 F2: an anonymous script has no fixed org target to re-read.
+          target_check: { ...TARGET_CHECK_NOT_APPLICABLE },
           ...status === "compile_error" ? {
             compile_error: {
               line: exec.line,
@@ -32954,6 +35596,20 @@ POST /connect/bot-versions/${version2.Id}/activation`
         };
       }
       async executeActivation(conn, code) {
+        let targetCheck;
+        const peek = this.db.findRequestByCode(conn.id, "activation", code);
+        if (peek && peek.status === "validated" && new Date(peek.expiresAt).getTime() >= Date.now()) {
+          const guard = await this.preflightTargetMoved(
+            conn,
+            "activation",
+            peek,
+            "agent_activation_execute",
+            { deadlineMs: TARGET_CHECK_DEADLINE_MS }
+          );
+          if (guard.verdict === "moved") return guard.result;
+          if (guard.verdict === "proceed") targetCheck = guard.targetCheck;
+        }
+        const checkField = targetCheck ? { target_check: targetCheck } : {};
         const claim = this.claimCode(conn, "activation", code, "agent_activation_execute");
         if (claim.kind === "terminal") return claim.result;
         if (claim.kind === "running") {
@@ -32994,21 +35650,22 @@ POST /connect/bot-versions/${version2.Id}/activation`
           const check2 = await rest.request(resource);
           confirmed = await check2.json();
         } catch (err2) {
-          const message = String(err2 instanceof Error ? err2.message : err2);
+          const message2 = String(err2 instanceof Error ? err2.message : err2);
           const result2 = {
             connection: conn.alias,
             executed: false,
             agent: payload.bot_developer_name,
             version: payload.bot_version_developer_name,
-            error_message: message,
-            note: "The request did not complete cleanly \u2014 the change may or may not have applied. The confirmation code is spent; check BotVersion.Status (soql_query) before proposing again."
+            error_message: message2,
+            note: "The request did not complete cleanly \u2014 the change may or may not have applied. The confirmation code is spent; check BotVersion.Status (soql_query) before proposing again.",
+            ...checkField
           };
           this.db.finishDeployRequest(request.id, "execution_failed", JSON.stringify(result2));
           this.audit.record("activation.execution_failed", {
             connectionId: conn.id,
             tool: "agent_activation_execute",
             outcome: "error",
-            detail: { requestId: request.id, error: message }
+            detail: { requestId: request.id, error: message2 }
           });
           return result2;
         }
@@ -33025,6 +35682,7 @@ POST /connect/bot-versions/${version2.Id}/activation`
           is_activated: confirmed.isActivated === true,
           // The platform explains refusals (e.g. an unpublished version) here.
           messages: posted.messages ?? [],
+          ...checkField,
           note: executed ? `${payload.bot_developer_name} ${payload.bot_version_developer_name} is now ${confirmedStatus}. This changed live behavior \u2014 no deploy or refresh follows.` : `The org did not confirm the change: requested ${payload.to_status}, org reports ${confirmedStatus}. Read messages[] \u2014 the code is spent either way.`
         };
         this.db.finishDeployRequest(
@@ -33058,13 +35716,13 @@ POST /connect/bot-versions/${version2.Id}/activation`
         if (!days || days <= 0) return;
         const cutoff = Date.now() - days * 24 * 60 * 60 * 1e3;
         try {
-          for (const name of fs10.readdirSync(deploysDir())) {
+          for (const name of fs11.readdirSync(deploysDir())) {
             if (!name.endsWith("-results")) continue;
-            const full = path5.join(deploysDir(), name);
+            const full = path6.join(deploysDir(), name);
             try {
-              const stat = fs10.statSync(full);
+              const stat = fs11.statSync(full);
               if (stat.isDirectory() && stat.mtimeMs < cutoff) {
-                fs10.rmSync(full, { recursive: true, force: true });
+                fs11.rmSync(full, { recursive: true, force: true });
                 this.audit.record("bulk.results_swept", {
                   detail: { dir: name, ageDays: Math.round((Date.now() - stat.mtimeMs) / 864e5) }
                 });
@@ -33126,8 +35784,8 @@ POST /connect/bot-versions/${version2.Id}/activation`
             detail: { count: superseded }
           });
         }
-        const stageDir = path5.join(deploysDir(), `bulk-stage-${crypto3.randomUUID()}`);
-        fs10.mkdirSync(stageDir, { recursive: true });
+        const stageDir = path6.join(deploysDir(), `bulk-stage-${crypto4.randomUUID()}`);
+        fs11.mkdirSync(stageDir, { recursive: true });
         const manifest = {
           bulk: true,
           version: 1,
@@ -33142,7 +35800,7 @@ POST /connect/bot-versions/${version2.Id}/activation`
             const label = `step ${n} (${s.displayName})`;
             let stat;
             try {
-              stat = fs10.statSync(s.sourcePath);
+              stat = fs11.statSync(s.sourcePath);
             } catch {
               throw new ContrailError(`${label}: the file does not exist`, "source_not_found");
             }
@@ -33155,7 +35813,7 @@ POST /connect/bot-versions/${version2.Id}/activation`
                 "source_too_large"
               );
             }
-            const bytes = fs10.readFileSync(s.sourcePath);
+            const bytes = fs11.readFileSync(s.sourcePath);
             const isTsv = s.sourcePath.toLowerCase().endsWith(".tsv");
             let scan;
             try {
@@ -33185,7 +35843,7 @@ POST /connect/bot-versions/${version2.Id}/activation`
             }
             const frozen = scan.hadBom ? bytes.subarray(UTF8_BOM.length) : bytes;
             const file = `step-${n}.${isTsv ? "tsv" : "csv"}`;
-            fs10.writeFileSync(path5.join(stageDir, file), frozen);
+            fs11.writeFileSync(path6.join(stageDir, file), frozen);
             manifest.steps.push({
               n,
               object: s.object,
@@ -33193,7 +35851,7 @@ POST /connect/bot-versions/${version2.Id}/activation`
               external_id_field: s.externalIdField ?? null,
               file,
               display_name: s.displayName,
-              sha256: crypto3.createHash("sha256").update(frozen).digest("hex"),
+              sha256: crypto4.createHash("sha256").update(frozen).digest("hex"),
               row_count: scan.rowCount,
               headers: scan.headers,
               line_ending: scan.lineEnding,
@@ -33203,7 +35861,7 @@ POST /connect/bot-versions/${version2.Id}/activation`
             scanWarnings.push(scan.warnings);
           }
         } catch (err2) {
-          fs10.rmSync(stageDir, { recursive: true, force: true });
+          fs11.rmSync(stageDir, { recursive: true, force: true });
           throw err2;
         }
         const totalRows = manifest.steps.reduce((sum, s) => sum + s.row_count, 0);
@@ -33245,11 +35903,11 @@ columns: ${columnsLabel(m.headers)}`,
             payloadJson: JSON.stringify(manifest),
             summaryJson: JSON.stringify(preview)
           });
-          const payloadDir = path5.join(deploysDir(), request.id);
-          fs10.renameSync(stageDir, payloadDir);
+          const payloadDir = path6.join(deploysDir(), request.id);
+          fs11.renameSync(stageDir, payloadDir);
           this.db.setDeployRequestPayloadPath(request.id, payloadDir);
         } catch (err2) {
-          fs10.rmSync(stageDir, { recursive: true, force: true });
+          fs11.rmSync(stageDir, { recursive: true, force: true });
           throw err2;
         }
         const view = {
@@ -33264,6 +35922,7 @@ columns: ${columnsLabel(m.headers)}`,
           },
           changes: rows.filter((r) => !r.destructive),
           destructive: rows.filter((r) => r.destructive),
+          automation: this.automationCard(conn, manifest.steps.map((s) => s.object)),
           results: [
             {
               label: "Plan",
@@ -33343,7 +36002,7 @@ columns: ${columnsLabel(m.headers)}`,
       }
       async doExecuteBulk(conn, request, job) {
         const manifest = JSON.parse(request.payloadJson ?? "{}");
-        if (manifest.bulk !== true || !Array.isArray(manifest.steps) || manifest.steps.length === 0 || !request.payloadPath || !fs10.existsSync(request.payloadPath)) {
+        if (manifest.bulk !== true || !Array.isArray(manifest.steps) || manifest.steps.length === 0 || !request.payloadPath || !fs11.existsSync(request.payloadPath)) {
           this.audit.record("bulk.execution_failed", {
             connectionId: conn.id,
             tool: "bulk_load_execute",
@@ -33355,21 +36014,22 @@ columns: ${columnsLabel(m.headers)}`,
             bulk: true,
             executed: false,
             error_message: "The frozen CSV payload is missing from disk.",
-            note: "Nothing was sent to the org. Re-propose to freeze the files again."
+            note: "Nothing was sent to the org. Re-propose to freeze the files again.",
+            target_check: { ...TARGET_CHECK_NOT_APPLICABLE_BULK }
           });
         }
         const version2 = this.config.salesforce.apiVersion;
         const rest = new RestClient(this.tokenMgr, conn, version2);
-        const resultsDir = path5.join(deploysDir(), `${request.id}-results`);
+        const resultsDir = path6.join(deploysDir(), `${request.id}-results`);
         let resultsDirMade = false;
         const writeResultCsv = (name, csv) => {
           if (csv.trim().split("\n").length < 2) return null;
           if (!resultsDirMade) {
-            fs10.mkdirSync(resultsDir, { recursive: true });
+            fs11.mkdirSync(resultsDir, { recursive: true });
             resultsDirMade = true;
           }
-          const p = path5.join(resultsDir, name);
-          fs10.writeFileSync(p, csv);
+          const p = path6.join(resultsDir, name);
+          fs11.writeFileSync(p, csv);
           return p;
         };
         const steps = manifest.steps;
@@ -33383,16 +36043,16 @@ columns: ${columnsLabel(m.headers)}`,
         for (const m of steps) {
           const stepLabel = `step ${m.n}/${total}: ${m.operation.toUpperCase()} ${m.object}`;
           if (job) job.progress = `${stepLabel} \u2014 verifying frozen file`;
-          const frozenPath = path5.join(request.payloadPath, m.file);
+          const frozenPath = path6.join(request.payloadPath, m.file);
           let failedHard = null;
           let info = null;
           let jobId = null;
           let frozen = null;
-          if (!fs10.existsSync(frozenPath)) {
+          if (!fs11.existsSync(frozenPath)) {
             failedHard = "the frozen CSV for this step is missing from the payload directory";
           } else {
-            frozen = fs10.readFileSync(frozenPath);
-            const sha = crypto3.createHash("sha256").update(frozen).digest("hex");
+            frozen = fs11.readFileSync(frozenPath);
+            const sha = crypto4.createHash("sha256").update(frozen).digest("hex");
             if (sha !== m.sha256) {
               failedHard = "the frozen CSV no longer matches the hash the human approved (frozen_payload_tampered) \u2014 refusing to send it";
               frozen = null;
@@ -33502,6 +36162,9 @@ columns: ${columnsLabel(m.headers)}`,
           total_failed: totalFailed,
           ...haltedAfterStep !== null ? { halted_after_step: haltedAfterStep } : {},
           ...resultsDirMade ? { results_dir: resultsDir } : {},
+          // S45 F2: bulk loads are not re-checked — the page showed no current
+          // values for their rows, so there is nothing to compare against.
+          target_check: { ...TARGET_CHECK_NOT_APPLICABLE_BULK },
           note: executed ? `All ${stepResults.length} step(s) completed: ${totalProcessed.toLocaleString("en-US")} rows loaded. Bulk writes bypass no automation \u2014 triggers and flows ran normally.` : "At least one step did not fully succeed. Rows loaded by completed steps REMAIN in the org (there is no cross-job rollback). Failed and unprocessed rows were written as CSV files \u2014 open them at the paths above (the trailing sf__Error column names each cause), fix, and re-propose ONLY those rows. The confirmation code is spent."
         };
         this.audit.record(executed ? "bulk.executed" : "bulk.execution_failed", {
@@ -33534,12 +36197,459 @@ columns: ${columnsLabel(m.headers)}`,
           if (job) {
             job.progress = `${stepLabel} \u2014 ${info.state} (${info.numberRecordsProcessed.toLocaleString("en-US")} processed, ${info.numberRecordsFailed.toLocaleString("en-US")} failed)`;
           }
-          await delay3(this.config.bulkLoad.pollIntervalMs);
+          await delay4(this.config.bulkLoad.pollIntervalMs);
           info = await getIngestJob(rest, this.config.salesforce.apiVersion, jobId);
         }
         return info;
       }
       // ── shared internals ───────────────────────────────────────────────────
+      /**
+       * S45 F2: the execute-time "target moved" guard. Runs BEFORE claimCode,
+       * after a synchronous peek found a live 'validated' code; read-only — it
+       * voids only through the atomic voidRequestWithResult, and never registers
+       * an attempt. Bounded by `deadlineMs`.
+       *
+       * Moved → the request is voided with the result (refusal included) as its
+       * result_json, so re-sending the code replays that refusal; the payload
+       * and (deploy) the revert package are removed; `<kind>.target_moved` is
+       * audited; the SAME result object is returned as the call's terminal
+       * result. Losing the void race (another caller claimed first) falls
+       * through to claimCode. When the guard's own org read fails or outlives
+       * the deadline — Ryley's decision, 2026-11-14 — it FAILS OPEN WITH
+       * DISCLOSURE: execution continues, the result's target_check is
+       * {status:'unavailable', reason, note}, and deploy.target_check_unavailable
+       * is audited here, BEFORE the claim, so the record exists even if the
+       * write then fails. A probe that compared nothing (target_check
+       * 'not_checked') proceeds the same way, audited with reason 'no_baseline'
+       * (no baseline existed) or 'nothing_compared' (every member unchecked for
+       * its own reason). The desktop's notice keys on 'unavailable' OR
+       * 'not_checked'.
+       */
+      async preflightTargetMoved(conn, kind, request, tool, opts) {
+        let probe;
+        try {
+          probe = await withDeadline(
+            opts.deadlineMs,
+            (signal) => kind === "deploy" ? this.probeDeployTarget(conn, request) : kind === "dml" ? this.probeDmlTarget(conn, request, signal) : this.probeActivationTarget(conn, request, signal)
+          );
+        } catch (err2) {
+          const reason = err2 instanceof TargetCheckDeadline ? `the org did not answer within ${Math.round(opts.deadlineMs / 1e3)} s` : String(err2 instanceof Error ? err2.message : err2).slice(0, 300);
+          this.audit.record("deploy.target_check_unavailable", {
+            connectionId: conn.id,
+            tool,
+            outcome: "error",
+            detail: { requestId: request.id, kind, reason }
+          });
+          return {
+            verdict: "proceed",
+            // The desktop's "executed without a target check" notice keys on this
+            // status and on 'not_checked' (targetCheckOf).
+            targetCheck: {
+              status: "unavailable",
+              reason,
+              note: targetCheckUnavailableNote(kind, reason)
+            }
+          };
+        }
+        if (probe.moved === null) {
+          if (probe.targetCheck.status === "not_checked") {
+            const tc = probe.targetCheck;
+            const reason = nothingComparedReason(tc.checked ?? [], tc.unchecked ?? []) ?? "nothing_compared";
+            this.audit.record("deploy.target_check_unavailable", {
+              connectionId: conn.id,
+              tool,
+              outcome: "error",
+              detail: { requestId: request.id, kind, reason }
+            });
+          }
+          return { verdict: "proceed", targetCheck: probe.targetCheck };
+        }
+        if (!this.db.voidRequestWithResult(request.id, JSON.stringify(probe.moved))) {
+          return { verdict: "lost_race" };
+        }
+        if (request.payloadPath) safeUnlink(request.payloadPath);
+        if (kind === "deploy") this.removeRevertDir(request.id);
+        this.audit.record(`${kind}.target_moved`, {
+          connectionId: conn.id,
+          tool,
+          outcome: "refused",
+          detail: { requestId: request.id, ...probe.audit }
+        });
+        return { verdict: "moved", result: probe.moved };
+      }
+      /**
+       * S45 F2, deploy: re-list every member with the SAME listMetadataDetailed /
+       * listMetadataQueries calls the validate-time live check made (children by
+       * their own type, foldered members scoped to their folder), so baseline and
+       * probe share one source, and compare stamps as epoch ms. A member whose
+       * type cannot be enumerated (at validate or now), or whose frozen stamp is
+       * missing, is reported `unchecked` — NEVER a void. With no live baseline
+       * (the retrieve was unavailable at validate) the ORG clock anchors the
+       * check: a stamp at or after the checkOnly DeployResult's createdDate
+       * minus 5 s counts as moved (fail-closed in that margin); no org clock →
+       * every member unchecked — never a host-clock comparison.
+       */
+      async probeDeployTarget(conn, request) {
+        const summary = JSON.parse(request.summaryJson);
+        const live = summary.live_check ?? null;
+        const members = [];
+        const seen = /* @__PURE__ */ new Set();
+        for (const m of [...summary.changes ?? [], ...summary.destructive ?? []]) {
+          const key2 = preImageKey(m.type, m.api_name);
+          if (seen.has(key2)) continue;
+          seen.add(key2);
+          members.push(m);
+        }
+        const checked = [];
+        const unchecked = [];
+        const moved = [];
+        const uncheck = (m, reason) => unchecked.push({ type: m.type, api_name: m.api_name, reason });
+        const toProbe = [];
+        let threshold = null;
+        let degrade;
+        let note;
+        if (live?.status === "ok") {
+          const datesCovered = (type) => live.dates_unavailable === void 0 && !live.dates_unavailable_types.includes(type);
+          for (const m of members) {
+            const pre = m.pre_image;
+            if (!pre || pre.present === null) uncheck(m, "type_not_enumerable");
+            else if (pre.present === true && Number.isNaN(Date.parse(pre.last_modified_date ?? ""))) {
+              uncheck(m, "dates_unavailable_at_validate");
+            } else if (pre.present === false && !datesCovered(m.type)) {
+              uncheck(m, "dates_unavailable_at_validate");
+            } else if (preImageListQueryFor(m) === null) uncheck(m, "type_not_enumerable");
+            else toProbe.push(m);
+          }
+        } else {
+          const created = live?.org_clock?.created_date;
+          const createdMs = created ? Date.parse(created) : NaN;
+          const liveReason = live?.reason ?? "no live check was recorded";
+          if (!created || Number.isNaN(createdMs)) {
+            for (const m of members) uncheck(m, "live_check_unavailable_no_org_clock");
+            note = `No live baseline was captured when this package was validated (${liveReason}) and no org-side validation time was recorded, so Contrail had nothing to compare last-modified stamps against: every member is unchecked, and this deploy ran without a target check.`;
+          } else {
+            threshold = createdMs - ORG_CLOCK_MARGIN_MS;
+            degrade = { org_clock_created_date: created, live_check_reason: liveReason };
+            for (const m of members) {
+              if (preImageListQueryFor(m) === null) uncheck(m, "type_not_enumerable");
+              else toProbe.push(m);
+            }
+          }
+        }
+        let checkedAt = (/* @__PURE__ */ new Date()).toISOString();
+        if (toProbe.length > 0) {
+          const soap = new MetadataSoapClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
+          const { types, folderQueries } = buildPreImageListQueries(toProbe);
+          const none = { props: [], unsupportedTypes: [] };
+          const [flat, foldered] = await Promise.all([
+            types.length > 0 ? soap.listMetadataDetailed(types) : Promise.resolve(none),
+            folderQueries.length > 0 ? soap.listMetadataQueries(folderQueries) : Promise.resolve(none)
+          ]);
+          checkedAt = (/* @__PURE__ */ new Date()).toISOString();
+          const props = [...flat.props, ...foldered.props];
+          const unsupported = /* @__PURE__ */ new Set([...flat.unsupportedTypes, ...foldered.unsupportedTypes]);
+          for (const m of toProbe) {
+            if (unsupported.has(m.type)) {
+              uncheck(m, "type_not_enumerable");
+              continue;
+            }
+            const row = listedPropFor(props, m.type, m.api_name);
+            const stamps = {
+              last_modified_by: row?.lastModifiedByName ? row.lastModifiedByName : null,
+              last_modified_date: row?.lastModifiedDate ? row.lastModifiedDate : null
+            };
+            const name = { type: m.type, api_name: m.api_name };
+            const undated = row !== void 0 && Number.isNaN(Date.parse(row.lastModifiedDate));
+            if (threshold !== null) {
+              if (!row) {
+                if (m.change === "add") checked.push(name);
+                else uncheck(m, "absent_no_baseline");
+              } else if (undated) {
+                uncheck(m, "dates_unavailable_at_execute");
+              } else if (Date.parse(row.lastModifiedDate) >= threshold) {
+                moved.push({ ...name, ...stamps, frozen_date: null, state: "changed" });
+              } else {
+                checked.push(name);
+              }
+              continue;
+            }
+            const pre = m.pre_image;
+            if (pre.present === true && !row) {
+              moved.push({
+                ...name,
+                last_modified_by: null,
+                last_modified_date: null,
+                frozen_date: pre.last_modified_date,
+                state: "gone"
+              });
+            } else if (pre.present === false && row) {
+              moved.push({ ...name, ...stamps, frozen_date: null, state: "created" });
+            } else if (undated) {
+              uncheck(m, "dates_unavailable_at_execute");
+            } else if (row && Date.parse(row.lastModifiedDate) !== Date.parse(pre.last_modified_date ?? "")) {
+              moved.push({ ...name, ...stamps, frozen_date: pre.last_modified_date, state: "changed" });
+            } else {
+              checked.push(name);
+            }
+          }
+        }
+        const targetCheck = targetCheckOf(checkedAt, checked, unchecked, note ?? "");
+        if (moved.length === 0) return { moved: null, targetCheck, audit: {} };
+        const refusal = targetMovedRefusalText("deploy", {
+          at: hhmm(checkedAt),
+          alias: conn.alias,
+          moved,
+          ...degrade ? { degrade } : {}
+        });
+        return {
+          moved: {
+            connection: conn.alias,
+            executed: false,
+            deployed: false,
+            target_moved: true,
+            checked_at: checkedAt,
+            moved,
+            ...unchecked.length > 0 ? { unchecked } : {},
+            refusal,
+            note: "Nothing was deployed and this confirmation code is void. Re-run validate_deploy to see the current state of the org and get a fresh code."
+          },
+          targetCheck,
+          audit: {
+            checked_at: checkedAt,
+            moved: moved.map((m) => ({ type: m.type, api_name: m.api_name, state: m.state })),
+            ...degrade ? { org_clock_fallback: true } : {}
+          }
+        };
+      }
+      /**
+       * S45 F2, DML: re-run the SAME SOQL the preview ran and compare the old
+       * values the approval page showed (persisted untruncated in summaryJson)
+       * with today's — a field-value comparison, not SystemModstamp: the human
+       * approved specific old→new transitions, and an unrelated edit or an
+       * automation touch would false-refuse. A value changed and changed back
+       * is invisible. A record the preview returned but this query does not is
+       * moved (deleted, or no longer visible — indistinguishable from here); a
+       * failed pre-check at propose leaves its records unchecked; inserts have
+       * nothing to check.
+       */
+      async probeDmlTarget(conn, request, signal) {
+        const input = JSON.parse(request.payloadJson ?? "{}");
+        const summary = JSON.parse(request.summaryJson);
+        const rest = new RestClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
+        const query = async (soql, maxRows) => (await rest.queryWithCount(soql, maxRows, { signal })).records;
+        const checked = [];
+        const unchecked = [];
+        const changed = [];
+        const missing = [];
+        const notApplicable = {
+          moved: null,
+          targetCheck: {
+            status: "not_applicable",
+            note: "an insert has no existing record to re-check"
+          },
+          audit: {}
+        };
+        const compare = (object3, id, shown, row) => {
+          if (Object.keys(shown).length === 0) {
+            unchecked.push({ object: object3, id, reason: "no_before_value_shown" });
+            return;
+          }
+          let same2 = true;
+          for (const [field, was] of Object.entries(shown)) {
+            const key2 = Object.keys(row).find((p) => p.toLowerCase() === field.toLowerCase()) ?? field;
+            const now = stripAttributes(row[key2]);
+            if (JSON.stringify(now ?? null) !== JSON.stringify(was ?? null)) {
+              changed.push({ object: object3, id, field, now: dmlValueText(now), before: dmlValueText(was) });
+              same2 = false;
+            }
+          }
+          if (same2) checked.push({ object: object3, id });
+        };
+        const precheckReason = summary.precheck === "failed" ? "precheck_failed_at_propose" : "no_precheck_recorded";
+        if (isDmlPlan(input)) {
+          const before = summary.before && typeof summary.before === "object" ? summary.before : {};
+          let targets = 0;
+          for (let i = 0; i < input.steps.length; i++) {
+            const step = input.steps[i];
+            if (step.operation === "insert" || !step.id || REF_TOKEN_RE.test(step.id)) continue;
+            targets += 1;
+            const object3 = step.object;
+            const id = step.id;
+            const b = before[String(i + 1)];
+            if (!b) {
+              unchecked.push({ object: object3, id, reason: "no_precheck_recorded" });
+              continue;
+            }
+            if (b.exists === null) {
+              unchecked.push({ object: object3, id, reason: "precheck_failed_at_propose" });
+              continue;
+            }
+            if (!b.exists) {
+              unchecked.push({ object: object3, id, reason: "not_found_at_propose" });
+              continue;
+            }
+            const fields = step.operation === "update" ? Object.keys(step.record ?? {}) : null;
+            const row = (await query(dmlPlanStepSoql(object3, id, fields), 1))[0];
+            if (!row) missing.push({ object: object3, id });
+            else if (step.operation === "delete") checked.push({ object: object3, id });
+            else compare(object3, id, b.fields ?? {}, row);
+          }
+          if (targets === 0) return notApplicable;
+        } else if (input.operation === "insert") {
+          return notApplicable;
+        } else if (input.operation === "update") {
+          const records = input.records ?? [];
+          const ids = records.map((r) => String(r.Id ?? r.id));
+          const object3 = input.object;
+          if (summary.precheck !== "ok") {
+            for (const id of new Set(ids)) unchecked.push({ object: object3, id, reason: precheckReason });
+          } else {
+            const before = summary.before && typeof summary.before === "object" ? summary.before : {};
+            const baseline = [...new Set(ids)].filter((id) => before[id] !== void 0);
+            for (const id of new Set(ids)) {
+              if (before[id] === void 0) {
+                unchecked.push({ object: object3, id, reason: "not_found_at_propose" });
+              }
+            }
+            if (baseline.length > 0) {
+              const fields = [
+                ...new Set(
+                  records.flatMap((r) => Object.keys(r)).filter((k) => k.toLowerCase() !== "id")
+                )
+              ];
+              const now = /* @__PURE__ */ new Map();
+              for (const row of await query(dmlUpdatePreviewSoql(object3, fields, ids), 200)) {
+                now.set(String(row.Id).slice(0, 15), row);
+              }
+              for (const id of baseline) {
+                const row = now.get(id.slice(0, 15));
+                if (!row) missing.push({ object: object3, id });
+                else compare(object3, id, before[id], row);
+              }
+            }
+          }
+        } else {
+          const ids = input.ids ?? [];
+          const object3 = input.object;
+          if (summary.precheck !== "ok") {
+            for (const id of new Set(ids)) unchecked.push({ object: object3, id, reason: precheckReason });
+          } else {
+            const found = new Set(
+              Array.isArray(summary.found) ? summary.found.map(String) : []
+            );
+            for (const id of new Set(ids)) {
+              if (!found.has(id)) unchecked.push({ object: object3, id, reason: "not_found_at_propose" });
+            }
+            if (found.size > 0) {
+              const now = /* @__PURE__ */ new Set();
+              for (const row of await query(dmlDeletePreviewSoql(object3, ids), 200)) {
+                now.add(String(row.Id).slice(0, 15));
+              }
+              for (const id of found) {
+                if (now.has(id.slice(0, 15))) checked.push({ object: object3, id });
+                else missing.push({ object: object3, id });
+              }
+            }
+          }
+        }
+        const checkedAt = (/* @__PURE__ */ new Date()).toISOString();
+        const targetCheck = targetCheckOf(
+          checkedAt,
+          checked,
+          unchecked,
+          "dml_propose recorded no before-values Contrail could compare against (each record's reason is under unchecked), so nothing was re-checked: this write ran without a target check."
+        );
+        if (changed.length === 0 && missing.length === 0) {
+          return { moved: null, targetCheck, audit: {} };
+        }
+        const refusal = targetMovedRefusalText("dml", { at: hhmm(checkedAt), changed, missing });
+        return {
+          moved: {
+            connection: conn.alias,
+            executed: false,
+            target_moved: true,
+            checked_at: checkedAt,
+            moved: [
+              ...changed.map((c) => ({ object: c.object, id: c.id, field: c.field, state: "changed" })),
+              ...missing.map((m) => ({ object: m.object, id: m.id, state: "missing" }))
+            ],
+            ...unchecked.length > 0 ? { unchecked } : {},
+            refusal,
+            note: "Nothing was written and this confirmation code is void. Re-run dml_propose to see the current values and get a fresh code."
+          },
+          targetCheck,
+          audit: { checked_at: checkedAt, changed: changed.length, missing: missing.length }
+        };
+      }
+      /**
+       * S45 F2, activation: SELECT the BotVersion's Status now and compare it
+       * with the from_status frozen at propose. A row the query no longer
+       * returns is moved too (deleted, or not visible to this user).
+       */
+      async probeActivationTarget(conn, request, signal) {
+        const payload = JSON.parse(request.payloadJson ?? "{}");
+        const agent = payload.bot_developer_name ?? "(unknown agent)";
+        const version2 = payload.bot_version_developer_name ?? payload.bot_version_id ?? "(unknown)";
+        const member = { type: "BotVersion", api_name: `${agent}.${version2}` };
+        if (!payload.bot_version_id || !payload.from_status) {
+          return {
+            moved: null,
+            targetCheck: targetCheckOf(
+              (/* @__PURE__ */ new Date()).toISOString(),
+              [],
+              [{ ...member, reason: "no_baseline_recorded" }],
+              "No starting status was recorded when this change was proposed, so Contrail had nothing to compare the version's Status against: this change ran without a target check."
+            ),
+            audit: {}
+          };
+        }
+        const rest = new RestClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
+        const id = payload.bot_version_id;
+        const rows = (await rest.queryWithCount(
+          `SELECT Id, Status FROM BotVersion WHERE Id = '${soqlQuote(id)}'`,
+          200,
+          { signal }
+        )).records;
+        const checkedAt = (/* @__PURE__ */ new Date()).toISOString();
+        const row = rows.find((r) => r.Id === id);
+        if (row && row.Status === payload.from_status) {
+          return {
+            moved: null,
+            targetCheck: targetCheckOf(checkedAt, [member], [], ""),
+            audit: {}
+          };
+        }
+        const now = row ? String(row.Status ?? "an unreported status") : "not returned \u2014 deleted, or not visible to this connection's user";
+        const refusal = targetMovedRefusalText("activation", {
+          at: hhmm(checkedAt),
+          version: version2,
+          agent,
+          now,
+          from: payload.from_status
+        });
+        return {
+          moved: {
+            connection: conn.alias,
+            executed: false,
+            target_moved: true,
+            checked_at: checkedAt,
+            agent: payload.bot_developer_name,
+            version: payload.bot_version_developer_name,
+            bot_version_id: id,
+            approved_from_status: payload.from_status,
+            current_status: row ? row.Status ?? null : null,
+            refusal,
+            note: "Nothing was changed and this confirmation code is void. Re-run agent_activation_propose to see the current status and get a fresh code."
+          },
+          targetCheck: { checked_at: checkedAt, checked: [], unchecked: [] },
+          audit: {
+            checked_at: checkedAt,
+            bot_version_id: id,
+            from: payload.from_status,
+            now: row ? row.Status ?? null : null
+          }
+        };
+      }
       /**
        * Resolve a human-supplied code to an execution claim. Atomically flips
        * 'validated'→'executing' so exactly one caller may proceed; polls and
@@ -33566,6 +36676,7 @@ columns: ${columnsLabel(m.headers)}`,
           });
           if (attempt.locked) {
             if (attempt.payloadPath) safeUnlink(attempt.payloadPath);
+            if (kind === "deploy" && attempt.requestId) this.removeRevertDir(attempt.requestId);
             throw new ContrailError(
               `Too many incorrect codes \u2014 the pending ${kindNoun(kind)} on "${conn.alias}" has been locked and its code invalidated. Re-validate to get a fresh code. (This is the brute-force guard.)`,
               "code_locked"
@@ -33580,14 +36691,46 @@ columns: ${columnsLabel(m.headers)}`,
           const stored = request.resultJson ? JSON.parse(request.resultJson) : { executed: request.status === "executed" };
           return { kind: "terminal", result: { ...stored, already_completed: true } };
         }
-        if (request.status === "superseded" || request.status === "expired" || request.status === "locked") {
+        if (request.status === "expired") {
           this.audit.record(`${kind}.refused`, {
             connectionId: conn.id,
             tool,
             outcome: "refused",
-            detail: { reason: request.status, requestId: request.id }
+            detail: { reason: "code_expired", requestId: request.id }
           });
-          const why = request.status === "expired" ? "it timed out" : request.status === "locked" ? "it was locked after too many incorrect attempts" : "a newer validation replaced it";
+          throw new ContrailError(
+            `That confirmation code expired at ${request.expiresAt}. Validate again for a fresh one.`,
+            "code_expired"
+          );
+        }
+        if (request.status === "superseded" || request.status === "locked") {
+          let voided = null;
+          if (request.status === "superseded" && request.resultJson) {
+            try {
+              const stored = JSON.parse(request.resultJson);
+              if (stored.target_moved === true && typeof stored.refusal === "string") {
+                voided = stored.refusal;
+              }
+            } catch {
+            }
+          }
+          this.audit.record(`${kind}.refused`, {
+            connectionId: conn.id,
+            tool,
+            outcome: "refused",
+            detail: {
+              reason: request.status,
+              requestId: request.id,
+              ...voided !== null ? { cause: "target_moved" } : {}
+            }
+          });
+          if (voided !== null) {
+            throw new ContrailError(
+              `This code was already voided and was not executed \u2014 ${voided}`,
+              "code_unusable"
+            );
+          }
+          const why = request.status === "locked" ? "it was locked after too many incorrect attempts" : "a newer validation replaced it";
           throw new ContrailError(
             `That confirmation code is ${request.status} \u2014 ${why}. Validate again for a fresh one.`,
             "code_unusable"
@@ -33597,7 +36740,10 @@ columns: ${columnsLabel(m.headers)}`,
           return { kind: "running", request };
         }
         if (new Date(request.expiresAt).getTime() < Date.now()) {
-          this.db.updateDeployRequestStatus(request.id, "expired");
+          if (this.db.expireValidatedRequest(request.id)) {
+            if (request.payloadPath) safeUnlink(request.payloadPath);
+            if (kind === "deploy") this.removeRevertDir(request.id);
+          }
           this.audit.record(`${kind}.refused`, {
             connectionId: conn.id,
             tool,
@@ -33633,6 +36779,8 @@ columns: ${columnsLabel(m.headers)}`,
           return target ? `<new ${target.object} from step ${target.step}>` : token;
         };
         const rows = [];
+        const stepBefore = {};
+        let precheckOk = true;
         for (let i = 0; i < input.steps.length; i++) {
           const step = input.steps[i];
           const ordinal = `Step ${i + 1}`;
@@ -33665,15 +36813,28 @@ columns: ${columnsLabel(m.headers)}`,
             if (!idIsToken && step.id) {
               try {
                 const found = await rest.query(
-                  `SELECT Id FROM ${step.object} WHERE Id = '${step.id}'`,
+                  dmlPlanStepSoql(step.object, step.id, null),
                   1
                 );
                 if (found.length === 0) {
                   warnings = ["record not found in pre-check \u2014 it may already be gone or the id is wrong"];
                 }
+                stepBefore[String(i + 1)] = {
+                  object: step.object,
+                  id: step.id,
+                  operation: "delete",
+                  exists: found.length > 0
+                };
               } catch (err2) {
                 log("warn", "could not pre-check id for DML plan delete preview", { err: String(err2) });
                 warnings = ["could not verify this id exists (pre-check failed)"];
+                precheckOk = false;
+                stepBefore[String(i + 1)] = {
+                  object: step.object,
+                  id: step.id,
+                  operation: "delete",
+                  exists: null
+                };
               }
             }
             rows.push({
@@ -33685,20 +36846,37 @@ columns: ${columnsLabel(m.headers)}`,
             continue;
           }
           let prior;
+          let priorFailed = false;
           if (!idIsToken && step.id) {
             const fields = Object.keys(step.record ?? {});
             try {
-              const soql = `SELECT Id${fields.length ? ", " + fields.join(", ") : ""} FROM ${step.object} WHERE Id = '${step.id}'`;
-              prior = (await rest.query(soql, 1))[0];
+              prior = (await rest.query(
+                dmlPlanStepSoql(step.object, step.id, fields),
+                1
+              ))[0];
             } catch (err2) {
+              priorFailed = true;
+              precheckOk = false;
               log("warn", "could not fetch before-values for DML plan preview", { err: String(err2) });
             }
           }
+          const shownBefore = {};
           const changes = Object.entries(step.record ?? {}).map(([k, v]) => {
             const shown = typeof v === "string" && REF_TOKEN_RE.test(v) ? symbolic(v) : JSON.stringify(v);
-            const old = prior?.[k];
-            return prior && old !== void 0 ? `${k}: ${JSON.stringify(old)} \u2192 ${shown}` : `${k} = ${shown}`;
+            const key2 = prior ? Object.keys(prior).find((p) => p !== "attributes" && p.toLowerCase() === k.toLowerCase()) : void 0;
+            const old = key2 !== void 0 ? prior[key2] : void 0;
+            if (key2 !== void 0 && old !== void 0) shownBefore[key2] = old;
+            return old !== void 0 ? `${k}: ${JSON.stringify(old)} \u2192 ${shown}` : `${k} = ${shown}`;
           }).join(", ");
+          if (!idIsToken && step.id) {
+            stepBefore[String(i + 1)] = {
+              object: step.object,
+              id: step.id,
+              operation: "update",
+              exists: priorFailed ? null : prior !== void 0,
+              ...prior ? { fields: stripAttributes(shownBefore) } : {}
+            };
+          }
           rows.push({
             label: `${ordinal} \xB7 UPDATE ${step.object} ${target}: ${truncateLabel(changes)}`,
             warnings: !idIsToken && step.id && !prior ? ["record not found in pre-check \u2014 verify the id"] : [],
@@ -33711,7 +36889,9 @@ columns: ${columnsLabel(m.headers)}`,
           steps: input.steps.length,
           operations: summarizeOps(input.steps),
           row_count: rows.length,
-          rows
+          rows,
+          before: stepBefore,
+          precheck: precheckOk ? "ok" : "failed"
         };
       }
       async buildDmlPreview(rest, input) {
@@ -33729,48 +36909,70 @@ columns: ${columnsLabel(m.headers)}`,
           ];
           const ids2 = records.map((r) => String(r.Id ?? r.id));
           const before = /* @__PURE__ */ new Map();
+          let precheckOk2 = true;
           try {
-            const soql = `SELECT Id${fields.length ? ", " + fields.join(", ") : ""} FROM ${input.object} WHERE Id IN (${ids2.map((i) => `'${i}'`).join(",")})`;
-            for (const row of await rest.query(soql, 200)) {
-              before.set(String(row.Id), row);
+            for (const row of await rest.query(
+              dmlUpdatePreviewSoql(input.object, fields, ids2),
+              200
+            )) {
+              before.set(String(row.Id).slice(0, 15), row);
             }
           } catch (err2) {
+            precheckOk2 = false;
             log("warn", "could not fetch before-values for DML preview", { err: String(err2) });
           }
+          const shownBefore = {};
           const rows2 = records.map((r) => {
             const id = String(r.Id ?? r.id);
-            const prior = before.get(id);
+            const prior = before.get(id.slice(0, 15));
+            if (prior) shownBefore[id] = { ...shownBefore[id] };
             const changes = Object.entries(r).filter(([k]) => k.toLowerCase() !== "id").map(([k, v]) => {
-              const old = prior?.[k];
-              return prior && old !== void 0 ? `${k}: ${JSON.stringify(old)} \u2192 ${JSON.stringify(v)}` : `${k} = ${JSON.stringify(v)}`;
+              const key2 = prior ? Object.keys(prior).find(
+                (p) => p !== "attributes" && p.toLowerCase() === k.toLowerCase()
+              ) : void 0;
+              const old = key2 !== void 0 ? prior[key2] : void 0;
+              if (key2 !== void 0 && old !== void 0) shownBefore[id][key2] = old;
+              return old !== void 0 ? `${k}: ${JSON.stringify(old)} \u2192 ${JSON.stringify(v)}` : `${k} = ${JSON.stringify(v)}`;
             }).join(", ");
             return {
               label: `UPDATE ${input.object} ${id}: ${truncateLabel(changes)}`,
               warnings: prior ? [] : ["record not found in pre-check \u2014 verify the id"]
             };
           });
-          return { operation: "update", object: input.object, row_count: rows2.length, rows: rows2 };
+          return {
+            operation: "update",
+            object: input.object,
+            row_count: rows2.length,
+            rows: rows2,
+            before: stripAttributes(shownBefore),
+            precheck: precheckOk2 ? "ok" : "failed"
+          };
         }
         const ids = input.ids ?? [];
         const found = /* @__PURE__ */ new Set();
         let precheckOk = true;
         try {
-          const soql = `SELECT Id FROM ${input.object} WHERE Id IN (${ids.map((i) => `'${i}'`).join(",")})`;
-          for (const row of await rest.query(soql, 200)) found.add(row.Id);
+          for (const row of await rest.query(
+            dmlDeletePreviewSoql(input.object, ids),
+            200
+          )) {
+            found.add(String(row.Id).slice(0, 15));
+          }
         } catch (err2) {
           precheckOk = false;
           log("warn", "could not pre-check ids for DML delete preview", { err: String(err2) });
         }
         const rows = ids.map((id) => ({
           label: `DELETE ${input.object} ${id}`,
-          warnings: !precheckOk ? ["could not verify this id exists (pre-check failed)"] : !found.has(id) ? ["record not found in pre-check \u2014 it may already be gone or the id is wrong"] : []
+          warnings: !precheckOk ? ["could not verify this id exists (pre-check failed)"] : !found.has(id.slice(0, 15)) ? ["record not found in pre-check \u2014 it may already be gone or the id is wrong"] : []
         }));
         return {
           operation: "delete",
           object: input.object,
           row_count: rows.length,
           rows,
-          ...precheckOk ? {} : { precheck: "failed \u2014 existence of these records is unconfirmed" }
+          found: ids.filter((id) => found.has(id.slice(0, 15))),
+          precheck: precheckOk ? "ok" : "failed"
         };
       }
       gateTestDetail(conn, result) {
@@ -33801,7 +37003,7 @@ columns: ${columnsLabel(m.headers)}`,
           if (job) {
             job.progress = `${result.status} (poll ${poll}${result.numberComponentsTotal ? `, ${result.numberComponentsDeployed}/${result.numberComponentsTotal} components` : ""})`;
           }
-          await delay3(this.config.deploy.pollIntervalMs);
+          await delay4(this.config.deploy.pollIntervalMs);
           result = await soap.checkDeployStatus(id);
         }
         return result;
@@ -33852,7 +37054,7 @@ columns: ${columnsLabel(m.headers)}`,
               error: String(err2 instanceof Error ? err2.message : err2)
             })
           ),
-          delay3(waitMs).then(() => null)
+          delay4(waitMs).then(() => null)
         ]);
         if (winner) {
           this.jobs.delete(key2);
@@ -33869,6 +37071,66 @@ columns: ${columnsLabel(m.headers)}`,
         if (!spec) return null;
         return this.store.readCurrentFile(conn.id, `${spec.dir}/${apiName}${spec.ext}-meta.xml`);
       }
+      /**
+       * S45 F3: the automation card of a data-write page — what the LOCAL
+       * SNAPSHOT says fires on each object the write touches (never the org; the
+       * card's heading says so). One entry per distinct object, at most
+       * AUTOMATION_CARD_MAX_OBJECTS; the last entry names any left out.
+       * collectObjectAutomation never throws — the try keeps that promise for the
+       * page: a card must never cost the human their approval page.
+       */
+      automationCard(conn, objects) {
+        const distinct = [];
+        const seen = /* @__PURE__ */ new Set();
+        for (const object3 of objects) {
+          if (seen.has(object3.toLowerCase())) continue;
+          seen.add(object3.toLowerCase());
+          distinct.push(object3);
+        }
+        try {
+          const card = distinct.slice(0, AUTOMATION_CARD_MAX_OBJECTS).map(
+            (object3) => collectObjectAutomation({ db: this.db, store: this.store, connectionId: conn.id, object: object3 })
+          );
+          const left = distinct.slice(AUTOMATION_CARD_MAX_OBJECTS);
+          const last = card.at(-1);
+          if (last && left.length > 0) {
+            last.notes.push(
+              `This card covers the first ${AUTOMATION_CARD_MAX_OBJECTS} objects; not shown: ${left.join(", ")}.`
+            );
+          }
+          return card;
+        } catch (err2) {
+          log("warn", "automation card failed", { error: String(err2) });
+          return [];
+        }
+      }
+      /**
+       * S45 F3: the objects an anonymous Apex script MAY touch, parsed from its
+       * text — null when the parse itself failed (the page then shows no card
+       * rather than claiming none were found).
+       */
+      apexScriptObjects(conn, script) {
+        try {
+          const known = this.db.listArtifacts(conn.id, "ApexClass").map((a) => a.apiName);
+          return parseApexObjectTargets(script, known);
+        } catch (err2) {
+          log("warn", "apex object parse failed", { error: String(err2) });
+          return null;
+        }
+      }
+    };
+    AUTOMATION_CARD_MAX_OBJECTS = 10;
+    PAGE_DIFF_LIMITS = {
+      maxChanges: 60,
+      maxHunks: 12,
+      maxHunkLines: 30,
+      maxLineChars: 240,
+      maxHunkBudgetChars: 2e4
+    };
+    PAGE_DIFF_BUDGET_CHARS = 15e4;
+    PAGE_DIFF_BUDGET_NOTE = "diff body omitted \u2014 this page's 150 KB diff budget was spent on the rows above; the summary line still counts this row";
+    REQUEST_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    TargetCheckDeadline = class extends Error {
     };
   }
 });
@@ -33881,14 +37143,14 @@ __export(updateCheck_exports, {
   pendingUpdateRefresh: () => pendingUpdateRefresh,
   refreshUpdateCache: () => refreshUpdateCache
 });
-import fs11 from "node:fs";
-import path6 from "node:path";
+import fs12 from "node:fs";
+import path7 from "node:path";
 function cachePath() {
-  return path6.join(dataDir(), CACHE_FILE);
+  return path7.join(dataDir(), CACHE_FILE);
 }
 function readCache(repo) {
   try {
-    const all = JSON.parse(fs11.readFileSync(cachePath(), "utf8"));
+    const all = JSON.parse(fs12.readFileSync(cachePath(), "utf8"));
     const entry = all[repo];
     return entry && typeof entry.checkedAt === "string" ? entry : null;
   } catch {
@@ -33898,14 +37160,14 @@ function readCache(repo) {
 function writeCache(repo, latestVersion) {
   let all = {};
   try {
-    const parsed = JSON.parse(fs11.readFileSync(cachePath(), "utf8"));
+    const parsed = JSON.parse(fs12.readFileSync(cachePath(), "utf8"));
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       all = parsed;
     }
   } catch {
   }
   all[repo] = { checkedAt: (/* @__PURE__ */ new Date()).toISOString(), latestVersion };
-  fs11.writeFileSync(cachePath(), JSON.stringify(all, null, 2) + "\n", "utf8");
+  fs12.writeFileSync(cachePath(), JSON.stringify(all, null, 2) + "\n", "utf8");
 }
 function isNewerVersion(a, b) {
   const pa = a.split(".").map(Number);
@@ -34002,8 +37264,8 @@ function ok(payload, prefix) {
   return { content: [{ type: "text", text: prefix ? `${prefix}
 ${json2}` : json2 }] };
 }
-function fail(message) {
-  return { content: [{ type: "text", text: message }], isError: true };
+function fail(message2) {
+  return { content: [{ type: "text", text: message2 }], isError: true };
 }
 function guarded(handler) {
   return Promise.resolve().then(handler).catch((err2) => {
@@ -34278,7 +37540,7 @@ var init_flowversion = __esm({
 });
 
 // src/tools/metadata.ts
-import fs12 from "node:fs";
+import fs13 from "node:fs";
 function registerMetadataTools(server, deps) {
   const { db, audit, config: config2, engine, store, tokenMgr } = deps;
   function requireConnection(ref, tool) {
@@ -34809,8 +38071,8 @@ async function fetchAuraLiveContent(deps, conn, name) {
     }
   }
   const hidden = files.some(([, body]) => body === "(hidden)");
-  const framed = files.sort(([a], [b]) => a.localeCompare(b)).map(([rel, text]) => `<!-- contrail:file aura/${name}/${rel} -->
-${text}`).join("\n");
+  const framed = files.sort(([a], [b]) => a.localeCompare(b)).map(([rel, text2]) => `<!-- contrail:file aura/${name}/${rel} -->
+${text2}`).join("\n");
   return {
     body: framed,
     source: "tooling (live)",
@@ -34876,7 +38138,7 @@ async function fetchArtifactContent(deps, conn, type, name) {
       const abs = store.currentFilePath(conn.id, rel);
       let bytes = 0;
       try {
-        bytes = abs ? fs12.statSync(abs).size : 0;
+        bytes = abs ? fs13.statSync(abs).size : 0;
       } catch {
       }
       return { path: rel, bytes, snapshot_path: abs };
@@ -35013,9 +38275,9 @@ function readArtifactFromSnapshot(deps, conn, type, name) {
     if (files.length === 0) return null;
     const parts = [];
     for (const rel of files) {
-      const text = deps.store.readCurrentFile(conn.id, rel);
-      if (text !== null) parts.push(`<!-- contrail:file ${rel} -->
-${text}`);
+      const text2 = deps.store.readCurrentFile(conn.id, rel);
+      if (text2 !== null) parts.push(`<!-- contrail:file ${rel} -->
+${text2}`);
     }
     return parts.length > 0 ? parts.join("\n") : null;
   }
@@ -35107,305 +38369,6 @@ var init_metadata = __esm({
   }
 });
 
-// src/diff/semantic.ts
-function semanticDiff(aContent, bContent) {
-  if (aContent === bContent) {
-    return { format: looksLikeXml(aContent) ? "xml" : "text", identical: true };
-  }
-  if (looksLikeXml(aContent) && looksLikeXml(bContent)) {
-    const xml = diffXml(aContent, bContent);
-    if (xml) return { format: "xml", identical: xml.identical, xml };
-  }
-  const text = diffText(aContent, bContent);
-  return { format: "text", identical: text.identical, text };
-}
-function looksLikeXml(content) {
-  const t = content.trimStart();
-  if (t.startsWith("<!-- contrail:file ")) return false;
-  return t.startsWith("<");
-}
-function diffXml(aXml, bXml) {
-  let aDoc;
-  let bDoc;
-  try {
-    aDoc = parseXml(aXml);
-    bDoc = parseXml(bXml);
-  } catch {
-    return null;
-  }
-  const aRoot = rootElement(aDoc);
-  const bRoot = rootElement(bDoc);
-  if (!aRoot || !bRoot) return null;
-  const changes = [];
-  const state = { truncated: false };
-  diffNode(aRoot.value, bRoot.value, "", changes, state);
-  return {
-    identical: changes.length === 0,
-    root: aRoot.name,
-    changes: changes.slice(0, MAX_CHANGES),
-    change_count: changes.length,
-    truncated: state.truncated || changes.length > MAX_CHANGES
-  };
-}
-function rootElement(doc) {
-  const keys = Object.keys(doc).filter((k) => k !== "?xml");
-  const name = keys[0];
-  if (!name) return null;
-  return { name, value: doc[name] };
-}
-function diffNode(a, b, path13, changes, state) {
-  if (changes.length > MAX_CHANGES) {
-    state.truncated = true;
-    return;
-  }
-  if (deepEqual(a, b)) return;
-  if (Array.isArray(a) || Array.isArray(b)) {
-    diffCollection(asArray(a), asArray(b), path13, changes, state);
-    return;
-  }
-  const aKeyed = isObject2(a) && itemKey(a) !== null;
-  const bKeyed = isObject2(b) && itemKey(b) !== null;
-  if ((aKeyed || bKeyed) && (a == null || isObject2(a)) && (b == null || isObject2(b))) {
-    diffCollection(a == null ? [] : [a], b == null ? [] : [b], path13, changes, state);
-    return;
-  }
-  if (isObject2(a) && isObject2(b)) {
-    diffObjectFields(a, b, path13, changes, state);
-    return;
-  }
-  changes.push({ kind: "scalar", path: path13, a: summarize(a), b: summarize(b) });
-}
-function diffObjectFields(a, b, path13, changes, state) {
-  const keys = /* @__PURE__ */ new Set([...Object.keys(a), ...Object.keys(b)]);
-  for (const key2 of keys) {
-    diffNode(a[key2], b[key2], path13 ? `${path13}.${key2}` : key2, changes, state);
-  }
-}
-function diffCollection(a, b, path13, changes, state) {
-  const aKeyed = keyItems(a);
-  const bKeyed = keyItems(b);
-  if (!aKeyed || !bKeyed) {
-    changes.push({
-      kind: "unkeyed",
-      path: path13,
-      note: `list changed (${a.length} \u2192 ${b.length} items; no stable key to match on)`
-    });
-    return;
-  }
-  for (const [key2, aItem] of aKeyed) {
-    const bItem = bKeyed.get(key2);
-    if (bItem === void 0) {
-      changes.push({ kind: "removed", path: path13, key: key2 });
-    } else if (isObject2(aItem) && isObject2(bItem)) {
-      diffObjectFields(aItem, bItem, `${path13}[${key2}]`, changes, state);
-    } else {
-      diffNode(aItem, bItem, `${path13}[${key2}]`, changes, state);
-    }
-  }
-  for (const key2 of bKeyed.keys()) {
-    if (!aKeyed.has(key2)) changes.push({ kind: "added", path: path13, key: key2 });
-  }
-}
-function keyItems(items) {
-  const map = /* @__PURE__ */ new Map();
-  for (const item of items) {
-    if (!isObject2(item)) return null;
-    const key2 = itemKey(item);
-    if (key2 === null) return null;
-    map.set(key2, item);
-  }
-  return map;
-}
-function itemKey(item) {
-  for (const f of ITEM_KEY_FIELDS) {
-    const v = item[f];
-    if (typeof v === "string" && v !== "") return v;
-  }
-  return null;
-}
-function isObject2(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function deepEqual(a, b) {
-  if (a === b) return true;
-  if (typeof a !== typeof b) return false;
-  if (typeof a !== "object" || a === null || b === null) return false;
-  return JSON.stringify(a) === JSON.stringify(b);
-}
-function summarize(value) {
-  if (value === void 0) return null;
-  if (typeof value === "string" && value.length > 200) return `${value.slice(0, 200)}\u2026`;
-  if (isObject2(value) || Array.isArray(value)) {
-    const json2 = JSON.stringify(value);
-    return json2.length > 200 ? `${json2.slice(0, 200)}\u2026` : JSON.parse(json2);
-  }
-  return value;
-}
-function diffText(aText, bText) {
-  const aLines = aText.split("\n");
-  const bLines = bText.split("\n");
-  if (aText === bText) {
-    return {
-      identical: true,
-      lines_a: aLines.length,
-      lines_b: bLines.length,
-      lines_added: 0,
-      lines_removed: 0,
-      hunks: [],
-      hunks_truncated: false,
-      counts_only: false
-    };
-  }
-  let start = 0;
-  while (start < aLines.length && start < bLines.length && aLines[start] === bLines[start]) {
-    start++;
-  }
-  let aEnd = aLines.length;
-  let bEnd = bLines.length;
-  while (aEnd > start && bEnd > start && aLines[aEnd - 1] === bLines[bEnd - 1]) {
-    aEnd--;
-    bEnd--;
-  }
-  const aMid = aLines.slice(start, aEnd);
-  const bMid = bLines.slice(start, bEnd);
-  if (aMid.length * bMid.length > MAX_LCS_CELLS) {
-    const aSet = countLines(aMid);
-    const bSet = countLines(bMid);
-    let removed2 = 0;
-    for (const [line, n] of aSet) removed2 += Math.max(0, n - (bSet.get(line) ?? 0));
-    let added2 = 0;
-    for (const [line, n] of bSet) added2 += Math.max(0, n - (aSet.get(line) ?? 0));
-    return {
-      identical: false,
-      lines_a: aLines.length,
-      lines_b: bLines.length,
-      lines_added: added2,
-      lines_removed: removed2,
-      hunks: [],
-      hunks_truncated: false,
-      counts_only: true
-    };
-  }
-  const ops = lcsOps(aMid, bMid);
-  const hunks = [];
-  let current = null;
-  let ai = 0;
-  let bi = 0;
-  let added = 0;
-  let removed = 0;
-  for (const op of ops) {
-    if (op === "same") {
-      current = null;
-      ai++;
-      bi++;
-      continue;
-    }
-    if (!current) {
-      current = { a_line: start + ai + 1, b_line: start + bi + 1, removed: [], added: [] };
-      hunks.push(current);
-    }
-    if (op === "del") {
-      removed++;
-      if (current.removed.length < MAX_HUNK_LINES) current.removed.push(clampLine(aMid[ai] ?? ""));
-      else current.removed_truncated = true;
-      ai++;
-    } else {
-      added++;
-      if (current.added.length < MAX_HUNK_LINES) current.added.push(clampLine(bMid[bi] ?? ""));
-      else current.added_truncated = true;
-      bi++;
-    }
-  }
-  let budget = MAX_HUNK_BUDGET_CHARS;
-  let kept = 0;
-  for (const h of hunks) {
-    budget -= [...h.removed, ...h.added].reduce((n, l) => n + l.length + 1, 0);
-    if (budget < 0) break;
-    kept++;
-  }
-  const cappedHunks = hunks.slice(0, Math.min(kept, MAX_HUNKS));
-  return {
-    identical: false,
-    lines_a: aLines.length,
-    lines_b: bLines.length,
-    lines_added: added,
-    lines_removed: removed,
-    hunks: cappedHunks,
-    hunks_truncated: cappedHunks.length < hunks.length,
-    counts_only: false
-  };
-}
-function clampLine(line) {
-  return line.length > MAX_LINE_CHARS ? `${line.slice(0, MAX_LINE_CHARS)}\u2026` : line;
-}
-function countLines(lines) {
-  const map = /* @__PURE__ */ new Map();
-  for (const l of lines) map.set(l, (map.get(l) ?? 0) + 1);
-  return map;
-}
-function lcsOps(a, b) {
-  const n = a.length;
-  const m = b.length;
-  const width = m + 1;
-  const table = new Int32Array((n + 1) * width);
-  for (let i2 = n - 1; i2 >= 0; i2--) {
-    for (let j2 = m - 1; j2 >= 0; j2--) {
-      table[i2 * width + j2] = a[i2] === b[j2] ? table[(i2 + 1) * width + j2 + 1] + 1 : Math.max(table[(i2 + 1) * width + j2], table[i2 * width + j2 + 1]);
-    }
-  }
-  const ops = [];
-  let i = 0;
-  let j = 0;
-  while (i < n && j < m) {
-    if (a[i] === b[j]) {
-      ops.push("same");
-      i++;
-      j++;
-    } else if (table[(i + 1) * width + j] >= table[i * width + j + 1]) {
-      ops.push("del");
-      i++;
-    } else {
-      ops.push("add");
-      j++;
-    }
-  }
-  while (i < n) {
-    ops.push("del");
-    i++;
-  }
-  while (j < m) {
-    ops.push("add");
-    j++;
-  }
-  return ops;
-}
-var MAX_CHANGES, MAX_HUNKS, MAX_HUNK_LINES, MAX_LINE_CHARS, MAX_HUNK_BUDGET_CHARS, MAX_LCS_CELLS, ITEM_KEY_FIELDS;
-var init_semantic = __esm({
-  "src/diff/semantic.ts"() {
-    "use strict";
-    init_xml();
-    MAX_CHANGES = 200;
-    MAX_HUNKS = 50;
-    MAX_HUNK_LINES = 40;
-    MAX_LINE_CHARS = 500;
-    MAX_HUNK_BUDGET_CHARS = 1e5;
-    MAX_LCS_CELLS = 4e6;
-    ITEM_KEY_FIELDS = [
-      "fullName",
-      "name",
-      "field",
-      "object",
-      "apexClass",
-      "apexPage",
-      "flow",
-      "tab",
-      "recordType",
-      "application",
-      "layout"
-    ];
-  }
-});
-
 // src/tools/diff.ts
 function registerDiffTools(server, deps) {
   const { db, audit } = deps;
@@ -35474,14 +38437,14 @@ function registerDiffTools(server, deps) {
           onlyB.push(`${bArt.type}:${bArt.apiName}`);
         }
       }
-      const newest = (list) => list.reduce(
+      const newest2 = (list) => list.reduce(
         (acc, x) => acc && acc > x.retrievedAt ? acc : x.retrievedAt,
         null
       );
       return ok({
         from: a.alias,
         to: b.alias,
-        snapshot_taken: { [a.alias]: newest(aArtifacts), [b.alias]: newest(bArtifacts) },
+        snapshot_taken: { [a.alias]: newest2(aArtifacts), [b.alias]: newest2(bArtifacts) },
         counts_by_type: counts,
         changed: changed.slice(0, BUCKET_LIST_CAP),
         changed_truncated: changed.length > BUCKET_LIST_CAP,
@@ -35646,8 +38609,8 @@ function registerDataTools(server, deps) {
       if (args.fields?.some((f) => !/^[A-Za-z0-9_.]+$/.test(f))) {
         return fail("invalid field name");
       }
-      const path13 = `/services/data/${config2.salesforce.apiVersion}/sobjects/${encodeURIComponent(args.object)}/${encodeURIComponent(args.id)}` + (args.fields?.length ? `?fields=${encodeURIComponent(args.fields.join(","))}` : "");
-      const res = await rest(conn).request(path13);
+      const path14 = `/services/data/${config2.salesforce.apiVersion}/sobjects/${encodeURIComponent(args.object)}/${encodeURIComponent(args.id)}` + (args.fields?.length ? `?fields=${encodeURIComponent(args.fields.join(","))}` : "");
+      const res = await rest(conn).request(path14);
       const record2 = truncateDeep(stripAttributes(await res.json()));
       return ok({ connection: conn.alias, object: args.object, record: record2 });
     })
@@ -36274,9 +39237,9 @@ function flattenGroupings(nodes, prefix) {
   const map = /* @__PURE__ */ new Map();
   for (const n of nodes ?? []) {
     if (typeof n.key !== "string") continue;
-    const path13 = [...prefix, n.label ?? ""];
-    map.set(n.key, path13);
-    for (const [k, v] of flattenGroupings(n.groupings, path13)) map.set(k, v);
+    const path14 = [...prefix, n.label ?? ""];
+    map.set(n.key, path14);
+    for (const [k, v] of flattenGroupings(n.groupings, path14)) map.set(k, v);
   }
   return map;
 }
@@ -36654,7 +39617,7 @@ function summarizeSubjectResponse(v) {
   if (!obj) {
     return { text: typeof parsed === "string" ? parsed : null, routedTopics: [], sessionId: null };
   }
-  const message = asObject(obj.agentMessage)?.message;
+  const message2 = asObject(obj.agentMessage)?.message;
   const value = asObject(obj.value)?.fullResponse;
   const runs = asObject(asObject(obj.agentResponse)?.sessionState)?.runs;
   const topics = Array.isArray(runs) ? [
@@ -36663,7 +39626,7 @@ function summarizeSubjectResponse(v) {
     )
   ] : [];
   return {
-    text: typeof message === "string" ? message : typeof value === "string" ? value : null,
+    text: typeof message2 === "string" ? message2 : typeof value === "string" ? value : null,
     routedTopics: topics,
     sessionId: typeof obj.sessionId === "string" ? obj.sessionId : null
   };
@@ -36832,30 +39795,30 @@ var init_data = __esm({
 });
 
 // src/deploy/sources.ts
-import crypto4 from "node:crypto";
-import fs13 from "node:fs";
-import path7 from "node:path";
+import crypto5 from "node:crypto";
+import fs14 from "node:fs";
+import path8 from "node:path";
 function allowedSourceRoots(configured = []) {
   const roots = [stagingDir(), snapshotsDir(), ...configured];
   const real = [];
   for (const root of roots) {
-    if (!path7.isAbsolute(root)) continue;
+    if (!path8.isAbsolute(root)) continue;
     try {
-      real.push(fs13.realpathSync(root));
+      real.push(fs14.realpathSync(root));
     } catch {
     }
   }
   return real;
 }
 function isInside(target, root) {
-  return target === root || target.startsWith(root + path7.sep);
+  return target === root || target.startsWith(root + path8.sep);
 }
 function resolveSourcePath(rawPath, configuredRoots = [], opts = {}) {
   const noun = opts.noun ?? "content_file";
   const maxBytes = opts.maxBytes ?? MAX_SOURCE_FILE_BYTES;
   const given = rawPath.trim();
   if (!given) throw new ContrailError(`${noun} was empty.`, "bad_source_path");
-  if (!path7.isAbsolute(given)) {
+  if (!path8.isAbsolute(given)) {
     throw new ContrailError(
       `${noun} must be an absolute path (got "${given}"). Write the file under ${stagingDir()} and pass that full path.`,
       "bad_source_path"
@@ -36863,11 +39826,11 @@ function resolveSourcePath(rawPath, configuredRoots = [], opts = {}) {
   }
   let real;
   try {
-    real = fs13.realpathSync(given);
+    real = fs14.realpathSync(given);
   } catch {
     throw new ContrailError(`${noun} does not exist: ${given}`, "source_not_found");
   }
-  const stat = fs13.statSync(real);
+  const stat = fs14.statSync(real);
   if (!stat.isFile()) {
     throw new ContrailError(`${noun} is not a regular file: ${given}`, "bad_source_path");
   }
@@ -36881,7 +39844,7 @@ function resolveSourcePath(rawPath, configuredRoots = [], opts = {}) {
   if (!roots.some((root) => isInside(real, root))) {
     const psq = (s) => `'${s.replace(/'/g, "''")}'`;
     const shq = (s) => `'${s.replace(/'/g, `'\\''`)}'`;
-    const copyCmd = process.platform === "win32" ? `Copy-Item -LiteralPath ${psq(given)} -Destination ${psq(stagingDir() + path7.sep)}` : `cp ${shq(given)} ${shq(stagingDir() + "/")}`;
+    const copyCmd = process.platform === "win32" ? `Copy-Item -LiteralPath ${psq(given)} -Destination ${psq(stagingDir() + path8.sep)}` : `cp ${shq(given)} ${shq(stagingDir() + "/")}`;
     throw new ContrailError(
       `${noun} is outside every allowed deploy source root, so Contrail will not deploy it. Allowed: ${roots.join(", ")}. The fix is yours, not the human's: copy the file into staging \u2014 e.g. ${copyCmd} \u2014 and retry with the staged path. Never ask the human to add a folder to deploy.allowedSourceRoots for a one-off; that config.json list is for standing folders the human volunteers unprompted, and only they can edit it.`,
       "source_outside_roots"
@@ -36891,11 +39854,11 @@ function resolveSourcePath(rawPath, configuredRoots = [], opts = {}) {
 }
 function resolveSourceFile(rawPath, configuredRoots = []) {
   const { absPath } = resolveSourcePath(rawPath, configuredRoots);
-  const bytes = fs13.readFileSync(absPath);
+  const bytes = fs14.readFileSync(absPath);
   return {
     content: bytes.toString("utf8"),
     sourcePath: absPath,
-    sourceSha256: crypto4.createHash("sha256").update(bytes).digest("hex")
+    sourceSha256: crypto5.createHash("sha256").update(bytes).digest("hex")
   };
 }
 var MAX_SOURCE_FILE_BYTES;
@@ -36976,7 +39939,7 @@ function registerDeployTools(server, deps) {
     "validate_deploy",
     {
       title: "Validate a metadata deploy (checkOnly)",
-      description: "Build a deploy package and validate it against the org with checkOnly=true \u2014 nothing is committed. Returns the change summary (destructive changes flagged), validation/test results, and blast radius; puts a confirmation code on the human-only approval page. Checking work-in-progress mid-build? Pass dry_run: true \u2014 same validation, NO approval request or code is created (save the human from pages that were never meant to be approved). Normally OMIT test_level \u2014 the org then applies its own default (production runs local tests for Apex packages automatically and refuses an explicit NoTestRun). An in-progress result means call validate_deploy again to check on it. For anything large \u2014 flows especially \u2014 write the source to a file and pass content_file instead of content: retyping tens of KB of XML risks a silent one-character corruption, and a file is read byte-exactly.",
+      description: "Build a deploy package and validate it against the org with checkOnly=true \u2014 nothing is committed. Returns the change summary (destructive changes flagged), validation/test results, and blast radius; puts a confirmation code on the human-only approval page. Checking work-in-progress mid-build? Pass dry_run: true \u2014 same validation, NO approval request or code is created (save the human from pages that were never meant to be approved). Normally OMIT test_level \u2014 the org then applies its own default (production runs local tests for Apex packages automatically and refuses an explicit NoTestRun). An in-progress result means call validate_deploy again to check on it. For anything large \u2014 flows especially \u2014 write the source to a file and pass content_file instead of content: retyping tens of KB of XML risks a silent one-character corruption, and a file is read byte-exactly. Live diff (real validations only, never dry_run): alongside the checkOnly deploy, Contrail retrieves the org's CURRENT version of every component and deletion, and the approval page diffs each changed component against that live version, per file for bundles \u2014 the diff baseline is the org at validate time. A component the org has but your snapshot lacks is flagged EXISTS IN TARGET (this deploy overwrites it, so it classifies as MODIFY), one your snapshot has but the org lacks NOT IN TARGET, and one whose last-modified stamp in the org differs from your snapshot's CHANGED IN TARGET. When that retrieve fails or times out (deploy.preImageTimeoutMs), the page says the org was not re-read and falls back to your local snapshot; types whose retrieved bytes cannot be compared (such as Profile) are diffed against the snapshot and labelled so. The pre-images and their last-modified stamps are frozen on the request: execute_deploy re-checks the stamps before running, and the restorable bytes become its revert package.",
       inputSchema: {
         connection: external_exports.string().describe("Target connection alias (or id) \u2014 name it unmissably to the human."),
         components: external_exports.array(
@@ -37161,7 +40124,7 @@ function registerDeployTools(server, deps) {
     "execute_deploy",
     {
       title: "Execute a validated deploy",
-      description: "Execute the deploy that the given confirmation code approves. The code exists only on the human's approval page: never guess, never fabricate, never reuse one \u2014 only pass a code the human just gave you. Codes are single-use, expire in ~1h, and are invalidated by any new REAL validation on the same connection (a dry_run check leaves them untouched).",
+      description: "Execute the deploy that the given confirmation code approves. The code exists only on the human's approval page: never guess, never fabricate, never reuse one \u2014 only pass a code the human just gave you. Codes are single-use, expire in ~1h, and are invalidated by any new REAL validation on the same connection (a dry_run check leaves them untouched). Target check: before claiming the code, Contrail re-lists the package's members in the org and compares their last-modified stamps \u2014 not bytes \u2014 with the validate-time retrieve (or, when no live baseline was captured at validate, with the org-side validation time); if a member changed, appeared or disappeared, nothing is deployed, the code is voided, and the call reports TARGET MOVED naming what moved \u2014 re-validate for a fresh code. The check covers changes up to the moment the code is claimed, not changes landing while the org processes the deploy; a member it cannot compare (its type cannot be enumerated, no baseline stamp was captured at validate, the org gives it no stamp, or \u2014 with no live baseline \u2014 it is missing from the listing) is reported as unchecked on the result's target_check, never refused; and when the org cannot be re-read at all, the deploy still runs and target_check says the check did not happen. Revert package: on success the result's revert_package points at the pre-images Contrail retrieved when this deploy was VALIDATED (not immediately before executing), under staging/_reverts/<request id>/ with revert-plan.json and README.txt; it is kept, marked outcome unknown, when Contrail loses track of a deploy that may have committed, and is null with a revert_note saying why when there is no live pre-image to restore from. Contrail never deploys a revert on its own \u2014 a revert is its own validate_deploy.",
       inputSchema: {
         connection: external_exports.string().describe("Target connection alias (or id)."),
         confirmation_code: external_exports.string().describe("The code the human read from the approval page (format XXXX-XXXX).")
@@ -37269,7 +40232,7 @@ function registerDeployTools(server, deps) {
     "dml_execute",
     {
       title: "Execute a proposed data change",
-      description: "Execute the DML that the given confirmation code approves. The code exists only on the human's approval page \u2014 only pass a code the human just gave you. Single-use, ~1h expiry, invalidated by a new proposal on the same connection.",
+      description: "Execute the DML that the given confirmation code approves. The code exists only on the human's approval page \u2014 only pass a code the human just gave you. Single-use, ~1h expiry, invalidated by a new proposal on the same connection. Target check: before claiming the code, Contrail re-runs the preview query and compares what it returns with what the approval showed \u2014 each updated field's before-value, and that each approved record still comes back; if a value changed or a record is no longer returned, nothing is written, the code is voided, and the call reports TARGET MOVED naming the records \u2014 re-run dml_propose for a fresh code. The check covers changes up to the moment the code is claimed, not changes landing while the org processes the write, and a value changed and changed back is invisible to it; a record the preview did not return or whose pre-check failed is reported as unchecked on the result's target_check, never refused; one for which the approval showed no before-value is also reported as unchecked, but its existence is still re-checked, so a record no longer returned is TARGET MOVED; an insert has nothing to re-check; when the org cannot be re-read at all, the write still runs and target_check says the check did not happen.",
       inputSchema: {
         connection: external_exports.string().describe("Target connection alias (or id)."),
         confirmation_code: external_exports.string().describe("The code the human read from the approval page (format XXXX-XXXX).")
@@ -37347,7 +40310,7 @@ function registerDeployTools(server, deps) {
     "agent_activation_execute",
     {
       title: "Execute a proposed agent activation change",
-      description: "Apply the agent activation change the given confirmation code approves \u2014 one documented Connect REST call, then a re-read so the result reports what the org CONFIRMS. The code exists only on the human's approval page \u2014 only pass a code the human just gave you. Single-use, ~1h expiry, invalidated by a new agent_activation_propose on the same connection. Changes live agent behavior immediately on success.",
+      description: "Apply the agent activation change the given confirmation code approves \u2014 one documented Connect REST call, then a re-read so the result reports what the org CONFIRMS. The code exists only on the human's approval page \u2014 only pass a code the human just gave you. Single-use, ~1h expiry, invalidated by a new agent_activation_propose on the same connection. Changes live agent behavior immediately on success. Target check: before claiming the code, Contrail re-reads the agent version's Status and compares it with the status the approval was for; if it changed or the version is no longer returned, nothing is applied, the code is voided, and the call reports TARGET MOVED \u2014 re-run agent_activation_propose for a fresh code. The check covers changes up to the moment the code is claimed, not changes landing while the org processes the call; a request with no recorded starting status is reported as unchecked on the result's target_check, never refused; and when the org cannot be re-read at all, the change still runs and target_check says the check did not happen.",
       inputSchema: {
         connection: external_exports.string().describe("Target connection alias (or id)."),
         confirmation_code: external_exports.string().describe("The code the human read from the approval page (format XXXX-XXXX).")
@@ -37718,7 +40681,7 @@ var init_lspClient = __esm({
 });
 
 // src/localdiag/apex.ts
-import path8 from "node:path";
+import path9 from "node:path";
 import { pathToFileURL } from "node:url";
 function severityOf(n) {
   switch (n) {
@@ -37761,7 +40724,7 @@ async function startApexServer(spawnLsp, serverScript, workspaceRoot) {
       processId: process.pid,
       rootUri: pathToFileURL(workspaceRoot).toString(),
       workspaceFolders: [
-        { uri: pathToFileURL(workspaceRoot).toString(), name: path8.basename(workspaceRoot) }
+        { uri: pathToFileURL(workspaceRoot).toString(), name: path9.basename(workspaceRoot) }
       ],
       capabilities: {
         textDocument: {
@@ -37784,12 +40747,12 @@ async function startApexServer(spawnLsp, serverScript, workspaceRoot) {
   client.notify("initialized", {});
   return client;
 }
-function delay4(ms) {
+function delay5(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms).unref?.());
 }
-async function checkApexOnce(client, fileUri, text, version2, deadline) {
+async function checkApexOnce(client, fileUri, text2, version2, deadline) {
   client.notify("textDocument/didOpen", {
-    textDocument: { uri: fileUri, languageId: "apex", version: version2, text }
+    textDocument: { uri: fileUri, languageId: "apex", version: version2, text: text2 }
   });
   try {
     let emptyStreak = 0;
@@ -37806,9 +40769,9 @@ async function checkApexOnce(client, fileUri, text, version2, deadline) {
         );
         items = result?.items;
       } catch (err2) {
-        const message = err2 instanceof Error ? err2.message : String(err2);
-        if (message.includes("Unhandled method")) {
-          await delay4(PULL_INTERVAL_MS);
+        const message2 = err2 instanceof Error ? err2.message : String(err2);
+        if (message2.includes("Unhandled method")) {
+          await delay5(PULL_INTERVAL_MS);
           continue;
         }
         throw err2;
@@ -37828,7 +40791,7 @@ async function checkApexOnce(client, fileUri, text, version2, deadline) {
         emptyStreak = 0;
         if (Date.now() - stableSince >= SEMANTIC_STABLE_MS) return mapDiagnostics(list);
       }
-      await delay4(PULL_INTERVAL_MS);
+      await delay5(PULL_INTERVAL_MS);
     }
   } finally {
     try {
@@ -37856,7 +40819,7 @@ var init_apex = __esm({
 });
 
 // src/localdiag/soql.ts
-import path9 from "node:path";
+import path10 from "node:path";
 import { pathToFileURL as pathToFileURL2 } from "node:url";
 async function startSoqlServer(spawnLsp, serverScript, workspaceRoot) {
   const child = spawnLsp(serverScript, ["--stdio"], workspaceRoot);
@@ -37867,7 +40830,7 @@ async function startSoqlServer(spawnLsp, serverScript, workspaceRoot) {
       processId: process.pid,
       rootUri: pathToFileURL2(workspaceRoot).toString(),
       workspaceFolders: [
-        { uri: pathToFileURL2(workspaceRoot).toString(), name: path9.basename(workspaceRoot) }
+        { uri: pathToFileURL2(workspaceRoot).toString(), name: path10.basename(workspaceRoot) }
       ],
       capabilities: {
         textDocument: {
@@ -37882,7 +40845,7 @@ async function startSoqlServer(spawnLsp, serverScript, workspaceRoot) {
   return client;
 }
 async function checkSoqlOnce(client, workspaceRoot, query, version2, deadline) {
-  const uri = pathToFileURL2(path9.join(workspaceRoot, `__validate__${version2}.soql`)).toString();
+  const uri = pathToFileURL2(path10.join(workspaceRoot, `__validate__${version2}.soql`)).toString();
   let unsubscribe = () => void 0;
   const push = new Promise((resolve) => {
     unsubscribe = client.onNotification("textDocument/publishDiagnostics", (params) => {
@@ -37921,8 +40884,8 @@ var init_soql = __esm({
 
 // src/localdiag/runner.ts
 import { spawn } from "node:child_process";
-import fs14 from "node:fs";
-import path10 from "node:path";
+import fs15 from "node:fs";
+import path11 from "node:path";
 import { pathToFileURL as pathToFileURL3 } from "node:url";
 function newLane() {
   return {
@@ -37951,23 +40914,23 @@ function createLocalDiagRunner(opts) {
   const idleReapMs = opts.idleReapMs ?? SOQL_IDLE_REAP_MS;
   const lanes = { apex: newLane(), soql: newLane() };
   let apexInFlight = null;
-  const classesDir = () => path10.join(opts.workspaceRoot, "force-app", "main", "default", "classes");
+  const classesDir = () => path11.join(opts.workspaceRoot, "force-app", "main", "default", "classes");
   function ensureWorkspace() {
     const dir = classesDir();
-    fs14.mkdirSync(dir, { recursive: true });
-    for (const name of fs14.readdirSync(dir)) {
+    fs15.mkdirSync(dir, { recursive: true });
+    for (const name of fs15.readdirSync(dir)) {
       if (name === SEED_NAME) continue;
       try {
-        fs14.rmSync(path10.join(dir, name), { force: true });
+        fs15.rmSync(path11.join(dir, name), { force: true });
       } catch {
       }
     }
-    fs14.writeFileSync(path10.join(dir, SEED_NAME), SEED_SOURCE, "utf8");
+    fs15.writeFileSync(path11.join(dir, SEED_NAME), SEED_SOURCE, "utf8");
   }
   function scriptFor(lane) {
     if (!opts.vendorDir) return null;
-    const script = lane === "apex" ? path10.join(opts.vendorDir, "apex-ls", "dist", "server.node.js") : path10.join(opts.vendorDir, "bin", "soql-lsp.bundled.js");
-    return fs14.existsSync(script) ? script : null;
+    const script = lane === "apex" ? path11.join(opts.vendorDir, "apex-ls", "dist", "server.node.js") : path11.join(opts.vendorDir, "bin", "soql-lsp.bundled.js");
+    return fs15.existsSync(script) ? script : null;
   }
   function enqueue(name, work) {
     const lane = lanes[name];
@@ -38044,8 +41007,8 @@ function createLocalDiagRunner(opts) {
         const deadline = Date.now() + opts.timeoutMs;
         ensureWorkspace();
         const filename = apexScratchName(source, kind);
-        const filePath = path10.join(classesDir(), filename);
-        fs14.writeFileSync(filePath, source, "utf8");
+        const filePath = path11.join(classesDir(), filename);
+        fs15.writeFileSync(filePath, source, "utf8");
         let client = null;
         try {
           client = await startApexServer(spawnLsp, gate.script, opts.workspaceRoot);
@@ -38076,7 +41039,7 @@ function createLocalDiagRunner(opts) {
         try {
           if (!lane.client?.alive) {
             killSoql();
-            fs14.mkdirSync(opts.workspaceRoot, { recursive: true });
+            fs15.mkdirSync(opts.workspaceRoot, { recursive: true });
             lane.client = await startSoqlServer(spawnLsp, gate.script, opts.workspaceRoot);
           }
           const diagnostics = await checkSoqlOnce(
@@ -38123,16 +41086,16 @@ var init_runner = __esm({
 });
 
 // src/core/remoteControl.ts
-import fs15 from "node:fs";
+import fs16 from "node:fs";
 import os4 from "node:os";
-import path11 from "node:path";
+import path12 from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
 function claudeSettingsPath() {
-  const base = process.env.CLAUDE_CONFIG_DIR?.trim() || path11.join(os4.homedir(), ".claude");
-  return path11.join(base, "settings.json");
+  const base = process.env.CLAUDE_CONFIG_DIR?.trim() || path12.join(os4.homedir(), ".claude");
+  return path12.join(base, "settings.json");
 }
 function userHookState(file) {
-  if (!fs15.existsSync(file)) return "not_installed";
+  if (!fs16.existsSync(file)) return "not_installed";
   let settings;
   try {
     settings = readSettings(file);
@@ -38158,10 +41121,10 @@ function isOurEntry(entry) {
   });
 }
 function readSettings(file) {
-  if (!fs15.existsSync(file)) return {};
+  if (!fs16.existsSync(file)) return {};
   let parsed;
   try {
-    parsed = JSON.parse(fs15.readFileSync(file, "utf8"));
+    parsed = JSON.parse(fs16.readFileSync(file, "utf8"));
   } catch (err2) {
     throw new Error(
       `${file} is not valid JSON (${err2 instanceof Error ? err2.message : String(err2)}) \u2014 nothing was changed. Fix the file, then try again.`
@@ -38181,39 +41144,39 @@ function hookLists(settings, file) {
   return { hooks, pre: [...pre] };
 }
 function writeSettings(file, settings, opts) {
-  fs15.mkdirSync(path11.dirname(file), { recursive: true });
+  fs16.mkdirSync(path12.dirname(file), { recursive: true });
   let target = file;
   let mode = null;
   let backup = null;
-  if (fs15.existsSync(file)) {
+  if (fs16.existsSync(file)) {
     try {
-      target = fs15.realpathSync(file);
-      mode = fs15.statSync(target).mode & 511;
+      target = fs16.realpathSync(file);
+      mode = fs16.statSync(target).mode & 511;
     } catch {
       target = file;
     }
     const candidate = `${target}.contrail-backup`;
-    if (!opts.touchedBefore && !fs15.existsSync(candidate)) {
+    if (!opts.touchedBefore && !fs16.existsSync(candidate)) {
       try {
-        fs15.copyFileSync(target, candidate);
+        fs16.copyFileSync(target, candidate);
       } catch {
       }
     }
-    if (fs15.existsSync(candidate)) backup = candidate;
+    if (fs16.existsSync(candidate)) backup = candidate;
   }
   const tmp = `${target}.${process.pid}.tmp`;
   try {
-    fs15.writeFileSync(tmp, JSON.stringify(settings, null, 2) + "\n", { encoding: "utf8", ...mode !== null ? { mode } : {} });
+    fs16.writeFileSync(tmp, JSON.stringify(settings, null, 2) + "\n", { encoding: "utf8", ...mode !== null ? { mode } : {} });
     if (mode !== null) {
       try {
-        fs15.chmodSync(tmp, mode);
+        fs16.chmodSync(tmp, mode);
       } catch {
       }
     }
-    fs15.renameSync(tmp, target);
+    fs16.renameSync(tmp, target);
   } catch (err2) {
     try {
-      fs15.rmSync(tmp, { force: true });
+      fs16.rmSync(tmp, { force: true });
     } catch {
     }
     throw err2;
@@ -38337,7 +41300,7 @@ var init_remoteControl = __esm({
         this.now = opts.now ?? Date.now;
       }
       get markerDir() {
-        return path11.join(this.root, "remote-control");
+        return path12.join(this.root, "remote-control");
       }
       /**
        * Run a tool handler with the Remote Control state sampled NOW, at call
@@ -38358,10 +41321,10 @@ var init_remoteControl = __esm({
       sample(toolUseId, toolName) {
         this.prune();
         if (toolUseId) {
-          const own = this.readMarker(path11.join(this.markerDir, `${toolUseId}.json`));
+          const own = this.readMarker(path12.join(this.markerDir, `${toolUseId}.json`));
           return own ? { state: own.remoteControl ? "on" : "off", source: "call", at: new Date(own.at).toISOString() } : { state: "unknown", source: "none", at: null };
         }
-        const latest = this.readMarker(path11.join(this.markerDir, "latest.json"));
+        const latest = this.readMarker(path12.join(this.markerDir, "latest.json"));
         if (latest && this.now() - latest.at <= RECENT_WINDOW_MS && toolNameMatches(latest.toolName, toolName)) {
           return { state: latest.remoteControl ? "on" : "off", source: "recent", at: new Date(latest.at).toISOString() };
         }
@@ -38369,7 +41332,7 @@ var init_remoteControl = __esm({
       }
       /** Status for list_connections and the Settings page. */
       status() {
-        const latest = this.readMarker(path11.join(this.markerDir, "latest.json"));
+        const latest = this.readMarker(path12.join(this.markerDir, "latest.json"));
         const fresh = latest !== null && this.now() - latest.at <= RECENT_WINDOW_MS;
         return {
           state: latest && fresh ? latest.remoteControl ? "on" : "off" : "unknown",
@@ -38422,7 +41385,7 @@ var init_remoteControl = __esm({
       }
       removeUserHook() {
         const file = this.claudeSettingsFile;
-        if (!fs15.existsSync(file)) return { changed: false, file };
+        if (!fs16.existsSync(file)) return { changed: false, file };
         const settings = readSettings(file);
         const { hooks, pre } = hookLists(settings, file);
         const kept = pre.filter((e) => !isOurEntry(e));
@@ -38438,7 +41401,7 @@ var init_remoteControl = __esm({
       readMarker(file) {
         let parsed;
         try {
-          parsed = JSON.parse(fs15.readFileSync(file, "utf8"));
+          parsed = JSON.parse(fs16.readFileSync(file, "utf8"));
         } catch {
           return null;
         }
@@ -38453,16 +41416,16 @@ var init_remoteControl = __esm({
       prune() {
         let names;
         try {
-          names = fs15.readdirSync(this.markerDir);
+          names = fs16.readdirSync(this.markerDir);
         } catch {
           return;
         }
         const cutoff = this.now() - PRUNE_AFTER_MS;
         for (const name of names) {
           if (name === "latest.json" || !name.endsWith(".json")) continue;
-          const file = path11.join(this.markerDir, name);
+          const file = path12.join(this.markerDir, name);
           try {
-            if (fs15.statSync(file).mtimeMs < cutoff) fs15.rmSync(file, { force: true });
+            if (fs16.statSync(file).mtimeMs < cutoff) fs16.rmSync(file, { force: true });
           } catch {
           }
         }
@@ -38710,14 +41673,14 @@ var init_settings2 = __esm({
             text: changed ? `Hook installed in ${file}` + (backup ? ` (the file as it was before Contrail touched it is kept at ${backup}).` : " (the file did not exist and was created).") + " Claude Code watches its settings files, so running sessions pick it up within moments; the next proposal reports whether Remote Control is on. If a proposal still says no hook reported, start a new Claude Code session." : `The hook is already installed in ${file}. Nothing changed.`
           };
         } catch (err2) {
-          const message = err2 instanceof Error ? err2.message : String(err2);
-          log("warn", "settings: hook install failed", { err: message });
+          const message2 = err2 instanceof Error ? err2.message : String(err2);
+          log("warn", "settings: hook install failed", { err: message2 });
           this.deps.audit.record("settings.remote_control_hook", {
             tool: "open_settings",
             outcome: "error",
             detail: { action: "install", changed: false }
           });
-          return { kind: "error", text: `Could not install the hook: ${message}` };
+          return { kind: "error", text: `Could not install the hook: ${message2}` };
         }
       }
       removeHook() {
@@ -38732,14 +41695,14 @@ var init_settings2 = __esm({
             text: changed ? `Hook removed from ${file}. With "Only while Remote Control is on" still selected, nothing is pushed from the next proposal on (where Contrail cannot pair a call with its report, a same-tool report may stand in for up to 30 minutes) \u2014 choose "Always" to push every approval. If Contrail runs as a Claude Code plugin, its bundled hook keeps reporting.` : `No Contrail hook was present in ${file}. Nothing changed.`
           };
         } catch (err2) {
-          const message = err2 instanceof Error ? err2.message : String(err2);
-          log("warn", "settings: hook removal failed", { err: message });
+          const message2 = err2 instanceof Error ? err2.message : String(err2);
+          log("warn", "settings: hook removal failed", { err: message2 });
           this.deps.audit.record("settings.remote_control_hook", {
             tool: "open_settings",
             outcome: "error",
             detail: { action: "remove", changed: false }
           });
-          return { kind: "error", text: `Could not remove the hook: ${message}` };
+          return { kind: "error", text: `Could not remove the hook: ${message2}` };
         }
       }
       clear() {
@@ -38888,7 +41851,7 @@ __export(server_exports, {
   createDeps: () => createDeps,
   createServer: () => createServer
 });
-import path12 from "node:path";
+import path13 from "node:path";
 function createDeps(overrides) {
   const db = overrides?.db ?? new ContrailDb();
   const tokens = overrides?.tokens ?? new KeychainTokenStore();
@@ -38922,7 +41885,7 @@ function createDeps(overrides) {
     vendorDir: vendorDir(),
     enabled: config2.localDiagnostics.enabled,
     timeoutMs: config2.localDiagnostics.timeoutMs,
-    workspaceRoot: path12.join(dataDir(), "localdiag-workspace")
+    workspaceRoot: path13.join(dataDir(), "localdiag-workspace")
   });
   return {
     db,
@@ -39024,8 +41987,8 @@ var ReadBuffer = class {
 function deserializeMessage(line) {
   return JSONRPCMessageSchema.parse(JSON.parse(line));
 }
-function serializeMessage(message) {
-  return JSON.stringify(message) + "\n";
+function serializeMessage(message2) {
+  return JSON.stringify(message2) + "\n";
 }
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
@@ -39063,11 +42026,11 @@ var StdioServerTransport = class {
   processReadBuffer() {
     while (true) {
       try {
-        const message = this._readBuffer.readMessage();
-        if (message === null) {
+        const message2 = this._readBuffer.readMessage();
+        if (message2 === null) {
           break;
         }
-        this.onmessage?.(message);
+        this.onmessage?.(message2);
       } catch (error2) {
         this.onerror?.(error2);
       }
@@ -39083,9 +42046,9 @@ var StdioServerTransport = class {
     this._readBuffer.clear();
     this.onclose?.();
   }
-  send(message) {
+  send(message2) {
     return new Promise((resolve) => {
-      const json2 = serializeMessage(message);
+      const json2 = serializeMessage(message2);
       if (this._stdout.write(json2)) {
         resolve();
       } else {
@@ -39130,8 +42093,8 @@ var defineWebSocketHelper = (handler) => {
 
 // node_modules/@hono/node-server/dist/index.mjs
 var RequestError = class extends Error {
-  constructor(message, options) {
-    super(message, options);
+  constructor(message2, options) {
+    super(message2, options);
     this.name = "RequestError";
   }
 };
@@ -40109,7 +43072,7 @@ var upgradeWebSocket = defineWebSocketHelper(async (c, events, options) => {
       }
     };
     ws.off("message", bufferMessage);
-    for (const message of messagesReceivedInStarting) handleMessage(...message);
+    for (const message2 of messagesReceivedInStarting) handleMessage(...message2);
     ws.on("message", (data, isBinary) => {
       handleMessage(data, isBinary);
     });
@@ -40227,8 +43190,8 @@ var WebStandardStreamableHTTPServerTransport = class {
   /**
    * Helper to create a JSON error response
    */
-  createJsonErrorResponse(status, code, message, options) {
-    const error2 = { code, message };
+  createJsonErrorResponse(status, code, message2, options) {
+    const error2 = { code, message: message2 };
     if (options?.data !== void 0) {
       error2.data = options.data;
     }
@@ -40445,8 +43408,8 @@ data:
       });
       const replayedEventIds = /* @__PURE__ */ new Set();
       replayedStreamId = await this._eventStore.replayEventsAfter(lastEventId, {
-        send: async (eventId, message) => {
-          const success = this.writeSSEEvent(streamController, encoder, message, eventId);
+        send: async (eventId, message2) => {
+          const success = this.writeSSEEvent(streamController, encoder, message2, eventId);
           if (!success) {
             this.onerror?.(new Error("Failed replay events"));
             try {
@@ -40492,7 +43455,7 @@ data:
   /**
    * Writes an event to an SSE stream via controller with proper formatting
    */
-  writeSSEEvent(controller, encoder, message, eventId) {
+  writeSSEEvent(controller, encoder, message2, eventId) {
     try {
       let eventData = `event: message
 `;
@@ -40500,7 +43463,7 @@ data:
         eventData += `id: ${eventId}
 `;
       }
-      eventData += `data: ${JSON.stringify(message)}
+      eventData += `data: ${JSON.stringify(message2)}
 
 `;
       controller.enqueue(encoder.encode(eventData));
@@ -40605,8 +43568,8 @@ data:
       }
       const hasRequests = messages.some(isJSONRPCRequest);
       if (!hasRequests) {
-        for (const message of messages) {
-          this.onmessage?.(message, { authInfo: options?.authInfo, requestInfo });
+        for (const message2 of messages) {
+          this.onmessage?.(message2, { authInfo: options?.authInfo, requestInfo });
         }
         return new Response(null, { status: 202 });
       }
@@ -40621,13 +43584,13 @@ data:
               this._streamMapping.delete(streamId);
             }
           });
-          for (const message of messages) {
-            if (isJSONRPCRequest(message)) {
-              this._requestToStreamMapping.set(message.id, streamId);
+          for (const message2 of messages) {
+            if (isJSONRPCRequest(message2)) {
+              this._requestToStreamMapping.set(message2.id, streamId);
             }
           }
-          for (const message of messages) {
-            this.onmessage?.(message, { authInfo: options?.authInfo, requestInfo });
+          for (const message2 of messages) {
+            this.onmessage?.(message2, { authInfo: options?.authInfo, requestInfo });
           }
         });
       }
@@ -40656,8 +43619,8 @@ data:
       if (this.sessionId !== void 0) {
         headers["mcp-session-id"] = this.sessionId;
       }
-      for (const message of messages) {
-        if (isJSONRPCRequest(message)) {
+      for (const message2 of messages) {
+        if (isJSONRPCRequest(message2)) {
           this._streamMapping.set(streamId, {
             controller: streamController,
             encoder,
@@ -40672,30 +43635,30 @@ data:
               }
             }
           });
-          this._requestToStreamMapping.set(message.id, streamId);
+          this._requestToStreamMapping.set(message2.id, streamId);
         }
       }
       try {
         await this.writePrimingEvent(streamController, encoder, streamId, clientProtocolVersion);
-        for (const message of messages) {
+        for (const message2 of messages) {
           let closeSSEStream;
           let closeStandaloneSSEStream;
-          if (isJSONRPCRequest(message) && this._eventStore && clientProtocolVersion >= "2025-11-25") {
+          if (isJSONRPCRequest(message2) && this._eventStore && clientProtocolVersion >= "2025-11-25") {
             closeSSEStream = () => {
-              this.closeSSEStream(message.id);
+              this.closeSSEStream(message2.id);
             };
             closeStandaloneSSEStream = () => {
               this.closeStandaloneSSEStream();
             };
           }
-          this.onmessage?.(message, { authInfo: options?.authInfo, requestInfo, closeSSEStream, closeStandaloneSSEStream });
+          this.onmessage?.(message2, { authInfo: options?.authInfo, requestInfo, closeSSEStream, closeStandaloneSSEStream });
         }
       } catch (error2) {
         this._streamMapping.get(streamId)?.cleanup();
         this._resumableStreams.delete(streamId);
-        for (const message of messages) {
-          if (isJSONRPCRequest(message)) {
-            this._requestToStreamMapping.delete(message.id);
+        for (const message2 of messages) {
+          if (isJSONRPCRequest(message2)) {
+            this._requestToStreamMapping.delete(message2.id);
           }
         }
         throw error2;
@@ -40809,25 +43772,25 @@ data:
       stream.cleanup();
     }
   }
-  async send(message, options) {
+  async send(message2, options) {
     let requestId = options?.relatedRequestId;
-    if (isJSONRPCResultResponse(message) || isJSONRPCErrorResponse(message)) {
-      requestId = message.id;
+    if (isJSONRPCResultResponse(message2) || isJSONRPCErrorResponse(message2)) {
+      requestId = message2.id;
     }
     if (requestId === void 0) {
-      if (isJSONRPCResultResponse(message) || isJSONRPCErrorResponse(message)) {
+      if (isJSONRPCResultResponse(message2) || isJSONRPCErrorResponse(message2)) {
         throw new Error("Cannot send a response on a standalone SSE stream unless resuming a previous client request");
       }
       let eventId;
       if (this._eventStore) {
-        eventId = await this._eventStore.storeEvent(this._standaloneSseStreamId, message);
+        eventId = await this._eventStore.storeEvent(this._standaloneSseStreamId, message2);
       }
       const standaloneSse = this._streamMapping.get(this._standaloneSseStreamId);
       if (standaloneSse === void 0) {
         return;
       }
       if (standaloneSse.controller && standaloneSse.encoder && (eventId === void 0 || !standaloneSse.replayedEventIds?.has(eventId))) {
-        this.writeSSEEvent(standaloneSse.controller, standaloneSse.encoder, message, eventId);
+        this.writeSSEEvent(standaloneSse.controller, standaloneSse.encoder, message2, eventId);
       }
       return;
     }
@@ -40839,18 +43802,18 @@ data:
     if (!this._enableJsonResponse) {
       let eventId;
       if (this._eventStore) {
-        eventId = await this._eventStore.storeEvent(streamId, message);
+        eventId = await this._eventStore.storeEvent(streamId, message2);
         stream = this._streamMapping.get(streamId);
       }
       if (stream?.controller && stream?.encoder && (eventId === void 0 || !stream.replayedEventIds?.has(eventId))) {
-        const written = this.writeSSEEvent(stream.controller, stream.encoder, message, eventId);
+        const written = this.writeSSEEvent(stream.controller, stream.encoder, message2, eventId);
         if (written && eventId !== void 0) {
           this._resumableStreams.add(streamId);
         }
       }
     }
-    if (isJSONRPCResultResponse(message) || isJSONRPCErrorResponse(message)) {
-      this._requestResponseMap.set(requestId, message);
+    if (isJSONRPCResultResponse(message2) || isJSONRPCErrorResponse(message2)) {
+      this._requestResponseMap.set(requestId, message2);
       const relatedIds = Array.from(this._requestToStreamMapping.entries()).filter(([_, sid]) => sid === streamId).map(([id]) => id);
       const allResponsesReady = relatedIds.every((id) => this._requestResponseMap.has(id));
       if (allResponsesReady) {
@@ -40964,8 +43927,8 @@ var StreamableHTTPServerTransport = class {
   /**
    * Sends a JSON-RPC message through the transport.
    */
-  async send(message, options) {
-    return this._webStandardTransport.send(message, options);
+  async send(message2, options) {
+    return this._webStandardTransport.send(message2, options);
   }
   /**
    * Handles an incoming HTTP request, whether GET or POST.
@@ -41028,13 +43991,13 @@ function describeDataDir() {
   }
 }
 function createStartupErrorServer(err2) {
-  const message = err2 instanceof Error ? err2.message : String(err2);
+  const message2 = err2 instanceof Error ? err2.message : String(err2);
   const code = err2?.code;
   const stack = err2 instanceof Error && err2.stack ? err2.stack : null;
   const server = new McpServer(
     { name: SERVER_NAME, version: ENGINE_VERSION },
     {
-      instructions: `Contrail Engine ${ENGINE_VERSION} FAILED TO START: ${message} \u2014 no engine functionality is available this session. Call engine_status for the full error and remediation steps, report the failure to the human, and do not retry other operations.`
+      instructions: `Contrail Engine ${ENGINE_VERSION} FAILED TO START: ${message2} \u2014 no engine functionality is available this session. Call engine_status for the full error and remediation steps, report the failure to the human, and do not retry other operations.`
     }
   );
   server.registerTool(
@@ -41053,7 +44016,7 @@ function createStartupErrorServer(err2) {
             {
               status: "startup_failed",
               version: ENGINE_VERSION,
-              error: message,
+              error: message2,
               ...typeof code === "string" ? { error_code: code } : {},
               data_dir: describeDataDir(),
               remediation: [
@@ -41203,13 +44166,13 @@ function readJsonBody(req) {
       chunks.push(chunk);
     });
     req.on("end", () => {
-      const text = Buffer.concat(chunks).toString("utf8");
-      if (!text) {
+      const text2 = Buffer.concat(chunks).toString("utf8");
+      if (!text2) {
         resolve(void 0);
         return;
       }
       try {
-        resolve(JSON.parse(text));
+        resolve(JSON.parse(text2));
       } catch {
         reject(new Error("invalid JSON body"));
       }

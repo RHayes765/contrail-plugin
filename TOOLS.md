@@ -1,6 +1,6 @@
 # Contrail Reference — tools, features, configuration
 
-Everything Contrail can do, in one place. Current as of **v0.38.2** (39 tools).
+Everything Contrail can do, in one place. Current as of **v0.39.0** (39 tools).
 The same tool surface is available in all three installs — the Claude Desktop
 extension (`.mcpb`), the Claude Code plugin, and the Contrail desktop app —
 with a few desktop-app differences [noted at the end](#the-desktop-app).
@@ -99,7 +99,13 @@ already passed this ritual — see `run_agent_eval`), in every environment
 
 Codes are single-use, expire in ~1 hour, are invalidated by any newer
 proposal **of the same kind** (deploy, DML, Apex, or bulk) on the same
-connection, and lock after repeated wrong guesses (brute-force guard). Every decision — proposals, executions, refusals — lands
+connection, and lock after repeated wrong guesses (brute-force guard). A
+deploy, DML or agent-activation code is also voided when Contrail finds, just
+before claiming it, that the target changed since validation or proposal
+(S45 — see [`execute_deploy`](#execute_deploy)); anonymous Apex has no fixed
+org target to re-check, and bulk loads are not re-checked (their approval
+page shows no current values for the rows to compare against); their results
+say so (`target_check.status: "not_applicable"`). Every decision — proposals, executions, refusals — lands
 in the local audit log.
 
 Refresh tokens live in the OS keychain only. Contrail makes exactly two kinds
@@ -135,7 +141,10 @@ the recovery path after a sandbox refresh.
 
 Revokes the stored refresh token and removes the connection, its cached
 tokens, and its snapshot data. Irreversible without a new OAuth flow —
-Claude is instructed to confirm with the human first.
+Claude is instructed to confirm with the human first. Deploy artifacts it
+produced are kept: revert packages under `staging/_reverts/` and bulk
+failed-row exports under `deploys/`; each is removed by its own retention
+sweep.
 
 - `connection` — alias (or id) to remove.
 
@@ -712,6 +721,52 @@ results (S41); an in-progress validation is polled with
 `{connection, job_id}` alone, nothing re-sent and no `content_file`
 re-read.
 
+**Live diff and clobber flags (S45).** A real validation (never a dry run)
+also retrieves the org's current version of every component and deletion —
+concurrently with the checkOnly deploy, bounded by
+`deploy.preImageTimeoutMs` — and the approval page diffs each changed row
+against that **live** version: a collapsed diff per row (XML changes for
+documents and child components, per-file text hunks for bundles, files on
+one side only listed as added or removed), capped per row and at 150 KB per
+page, after which rows show counts only. Classification follows the org,
+not the snapshot: a component the org holds but the snapshot lacks is
+**EXISTS IN TARGET** and classifies as MODIFY (the deploy overwrites it),
+one the snapshot has but the org lacks is **NOT IN TARGET** (the deploy
+creates it), and a component whose proposed content matches the live
+version reads "identical to the live version" whatever the snapshot says.
+A row the live check reclassifies carries the warnings of its new
+classification, computed against the live copy: a snapshot ADD the org
+already has gains, say, the whole-document REPLACE or deactivate-first
+warning and loses an add-only advisory such as "NEW LAYOUT IS NOT
+ASSIGNED"; a snapshot MODIFY the org lacks goes the other way round.
+**CHANGED IN TARGET** is driven by dates only — the org's last-modified
+stamp differs from the snapshot's — with who and when in the row's detail,
+never in a warning (so never on the phone); when either stamp is
+unavailable, a row whose live bytes differ from the snapshot gets a neutral
+note instead ("… Contrail cannot say who or when"). A child component
+(a field, a validation rule …) whose snapshot row carries its object's
+stamp has no stamp of its own to compare, so its live stamp is compared
+with the time the snapshot was taken — the org's clock against this
+computer's — and CHANGED IN TARGET needs it more than 60 seconds after the
+snapshot; within a minute either way, differing bytes get the neutral note
+only. A deletion whose member the org's listing does not show is noted ("not
+present in the target … the org decides whether this delete fails or
+no-ops"). Types whose retrieved bytes cannot be compared (Profile) keep the
+snapshot's content verdict and are diffed against the snapshot, labelled
+"diff vs your snapshot". When the
+**retrieve** fails or times out, a LIVE COMPARISON UNAVAILABLE banner says
+the org was not re-read and classifications and diffs come from the
+snapshot; when only the last-modified **listing** fails for some types, the
+live diff stands and a line names the types whose stamps were unavailable
+(the execute-time check then reports those members as unchecked). The
+result carries `live_check` (`status`, `reason`, `started_at`, `at`, the
+checkOnly deploy's org-side `org_clock`, `dates_unavailable_types`) and a
+`pre_image` per change and deletion (`present`, `source`, `sha256`,
+last-modified date/by, `comparable`, `restorable`); the diffs themselves
+live on the page only. The restorable pre-images are written to
+`staging/_reverts/<requestId>/` for the revert package (see
+[`execute_deploy`](#execute_deploy)).
+
 - `connection` — target, named unmissably to the human.
 - `components` *(≤50)* — each `{type, api_name, content | content_file}`.
   Types include `ApexClass`, `ApexTrigger`, `ApexPage`, `Flow`,
@@ -828,6 +883,85 @@ when tests ran (stricter and faster than replaying bytes), falling back to
 the frozen zip. In-progress results mean call again with the same code — the
 running deploy is never restarted.
 
+**Target check (S45).** Before the code is claimed, Contrail re-lists the
+package's members with the same `listMetadata` calls the validate-time live
+check made and compares last-modified stamps — **stamps, not bytes** —
+against that validate-time retrieve. A member that changed, disappeared or
+newly appeared is **TARGET MOVED**: nothing is deployed, the code is voided
+(the request reads `superseded`), the frozen payload and the revert files are
+removed, and the result is `{executed: false, target_moved: true, moved,
+refusal, …}` — the refusal names each member (with who and when, where the
+org reports them), and re-sending the same code replays it ("This code was
+already voided and was not executed — …"), never "a newer validation
+replaced it". Re-validate for the current state and a fresh code. A member
+Contrail cannot compare is
+**unchecked** — named in `target_check.unchecked` with a reason
+(`type_not_enumerable`, `dates_unavailable_at_validate`,
+`dates_unavailable_at_execute` — the listing gave it no stamp now, or
+`absent_no_baseline` — see below) — never refused.
+When validation captured no live baseline, the check falls back to the
+org's own clock: a stamp at or after the checkOnly deploy's org-side
+creation time, minus a 5-second ordering margin, counts as moved (so an edit
+in those 5 seconds before validation also refuses — re-validate; the refusal
+says "within 5 seconds before", never "after"); a member missing from that
+listing is unchecked (`absent_no_baseline` — without a live baseline
+Contrail cannot tell whether it vanished before or after validation),
+except an ADD, whose absence is what the approval assumed; with no
+org-side time either — or for a request validated before the live check
+existed — there is no baseline: every member is unchecked
+(`live_check_unavailable_no_org_clock`). Whenever **no member could be
+compared** — no baseline, or every member unchecked for its own reason
+(types the org cannot enumerate, stamps unavailable at validate) — the
+deploy **still runs**, and `target_check` is `{status: "not_checked",
+checked_at, checked: [], unchecked, note}`, the note saying so;
+`deploy.target_check_unavailable` is audited before the claim with
+`reason: "no_baseline"` or `"nothing_compared"`. When the org cannot
+be re-read at all (an error, or no answer within 15 s), the deploy **still
+runs** — a deliberate fail-open, disclosed: `target_check` is
+`{status: "unavailable", reason, note}`, the note says the approval page's
+diff may not describe what was overwritten, and
+`deploy.target_check_unavailable` is audited before the claim. On a pass,
+`target_check` is `{status: "ok", checked_at, checked, unchecked}` — `ok`
+means at least one member was compared and none had moved. Every
+`target_check` carries a `status` — `ok`, `not_checked`, `unavailable` or
+`not_applicable`; `not_checked` and `unavailable` both mean the write ran
+without a completed check. A result where nothing was submitted (the frozen
+package missing from disk) carries no `target_check`. The check covers
+changes up to the moment the code is claimed; a change landing while the
+org processes the deploy is not caught.
+
+**Revert package (S45).** On success the result carries `revert_package`
+(`dir`, `restores`, `deletes`, `not_restorable`, `covered` — present only when
+some child member is restored by its container's document — `plan`, `note`),
+where `dir`
+is `staging/_reverts/<requestId>/`: the pre-images Contrail retrieved when
+this deploy was **validated** — not immediately before executing — as
+documents at their zip-relative paths, child components under
+`children/<Type>/` and bundles as `bundles/<Type>/<Name>.contrail-bundle.json`
+envelopes, plus `revert-plan.json` (`components` with each one's
+`content_file`, `destructive` = the components this deploy added,
+`not_restorable` with reasons — Profiles, and types Contrail cannot
+retrieve — `covered` = child members restored by their container's document,
+which gets the only file because `validate_deploy` refuses a container and
+its own children in one package — and the `target_check`) and `README.txt`,
+which says what a revert does not undo — data changes, automation that
+ran, permission effects, changes to components outside the package — and
+that it overwrites anything changed since in the components it restores,
+another user's edits included; and re-deploying a Flow whose
+latest version is active creates a new version. Contrail never deploys a
+revert on its own: pass each `content_file` (and the `destructive` list) to
+`validate_deploy`, and the human approves it like any deploy. When a timeout
+or transport error leaves the outcome unknown, the directory is **kept** and
+finalized with `outcome: "unknown"` — the deploy may have committed, so the
+failure result names the directory (check Setup → Deployment Status). An
+org-reported failure (rolled back, nothing committed) removes it. With no
+live pre-image (the retrieve was unavailable at validate), `revert_package`
+is `null` with a `revert_note` — Contrail never builds a revert from the
+snapshot, which may describe a state the org never had. Directories of
+expired, superseded or locked validations are swept at the next real
+validate; executed (and outcome-unknown) ones are removed by the first real
+validate after `deploy.revertRetentionDays` (`0` keeps them forever).
+
 - `connection`, `confirmation_code`.
 
 ### `deactivate_flow`
@@ -863,6 +997,31 @@ not data.
 Executes the proposed change with the human's code. Returns per-row/per-step
 outcomes and created ids.
 
+**Target check (S45).** Before the code is claimed, the preview query is
+re-run: an updated field whose value no longer matches the before-value the
+page showed, or an approved record the query no longer returns (deleted, or
+no longer visible to this connection's user — indistinguishable from here),
+is **TARGET MOVED** — nothing is written, the code is voided, and the
+refusal names the records. Field values are compared, not
+`SystemModstamp`, so an unrelated edit does not refuse; a value changed and
+changed back is invisible. Field names are matched case-insensitively
+against the preview row, and a 15-character id is matched to its
+18-character record. Records the preview did not return, whose pre-check
+failed, or for which the page showed no before-value
+(`no_before_value_shown` — the record's existence is still re-checked) are
+reported as unchecked; when no record could be compared (the pre-check
+failed at propose, or every record was not found at propose), the write
+still runs with `target_check.status: "not_checked"` and
+`deploy.target_check_unavailable` audited (`reason: "no_baseline"` or
+`"nothing_compared"`); an
+insert has nothing to re-check (`target_check.status: "not_applicable"`).
+When the org cannot be re-read, the write still runs with
+`target_check.status: "unavailable"`; a pass (`"ok"`) means at least one
+record was compared and none had moved.
+The untruncated before-values this check compares are kept with the request
+and are not added to the `dml_propose` result (its rows carry only the
+page's truncated `old → new` labels).
+
 - `connection`, `confirmation_code`.
 
 ### `agent_activation_propose`
@@ -884,6 +1043,13 @@ One documented Connect REST call
 reports the org's **confirmed** status, never the requested one, with the
 platform's `messages[]` verbatim when it refuses (e.g. an unpublished
 version). Single-use code, ~1h expiry, superseded by a new propose.
+
+**Target check (S45).** Before the code is claimed, the version's `Status`
+is re-read; a status other than the one the approval was for (or no row) is
+**TARGET MOVED** — nothing is applied and the code is voided. When the org
+cannot be re-read, the change still runs with
+`target_check.status: "unavailable"`; a request with no recorded starting
+status runs with `"not_checked"` (nothing was compared); a pass is `"ok"`.
 
 - `connection`, `confirmation_code`.
 
@@ -1019,6 +1185,8 @@ sections' defaults automatically.
 | | `codeTtlMs` | 1 h | Confirmation-code lifetime. |
 | | `maxFailedAttempts` | 5 | Wrong-code guesses before the pending code locks. |
 | | `allowedSourceRoots` | `[]` | Extra dirs `content_file`/`csv_file` may read from — for standing folders the human volunteers unprompted. Config-file-only by design: no tool call can widen it, and agents are told never to request an entry for a one-off (they copy into `staging/` instead). |
+| | `preImageTimeoutMs` | 120 s | S45: budget for the pre-image retrieve the approval page diffs against |
+| | `revertRetentionDays` | 30 | S45: pre-images of expired or superseded validations are removed at the next validate; executed (or outcome-unknown) plans are removed by the first real validate after this many days (the sweep runs only when a validate issues a code). `0` keeps executed plans forever. |
 | `bulkLoad` | `pollIntervalMs` / `ingestTimeoutMs` | 5 s / 30 min | Ingest-job polling, per job. |
 | | `maxFileBytes` | 100 MB | Per-file cap (Salesforce's raw ceiling per job). |
 | | `maxFilesPerPlan` | 20 | Max steps in one bulk plan. |
@@ -1083,9 +1251,20 @@ on Linux; override with `CONTRAIL_DATA_DIR`) holds:
 - `staging/` — where agents author files for `content_file` / `csv_file`,
   from the start (a session's working folder is never *automatically* a
   deploy source root).
+- `staging/_reverts/<requestId>/` — S45 revert packages: the pre-images a real
+  validation retrieved from the org, finalized with `revert-plan.json` and
+  `README.txt` when the deploy executes (or its outcome is unknown). Inside
+  staging so every file is a valid `content_file` for a revert's own
+  `validate_deploy`; Contrail never deploys one itself. Swept at the next real
+  validate when the validation expired, was superseded or locked; once
+  executed, removed by the first real validate after
+  `deploy.revertRetentionDays` (`0` keeps them forever). The sweep runs only
+  when a later `validate_deploy` issues a code, and disconnecting the org does
+  not remove them.
 - `remote-control/` — the Remote Control hook's markers (a boolean, a
   timestamp, tool name and tool-use id per call; swept after an hour). Nothing
   executable lives in the data directory (see [`open_settings`](#open_settings)).
-- `deploys/` — frozen approved payloads (cleaned when spent) and
+- `deploys/` — frozen approved payloads (cleaned when spent, or when a
+  never-executed validation expires — swept at the next real validate) and
   `<request>-results/` directories with failed-row exports (kept).
 - `config.json` — everything in the table above.

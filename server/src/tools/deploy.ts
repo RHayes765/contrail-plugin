@@ -148,7 +148,19 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
         'An in-progress result means call validate_deploy again to check on it. ' +
         'For anything large — flows especially — write the source to a file and pass ' +
         'content_file instead of content: retyping tens of KB of XML risks a silent ' +
-        'one-character corruption, and a file is read byte-exactly.',
+        'one-character corruption, and a file is read byte-exactly. ' +
+        'Live diff (real validations only, never dry_run): alongside the checkOnly deploy, ' +
+        "Contrail retrieves the org's CURRENT version of every component and deletion, and the " +
+        'approval page diffs each changed component against that live version, per file for ' +
+        'bundles — the diff baseline is the org at validate time. A component the org has but ' +
+        'your snapshot lacks is flagged EXISTS IN TARGET (this deploy overwrites it, so it ' +
+        'classifies as MODIFY), one your snapshot has but the org lacks NOT IN TARGET, and one ' +
+        "whose last-modified stamp in the org differs from your snapshot's CHANGED IN TARGET. " +
+        'When that retrieve fails or times out (deploy.preImageTimeoutMs), the page says the ' +
+        'org was not re-read and falls back to your local snapshot; types whose retrieved bytes ' +
+        'cannot be compared (such as Profile) are diffed against the snapshot and labelled so. ' +
+        'The pre-images and their last-modified stamps are frozen on the request: execute_deploy ' +
+        're-checks the stamps before running, and the restorable bytes become its revert package.',
       inputSchema: {
         connection: z.string().describe('Target connection alias (or id) — name it unmissably to the human.'),
         components: z
@@ -522,7 +534,24 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
         'on the human\'s approval page: never guess, never fabricate, never reuse one — only ' +
         'pass a code the human just gave you. Codes are single-use, expire in ~1h, and are ' +
         'invalidated by any new REAL validation on the same connection (a dry_run ' +
-        'check leaves them untouched).',
+        'check leaves them untouched). ' +
+        "Target check: before claiming the code, Contrail re-lists the package's members in the " +
+        'org and compares their last-modified stamps — not bytes — with the validate-time ' +
+        'retrieve (or, when no live baseline was captured at validate, with the org-side ' +
+        'validation time); if a member changed, appeared or disappeared, nothing is deployed, ' +
+        'the code is voided, and the call reports TARGET MOVED naming what moved — re-validate ' +
+        'for a fresh code. The check covers changes up to the moment the code is claimed, not ' +
+        'changes landing while the org processes the deploy; a member it cannot compare (its ' +
+        'type cannot be enumerated, no baseline stamp was captured at validate, the org gives ' +
+        'it no stamp, or — with no live baseline — it is missing from the listing) is reported ' +
+        "as unchecked on the result's target_check, never refused; and when the org cannot be " +
+        're-read at all, the deploy still runs and target_check says the check did not happen. ' +
+        "Revert package: on success the result's revert_package points at the pre-images " +
+        'Contrail retrieved when this deploy was VALIDATED (not immediately before executing), ' +
+        'under staging/_reverts/<request id>/ with revert-plan.json and README.txt; it is kept, ' +
+        'marked outcome unknown, when Contrail loses track of a deploy that may have committed, ' +
+        'and is null with a revert_note saying why when there is no live pre-image to restore ' +
+        'from. Contrail never deploys a revert on its own — a revert is its own validate_deploy.',
       inputSchema: {
         connection: z.string().describe('Target connection alias (or id).'),
         confirmation_code: z
@@ -703,7 +732,20 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
       description:
         'Execute the DML that the given confirmation code approves. The code exists only on ' +
         'the human\'s approval page — only pass a code the human just gave you. Single-use, ' +
-        '~1h expiry, invalidated by a new proposal on the same connection.',
+        '~1h expiry, invalidated by a new proposal on the same connection. ' +
+        'Target check: before claiming the code, Contrail re-runs the preview query and ' +
+        "compares what it returns with what the approval showed — each updated field's " +
+        'before-value, and that each approved record still comes back; if a value changed or a ' +
+        'record is no longer returned, nothing is written, the code is voided, and the call ' +
+        'reports TARGET MOVED naming the records — re-run dml_propose for a fresh code. The ' +
+        'check covers changes up to the moment the code is claimed, not changes landing while ' +
+        'the org processes the write, and a value changed and changed back is invisible to it; ' +
+        "a record the preview did not return or whose pre-check failed is reported as unchecked " +
+        "on the result's target_check, never refused; one for which the approval showed no " +
+        'before-value is also reported as unchecked, but its existence is still re-checked, so ' +
+        'a record no longer returned is TARGET MOVED; an insert has nothing to re-check; when ' +
+        'the org cannot be re-read at all, the write still runs and target_check ' +
+        'says the check did not happen.',
       inputSchema: {
         connection: z.string().describe('Target connection alias (or id).'),
         confirmation_code: z
@@ -838,7 +880,15 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
         "CONFIRMS. The code exists only on the human's approval page — only pass a code " +
         'the human just gave you. Single-use, ~1h expiry, invalidated by a new ' +
         'agent_activation_propose on the same connection. Changes live agent behavior ' +
-        'immediately on success.',
+        'immediately on success. ' +
+        "Target check: before claiming the code, Contrail re-reads the agent version's Status " +
+        'and compares it with the status the approval was for; if it changed or the version is ' +
+        'no longer returned, nothing is applied, the code is voided, and the call reports TARGET ' +
+        'MOVED — re-run agent_activation_propose for a fresh code. The check covers changes up ' +
+        'to the moment the code is claimed, not changes landing while the org processes the ' +
+        'call; a request with no recorded starting status is reported as unchecked on the ' +
+        "result's target_check, never refused; and when the org cannot be re-read at all, the " +
+        'change still runs and target_check says the check did not happen.',
       inputSchema: {
         connection: z.string().describe('Target connection alias (or id).'),
         confirmation_code: z

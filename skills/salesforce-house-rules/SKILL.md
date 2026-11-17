@@ -139,12 +139,35 @@ rather than inventing what the skill would have said.
   is the system working.
 - **If a code is rejected, do not retry variations.** A wrong code returns one of
   three distinct messages — *no match* (a misread or the wrong tab), *superseded*
-  (a newer validation replaced it), or *expired*. Codes are drawn from an
+  (a newer validation replaced it, or Contrail found the target had changed before
+  executing — the refusal names which), or *expired*. Codes are drawn from an
   unambiguous alphabet with **no `O`, `0`, `I`, `L`, or `1`**, so a character read
   as one of those is a misread — ask the human to re-read from the **newest**
   approval tab (older tabs self-invalidate and show "no longer valid"). After
   repeated wrong codes the pending code is **locked** as a brute-force guard, and
   even the correct code stops working — at that point re-validate for a fresh one.
+- **The page diffs against the live org; execute re-checks it.** A real
+  `validate_deploy` retrieves the org's current version of every member, so the
+  approval page shows a live diff against the org at validate time: lead your
+  summary with any **EXISTS IN TARGET** row (the deploy overwrites something your
+  snapshot does not have) or **CHANGED IN TARGET** row (changed in the org since
+  your snapshot). If the result's `live_check.status` is `unavailable` (the
+  page's **LIVE COMPARISON UNAVAILABLE** banner), its diff is against the
+  snapshot only — say so. Before claiming the code, execute compares the
+  members' last-modified stamps against that validate-time retrieve (DML re-checks
+  the before-values, an agent activation the version's status) and voids the code
+  with a **TARGET MOVED** refusal when the target moved since validation —
+  re-validate, never retry the code. Members whose type the org cannot enumerate are
+  reported as unchecked; if the org could not be re-read at all
+  (`target_check.status` `unavailable`) or no member could be compared
+  (`not_checked` — no baseline, or every member unchecked: types the org cannot
+  enumerate, stamps unavailable at validate, records not found at propose), the
+  write still runs and `target_check` says the check did not happen — read it
+  before claiming the page's diff is what got overwritten. Only `ok` means at
+  least one member was compared and none had moved. A successful deploy
+  writes a revert plan under `staging/_reverts/<requestId>/` (`revert_package` on
+  the result) that Contrail never auto-deploys: a revert is its own
+  `validate_deploy`, approved like any other.
 - **Surface the permission warning.** If `validate_deploy` returns a
   `permission_warning` (new components deploying without FLS/object/Apex/tab
   permissions), lead your summary with it — those components will be invisible or

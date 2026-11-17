@@ -1093,6 +1093,65 @@ describe('dml two-step', () => {
     expect(result.isError).toBe(true);
     expect(textOf(result)).toContain('data_write');
   });
+
+  it('S45 F3: the page carries the snapshot automation card for every object the plan writes', async () => {
+    store.writeCurrent(
+      connId,
+      new Map([
+        [
+          'flows/Invoice_After_Save.flow',
+          strToU8(`<?xml version="1.0" encoding="UTF-8"?>
+<Flow xmlns="http://soap.sforce.com/2006/04/metadata">
+    <label>Invoice After Save</label>
+    <processType>AutoLaunchedFlow</processType>
+    <start>
+        <object>Invoice__c</object>
+        <recordTriggerType>Create</recordTriggerType>
+        <triggerType>RecordAfterSave</triggerType>
+    </start>
+    <status>Active</status>
+</Flow>`),
+        ],
+      ]),
+      { clearDirs: ['flows'] },
+    );
+    db.replaceArtifactsForTypes(connId, ['Flow'], [
+      {
+        connectionId: connId,
+        type: 'Flow',
+        apiName: 'Invoice_After_Save',
+        filePath: 'flows/Invoice_After_Save.flow',
+        contentHash: 'h',
+        lastModifiedDate: null,
+        lastModifiedBy: null,
+        retrievedAt: '2026-08-07T00:00:00.000Z',
+      },
+    ]);
+    const result = await client.callTool({
+      name: 'dml_propose',
+      arguments: {
+        connection: 'deploy-org',
+        steps: [
+          { operation: 'insert', object: 'Invoice__c', record: { Name: 'INV-1' } },
+          { operation: 'insert', object: 'Contact', record: { LastName: 'Doe' } },
+        ],
+      },
+    });
+    expect(result.isError).not.toBe(true);
+    const page = presentedPages.at(-1)!;
+    expect(page).toContain('AUTOMATION IN YOUR SNAPSHOT (from ');
+    expect(page).toContain('— read from the local snapshot, not the live org');
+    expect(page).toContain(
+      'Flow Invoice_After_Save — Active · record-triggered, after save, on create · ' +
+        'entry criteria: no',
+    );
+    expect(page).toContain('<div class="chg-label">Contact</div>');
+    expect(page).toContain('The snapshot holds no object file for Contact');
+    expect(page).toContain('Not visible in the snapshot:');
+    expect(page).not.toContain('Objects this script MAY touch');
+    // Page-only: the agent's result carries neither the card nor the code.
+    expect(textOf(result)).not.toContain('AUTOMATION IN YOUR SNAPSHOT');
+  });
 });
 
 /**

@@ -138,6 +138,23 @@ describe('diffText', () => {
     expect(d.lines_removed).toBe(2100);
     expect(d.hunks).toEqual([]);
   });
+
+  it('caps hunk lines at the default limit but honors caller-supplied limits', () => {
+    // One contiguous 120-line insertion: defaults keep 40 lines and flag the
+    // cut; a UI-sized limit keeps the whole block with no flag.
+    const a = ['start', 'end'].join('\n');
+    const b = ['start', ...Array.from({ length: 120 }, (_, i) => `added-${i}`), 'end'].join('\n');
+
+    const capped = diffText(a, b);
+    expect(capped.hunks).toHaveLength(1);
+    expect(capped.hunks[0]!.added).toHaveLength(40);
+    expect(capped.hunks[0]!.added_truncated).toBe(true);
+    expect(capped.lines_added).toBe(120); // counts stay exact even when display is capped
+
+    const full = diffText(a, b, { maxHunkLines: 2_000 });
+    expect(full.hunks[0]!.added).toHaveLength(120);
+    expect(full.hunks[0]!.added_truncated).toBeUndefined();
+  });
 });
 
 describe('semanticDiff', () => {
@@ -152,5 +169,65 @@ describe('semanticDiff', () => {
     const d = semanticDiff('class A {}', 'class B {}');
     expect(d.format).toBe('text');
     expect(d.text!.identical).toBe(false);
+  });
+});
+
+describe('S45: DiffLimits (converged with the desktop copy; defaults unchanged)', () => {
+  // Two local edits far enough apart to form two hunks.
+  const a = ['h1', 'x', 'same', 'same', 'same', 'same', 'same', 'y', 'tail'].join('\n');
+  const b = ['h1', 'X', 'same', 'same', 'same', 'same', 'same', 'Y', 'tail'].join('\n');
+
+  it('no limits → the pre-S45 defaults (existing callers pass none)', () => {
+    const d = diffText(a, b);
+    expect(d.hunks).toHaveLength(2);
+    expect(d.hunks_truncated).toBe(false);
+    expect(d.lines_added).toBe(2);
+    expect(d.lines_removed).toBe(2);
+  });
+
+  it('maxHunks caps the hunk list and flags the truncation; counts are never capped', () => {
+    const d = diffText(a, b, { maxHunks: 1 });
+    expect(d.hunks).toHaveLength(1);
+    expect(d.hunks_truncated).toBe(true);
+    expect(d.lines_added).toBe(2);
+    expect(d.lines_removed).toBe(2);
+  });
+
+  it('maxHunkLines and maxLineChars clamp what one hunk carries', () => {
+    const many = Array.from({ length: 5 }, (_, i) => `removed-line-${i}`).join('\n');
+    const d = diffText(`k\n${many}\nk`, 'k\nk', { maxHunkLines: 2, maxLineChars: 7 });
+    expect(d.hunks).toHaveLength(1);
+    expect(d.hunks[0]!.removed).toEqual(['removed…', 'removed…']);
+    expect(d.hunks[0]!.removed_truncated).toBe(true);
+    expect(d.lines_removed).toBe(5);
+  });
+
+  it('maxHunkBudgetChars drops whole hunks once the budget is spent', () => {
+    // Hunk 1 costs ("x"+1)+("X"+1) = 4 chars: a budget of 4 keeps it and
+    // nothing after it; 3 keeps none.
+    const one = diffText(a, b, { maxHunkBudgetChars: 4 });
+    expect(one.hunks).toHaveLength(1);
+    expect(one.hunks_truncated).toBe(true);
+    const none = diffText(a, b, { maxHunkBudgetChars: 3 });
+    expect(none.hunks).toEqual([]);
+    expect(none.hunks_truncated).toBe(true);
+    expect(none.counts_only).toBe(false);
+  });
+
+  it('maxChanges caps structural XML changes and flags it', () => {
+    const capped = diffXml(INVOICE_OBJECT_XML, INVOICE_OBJECT_XML_V2, { maxChanges: 1 })!;
+    expect(capped.changes).toHaveLength(1);
+    expect(capped.truncated).toBe(true);
+    expect(capped.identical).toBe(false);
+    expect(diffXml(INVOICE_OBJECT_XML, INVOICE_OBJECT_XML_V2)!.truncated).toBe(false);
+  });
+
+  it('semanticDiff forwards the limits to whichever format it routes to', () => {
+    expect(semanticDiff(a, b, { maxHunks: 1 }).text!.hunks).toHaveLength(1);
+    expect(semanticDiff(a, b).text!.hunks).toHaveLength(2);
+    const xml = semanticDiff(INVOICE_OBJECT_XML, INVOICE_OBJECT_XML_V2, { maxChanges: 1 });
+    expect(xml.format).toBe('xml');
+    expect(xml.xml!.changes).toHaveLength(1);
+    expect(xml.xml!.truncated).toBe(true);
   });
 });

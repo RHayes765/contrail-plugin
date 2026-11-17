@@ -12,9 +12,18 @@ import { fileURLToPath } from 'node:url';
  *
  * Flow: bump server/package.json by hand, then `npm run release`.
  * `npm run release -- --dry-run` does everything except commit/tag/push.
+ *
+ * Step 2 includes the LOCAL mirror gate (scripts/describe-identity.mjs):
+ * word-identical describe/refusal/page texts and byte-identical mirror units
+ * against the desktop checkout (`--desktop <path>` or CONTRAIL_DESKTOP_ROOT,
+ * default the sibling ../desktop). It fails the release on any MISSING or
+ * MISMATCH, and REFUSES when the desktop checkout is absent unless
+ * `--skip-mirror` is passed explicitly. CI never runs this script.
  */
 
 const dryRun = process.argv.includes('--dry-run');
+const skipMirror = process.argv.includes('--skip-mirror');
+const desktopArg = process.argv.indexOf('--desktop');
 const serverRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = path.resolve(serverRoot, '..');
 const version = JSON.parse(
@@ -67,6 +76,16 @@ syncText('README.md', /Status: v[\d.]+/, `Status: v${version}`);
 syncText('TOOLS.md', /Current as of \*\*v[\d.]+\*\*/, `Current as of **v${version}**`);
 
 // ── 2. Gates ──
+// Mirror gate first (cheap, and a refusal should not wait out the suite).
+// Local only: CI's runner has no desktop checkout — never add it to
+// release.yml.
+run(
+  'node scripts/describe-identity.mjs' +
+    (skipMirror ? ' --skip-mirror' : '') +
+    (desktopArg >= 0 && process.argv[desktopArg + 1]
+      ? ` --desktop "${process.argv[desktopArg + 1]}"`
+      : ''),
+);
 run('npm run lint:skills');
 run('npm run build');
 run('npx vitest run');

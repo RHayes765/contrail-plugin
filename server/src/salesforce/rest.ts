@@ -35,12 +35,17 @@ export class RestClient {
       .records;
   }
 
-  /** Like query(), but also returns the org-side total row count (pre-cap). */
+  /**
+   * Like query(), but also returns the org-side total row count (pre-cap).
+   * S45: an optional `init.signal` lets a caller with a time budget abort the
+   * fetch(es) — forwarded to request() as-is.
+   */
   async queryWithCount<T = Record<string, unknown>>(
     soql: string,
     maxRows = 2000,
+    init?: Pick<RequestInit, 'signal'>,
   ): Promise<{ records: T[]; totalSize: number | null }> {
-    return this.runQuery<T>(`/services/data/${this.apiVersion}/query`, soql, maxRows);
+    return this.runQuery<T>(`/services/data/${this.apiVersion}/query`, soql, maxRows, init);
   }
 
   async toolingQuery<T = Record<string, unknown>>(soql: string, maxRows = 2000): Promise<T[]> {
@@ -97,12 +102,13 @@ export class RestClient {
     basePath: string,
     soql: string,
     maxRows: number,
+    init?: Pick<RequestInit, 'signal'>,
   ): Promise<{ records: T[]; totalSize: number | null }> {
     const records: T[] = [];
     let totalSize: number | null = null;
     let path: string | null = `${basePath}?q=${encodeURIComponent(soql)}`;
     while (path && records.length < maxRows) {
-      const res = await this.request(path);
+      const res = await this.request(path, init);
       const data = (await res.json()) as {
         records?: T[];
         totalSize?: number;

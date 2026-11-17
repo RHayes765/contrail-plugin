@@ -69,4 +69,23 @@ describe('config', () => {
     fs.writeFileSync(path.join(tmp, 'config.json'), '{not json');
     expect(loadConfig()).toEqual(DEFAULT_CONFIG);
   });
+
+  it('S45: deploy.preImageTimeoutMs / revertRetentionDays default and merge partially', () => {
+    expect(DEFAULT_CONFIG.deploy.preImageTimeoutMs).toBe(120_000);
+    expect(DEFAULT_CONFIG.deploy.revertRetentionDays).toBe(30);
+    // The default file written on first load carries both knobs (discoverable).
+    loadConfig();
+    const onDisk = JSON.parse(fs.readFileSync(path.join(tmp, 'config.json'), 'utf8'));
+    expect(onDisk.deploy.preImageTimeoutMs).toBe(120_000);
+    expect(onDisk.deploy.revertRetentionDays).toBe(30);
+    // A partial deploy section overrides one knob and keeps the rest.
+    fs.writeFileSync(
+      path.join(tmp, 'config.json'),
+      JSON.stringify({ deploy: { revertRetentionDays: 0 } }),
+    );
+    const cfg = loadConfig();
+    expect(cfg.deploy.revertRetentionDays).toBe(0);
+    expect(cfg.deploy.preImageTimeoutMs).toBe(120_000);
+    expect(cfg.deploy.codeTtlMs).toBe(DEFAULT_CONFIG.deploy.codeTtlMs);
+  });
 });

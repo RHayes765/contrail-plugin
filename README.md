@@ -8,11 +8,54 @@ The Contrail engine shipped as a Claude plugin: a local stdio MCP server (the
 For the narrative overview see [CONTRAIL_OVERVIEW.md](CONTRAIL_OVERVIEW.md); to
 install, see [Getting Started](Getting%20Started.md).
 
-**Status: v0.38.2 — one-click packaging (MCPB)** on top of the completed
+**Status: v0.39.0 — one-click packaging (MCPB)** on top of the completed
 P0.1–P0.6 Phase 0 surface. `npm run mcpb` builds `contrail-<version>.mcpb`, a
-single MCP Bundle that installs into Claude Desktop via Settings → Extensions
-(no Node install, no npm, no config editing on the target machine) and covers
+single MCP Bundle that installs into Claude Desktop via Settings → Desktop App →
+Extensions (no Node install, no npm, no config editing on the target machine) and covers
 Windows x64/ARM and macOS Intel/Apple Silicon from one file. 39 tools.
+
+**Approval-page truth (S45).** The approval page now diffs against the org
+itself, not just the local snapshot. A real `validate_deploy` (never a dry
+run) retrieves the org's current version of every component and deletion
+alongside the checkOnly deploy, and each changed row carries a collapsed diff
+against that live version — file by file for bundles (a Profile, whose
+retrieved bytes cannot be compared, is diffed against the snapshot and
+labelled so). A component the org holds but the snapshot lacks is flagged
+**EXISTS IN TARGET** and classifies as MODIFY (the deploy overwrites it), one
+the org lacks is **NOT IN TARGET**, and one whose last-modified stamp in the
+org differs from the snapshot's is **CHANGED IN TARGET**, with who and when in
+the row's detail (never in the phone push); when the retrieve fails, a banner
+says the org was not re-read and the page falls back to the snapshot.
+Execution re-checks the target before the code is claimed: a deploy re-lists
+its members and compares last-modified stamps — not bytes — against that
+validate-time retrieve, a DML re-runs its preview query against the
+before-values the page showed, and an agent activation re-reads the
+version's status. Anything that moved voids the code
+with a **TARGET MOVED** refusal naming what changed (re-sending the code
+replays it); a member it cannot compare (its type cannot be enumerated, no
+stamp is available, or — with no live baseline — it is missing from the
+listing) is named as unchecked, never refused; and when the org cannot be
+re-read at all, the write
+still runs and the result's `target_check` says the check did not happen. The
+check is best-effort: it covers changes up to the claim, not changes landing
+while the org processes the write. An executed deploy whose live check
+succeeded leaves a **revert package** under `staging/_reverts/<requestId>/`:
+the pre-images retrieved at validate, a `revert-plan.json` (the components to
+restore, the ones this deploy added under `destructive`, and `not_restorable`
+members such as Profiles) and a README saying what a revert does not undo and
+what it overwrites. It
+is kept, marked outcome unknown, when Contrail loses track of a deploy that may
+have committed, removed by the first real validate after
+`deploy.revertRetentionDays` (30) days (the sweep runs only when a later
+validate_deploy issues a code; disconnecting the org does not remove it), and never
+deployed by Contrail — a revert is its own `validate_deploy`. DML, anonymous
+Apex and bulk-load pages gain an **automation card**: the flows, Apex
+triggers and validation rules the local snapshot shows on the objects being
+written (for Apex, the objects its text names — a best-effort parse; when it
+names none, the card says so rather than disappearing), plus
+Process Builder processes whose object is read best-effort (unverified, and
+labelled so), dated from the snapshot, with a fixed list of what the snapshot
+cannot see. No new tool (still 39).
 
 **Agentforce Studio tests (S44).** Agent testing caught up with the new
 builder. `AiTestingDefinition` — the metadata type Salesforce pairs with
@@ -336,8 +379,9 @@ runs the suite.
 (scripts/mcpb.mjs) produces `dist-mcpb/contrail-<version>.mcpb` — manifest +
 esbuild server bundle + both native addons with prebuilt binaries for all four
 Claude Desktop platforms (win32 x64/arm64, darwin x64/arm64). The recipient
-installs it via Claude Desktop **Settings → Extensions → Advanced settings →
-Install Extension…** — Claude Desktop runs it on its own bundled Node, so the
+installs it via Claude Desktop **Settings → Desktop App → Extensions (bottom of
+the page) → Advanced settings → Install Extension…** — Claude Desktop runs it on
+its own bundled Node, so the
 target machine needs nothing installed. See `Getting Started.md`.
 
 **As a Claude Code / Cowork plugin:** `/plugin marketplace add

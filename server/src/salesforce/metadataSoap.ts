@@ -54,6 +54,14 @@ export interface DeployResult {
   checkOnly: boolean;
   stateDetail?: string;
   errorMessage?: string;
+  /**
+   * S45: the deploy's org-side stamps (documented DeployResult fields, org
+   * time, never the host clock). A checkOnly deploy's createdDate anchors the
+   * execute-time moved check when no live baseline was captured at validate.
+   * Absent when the org omits them.
+   */
+  createdDate?: string;
+  completedDate?: string;
   numberComponentsTotal: number;
   numberComponentsDeployed: number;
   numberComponentErrors: number;
@@ -86,7 +94,7 @@ export const FOLDER_TYPES: Record<string, string> = Object.fromEntries(
   Object.entries(FOLDERED_TYPES).map(([content, cfg]) => [cfg.folderType, content]),
 );
 
-interface ListQuery {
+export interface ListQuery {
   type: string;
   folder?: string;
 }
@@ -130,6 +138,30 @@ export class MetadataSoapClient {
     types: string[],
   ): Promise<{ props: FileProperties[]; unsupportedTypes: string[] }> {
     return this.listAll(types, true);
+  }
+
+  /**
+   * S45: list exactly the given {type, folder?} queries — no folder
+   * enumeration, no fan-out. A foldered member (Report/Dashboard) is listed
+   * by ITS folder only, never the whole tree. The validate-time pre-image and
+   * the execute-time moved check both call this, so their last-modified
+   * stamps come from one source. Duplicate queries collapse; INVALID_TYPE
+   * degrades per query like listMetadataDetailed (the type lands in
+   * unsupportedTypes); every other fault throws.
+   */
+  async listMetadataQueries(
+    queries: ListQuery[],
+  ): Promise<{ props: FileProperties[]; unsupportedTypes: string[] }> {
+    const seen = new Set<string>();
+    const distinct = queries.filter((q) => {
+      const key = `${q.type}\u0000${q.folder ?? ''}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    const unsupported = new Set<string>();
+    const props = await this.listQueries(distinct, true, unsupported);
+    return { props, unsupportedTypes: [...unsupported] };
   }
 
   private async listAll(
@@ -418,6 +450,8 @@ export class MetadataSoapClient {
       checkOnly: bool(result.checkOnly),
       stateDetail: typeof result.stateDetail === 'string' ? result.stateDetail : undefined,
       errorMessage: typeof result.errorMessage === 'string' ? result.errorMessage : undefined,
+      createdDate: typeof result.createdDate === 'string' ? result.createdDate : undefined,
+      completedDate: typeof result.completedDate === 'string' ? result.completedDate : undefined,
       numberComponentsTotal: num(result.numberComponentsTotal),
       numberComponentsDeployed: num(result.numberComponentsDeployed),
       numberComponentErrors: num(result.numberComponentErrors),

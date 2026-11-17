@@ -81,7 +81,15 @@ Phase 0 is a working engine, dogfooded end-to-end against a real development org
 - **Investigate** — search and describe metadata, trace what a change would affect,
   diff artifacts and whole orgs, query records, and read logs and flow errors.
 - **Change, safely** — validate and deploy metadata, and create/update/delete data,
-  each gated behind the human confirmation flow above.
+  each gated behind the human confirmation flow above. The approval page diffs a
+  deploy against the org's live version (not just the local snapshot) and flags
+  components the org holds, or has changed, that the snapshot does not show; just
+  before executing, Contrail re-checks (best-effort) that the target has not
+  changed since validation and refuses if it has; and an executed deploy whose
+  live comparison succeeded leaves a revert plan, built from what the org held at
+  validation, that a human can review and re-deploy through the same flow.
+  Data-write pages also list the automation the local snapshot shows on the
+  affected objects.
 - **Migrate data at scale** — load ordered CSV files (accounts, then the contacts
   that reference them) straight into an org through Salesforce's Bulk API, with the
   whole plan on one approval page and the rows travelling file → org, never through

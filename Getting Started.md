@@ -9,8 +9,9 @@ Installing it is now a one-click affair: Contrail ships as a Claude Desktop
 
 ## What you need
 
-- **Claude Desktop**, reasonably up to date (Settings must have an **Extensions**
-  page — if yours doesn't, update the app first).
+- **Claude Desktop**, reasonably up to date (the **Extensions** section lives
+  under **Settings → Desktop App**, at the bottom of that page — if yours
+  doesn't have it, update the app first).
 - The **`contrail-<version>.mcpb`** file from the latest release:
   **https://github.com/RHayes765/contrail-plugin/releases/latest**
 
@@ -19,12 +20,14 @@ That's the whole list.
 ## Step 1 — Install the extension
 
 1. Download `contrail-<version>.mcpb` from the releases page above.
-2. In Claude Desktop, open **Settings → Extensions → Advanced settings →
-   "Install Extension…"** and pick the downloaded file.
-   (On some machines simply double-clicking the `.mcpb` file works too — but the
-   Settings path works everywhere.)
+2. In Claude Desktop, open **Settings → Desktop App**, scroll to the bottom to
+   **Extensions**, then **Advanced settings → "Install Extension…"** and pick
+   the downloaded file. (On some machines simply double-clicking the `.mcpb`
+   file works too — but the Settings path works everywhere.)
 3. Review the install dialog and confirm. Make sure Contrail shows as **enabled**
-   in the Extensions list afterward.
+   in the Extensions list afterward. Claude Desktop refuses to install the same
+   version number twice, so every update carries a new number — install it the
+   same way.
 
 You can delete the downloaded file when done — the extension is self-contained and
 managed by Claude Desktop from here on.
@@ -171,8 +174,8 @@ shares these keys (its own code-free push ignores the Remote Control setting).
 
 ## Troubleshooting
 
-- **Tools don't appear in a chat:** check Settings → Extensions — Contrail must be
-  listed *and* enabled. Try toggling it off and on, then start a new conversation.
+- **Tools don't appear in a chat:** check Settings → Desktop App → Extensions (at
+  the bottom of that page) — Contrail must be listed *and* enabled. Try toggling it off and on, then start a new conversation.
 - **The install window closes silently with no error:** a known Claude Desktop bug
   on a few Windows builds. Update Claude Desktop and retry; if it persists, use the
   fallback below.

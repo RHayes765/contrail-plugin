@@ -3,9 +3,10 @@
 **You are being asked to install the Contrail Engine plugin for your human.**
 
 > **Check first:** this is the FALLBACK path. The normal way to install Contrail is
-> the one-click extension — the human opens Claude Desktop **Settings → Extensions →
-> Advanced settings → Install Extension…** and picks `contrail-<version>.mcpb` from
-> the distribution folder. No build, no config editing, done. Only continue with
+> the one-click extension — the human opens Claude Desktop **Settings → Desktop
+> App**, scrolls to **Extensions** at the bottom, then **Advanced settings →
+> Install Extension…** and picks `contrail-<version>.mcpb` from the distribution
+> folder. No build, no config editing, done. Only continue with
 > this file if the extension route failed on their machine, their Claude Desktop has
 > no Extensions page, or they're installing into **Claude Code** rather than Claude
 > Desktop.

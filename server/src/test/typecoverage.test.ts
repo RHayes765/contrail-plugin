@@ -4,6 +4,7 @@ import {
   analyzeChanges,
   analyzePermissionCoverage,
   buildDeployZip,
+  retrieveMemberFor,
   type ProposedComponent,
 } from '../deploy/package.js';
 import { indexSnapshotFiles } from '../snapshot/indexer.js';
@@ -2399,5 +2400,41 @@ describe('S44: Agentforce Studio test suites & custom scorers', () => {
       path: 'aiAgentScorerDefinitions/Tone_Check.aiAgentScorerDefinition',
       child: false,
     });
+  });
+});
+
+describe('S45: retrieveMemberFor mirrors the component arms of buildDeployZip', () => {
+  it('file, bundle, foldered and child types resolve to the member the deploy manifest carries', () => {
+    expect(retrieveMemberFor('ApexClass', 'Foo')).toEqual({ type: 'ApexClass', member: 'Foo' });
+    expect(retrieveMemberFor('LightningComponentBundle', 'myCmp')).toEqual({
+      type: 'LightningComponentBundle',
+      member: 'myCmp',
+    });
+    expect(retrieveMemberFor('Report', 'Ops/Pipeline')).toEqual({
+      type: 'Report',
+      member: 'Ops/Pipeline',
+    });
+    // A folder component addresses as a member of its CONTENT type (manifestType).
+    expect(retrieveMemberFor('ReportFolder', 'Ops')).toEqual({ type: 'Report', member: 'Ops' });
+    // Children come down inside their container, addressed by the parent name.
+    expect(retrieveMemberFor('CustomField', 'Invoice__c.Amount__c')).toEqual({
+      type: 'CustomObject',
+      member: 'Invoice__c',
+    });
+    expect(retrieveMemberFor('ValidationRule', 'Invoice__c.Positive_Amount')).toEqual({
+      type: 'CustomObject',
+      member: 'Invoice__c',
+    });
+    expect(retrieveMemberFor('CustomLabel', 'Greeting')).toEqual({
+      type: 'CustomLabels',
+      member: 'CustomLabels',
+    });
+    expect(retrieveMemberFor('BotVersion', 'MyBot.v1')).toEqual({ type: 'Bot', member: 'MyBot' });
+  });
+
+  it('a type Contrail cannot author (destructive-only) and an undotted child name resolve to null', () => {
+    expect(retrieveMemberFor('PresenceUserConfig', 'Agents')).toBeNull();
+    expect(retrieveMemberFor('NotAType', 'x')).toBeNull();
+    expect(retrieveMemberFor('CustomField', '')).toBeNull();
   });
 });

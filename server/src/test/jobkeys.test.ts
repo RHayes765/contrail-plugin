@@ -48,6 +48,9 @@ function armGate(): void {
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'contrail-jobkeys-'));
+  // S45: every engine path that touches the data dir (staging/_reverts
+  // sweeps included) must land in THIS tmp, never the developer's real one.
+  process.env.CONTRAIL_DATA_DIR = tmp;
   db = new ContrailDb(path.join(tmp, 'test.db'));
   tokens = new MemoryTokenStore();
   const grants = emptyGrantSet();
@@ -75,6 +78,7 @@ afterEach(() => {
   gatePromise = null;
   vi.unstubAllGlobals();
   db.close();
+  delete process.env.CONTRAIL_DATA_DIR;
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 

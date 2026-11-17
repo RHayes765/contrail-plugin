@@ -19,6 +19,17 @@ export type AuditEventType =
   | 'oauth.callback_refused'
   | 'local_request.refused'
   | 'grant.refused'
+  // S45: the execute-time "target moved" guard voided a code (per kind), the
+  // guard could not re-read the org and the write proceeded unverified, the
+  // revert package was written / swept, and the validate-time sweep expired
+  // stale codes.
+  | 'deploy.target_moved'
+  | 'dml.target_moved'
+  | 'activation.target_moved'
+  | 'deploy.target_check_unavailable'
+  | 'deploy.revert_written'
+  | 'deploy.revert_swept'
+  | 'deploy.expired'
   | (string & {});
 
 export class AuditLog {

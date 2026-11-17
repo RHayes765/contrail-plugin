@@ -82,6 +82,23 @@ const STYLE = `
   .code-card { text-align: center; }
   .code { font-family: ui-monospace, Consolas, monospace; font-size: 1.9rem; font-weight: 700;
           letter-spacing: 0.12em; padding: 0.7rem 0; user-select: all; }
+  .chg-diff { font-size: 0.78rem; margin-top: 0.25rem; }
+  .chg-diff summary { cursor: pointer; color: light-dark(#5a6570, #8b949e); }
+  .dh { font-family: ui-monospace, Consolas, monospace; font-size: 0.74rem; margin-top: 0.2rem;
+        overflow-wrap: anywhere; }
+  .dh del { color: light-dark(#a32c2c, #e88c7c); }
+  .dh ins { color: light-dark(#176b33, #8ce8a8); text-decoration: none; }
+  .dh-hunk { font-family: ui-monospace, Consolas, monospace; overflow-x: auto; overflow-y: auto;
+             white-space: pre; max-height: 18rem; font-size: 0.72rem; margin: 0.3rem 0 0;
+             padding: 0.4rem 0.5rem; border-radius: 6px; background: light-dark(#f0f2f5, #23262d); }
+  .dh-file { font-weight: 600; }
+  .dh-del { color: light-dark(#a32c2c, #e88c7c); }
+  .dh-add { color: light-dark(#176b33, #8ce8a8); }
+  .auto-line { font-size: 0.82rem; margin-top: 0.15rem; overflow-wrap: anywhere; }
+  .auto-note { font-size: 0.78rem; color: light-dark(#5b6472, #9aa4b2); margin-top: 0.15rem;
+               overflow-wrap: anywhere; }
+  .auto-nc { font-size: 0.78rem; color: light-dark(#5b6472, #9aa4b2); margin-top: 0.6rem; }
+  .auto-nc ul { margin: 0.2rem 0 0; padding-left: 1.1rem; }
 `;
 
 /** The shared page shell — exported so sibling human-only pages (S42 Settings) keep the exact look. */
@@ -198,15 +215,97 @@ export function renderSuccessPage(opts: {
   );
 }
 
+/**
+ * S45: one row's collapsed diff (deploy pages). Structural copies of the
+ * diff/semantic.ts shapes, so this file imports no diff code. The engine
+ * composes every sentence (`summary`, `note`); this page only escapes and
+ * lays them out. Pre-image text is untrusted org content — esc() on all of it.
+ */
+export interface ApprovalRowDiff {
+  format: 'xml' | 'text' | 'bundle';
+  identical: boolean;
+  /** "diff vs live org (retrieved HH:MM)" or "diff vs your snapshot (<date>)". */
+  baseline_label: string;
+  /** The <summary> line, e.g. "diff vs live org (retrieved 15:02) · 3 changes". */
+  summary: string;
+  xml_changes?: Array<{
+    kind: string;
+    path: string;
+    a?: unknown;
+    b?: unknown;
+    key?: string;
+    note?: string;
+  }>;
+  /** Bundles carry `file` (the path inside the bundle) on every hunk. */
+  text_hunks?: Array<{
+    file?: string;
+    a_line: number;
+    b_line: number;
+    removed: string[];
+    added: string[];
+    removed_truncated?: boolean;
+    added_truncated?: boolean;
+  }>;
+  counts?: {
+    changes?: number;
+    lines_added?: number;
+    lines_removed?: number;
+    files_changed?: string[];
+    files_added?: string[];
+    files_removed?: string[];
+  };
+  truncated: boolean;
+  /** Why the body is shorter than the summary line (budget spent, too large to diff). */
+  note?: string;
+}
+
+/**
+ * S45 F3: one object's section of the automation card (DML / bulk / Apex
+ * pages) — a structural subset of deps/automation.ts's ObjectAutomation, so
+ * this file imports no snapshot code. That module composes every line
+ * (`summary_lines` from formatAutomationLines, `notes`, `not_covered`); this
+ * page only escapes and lays them out. The card is read from the local
+ * snapshot, never the org — its heading says so and names the snapshot date.
+ */
+export interface ApprovalAutomation {
+  object: string;
+  /** ISO time the snapshot rows behind this section were retrieved; null when none. */
+  snapshot_at: string | null;
+  summary_lines: string[];
+  notes: string[];
+  not_covered: string[];
+}
+
 export interface ApprovalPageOptions {
   kind: 'deploy' | 'dml' | 'apex' | 'bulk' | 'activation';
   code: string;
   expiresAt: string;
   org: { alias: string; orgName: string | null; orgType: string; instanceUrl: string };
-  /** Non-destructive changes, one row each. `detail` renders monospace, pre-wrap (multiline-safe). */
-  changes: Array<{ label: string; warnings: string[]; detail?: string }>;
+  /**
+   * Non-destructive changes, one row each. `detail` renders monospace, pre-wrap (multiline-safe).
+   * S45: `diff` (deploy rows) renders collapsed under the warnings.
+   */
+  changes: Array<{ label: string; warnings: string[]; detail?: string; diff?: ApprovalRowDiff }>;
   /** Destructive changes — rendered first, in red. */
-  destructive: Array<{ label: string; warnings: string[]; detail?: string }>;
+  destructive: Array<{
+    label: string;
+    warnings: string[];
+    detail?: string;
+    diff?: ApprovalRowDiff;
+  }>;
+  /**
+   * S45 F3: what the snapshot says fires on the objects this write touches —
+   * one entry per object (at most 10), rendered as one card after Changes.
+   */
+  automation?: ApprovalAutomation[];
+  /**
+   * S45 F3 (Apex pages): the not_covered lines for a script in which no
+   * object was found. `automation` is then empty and the card still renders
+   * — its prefix line says none were found in the text, followed by these
+   * lines — so the page never reads as "no automation fires". Supplied by the
+   * engine (deps/automation.ts NOT_COVERED), so this file imports nothing.
+   */
+  automationNotCovered?: string[];
   /** Validation/test result lines. */
   results: Array<{ label: string; value: string; bad?: boolean }>;
   /** Blast radius lines. */
@@ -237,11 +336,15 @@ export function renderApprovalPage(opts: ApprovalPageOptions): string {
   // `detail` carries file provenance for components read from disk. The human
   // is approving bytes they did not type, so the page has to say which file
   // they came from and fingerprint it.
-  const row = (c: { label: string; warnings: string[]; detail?: string }, danger: boolean) => `
+  const row = (
+    c: { label: string; warnings: string[]; detail?: string; diff?: ApprovalRowDiff },
+    danger: boolean,
+  ) => `
     <div class="chg${danger ? ' danger' : ''}">
       <div class="chg-label">${esc(c.label)}</div>
       ${c.detail ? `<div class="chg-detail">${esc(c.detail)}</div>` : ''}
       ${c.warnings.map((w) => `<div class="chg-warn">⚠ ${esc(w)}</div>`).join('')}
+      ${c.diff ? renderRowDiff(c.diff) : ''}
     </div>`;
 
   return page(
@@ -274,6 +377,12 @@ export function renderApprovalPage(opts: ApprovalPageOptions): string {
     ${
       opts.changes.length
         ? `<div class="card"><h2>Changes</h2>${opts.changes.map((c) => row(c, false)).join('')}</div>`
+        : ''
+    }
+    ${
+      (opts.automation && opts.automation.length) ||
+      (opts.kind === 'apex' && opts.automationNotCovered && opts.automationNotCovered.length)
+        ? renderAutomationCard(opts.kind, opts.automation ?? [], opts.automationNotCovered ?? [])
         : ''
     }
     ${
@@ -319,7 +428,9 @@ export function renderApprovalPage(opts: ApprovalPageOptions): string {
         var reasons = {
           executed: 'This change has already been executed.',
           executing: 'This change is currently being executed.',
-          superseded: 'A newer validation replaced this code.',
+          superseded:
+            'This code was replaced — by a newer validation, or because Contrail found the ' +
+            'target had changed before executing.',
           expired: 'This code has expired.',
           locked: 'This code was locked after too many incorrect attempts.',
           execution_failed: 'The execution failed; this code is spent.',
@@ -360,6 +471,115 @@ export function renderApprovalPage(opts: ApprovalPageOptions): string {
       })();
     </script>`,
   );
+}
+
+/**
+ * S45: a row's diff, collapsed. No JavaScript — a native <details>. Hunks
+ * scroll horizontally inside the 34rem column (phones stay readable).
+ * Everything interpolated goes through esc(): pre-images are org text.
+ */
+function renderRowDiff(d: ApprovalRowDiff): string {
+  if (d.identical) return `<div class="chg-diff">${esc(d.summary)}</div>`;
+  const value = (v: unknown) =>
+    v === null || v === undefined ? '(absent)' : typeof v === 'string' ? v : JSON.stringify(v);
+  const parts: string[] = [];
+  for (const ch of d.xml_changes ?? []) {
+    const where = `<span class="dh-file">${esc(ch.path || '(root)')}</span>`;
+    if (ch.kind === 'scalar') {
+      parts.push(
+        `<div class="dh">${where} <del>${esc(value(ch.a))}</del> → ` +
+          `<ins>${esc(value(ch.b))}</ins></div>`,
+      );
+    } else if (ch.kind === 'added') {
+      parts.push(`<div class="dh">${where} <ins>+ ${esc(ch.key)}</ins></div>`);
+    } else if (ch.kind === 'removed') {
+      parts.push(`<div class="dh">${where} <del>− ${esc(ch.key)}</del></div>`);
+    } else {
+      parts.push(`<div class="dh">${where} ${esc(ch.note)}</div>`);
+    }
+  }
+  if (d.counts?.files_added?.length) {
+    parts.push(`<div class="dh">added: ${esc(d.counts.files_added.join(', '))}</div>`);
+  }
+  if (d.counts?.files_removed?.length) {
+    parts.push(`<div class="dh">removed: ${esc(d.counts.files_removed.join(', '))}</div>`);
+  }
+  for (const h of d.text_hunks ?? []) {
+    const lines: string[] = [];
+    if (h.file) lines.push(`<span class="dh-file">${esc(h.file)}</span>`);
+    lines.push(esc(`@@ −${h.a_line} +${h.b_line} @@`));
+    for (const l of h.removed) lines.push(`<span class="dh-del">- ${esc(l)}</span>`);
+    if (h.removed_truncated) lines.push(`<span class="dh-del">  … more removed lines</span>`);
+    for (const l of h.added) lines.push(`<span class="dh-add">+ ${esc(l)}</span>`);
+    if (h.added_truncated) lines.push(`<span class="dh-add">  … more added lines</span>`);
+    parts.push(`<pre class="dh-hunk">${lines.join('\n')}</pre>`);
+  }
+  if (d.note) parts.push(`<div class="dh">${esc(d.note)}</div>`);
+  else if (d.truncated) {
+    parts.push(`<div class="dh">… truncated — more differences than this page shows</div>`);
+  }
+  return (
+    `<details class="chg-diff"><summary>${esc(d.summary)}</summary>` +
+    `${parts.join('')}</details>`
+  );
+}
+
+/**
+ * S45 F3: the automation card. Lines come from deps/automation.ts (the one
+ * text source); the heading names the snapshot date(s) behind them and says
+ * the org was not read. esc() on everything — flow, trigger and rule names are
+ * org text.
+ */
+function renderAutomationCard(
+  kind: ApprovalPageOptions['kind'],
+  list: ApprovalAutomation[],
+  extraNotCovered: string[],
+): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const stamp = (iso: string) => {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return (
+      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+      `${pad(d.getHours())}:${pad(d.getMinutes())}`
+    );
+  };
+  const dates = [
+    ...new Set(list.flatMap((a) => (a.snapshot_at ? [stamp(a.snapshot_at)] : []))),
+  ];
+  // No object at all (an Apex script naming none) means no snapshot row was
+  // read, so the heading names no date rather than "an unknown date".
+  const heading =
+    (list.length
+      ? `AUTOMATION IN YOUR SNAPSHOT (from ${dates.length ? dates.join(', ') : 'an unknown date'})`
+      : 'AUTOMATION IN YOUR SNAPSHOT') + ' — read from the local snapshot, not the live org';
+  // An Apex page with no object found still says so, rather than dropping
+  // the card (the not_covered lines then come from extraNotCovered).
+  const prefix =
+    kind === 'apex'
+      ? `<div class="auto-line">${esc(
+          'Objects this script MAY touch (parsed from the text; dynamic SOQL and called Apex ' +
+            `hide more): ${
+              list.length ? list.map((a) => a.object).join(', ') : 'none found in the text'
+            }`,
+        )}</div>`
+      : '';
+  const objects = list
+    .map(
+      (a) =>
+        `<div class="chg"><div class="chg-label">${esc(a.object)}</div>` +
+        a.summary_lines.map((l) => `<div class="auto-line">${esc(l)}</div>`).join('') +
+        a.notes.map((n) => `<div class="auto-note">${esc(n)}</div>`).join('') +
+        '</div>',
+    )
+    .join('');
+  const notCovered = [...new Set([...list.flatMap((a) => a.not_covered), ...extraNotCovered])];
+  const nc = notCovered.length
+    ? `<div class="auto-nc">Not visible in the snapshot:<ul>${notCovered
+        .map((l) => `<li>${esc(l)}</li>`)
+        .join('')}</ul></div>`
+    : '';
+  return `<div class="card"><h2>${esc(heading)}</h2>${prefix}${objects}${nc}</div>`;
 }
 
 export function renderErrorPage(message: string): string {

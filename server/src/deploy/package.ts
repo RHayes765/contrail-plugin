@@ -35,6 +35,34 @@ export interface ComponentChange {
   /** Provenance for file-sourced components; absent when content was inline. */
   source_path?: string;
   source_sha256?: string;
+  /**
+   * S45: what the org held for this member when validate_deploy ran — the
+   * live baseline the approval page diffs against and the execute-time
+   * "target moved" check compares last-modified stamps with. Absent on dry
+   * runs and whenever the live check never ran.
+   */
+  pre_image?: ComponentPreImage;
+}
+
+/**
+ * S45: the frozen summary of one member's live pre-image (the bytes
+ * themselves live on disk under staging/_reverts/, never here). `present` is
+ * null when the org could not enumerate the type at all; `source` says
+ * whether the member's bytes were retrieved or only the listing was
+ * consulted; `comparable` is false when a diff against the retrieved bytes
+ * would lie (Profile — a single-member retrieve is package-relative — and
+ * list-only members); `restorable` is false when no bytes were captured for
+ * a revert. Dates are null when the org's listing did not describe the
+ * member (a type in dates_unavailable_types).
+ */
+export interface ComponentPreImage {
+  present: boolean | null;
+  source: 'retrieve' | 'list';
+  sha256?: string;
+  last_modified_date: string | null;
+  last_modified_by: string | null;
+  comparable: boolean;
+  restorable: boolean;
 }
 
 /** File placement per deployable type (metadata format). */
@@ -406,6 +434,30 @@ export const AURA_DEFTYPE_FILES: Record<string, string> = {
  */
 export function isRegisteredType(type: string): boolean {
   return type in FILE_TYPES || type in CHILD_TYPES;
+}
+
+/**
+ * S45: the retrieve manifest entry that fetches ONE component's live bytes —
+ * mirrors the component arms of buildDeployZip (bundle, file, child) so the
+ * pre-image retrieve names exactly what the deploy will write: children come
+ * down inside their container document (CustomObject / CustomLabels / Bot,
+ * addressed by the parent name) and folder components as members of their
+ * CONTENT type (manifestType). null for a type Contrail cannot author: the
+ * destructive path admits any literal type name, but with no directory map
+ * there is no zip entry to read, so such a member gets a list-only pre-image.
+ */
+export function retrieveMemberFor(
+  type: string,
+  apiName: string,
+): { type: string; member: string } | null {
+  const fileSpec = FILE_TYPES[type];
+  if (fileSpec) return { type: fileSpec.manifestType ?? type, member: apiName };
+  const childSpec = CHILD_TYPES[type];
+  if (childSpec) {
+    const parent = childSpec.parentFromName(apiName);
+    return parent ? { type: childSpec.containerRoot, member: parent } : null;
+  }
+  return null;
 }
 
 /** S41: parse a bundle envelope by TYPE (spec looked up internally) — for callers outside this file. */
@@ -961,6 +1013,356 @@ function validateTypeAndName(type: string, name: string): void {
 }
 
 /**
+ * S45: what changeDependentWarnings needs to know about one component — the
+ * classification, the proposal, and the copy it was classified against.
+ */
+export interface ChangeWarningInput {
+  type: string;
+  api_name: string;
+  change: ComponentChange['change'];
+  /** The proposed document (or child block); a bundle's envelope for bundle types. */
+  proposed: string;
+  /**
+   * The copy the classification compared against — the snapshot's in
+   * analyzeChanges, the org's live pre-image when the engine re-runs this —
+   * or null when there is none (an add, an unreadable or incomparable copy).
+   * Documents and children only; bundles pass `bundleFiles`.
+   */
+  before: string | null;
+  /**
+   * Bundle types: the proposed files, the envelope's main file, and the
+   * baseline's files (rel → body; {} for an add) — compared per file.
+   */
+  bundleFiles?: {
+    proposed: Record<string, string>;
+    main: string;
+    before: Record<string, string>;
+  };
+  /**
+   * INERT UNTIL PLACED: does anything in this package or the snapshot
+   * reference c:<api_name>? Asked only when that arm needs the answer;
+   * without it the arm stays silent (it would assert an unchecked absence).
+   */
+  referenced?: () => boolean;
+}
+
+/**
+ * S45: the CHANGE-DEPENDENT warning arms of analyzeChanges — every advisory
+ * whose truth depends on the classification (add / modify /
+ * unchanged_content) or on the copy the proposal was compared against.
+ * Pure. analyzeChanges calls it with the SNAPSHOT copy; the engine calls it
+ * again with the LIVE copy for every row with a comparable live copy (a
+ * row the validate-time live check reclassified, or a MODIFY that stayed a
+ * MODIFY — its diff is against live), and swaps these warnings for the
+ * stale ones. The arms keep analyzeChanges' own order; for every type they
+ * precede its change-independent advisories.
+ */
+export function changeDependentWarnings(input: ChangeWarningInput): string[] {
+  const { type, api_name, change, proposed, before } = input;
+  const warnings: string[] = [];
+  if (input.bundleFiles) {
+    const { proposed: newFiles, main, before: oldFiles } = input.bundleFiles;
+    if (change === 'modify') {
+      const added = Object.keys(newFiles).filter((k) => !(k in oldFiles));
+      const removed = Object.keys(oldFiles).filter((k) => !(k in newFiles));
+      const changed = Object.keys(newFiles).filter(
+        (k) => k in oldFiles && oldFiles[k]!.trim() !== newFiles[k]!.trim(),
+      );
+      const describe = (label: string, list: string[]) =>
+        list.length > 0 ? `${label} ${list.slice(0, 8).join(', ')}${list.length > 8 ? '…' : ''}` : '';
+      const delta = [
+        describe('changed:', changed),
+        describe('added:', added),
+        describe('removed:', removed),
+      ]
+        .filter(Boolean)
+        .join('; ');
+      warnings.push(
+        `BUNDLE REPLACE — this deploy replaces the org's whole ${type} directory ` +
+          `(${Object.keys(newFiles).length} files; ${delta}).`,
+      );
+    }
+    if (type === 'GenAiPlannerBundle' && change === 'modify') {
+      warnings.push(
+        `AGENT MUST BE DEACTIVATED FIRST — deploying GenAiPlannerBundle changes for an ` +
+          `ACTIVE agent version fails, and version-suffixed bundles are PUBLISHED ` +
+          `SNAPSHOTS: a modified deploy of one fails org-side even deactivated ` +
+          `(unmodified re-deploys "succeed" as no-ops). Deactivate first ` +
+          `(agent_activation_propose/execute, or Agent Builder), deploy, then ` +
+          `reactivate; verify with BotVersion.Status. On Agent-Script agents the ` +
+          `next publish overwrites hand-edits.`,
+      );
+    }
+    if (type === 'AuraDefinitionBundle') {
+      const kind = main.slice(api_name.length);
+      const oldMain = ['.cmp', '.app', '.evt', '.intf', '.tokens']
+        .map((s) => `${api_name}${s}`)
+        .find((f) => f in oldFiles);
+      // S41 API VERSION: crossing 39/40 toggles Lightning Locker for the
+      // component in orgs still on Locker. Phrased carefully: LWS is an
+      // ORG setting — the bundle's apiVersion has no effect on it.
+      const verOf = (files: Record<string, string>, mainName: string | undefined): number =>
+        mainName
+          ? parseFloat(files[`${mainName}-meta.xml`]?.match(/<apiVersion>\s*([\d.]+)/)?.[1] ?? '')
+          : NaN;
+      const newVer = verOf(newFiles, main);
+      const oldVer = verOf(oldFiles, oldMain);
+      if (
+        Number.isFinite(newVer) &&
+        Number.isFinite(oldVer) &&
+        newVer < 40 !== oldVer < 40
+      ) {
+        warnings.push(
+          `API VERSION ${oldVer} → ${newVer} crosses the 39/40 boundary — in orgs still ` +
+            `on Lightning Locker this toggles Locker for the component (LWS is an org ` +
+            `setting, unaffected by apiVersion).`,
+        );
+      }
+      // S41 INERT UNTIL PLACED: a surface-declaring component that nothing
+      // references renders nowhere — the exact hand-made-voiceCallPop trap
+      // (deployed, green, invisible).
+      const mainBody = newFiles[main] ?? '';
+      const isBackgroundItem = /lightning:backgroundUtilityItem/.test(mainBody);
+      if (
+        change === 'add' &&
+        (kind === '.cmp' || kind === '.app') &&
+        /lightning:(backgroundUtilityItem|utilityItem|availableForFlow(Actions|Screens))|flexipage:availableFor\w*|force:lightningQuickAction/.test(
+          mainBody,
+        ) &&
+        input.referenced !== undefined &&
+        !input.referenced()
+      ) {
+        warnings.push(
+          `INERT UNTIL PLACED — this component declares surface interfaces but nothing ` +
+            `in this package or the snapshot references c:${api_name}; it renders ` +
+            `NOWHERE until host metadata places it` +
+            (isBackgroundItem
+              ? ` (a background utility item sits in a utility bar's Background region, ` +
+                `and the bar needs at least one VISIBLE item or it does not appear).`
+              : `.`),
+        );
+      }
+      if (change !== 'unchanged_content') {
+        warnings.push(
+          `The deploy compiles markup and design (each design:attribute must match an ` +
+            `aura:attribute) and parses the JS; runtime errors in a background item ` +
+            `surface only in the browser console. Consoles already open keep the OLD ` +
+            `definition until reloaded.`,
+        );
+      }
+    }
+    return warnings;
+  }
+  if (type === 'CustomField' && before) {
+    const oldType = before.match(/<type>([^<]+)<\/type>/)?.[1];
+    const newType = proposed.match(/<type>([^<]+)<\/type>/)?.[1];
+    if (oldType && newType && oldType !== newType) {
+      warnings.push(
+        `FIELD TYPE CHANGE ${oldType} → ${newType} — possible irreversible data loss`,
+      );
+    }
+  }
+  // Full-document UI types replace, never merge: an element missing from
+  // the proposed content is REMOVED from the org's definition.
+  if (
+    (type === 'FlexiPage' ||
+      type === 'CustomApplication' ||
+      type === 'Layout' ||
+      type === 'Report' ||
+      type === 'Dashboard' ||
+      type === 'GenAiPlugin' ||
+      type === 'GenAiPromptTemplate' ||
+      type === 'Bot' ||
+      type === 'LeadConvertSettings' ||
+      type === 'NamedCredential' ||
+      type === 'ExternalCredential' ||
+      type === 'AuthProvider' ||
+      type === 'PermissionSetGroup' ||
+      type === 'MutingPermissionSet' ||
+      // S44: both agent-test suite types are single documents of
+      // <testCase> blocks (the legacy one was a parity gap since S30).
+      // AiAgentScorerDefinition is deliberately NOT here — its versions
+      // are documented append-only, which makes the generic "removed"
+      // sentence false; it has its own arm below.
+      type === 'AiEvaluationDefinition' ||
+      type === 'AiTestingDefinition') &&
+    change === 'modify'
+  ) {
+    warnings.push(
+      `WHOLE-DOCUMENT REPLACE — this deploy fully replaces the org's ${type}; ` +
+        `anything not present in the proposed content is removed.` +
+        (type === 'Bot'
+          ? ' A <botVersions> block omitted from a Bot document is a VERSION DELETE.'
+          : type === 'LeadConvertSettings'
+            ? ' An <objectMapping> omitted here is a lead field mapping DELETED org-wide.'
+            : type === 'ExternalCredential'
+              ? ' A principal parameter omitted here is DELETED org-side — along with the' +
+                ' credential values a human entered for it in Setup.'
+              : type === 'PermissionSetGroup'
+                ? ' A <permissionSets> member omitted here is DETACHED from the group' +
+                  ' org-side — users assigned the group lose that permission set.'
+                : type === 'MutingPermissionSet'
+                  ? ' A muted permission omitted here is UN-MUTED org-side, silently' +
+                    ' RESTORING it to every user assigned the group.'
+                  : type === 'AiEvaluationDefinition' ||
+                      type === 'AiTestingDefinition'
+                    ? ' A <testCase> omitted here is removed from the suite org-side.'
+                    : ''),
+    );
+  }
+  // S30: the activeVersionIdentifier is an org-generated token. Altering
+  // it by hand mis-targets (or fails) the active-version pointer — the
+  // doctrine is retrieve-first, then modify the retrieved copy.
+  if (type === 'GenAiPromptTemplate' && change === 'modify') {
+    const oldId = before?.match(/<activeVersionIdentifier>([^<]*)</)?.[1];
+    const newId = proposed.match(/<activeVersionIdentifier>([^<]*)</)?.[1];
+    if (oldId && newId && oldId !== newId) {
+      warnings.push(
+        `activeVersionIdentifier ALTERED (${oldId.slice(0, 12)}… → ${newId.slice(0, 12)}…) — ` +
+          `these tokens are org-generated; a hand-edited value is rejected or mis-targets ` +
+          `the active version. To activate a new version, retrieve after deploying it and ` +
+          `repoint using the versionIdentifier the org minted.`,
+      );
+    }
+  }
+  // S44: scorer versions are documented APPEND-ONLY org-side, which makes
+  // the generic WHOLE-DOCUMENT REPLACE sentence a lie for this type — a
+  // <scorerVersion> the document omits is NOT removed — so the type has
+  // its own arm. Status is documented one-way (Draft → Available →
+  // Archived). What the org does with an omission or a regression
+  // (refuse, ignore) is NOT live-confirmed, so the text names only what
+  // is documented. The version/status scan is bounded regex (the
+  // activeVersionIdentifier precedent): it names what it can see; the
+  // org is the authority.
+  if (type === 'AiAgentScorerDefinition' && change === 'modify') {
+    const oldVersions = scorerVersionStatuses(before ?? '');
+    const newVersions = scorerVersionStatuses(proposed);
+    const omitted = [...oldVersions.keys()].filter((n) => !newVersions.has(n));
+    const regressed = [...oldVersions.entries()]
+      .filter(([n, was]) => {
+        const now = newVersions.get(n);
+        return (
+          now !== undefined &&
+          SCORER_STATUS_RANK[was] !== undefined &&
+          SCORER_STATUS_RANK[now] !== undefined &&
+          SCORER_STATUS_RANK[now]! < SCORER_STATUS_RANK[was]!
+        );
+      })
+      .map(([n, was]) => `${n} (${was} → ${newVersions.get(n)})`);
+    warnings.push(
+      `SCORER VERSIONS ARE APPEND-ONLY — the org never deletes a <scorerVersion>: one ` +
+        `omitted from this document is NOT removed` +
+        (omitted.length > 0 ? ` (org-side versions omitted here: ${omitted.join(', ')})` : '') +
+        `. Status is documented one-way (Draft → Available → Archived); a regression ` +
+        `here is not something the org performs` +
+        (regressed.length > 0 ? ` (regressed here: ${regressed.join('; ')})` : '') +
+        `. Retrieve-first, carry every existing version forward, edit only Draft versions.`,
+    );
+  }
+  // Folder definitions replace their sharing wholesale: the folderShares
+  // in this content ARE the folder's sharing after the deploy.
+  if ((type === 'ReportFolder' || type === 'DashboardFolder') && change === 'modify') {
+    warnings.push(
+      `FOLDER REPLACE — the folderShares in this content fully replace the ` +
+        `folder's sharing; shares omitted here are revoked.`,
+    );
+  }
+  // Custom metadata records deploy as full replacements too: a field with
+  // no <values> entry in this content is reset on the org's record.
+  if (type === 'CustomMetadata' && change === 'modify') {
+    warnings.push(
+      `FULL-RECORD REPLACE — fields omitted from this content are reset to ` +
+        `null/default on the deployed record.`,
+    );
+  }
+  // S36: a quick action deploys into a vacuum — surfacing is a layout
+  // concern (Layout-assignment precedent below).
+  if (type === 'QuickAction' && change === 'add') {
+    warnings.push(
+      `NEW QUICK ACTION is surfaced NOWHERE until a page layout, a global publisher ` +
+        `layout, or a Lightning record page using dynamic actions includes it — this ` +
+        `deploy creates the action but places it on no UI.`,
+    );
+  }
+  // A layout deploy never assigns the layout: assignment lives in Profile
+  // metadata (layoutAssignments) or Setup. Say so for NEW layouts, which
+  // otherwise deploy and then sit unused.
+  if (type === 'Layout' && change === 'add') {
+    warnings.push(
+      `NEW LAYOUT IS NOT ASSIGNED by this deploy — profiles keep their current ` +
+        `layout until layoutAssignments change (Profile metadata or Setup).`,
+    );
+  }
+  // Report/dashboard access is FOLDER sharing, not permission sets — no
+  // permission-coverage arm can exist for these (see the note in
+  // analyzePermissionCoverage), so the honesty lives here instead.
+  if ((type === 'Report' || type === 'Dashboard') && change === 'add') {
+    warnings.push(
+      `NEW ${type.toUpperCase()} visibility is governed by its FOLDER's sharing ` +
+        `(folderShares on the folder component), not by permission sets — this ` +
+        `deploy grants nobody new access by itself.`,
+    );
+  }
+  // S30: a NET-NEW prompt template carrying a hand-typed identifier cannot
+  // be right — the org mints these tokens on deploy.
+  if (
+    type === 'GenAiPromptTemplate' &&
+    change === 'add' &&
+    /<activeVersionIdentifier>[^<]/.test(proposed)
+  ) {
+    warnings.push(
+      `activeVersionIdentifier on a NET-NEW template — this token is org-generated and ` +
+        `cannot be authored from scratch. Omit it (the org mints one on deploy), or ` +
+        `retrieve-first if this template already exists under another name.`,
+    );
+  }
+  // S30/S34: the deactivate gate. Topic/action/instruction changes against
+  // an ACTIVE agent version fail org-side — since S34, each flip rides its
+  // own Contrail ritual (agent_activation_propose/execute); check state
+  // with soql_query on BotVersion.Status. (The GenAiPlannerBundle flavor
+  // of this warning lives in the envelope branch above.)
+  if (type === 'GenAiPlugin' && change === 'modify') {
+    warnings.push(
+      `AGENT MUST BE DEACTIVATED FIRST — deploying ${type} changes for an ACTIVE ` +
+        `agent version fails. Deactivate first (agent_activation_propose/execute, ` +
+        `or Agent Builder), deploy, then reactivate — each flip its own approval; ` +
+        `verify with BotVersion.Status.`,
+    );
+  }
+  // S33: a NEW external credential defines principals but carries NO secret
+  // values and grants NO access — both of those are post-deploy steps, and
+  // silence here would let "deployed" read as "working".
+  if (type === 'ExternalCredential' && change === 'add') {
+    warnings.push(
+      `NEW EXTERNAL CREDENTIAL carries no secrets and grants nobody access — a human ` +
+        `enters each principal's credential values in Setup (External Credentials) after ` +
+        `the deploy, and callouts fail until a permission set grants ` +
+        `externalCredentialPrincipalAccesses for its principals.`,
+    );
+  }
+  return warnings;
+}
+
+/**
+ * S41 INERT UNTIL PLACED's reference test: does another component in this
+ * package, or any snapshot dependency edge, reference c:<name>? S45:
+ * exported so the engine asks the same question when the live check turns
+ * an Aura bundle into an ADD.
+ */
+export function auraBundleReferenced(
+  db: ContrailDb,
+  conn: ConnectionRecord,
+  components: ProposedComponent[],
+  c: ProposedComponent,
+): boolean {
+  const refRe = new RegExp(`c:${c.api_name}\\b`);
+  return (
+    components.some((o) => o !== c && refRe.test(o.content)) ||
+    db.edgesTo(conn.id, 'AuraDefinitionBundle', c.api_name).length > 0
+  );
+}
+
+/**
  * Classify each proposed component against the local snapshot and flag
  * data-loss risks. Deletions are always listed and always prominent.
  */
@@ -998,10 +1400,10 @@ export function analyzeChanges(
       const existingBundle = db.getArtifact(conn.id, c.type, c.api_name);
       const warnings: string[] = [];
       let change: ComponentChange['change'];
+      const old = existingBundle ? readBundleFiles(store, conn, envSpec.dir, c.api_name) : {};
       if (!existingBundle) {
         change = 'add';
       } else {
-        const old = readBundleFiles(store, conn, envSpec.dir, c.api_name);
         const added = Object.keys(proposed).filter((k) => !(k in old));
         const removed = Object.keys(old).filter((k) => !(k in proposed));
         const changed = Object.keys(proposed).filter(
@@ -1009,33 +1411,22 @@ export function analyzeChanges(
         );
         change =
           added.length + removed.length + changed.length === 0 ? 'unchanged_content' : 'modify';
-        if (change === 'modify') {
-          const describe = (label: string, list: string[]) =>
-            list.length > 0 ? `${label} ${list.slice(0, 8).join(', ')}${list.length > 8 ? '…' : ''}` : '';
-          const delta = [
-            describe('changed:', changed),
-            describe('added:', added),
-            describe('removed:', removed),
-          ]
-            .filter(Boolean)
-            .join('; ');
-          warnings.push(
-            `BUNDLE REPLACE — this deploy replaces the org's whole ${c.type} directory ` +
-              `(${Object.keys(proposed).length} files; ${delta}).`,
-          );
-        }
       }
-      if (c.type === 'GenAiPlannerBundle' && change === 'modify') {
-        warnings.push(
-          `AGENT MUST BE DEACTIVATED FIRST — deploying GenAiPlannerBundle changes for an ` +
-            `ACTIVE agent version fails, and version-suffixed bundles are PUBLISHED ` +
-            `SNAPSHOTS: a modified deploy of one fails org-side even deactivated ` +
-            `(unmodified re-deploys "succeed" as no-ops). Deactivate first ` +
-            `(agent_activation_propose/execute, or Agent Builder), deploy, then ` +
-            `reactivate; verify with BotVersion.Status. On Agent-Script agents the ` +
-            `next publish overwrites hand-edits.`,
-        );
-      }
+      // S45: the change-dependent arms (BUNDLE REPLACE, the planner's
+      // deactivate gate, Aura's apiVersion / INERT UNTIL PLACED / compile
+      // advisories) live in one pure helper, so the engine can re-run them
+      // against the LIVE copy when the live check reclassifies this entry.
+      warnings.push(
+        ...changeDependentWarnings({
+          type: c.type,
+          api_name: c.api_name,
+          change,
+          proposed: c.content,
+          before: null,
+          bundleFiles: { proposed, main: mainFile, before: old },
+          referenced: () => auraBundleReferenced(db, conn, components, c),
+        }),
+      );
       if (c.type === 'AiAuthoringBundle') {
         // S34 D1: fires on EVERY draft deploy by design — it IS the honesty
         // contract that made Agent Script deployable at all.
@@ -1073,7 +1464,6 @@ export function analyzeChanges(
       }
       if (c.type === 'AuraDefinitionBundle') {
         const kind = mainFile.slice(c.api_name.length);
-        const old = existingBundle ? readBundleFiles(store, conn, envSpec.dir, c.api_name) : {};
         const oldMain = ['.cmp', '.app', '.evt', '.intf', '.tokens']
           .map((s) => `${c.api_name}${s}`)
           .find((f) => f in old);
@@ -1094,62 +1484,9 @@ export function analyzeChanges(
             'bad_component',
           );
         }
-        // S41 API VERSION: crossing 39/40 toggles Lightning Locker for the
-        // component in orgs still on Locker. Phrased carefully: LWS is an
-        // ORG setting — the bundle's apiVersion has no effect on it.
-        const verOf = (files: Record<string, string>, main: string | undefined): number =>
-          main
-            ? parseFloat(files[`${main}-meta.xml`]?.match(/<apiVersion>\s*([\d.]+)/)?.[1] ?? '')
-            : NaN;
-        const newVer = verOf(proposed, mainFile);
-        const oldVer = verOf(old, oldMain);
-        if (
-          Number.isFinite(newVer) &&
-          Number.isFinite(oldVer) &&
-          newVer < 40 !== oldVer < 40
-        ) {
-          warnings.push(
-            `API VERSION ${oldVer} → ${newVer} crosses the 39/40 boundary — in orgs still ` +
-              `on Lightning Locker this toggles Locker for the component (LWS is an org ` +
-              `setting, unaffected by apiVersion).`,
-          );
-        }
-        // S41 INERT UNTIL PLACED: a surface-declaring component that nothing
-        // references renders nowhere — the exact hand-made-voiceCallPop trap
-        // (deployed, green, invisible).
+        // (API VERSION, INERT UNTIL PLACED and the compile advisory are
+        // change-dependent: changeDependentWarnings, above.)
         const mainBody = proposed[mainFile] ?? '';
-        const isBackgroundItem = /lightning:backgroundUtilityItem/.test(mainBody);
-        if (
-          change === 'add' &&
-          (kind === '.cmp' || kind === '.app') &&
-          /lightning:(backgroundUtilityItem|utilityItem|availableForFlow(Actions|Screens))|flexipage:availableFor\w*|force:lightningQuickAction/.test(
-            mainBody,
-          )
-        ) {
-          const refRe = new RegExp(`c:${c.api_name}\\b`);
-          const referencedInPackage = components.some((o) => o !== c && refRe.test(o.content));
-          const referencedInOrg =
-            db.edgesTo(conn.id, 'AuraDefinitionBundle', c.api_name).length > 0;
-          if (!referencedInPackage && !referencedInOrg) {
-            warnings.push(
-              `INERT UNTIL PLACED — this component declares surface interfaces but nothing ` +
-                `in this package or the snapshot references c:${c.api_name}; it renders ` +
-                `NOWHERE until host metadata places it` +
-                (isBackgroundItem
-                  ? ` (a background utility item sits in a utility bar's Background region, ` +
-                    `and the bar needs at least one VISIBLE item or it does not appear).`
-                  : `.`),
-            );
-          }
-        }
-        if (change !== 'unchanged_content') {
-          warnings.push(
-            `The deploy compiles markup and design (each design:attribute must match an ` +
-              `aura:attribute) and parses the JS; runtime errors in a background item ` +
-              `surface only in the browser console. Consoles already open keep the OLD ` +
-              `definition until reloaded.`,
-          );
-        }
         // Server-side controller: ordinary Apex class access — said HERE as
         // an advisory on the bundle, not through the coverage table, whose
         // wording ("this package ADDS components … they will deploy") is
@@ -1182,138 +1519,32 @@ export function analyzeChanges(
     const existing = db.getArtifact(conn.id, c.type, c.api_name);
     const warnings: string[] = [];
     let change: ComponentChange['change'];
+    let oldContent: string | null = null;
     if (!existing) {
       change = 'add';
     } else {
-      const oldContent = existing.filePath
+      oldContent = existing.filePath
         ? readOldContent(store, conn, c.type, c.api_name, existing.filePath)
         : null;
       change = oldContent !== null && oldContent.trim() === c.content.trim()
         ? 'unchanged_content'
         : 'modify';
-      if (c.type === 'CustomField' && oldContent) {
-        const oldType = oldContent.match(/<type>([^<]+)<\/type>/)?.[1];
-        const newType = c.content.match(/<type>([^<]+)<\/type>/)?.[1];
-        if (oldType && newType && oldType !== newType) {
-          warnings.push(
-            `FIELD TYPE CHANGE ${oldType} → ${newType} — possible irreversible data loss`,
-          );
-        }
-      }
-      // Full-document UI types replace, never merge: an element missing from
-      // the proposed content is REMOVED from the org's definition.
-      if (
-        (c.type === 'FlexiPage' ||
-          c.type === 'CustomApplication' ||
-          c.type === 'Layout' ||
-          c.type === 'Report' ||
-          c.type === 'Dashboard' ||
-          c.type === 'GenAiPlugin' ||
-          c.type === 'GenAiPromptTemplate' ||
-          c.type === 'Bot' ||
-          c.type === 'LeadConvertSettings' ||
-          c.type === 'NamedCredential' ||
-          c.type === 'ExternalCredential' ||
-          c.type === 'AuthProvider' ||
-          c.type === 'PermissionSetGroup' ||
-          c.type === 'MutingPermissionSet' ||
-          // S44: both agent-test suite types are single documents of
-          // <testCase> blocks (the legacy one was a parity gap since S30).
-          // AiAgentScorerDefinition is deliberately NOT here — its versions
-          // are documented append-only, which makes the generic "removed"
-          // sentence false; it has its own arm below.
-          c.type === 'AiEvaluationDefinition' ||
-          c.type === 'AiTestingDefinition') &&
-        change === 'modify'
-      ) {
-        warnings.push(
-          `WHOLE-DOCUMENT REPLACE — this deploy fully replaces the org's ${c.type}; ` +
-            `anything not present in the proposed content is removed.` +
-            (c.type === 'Bot'
-              ? ' A <botVersions> block omitted from a Bot document is a VERSION DELETE.'
-              : c.type === 'LeadConvertSettings'
-                ? ' An <objectMapping> omitted here is a lead field mapping DELETED org-wide.'
-                : c.type === 'ExternalCredential'
-                  ? ' A principal parameter omitted here is DELETED org-side — along with the' +
-                    ' credential values a human entered for it in Setup.'
-                  : c.type === 'PermissionSetGroup'
-                    ? ' A <permissionSets> member omitted here is DETACHED from the group' +
-                      ' org-side — users assigned the group lose that permission set.'
-                    : c.type === 'MutingPermissionSet'
-                      ? ' A muted permission omitted here is UN-MUTED org-side, silently' +
-                        ' RESTORING it to every user assigned the group.'
-                      : c.type === 'AiEvaluationDefinition' ||
-                          c.type === 'AiTestingDefinition'
-                        ? ' A <testCase> omitted here is removed from the suite org-side.'
-                        : ''),
-        );
-      }
-      // S30: the activeVersionIdentifier is an org-generated token. Altering
-      // it by hand mis-targets (or fails) the active-version pointer — the
-      // doctrine is retrieve-first, then modify the retrieved copy.
-      if (c.type === 'GenAiPromptTemplate' && change === 'modify') {
-        const oldId = oldContent?.match(/<activeVersionIdentifier>([^<]*)</)?.[1];
-        const newId = c.content.match(/<activeVersionIdentifier>([^<]*)</)?.[1];
-        if (oldId && newId && oldId !== newId) {
-          warnings.push(
-            `activeVersionIdentifier ALTERED (${oldId.slice(0, 12)}… → ${newId.slice(0, 12)}…) — ` +
-              `these tokens are org-generated; a hand-edited value is rejected or mis-targets ` +
-              `the active version. To activate a new version, retrieve after deploying it and ` +
-              `repoint using the versionIdentifier the org minted.`,
-          );
-        }
-      }
-      // S44: scorer versions are documented APPEND-ONLY org-side, which makes
-      // the generic WHOLE-DOCUMENT REPLACE sentence a lie for this type — a
-      // <scorerVersion> the document omits is NOT removed — so the type has
-      // its own arm. Status is documented one-way (Draft → Available →
-      // Archived). What the org does with an omission or a regression
-      // (refuse, ignore) is NOT live-confirmed, so the text names only what
-      // is documented. The version/status scan is bounded regex (the
-      // activeVersionIdentifier precedent): it names what it can see; the
-      // org is the authority.
-      if (c.type === 'AiAgentScorerDefinition' && change === 'modify') {
-        const oldVersions = scorerVersionStatuses(oldContent ?? '');
-        const newVersions = scorerVersionStatuses(c.content);
-        const omitted = [...oldVersions.keys()].filter((n) => !newVersions.has(n));
-        const regressed = [...oldVersions.entries()]
-          .filter(([n, was]) => {
-            const now = newVersions.get(n);
-            return (
-              now !== undefined &&
-              SCORER_STATUS_RANK[was] !== undefined &&
-              SCORER_STATUS_RANK[now] !== undefined &&
-              SCORER_STATUS_RANK[now]! < SCORER_STATUS_RANK[was]!
-            );
-          })
-          .map(([n, was]) => `${n} (${was} → ${newVersions.get(n)})`);
-        warnings.push(
-          `SCORER VERSIONS ARE APPEND-ONLY — the org never deletes a <scorerVersion>: one ` +
-            `omitted from this document is NOT removed` +
-            (omitted.length > 0 ? ` (org-side versions omitted here: ${omitted.join(', ')})` : '') +
-            `. Status is documented one-way (Draft → Available → Archived); a regression ` +
-            `here is not something the org performs` +
-            (regressed.length > 0 ? ` (regressed here: ${regressed.join('; ')})` : '') +
-            `. Retrieve-first, carry every existing version forward, edit only Draft versions.`,
-        );
-      }
-      // Folder definitions replace their sharing wholesale: the folderShares
-      // in this content ARE the folder's sharing after the deploy.
-      if ((c.type === 'ReportFolder' || c.type === 'DashboardFolder') && change === 'modify') {
-        warnings.push(
-          `FOLDER REPLACE — the folderShares in this content fully replace the ` +
-            `folder's sharing; shares omitted here are revoked.`,
-        );
-      }
-      // Custom metadata records deploy as full replacements too: a field with
-      // no <values> entry in this content is reset on the org's record.
-      if (c.type === 'CustomMetadata' && change === 'modify') {
-        warnings.push(
-          `FULL-RECORD REPLACE — fields omitted from this content are reset to ` +
-            `null/default on the deployed record.`,
-        );
-      }
     }
+    // S45: every arm whose truth depends on the classification or on the
+    // copy it was compared against (FIELD TYPE CHANGE, the REPLACE family,
+    // the add-only advisories, the deactivate gate …) lives in one pure
+    // helper, so the engine can re-run them against the LIVE copy when the
+    // live check reclassifies this entry. For every type they precede its
+    // change-independent advisories below, so the order is unchanged.
+    warnings.push(
+      ...changeDependentWarnings({
+        type: c.type,
+        api_name: c.api_name,
+        change,
+        proposed: c.content,
+        before: oldContent,
+      }),
+    );
     // S44: the Studio suite type is BETA (Salesforce's own label for the type
     // AND its runner) and a deploy of one runs nothing — fires on add AND
     // modify (S34 D1 precedent: the honesty rides every deploy).
@@ -1367,71 +1598,6 @@ export function analyzeChanges(
           `rebuilds the group's aggregated permissions (Status: Updating → Updated). ` +
           `Verify with soql_query (SELECT Status FROM PermissionSetGroup WHERE ` +
           `DeveloperName = '${c.api_name}') before relying on the grants.`,
-      );
-    }
-    // S36: a quick action deploys into a vacuum — surfacing is a layout
-    // concern (Layout-assignment precedent below).
-    if (c.type === 'QuickAction' && change === 'add') {
-      warnings.push(
-        `NEW QUICK ACTION is surfaced NOWHERE until a page layout, a global publisher ` +
-          `layout, or a Lightning record page using dynamic actions includes it — this ` +
-          `deploy creates the action but places it on no UI.`,
-      );
-    }
-    // A layout deploy never assigns the layout: assignment lives in Profile
-    // metadata (layoutAssignments) or Setup. Say so for NEW layouts, which
-    // otherwise deploy and then sit unused.
-    if (c.type === 'Layout' && change === 'add') {
-      warnings.push(
-        `NEW LAYOUT IS NOT ASSIGNED by this deploy — profiles keep their current ` +
-          `layout until layoutAssignments change (Profile metadata or Setup).`,
-      );
-    }
-    // Report/dashboard access is FOLDER sharing, not permission sets — no
-    // permission-coverage arm can exist for these (see the note in
-    // analyzePermissionCoverage), so the honesty lives here instead.
-    if ((c.type === 'Report' || c.type === 'Dashboard') && change === 'add') {
-      warnings.push(
-        `NEW ${c.type.toUpperCase()} visibility is governed by its FOLDER's sharing ` +
-          `(folderShares on the folder component), not by permission sets — this ` +
-          `deploy grants nobody new access by itself.`,
-      );
-    }
-    // S30: a NET-NEW prompt template carrying a hand-typed identifier cannot
-    // be right — the org mints these tokens on deploy.
-    if (
-      c.type === 'GenAiPromptTemplate' &&
-      change === 'add' &&
-      /<activeVersionIdentifier>[^<]/.test(c.content)
-    ) {
-      warnings.push(
-        `activeVersionIdentifier on a NET-NEW template — this token is org-generated and ` +
-          `cannot be authored from scratch. Omit it (the org mints one on deploy), or ` +
-          `retrieve-first if this template already exists under another name.`,
-      );
-    }
-    // S30/S34: the deactivate gate. Topic/action/instruction changes against
-    // an ACTIVE agent version fail org-side — since S34, each flip rides its
-    // own Contrail ritual (agent_activation_propose/execute); check state
-    // with soql_query on BotVersion.Status. (The GenAiPlannerBundle flavor
-    // of this warning lives in the envelope branch above.)
-    if (c.type === 'GenAiPlugin' && change === 'modify') {
-      warnings.push(
-        `AGENT MUST BE DEACTIVATED FIRST — deploying ${c.type} changes for an ACTIVE ` +
-          `agent version fails. Deactivate first (agent_activation_propose/execute, ` +
-          `or Agent Builder), deploy, then reactivate — each flip its own approval; ` +
-          `verify with BotVersion.Status.`,
-      );
-    }
-    // S33: a NEW external credential defines principals but carries NO secret
-    // values and grants NO access — both of those are post-deploy steps, and
-    // silence here would let "deployed" read as "working".
-    if (c.type === 'ExternalCredential' && change === 'add') {
-      warnings.push(
-        `NEW EXTERNAL CREDENTIAL carries no secrets and grants nobody access — a human ` +
-          `enters each principal's credential values in Setup (External Credentials) after ` +
-          `the deploy, and callouts fail until a permission set grants ` +
-          `externalCredentialPrincipalAccesses for its principals.`,
       );
     }
     // S33: literal secrets in deploy content. Modern credential metadata never
@@ -1815,9 +1981,11 @@ function escapeRegex(s: string): string {
 /**
  * S30: the snapshot's view of a bundle, keyed by path RELATIVE to the bundle
  * directory — the same key shape a Contrail bundle envelope uses, so the
- * change classifier compares like with like.
+ * change classifier compares like with like. S45: exported — the live
+ * pre-image compares a bundle PER FILE against this map (never through
+ * readOldContent, whose bundle copy is the main file alone).
  */
-function readBundleFiles(
+export function readBundleFiles(
   store: SnapshotStore,
   conn: ConnectionRecord,
   dir: string,
@@ -1832,7 +2000,12 @@ function readBundleFiles(
   return out;
 }
 
-function readOldContent(
+/**
+ * The snapshot's copy of one component (a child's block extracted from its
+ * container). S45: exported — the approval page's snapshot-baseline diff
+ * reads it when the live pre-image is unavailable or not comparable.
+ */
+export function readOldContent(
   store: SnapshotStore,
   conn: ConnectionRecord,
   type: string,
