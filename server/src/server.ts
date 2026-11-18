@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { ContrailDb } from './core/db.js';
 import { KeychainTokenStore, type TokenStore } from './core/keychain.js';
 import { AuditLog } from './core/audit.js';
-import { loadConfig, readConfigSection, type ContrailConfig } from './core/config.js';
+import { loadConfig, loadPolicies, readConfigSection, type ContrailConfig } from './core/config.js';
 import { ConnectFlowManager, type FlowOps } from './connect/flow.js';
 import { AccessTokenManager } from './salesforce/tokens.js';
 import { SnapshotStore } from './snapshot/store.js';
@@ -16,12 +16,17 @@ import { registerDataTools } from './tools/data.js';
 import { registerDeployTools } from './tools/deploy.js';
 import { registerLocalDiagTools } from './tools/localdiag.js';
 import { registerSettingsTools } from './tools/settings.js';
+import { registerEvidenceTools } from './tools/evidence.js';
+import { registerSkillTools } from './tools/skills.js';
+import { registerFlowRenderTools, sweepRenders } from './tools/flowrender.js';
 import { createLocalDiagRunner } from './localdiag/runner.js';
 import type { LocalDiagRunner } from './localdiag/types.js';
 import { PushoverNotifier, type ApprovalNotifier } from './core/notify.js';
 import { GatedNotifier, RemoteControlProbe } from './core/remoteControl.js';
 import { SettingsPageServer } from './connect/settings.js';
-import { dataDir, vendorDir } from './core/paths.js';
+import { dataDir, resolveSkillsDir, vendorDir } from './core/paths.js';
+import { loadSkillPack } from './skillpack/pack.js';
+import { buildServerInstructions } from './skillpack/instructions.js';
 import path from 'node:path';
 import openBrowserDefault from 'open';
 
@@ -52,6 +57,18 @@ export function createDeps(overrides?: {
   const store = overrides?.store ?? new SnapshotStore();
   const engine = new SnapshotEngine(db, store, tokenMgr, config, audit);
   const deploys = new DeployEngine(db, store, tokenMgr, config, audit, overrides?.approvals);
+  // S46: after a successful deploy, re-read its components into the local
+  // snapshot (snapshot.rebaselineAfterDeploy; a test harness opts out there).
+  deploys.setSnapshotRebaseliner((i) =>
+    engine.rebaselineMembers(i.conn, i.members, {
+      timeoutMs: i.timeoutMs,
+      requestId: i.requestId,
+      deleted: i.deleted,
+    }),
+  );
+  // S46: policies are re-read from config.json at every check, so an edit
+  // applies without a restart; an injected config (tests) keeps its own.
+  if (!overrides?.config) deploys.setPolicySource(loadPolicies);
   // An injected config object is authoritative (tests); the loaded one is
   // re-synced from disk per send so a change saved by the desktop app lands.
   const pushover =
@@ -84,6 +101,21 @@ export function createDeps(overrides?: {
       timeoutMs: config.localDiagnostics.timeoutMs,
       workspaceRoot: path.join(dataDir(), 'localdiag-workspace'),
     });
+  // S46: the skill pack that ships inside this install, read once. The
+  // instruction text is built here rather than per server, so the stdio start
+  // and every HTTP session carry the same string.
+  const pack = loadSkillPack(resolveSkillsDir());
+  const skills = { pack, instructions: buildServerInstructions(pack, ENGINE_VERSION) };
+  const openExternal =
+    overrides?.flowOps?.openBrowser ??
+    (async (target: string) => {
+      await openBrowserDefault(target);
+    });
+  // S46: flow pages older than seven days are deleted here, once per start,
+  // and each time render_flow writes a page — otherwise a page rendered once on a
+  // machine that never renders again would stay on disk indefinitely. Never
+  // throws and never creates the folder.
+  sweepRenders(Date.now());
   return {
     db,
     tokens,
@@ -98,6 +130,8 @@ export function createDeps(overrides?: {
     notifier,
     remoteControl,
     settingsPage,
+    skills,
+    openExternal,
   };
 }
 
@@ -106,7 +140,10 @@ export function createDeps(overrides?: {
  * attaches stdio by default or streamable HTTP behind --http.
  */
 export function createServer(deps: ToolDeps): McpServer {
-  const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
+  const server = new McpServer(
+    { name: SERVER_NAME, version: SERVER_VERSION },
+    { instructions: deps.skills.instructions },
+  );
   registerTools(server, deps);
   registerMetadataTools(server, deps);
   registerDiffTools(server, deps);
@@ -114,5 +151,10 @@ export function createServer(deps: ToolDeps): McpServer {
   registerDeployTools(server, deps);
   registerLocalDiagTools(server, deps);
   registerSettingsTools(server, deps);
+  // S46: new registrars are appended, never inserted, so the existing
+  // tools/list order is unchanged.
+  registerEvidenceTools(server, deps);
+  registerSkillTools(server, deps);
+  registerFlowRenderTools(server, deps);
   return server;
 }

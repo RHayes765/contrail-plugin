@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_CONFIG, type ContrailConfig } from '../core/config.js';
 import { MemoryTokenStore } from '../core/keychain.js';
 import {
+  FREEZE_TAIL,
   NOTIFY_ACCOUNTS,
   NullNotifier,
   PUSHOVER_KEY_RE,
   PushoverNotifier,
   composePushover,
   describePhoneOutcome,
+  type NotifyOutcome,
 } from '../core/notify.js';
 import type { ApprovalPageOptions } from '../connect/pages.js';
 
@@ -177,6 +179,188 @@ describe('composePushover', () => {
   });
 });
 
+// S46 (B): the freeze tail and the policies-change line.
+const SIXTY = Array.from({ length: 60 }, (_, i) => ({
+  label: `MODIFY  CustomObject:${'VeryLongObjectName'.repeat(8)}_${i}__c`,
+  warnings: [`row warning ${i}`],
+}));
+const CHANGED_AT = '2026-11-17T09:30:00.000Z';
+const CHANGED_LINE =
+  /^Contrail noticed a policies change in config\.json at \d{2}:\d{2} — read the approval page or Deploy Review before approving\.$/;
+
+describe('composePushover during a change freeze, and after a policies change', () => {
+  it('the freeze tail is verbatim, the last line, and carries no code', () => {
+    expect(FREEZE_TAIL).toBe(
+      'CHANGE FREEZE in effect — this message carries no code. While the freeze lasts, this can ' +
+        'only be approved at your desk, after you type an emergency reason there (the approval ' +
+        'page in your browser, or Deploy Review in the Contrail desktop app).',
+    );
+    const m = composePushover(view({ code: '' }), { includeCode: false, freeze: true, summary: 'minimal' });
+    const lines = m.message.split('\n');
+    expect(lines.at(-1)).toBe(FREEZE_TAIL);
+    expect(lines[0]).toBe('2 changes · 1 deletion · 3 warnings');
+    expect(m.message).not.toMatch(/[A-Z2-9]{4}-[A-Z2-9]{4}/);
+    expect(m.message).not.toContain('Type the code below');
+    expect(m.message).not.toContain('Waiting in Deploy Review');
+    // Even a view that still carried the code is pushed without it.
+    const leaked = composePushover(view(), { includeCode: false, freeze: true, summary: 'full' });
+    expect(leaked.message).not.toContain(CODE);
+  });
+
+  it('the freeze tail survives truncation with summary full and 60 labels', () => {
+    const m = composePushover(view({ code: '', changes: SIXTY, destructive: [] }), {
+      includeCode: false,
+      freeze: true,
+      summary: 'full',
+    });
+    expect(m.message.length).toBeLessThanOrEqual(1024);
+    expect(m.message.endsWith(`\n${FREEZE_TAIL}`)).toBe(true);
+    expect(m.message).toContain('…');
+  });
+
+  it('the policies-change line sits directly after the counts line and takes none of the three warning slots', () => {
+    const m = composePushover(view({ warnings: ['one', 'two', 'three', 'four'] }), {
+      includeCode: true,
+      summary: 'full',
+      policyChangedAt: CHANGED_AT,
+    });
+    const lines = m.message.split('\n');
+    expect(lines[0]).toBe('2 changes · 1 deletion · 6 warnings');
+    expect(lines[1]).toMatch(CHANGED_LINE);
+    expect(lines.filter((l) => l.startsWith('⚠ '))).toEqual(['⚠ one', '⚠ two', '⚠ three']);
+    expectCodeIsLastLine(m.message);
+    // Without the instant there is no such line.
+    const plain = composePushover(view(), { includeCode: true, summary: 'full' });
+    expect(plain.message).not.toContain('policies change');
+  });
+
+  it('the policies-change line survives the same truncation, beside the code or the freeze tail', () => {
+    for (const freeze of [false, true]) {
+      const m = composePushover(view({ code: freeze ? '' : CODE, changes: SIXTY, destructive: [] }), {
+        includeCode: !freeze,
+        freeze,
+        summary: 'full',
+        policyChangedAt: CHANGED_AT,
+      });
+      const lines = m.message.split('\n');
+      expect(m.message.length).toBeLessThanOrEqual(1024);
+      expect(lines[0]).toBe('60 changes · 0 deletions · 61 warnings');
+      expect(lines[1]).toMatch(CHANGED_LINE);
+      expect(m.message).toContain('…');
+      if (freeze) expect(lines.at(-1)).toBe(FREEZE_TAIL);
+      else expectCodeIsLastLine(m.message);
+    }
+  });
+
+  it('PushoverNotifier sends what the engine asked for: the freeze tail and the policies line, no code', async () => {
+    const f = fakeFetch(() => ({ status: 200 }));
+    const n = new PushoverNotifier(configWith('pushover'), storeWithKeys(), f.fetch);
+    const out = await n.notify(view({ code: '' }), {
+      includeCode: false,
+      freeze: true,
+      policyChangedAt: CHANGED_AT,
+    });
+    expect(out).toEqual({ status: 'sent' });
+    const message = String(f.calls[0]!.body.message);
+    expect(message.split('\n')[1]).toMatch(CHANGED_LINE);
+    expect(message.endsWith(FREEZE_TAIL)).toBe(true);
+    expect(message).not.toMatch(/[A-Z2-9]{4}-[A-Z2-9]{4}/);
+  });
+});
+
+describe('describePhoneOutcome during a change freeze', () => {
+  const OUTCOMES: NotifyOutcome[] = [
+    { status: 'sent' },
+    { status: 'skipped', reason: 'remote_control_off' },
+    { status: 'skipped', reason: 'remote_control_unknown' },
+    { status: 'failed', reason: 'rejected' },
+    { status: 'failed', reason: 'not_configured' },
+    { status: 'failed', reason: 'network' },
+  ];
+  const page = (o: NotifyOutcome) =>
+    describePhoneOutcome(o, { includeCode: false, freeze: true, surface: 'page' });
+  const native = (o: NotifyOutcome) =>
+    describePhoneOutcome(o, { includeCode: false, freeze: true, surface: 'native' });
+
+  it('sent: a code-free summary, approved at the desk after an emergency reason', () => {
+    const text =
+      "A code-free summary was pushed to the human's phone: a change freeze is in effect, and " +
+      'while it lasts they can only approve at their desk, after typing an emergency reason there.';
+    expect(page({ status: 'sent' })).toEqual({ status: 'sent', note: text });
+    expect(native({ status: 'sent' })).toEqual({ status: 'sent', note: text });
+  });
+
+  it('skipped: both reasons, with where the human types the reason', () => {
+    for (const [describeFor, where, settings] of [
+      [page, 'on the approval page', 'via open_settings'],
+      [native, 'in Deploy Review', "in the app's Settings → Notifications"],
+    ] as const) {
+      expect(describeFor({ status: 'skipped', reason: 'remote_control_off' })).toEqual({
+        status: 'skipped',
+        reason: 'remote_control_off',
+        note:
+          'Phone notification skipped: Remote Control was not connected when this was proposed ' +
+          '(phone delivery is set to "only while Remote Control is on"). A change freeze is in ' +
+          'effect, so a push would have carried no code; while it lasts the human approves at ' +
+          `their desk, after typing an emergency reason ${where}.`,
+      });
+      expect(describeFor({ status: 'skipped', reason: 'remote_control_unknown' })).toEqual({
+        status: 'skipped',
+        reason: 'remote_control_unknown',
+        note:
+          'Phone notification skipped: phone delivery is set to "only while Remote Control is ' +
+          'on", but Contrail\'s Remote Control hook did not report for this call — it is not ' +
+          'installed, or this is not a Claude Code session. A change freeze is in effect: while ' +
+          `it lasts the request cannot be approved until the human types an emergency reason ${where}. ` +
+          `If the human expected a push, they can install the hook or switch delivery to Always ${settings}.`,
+      });
+    }
+  });
+
+  it('failed: the reason, then the freeze sentence', () => {
+    expect(page({ status: 'failed', reason: 'rejected' })).toEqual({
+      status: 'failed',
+      reason: 'rejected',
+      note:
+        'Phone notification failed (Pushover rejected the stored keys — the human should ' +
+        're-check them via open_settings). A change freeze is in effect, so the human approves ' +
+        'at their desk either way.',
+    });
+    expect(native({ status: 'failed', reason: 'network' }).note).toBe(
+      'Phone notification failed (Pushover was unreachable from this machine). A change freeze ' +
+        'is in effect, so the human approves at their desk either way.',
+    );
+  });
+
+  it('a frozen plugin outcome points at open_settings and never says the code is on the page; a native one never names open_settings', () => {
+    for (const o of OUTCOMES) {
+      const p = JSON.stringify(page(o));
+      expect(p).not.toContain("the app's Settings");
+      expect(p).not.toContain('as always');
+      expect(p).not.toContain('approval page in the human');
+      expect(p).not.toContain('nothing to do');
+      expect(p).not.toContain(CODE);
+      const n = JSON.stringify(native(o));
+      expect(n).not.toContain('open_settings');
+      expect(n).not.toContain(CODE);
+    }
+    expect(page({ status: 'failed', reason: 'not_configured' }).note).toContain('via open_settings');
+    expect(describePhoneOutcome({ status: 'off' }, { includeCode: false, freeze: true, surface: 'page' })).toEqual({
+      status: 'off',
+    });
+  });
+
+  it('the settings phrase keys on the surface, which defaults from includeCode', () => {
+    const rejected: NotifyOutcome = { status: 'failed', reason: 'rejected' };
+    expect(describePhoneOutcome(rejected, { includeCode: false, surface: 'page' }).note).toContain('open_settings');
+    expect(describePhoneOutcome(rejected, { includeCode: true, surface: 'native' }).note).toContain(
+      'Settings → Notifications',
+    );
+    expect(describePhoneOutcome(rejected, { includeCode: true }).note).toContain('open_settings');
+    expect(describePhoneOutcome(rejected, { includeCode: false }).note).not.toContain('open_settings');
+  });
+});
+
 describe('PushoverNotifier', () => {
   it('method none → off, and the network is never touched', async () => {
     const f = fakeFetch(() => ({ status: 200 }));
@@ -321,7 +505,7 @@ describe('PushoverNotifier', () => {
   it('describePhoneOutcome speaks to the presentation the human actually got', () => {
     const page = describePhoneOutcome({ status: 'sent' }, { includeCode: true });
     expect(page.note).toContain('summary and code were also pushed');
-    expect(page.note).toContain('types it into this chat');
+    expect(page.note).toContain('counts only when the human gives it to you as their approval');
     const native = describePhoneOutcome({ status: 'sent' }, { includeCode: false });
     expect(native.note).toContain('code-free summary');
     expect(native.note).toContain('Deploy Review');

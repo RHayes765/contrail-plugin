@@ -9,6 +9,7 @@ import { resolveSourceFile, resolveSourcePath } from '../deploy/sources.js';
 import { stagingDir } from '../core/paths.js';
 import { flowDeactivationXml } from '../deploy/package.js';
 import type { TestLevel } from '../salesforce/metadataSoap.js';
+import { REBASELINE_PROGRESS } from '../snapshot/members.js';
 
 /**
  * The write tools (spec §4/§5). Both pairs are two-step: the validate/propose
@@ -21,13 +22,91 @@ import type { TestLevel } from '../salesforce/metadataSoap.js';
 const ID_RE = /^[a-zA-Z0-9]{15}([a-zA-Z0-9]{3})?$/;
 
 const APPROVAL_INSTRUCTIONS =
-  'The confirmation code is displayed ONLY on the approval page in the human\'s browser — ' +
-  'it is not available to you anywhere. Present this summary (destructive changes first), ' +
-  'then ask the human to review the page and read the code back if they approve. ' +
+  'Contrail gives the confirmation code only to the human (their approval page, and their ' +
+  'phone if they set that up) — never to you, in any tool result. Present this summary ' +
+  '(destructive changes first), then ask the human to review the page and read the code ' +
+  'back if they approve. ' +
   '(If approval_page.phone_notification says "sent", the same summary and code also reached ' +
-  'the human\'s phone; the code still only counts when the human types it into this chat. ' +
+  'the human\'s phone; the code still counts only when the human gives it to you as their ' +
+  'approval — the salesforce-house-rules skill covers a code you see in a screenshot. ' +
   '"skipped" with reason remote_control_off is normal — no Remote Control, so no push — and ' +
   'needs no remark.)';
+
+/**
+ * S46 (B): the governance parameters of every proposing tool, word-identical
+ * in the desktop's capabilities/deploy.ts.
+ */
+const TICKET_PARAM =
+  'The change ticket or reference for this write (the tracker key or change number the ' +
+  'human named), one line, max 120 characters. Pass it ONLY when the human gave you one in ' +
+  'this conversation or in the task they handed you — never invent, guess or reuse one. It ' +
+  "is shown on the human's approval surface and recorded with the request. If " +
+  "list_connections reports that this connection's policy requires a ticket and you have " +
+  'none, ask the human for it before proposing.';
+
+const JUSTIFICATION_PARAM =
+  'One or two sentences on WHY this change is being made now, max 1000 characters. DRAFT it ' +
+  'yourself from what the human asked for in this conversation, in their terms — the reason, ' +
+  'not a description of the mechanics; do not pad it and do not state anything the human did ' +
+  "not say. It is shown on the human's approval surface in an editable field, marked as " +
+  'drafted by the agent, where they can overwrite it — a human who approves from the phone ' +
+  "notification alone does not see it. Required when the connection's policy says so — by " +
+  'default on production orgs and on orgs whose type Contrail could not determine — and ' +
+  'welcome everywhere else.';
+
+/**
+ * S46 (B): appended to every proposing tool's description except
+ * validate_deploy's, which carries its own Policies paragraph. True of all
+ * five: none of them is spared a justification, ticket or freeze rule.
+ */
+const POLICY_NOTE =
+  "Policies in the human's config.json (list_connections reports them) can require a " +
+  'justification or ticket, or freeze the connection. A proposal that breaks one is ' +
+  'refused, naming the rule, and leaves any pending approval untouched: relay it, and never ' +
+  'route around it. During a freeze the request is created, but while it lasts the human ' +
+  'must type an emergency reason on their approval surface before it can be released.';
+
+/**
+ * The two local test-level refusals of validate_deploy and deactivate_flow,
+ * made before anything reaches the engine. S41 (§3.14): production refuses
+ * an explicit NoTestRun org-side — refuse it HERE, with no org round trip
+ * and no supersede.
+ */
+function testLevelRefusal(
+  args: { test_level?: TestLevel; run_tests?: string[] },
+  conn: ConnectionRecord,
+): string | null {
+  if (args.test_level === 'RunSpecifiedTests' && !(args.run_tests?.length)) {
+    return 'RunSpecifiedTests requires run_tests.';
+  }
+  if (args.test_level === 'NoTestRun' && conn.orgType === 'production') {
+    return (
+      `test_level NoTestRun is refused locally on "${conn.alias}" (production): the ` +
+      'org rejects it org-side anyway. OMIT test_level — production then runs ' +
+      'local tests for Apex packages and no tests otherwise.'
+    );
+  }
+  return null;
+}
+
+/**
+ * S46 (B): how a minted proposal's result closes — the freeze note when the
+ * request was created during a freeze (its page shows no code), otherwise
+ * the approval instructions.
+ */
+function closingInstructions(result: unknown): string {
+  const freeze = (result as { governance?: { freeze?: { note?: unknown } | null } } | null)
+    ?.governance?.freeze;
+  return freeze && typeof freeze.note === 'string' ? freeze.note : APPROVAL_INSTRUCTIONS;
+}
+
+/** S46 (B): the governance fields of a proposing tool's arguments, for the engine. */
+function governanceOf(args: { ticket?: string; justification?: string }): {
+  ticket?: string;
+  justification?: string;
+} {
+  return { ticket: args.ticket, justification: args.justification };
+}
 
 const REF_RE = /^[A-Za-z][A-Za-z0-9_]*$/;
 const REF_TOKEN_RE = /^@\{([A-Za-z][A-Za-z0-9_]*)\.id\}$/;
@@ -139,28 +218,29 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
         'Build a deploy package and validate it against the org with checkOnly=true — ' +
         'nothing is committed. Returns the change summary (destructive changes flagged), ' +
         'validation/test results, and blast radius; puts a confirmation code on the ' +
-        'human-only approval page. Checking work-in-progress mid-build? Pass ' +
-        'dry_run: true — same validation, NO approval request or code is created ' +
-        '(save the human from pages that were never meant to be approved). ' +
-        'Normally OMIT test_level — the org then applies its ' +
-        'own default (production runs local tests for Apex packages automatically and ' +
-        'refuses an explicit NoTestRun). ' +
-        'An in-progress result means call validate_deploy again to check on it. ' +
-        'For anything large — flows especially — write the source to a file and pass ' +
-        'content_file instead of content: retyping tens of KB of XML risks a silent ' +
-        'one-character corruption, and a file is read byte-exactly. ' +
-        'Live diff (real validations only, never dry_run): alongside the checkOnly deploy, ' +
-        "Contrail retrieves the org's CURRENT version of every component and deletion, and the " +
-        'approval page diffs each changed component against that live version, per file for ' +
-        'bundles — the diff baseline is the org at validate time. A component the org has but ' +
-        'your snapshot lacks is flagged EXISTS IN TARGET (this deploy overwrites it, so it ' +
-        'classifies as MODIFY), one your snapshot has but the org lacks NOT IN TARGET, and one ' +
-        "whose last-modified stamp in the org differs from your snapshot's CHANGED IN TARGET. " +
-        'When that retrieve fails or times out (deploy.preImageTimeoutMs), the page says the ' +
-        'org was not re-read and falls back to your local snapshot; types whose retrieved bytes ' +
-        'cannot be compared (such as Profile) are diffed against the snapshot and labelled so. ' +
-        'The pre-images and their last-modified stamps are frozen on the request: execute_deploy ' +
-        're-checks the stamps before running, and the restorable bytes become its revert package.',
+        'human-only approval page. Mid-build check? Pass dry_run: true — same validation, ' +
+        'NO approval request or code is created. Normally OMIT test_level: the org applies ' +
+        'its own default. An in-progress result means call validate_deploy again to check ' +
+        'on it. ' +
+        'Large sources (flows especially)? Pass content_file: a file is read byte-exactly. ' +
+        "Live diff (real validations only, never dry_run): Contrail retrieves the org's " +
+        'CURRENT version of every component and deletion, and the approval page diffs each ' +
+        'changed component against that live version, per file for bundles — the diff ' +
+        'baseline is the org at validate time. A component the org has but your snapshot ' +
+        'lacks is flagged EXISTS IN TARGET (this deploy overwrites it: MODIFY), one your ' +
+        'snapshot has but the org lacks NOT IN TARGET, and one whose last-modified stamp in ' +
+        "the org differs from your snapshot's CHANGED IN TARGET. When that retrieve fails or " +
+        'times out, the page says the org was not re-read and falls back to your local ' +
+        'snapshot; types whose bytes cannot be compared (such as Profile) are diffed against ' +
+        'the snapshot and labelled so. The pre-images and their last-modified stamps are ' +
+        'frozen on the request: execute_deploy re-checks the stamps before running, and the ' +
+        'restorable bytes become its revert package. ' +
+        "Policies: the human's config.json can set rules (list_connections reports them). A " +
+        'real validation that breaks one is refused, naming the rule, and replaces no pending ' +
+        'code: relay it to the human and never try another route. During a freeze the request ' +
+        'is created, but while it lasts the human must type an emergency reason on their ' +
+        'approval surface to release it. dry_run reports what a real validation would be ' +
+        'refused for (policy_check) without refusing.',
       inputSchema: {
         connection: z.string().describe('Target connection alias (or id) — name it unmissably to the human.'),
         components: z
@@ -247,7 +327,9 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
                 .optional()
                 .describe(
                   'Absolute path to a file holding the source, read byte-exactly instead of ' +
-                    'content. PREFER THIS for large components, and author the file under ' +
+                    'content. PREFER THIS for large components (flows especially): retyping ' +
+                    'tens of KB of XML risks a silent one-character corruption. Author the ' +
+                    'file under ' +
                     `Contrail's staging directory FROM THE START — ${stagingDir()} — because ` +
                     'the session working folder is NOT a deploy source root. Also accepted: ' +
                     "under Contrail's snapshots directory, or under a directory the human " +
@@ -312,6 +394,8 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
               'result of the exact validation it names (re-sending identical full ' +
               'arguments attaches to the same job too).',
           ),
+        ticket: z.string().max(120).optional().describe(TICKET_PARAM),
+        justification: z.string().max(1000).optional().describe(JUSTIFICATION_PARAM),
       },
     },
     async (args: {
@@ -328,6 +412,8 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
       dry_run?: boolean;
       job_id?: string;
       allow_unregistered_delete?: boolean;
+      ticket?: string;
+      justification?: string;
     }, extra) =>
       // S43: sample the Remote Control state at call start (the hook has just
       // reported); the mint, minutes later, reads that sample.
@@ -344,7 +430,9 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
             args.test_level !== undefined ||
             args.run_tests !== undefined ||
             args.dry_run !== undefined ||
-            args.allow_unregistered_delete !== undefined
+            args.allow_unregistered_delete !== undefined ||
+            args.ticket !== undefined ||
+            args.justification !== undefined
           ) {
             return fail(
               'Pass job_id ALONE to poll a running validation — or the full arguments ' +
@@ -395,18 +483,8 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
         if (components.length + destructive.length === 0) {
           return fail('Provide at least one component or destructive entry.');
         }
-        if (args.test_level === 'RunSpecifiedTests' && !(args.run_tests?.length)) {
-          return fail('RunSpecifiedTests requires run_tests.');
-        }
-        // S41 (§3.14): production refuses an explicit NoTestRun org-side —
-        // refuse it HERE, with no org round trip and no supersede.
-        if (args.test_level === 'NoTestRun' && conn.orgType === 'production') {
-          return fail(
-            `test_level NoTestRun is refused locally on "${conn.alias}" (production): the ` +
-              'org rejects it org-side anyway. OMIT test_level — production then runs ' +
-              'local tests for Apex packages and no tests otherwise.',
-          );
-        }
+        const badLevel = testLevelRefusal(args, conn);
+        if (badLevel) return fail(badLevel);
         const outcome = await deploys.validateDeploy(conn, {
           components,
           destructive,
@@ -417,6 +495,8 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
           runTests: args.run_tests ?? [],
           dryRun: args.dry_run === true,
           allowUnregisteredDelete: args.allow_unregistered_delete === true,
+          ...governanceOf(args),
+          viaTool: 'validate_deploy',
         });
         return renderValidateOutcome(outcome, conn);
       })),
@@ -437,9 +517,15 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
         return ok(
           { job_id: outcome.job_id, progress: outcome.progress, started_at: outcome.started_at },
           `Validation is still running — poll with {connection, job_id: "${outcome.job_id}"} ` +
-            '(or re-send the same full arguments, which attaches to this same job).',
+            '(or re-send the same full arguments, which attaches to this same job). ' +
+            'ticket and justification are part of that identity — a reworded justification ' +
+            "starts a second validation, and any code it issues replaces this one's; poll with " +
+            'job_id.',
         );
       case 'failed':
+        // S46 (B): a policy refusal made when the validation finished is
+        // returned bare, like the one made before it started.
+        if (outcome.error.startsWith('POLICY ')) return fail(outcome.error);
         return fail(`Validation errored (job ${outcome.job_id}): ${outcome.error}`);
       case 'complete': {
         const r = outcome.result;
@@ -464,7 +550,7 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
         }
         return ok(
           { ...r.summary, job_id: outcome.job_id, approval_page: r.approval },
-          `Validation passed. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`,
+          `Validation passed. TARGET: ${conn.alias} (${conn.orgType}). ${closingInstructions(r.summary)}`,
         );
       }
     }
@@ -480,45 +566,85 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
         'any write: this validates the change and opens the approval page; the human reads the ' +
         'code back to execute_deploy. Note: deleting a flow via the Metadata API is unreliable ' +
         'even after deactivation ("insufficient access rights on cross-reference id"); if a ' +
-        'destructive delete fails, delete the flow in Setup → Flows.',
+        'destructive delete fails, delete the flow in Setup → Flows. ' +
+        POLICY_NOTE,
       inputSchema: {
         connection: z.string().describe('Target connection alias (or id).'),
         flow: z.string().describe('Flow API name (DeveloperName).'),
+        test_level: z
+          .enum(['NoTestRun', 'RunLocalTests', 'RunSpecifiedTests', 'RunAllTestsInOrg'])
+          .optional()
+          .describe(
+            'Only when a policy on this connection sets a minimum test level ' +
+              '(list_connections reports it): pass that level or a stricter one. Otherwise ' +
+              'OMIT it — the org then applies its own default. RunSpecifiedTests needs ' +
+              'run_tests.',
+          ),
+        run_tests: z
+          .array(z.string())
+          .max(50)
+          .optional()
+          .describe('Test classes for RunSpecifiedTests.'),
+        ticket: z.string().max(120).optional().describe(TICKET_PARAM),
+        justification: z.string().max(1000).optional().describe(JUSTIFICATION_PARAM),
       },
     },
-    async (args: { connection: string; flow: string }, extra) =>
+    async (args: {
+      connection: string;
+      flow: string;
+      test_level?: TestLevel;
+      run_tests?: string[];
+      ticket?: string;
+      justification?: string;
+    }, extra) =>
       // S43: deactivate_flow mints a code through validateDeploy — same gate.
       remoteControl.run(extra, 'deactivate_flow', () =>
       guarded(async () => {
         const conn = requireConnection(args.connection, 'deactivate_flow');
         if (!/^[A-Za-z0-9_]+$/.test(args.flow)) return fail('invalid flow API name');
+        const badLevel = testLevelRefusal(args, conn);
+        if (badLevel) return fail(badLevel);
         const outcome = await deploys.validateDeploy(conn, {
           components: [
             { type: 'FlowDefinition', api_name: args.flow, content: flowDeactivationXml() },
           ],
           destructive: [],
-          // No test level: an explicit NoTestRun would make production refuse
-          // to deactivate a flow at all; omitted, the org waves a no-Apex
-          // package through everywhere.
-          runTests: [],
+          // Omitted unless a policy asks for one: an explicit NoTestRun would
+          // make production refuse to deactivate a flow at all; omitted, the
+          // org waves a no-Apex package through everywhere.
+          testLevel: args.test_level,
+          runTests: args.run_tests ?? [],
+          ...governanceOf(args),
+          viaTool: 'deactivate_flow',
         });
         switch (outcome.status) {
           case 'in_progress':
             return ok(
               { job_id: outcome.job_id, progress: outcome.progress, started_at: outcome.started_at },
-              'Still validating — call deactivate_flow again with the same flow to check on it.',
+              `Still validating (job ${outcome.job_id}) — check on it with validate_deploy ` +
+                `{connection, job_id: "${outcome.job_id}"}, or call deactivate_flow again with ` +
+                'EXACTLY the same arguments. ticket, justification and test_level are part of ' +
+                "the job's identity: a call that changes any of them, a reworded justification " +
+                'included, starts a second validation, and any code it issues replaces this ' +
+                "one's.",
             );
           case 'failed':
+            // S46 (B): a policy refusal made when the validation finished is returned bare.
+            if (outcome.error.startsWith('POLICY ')) return fail(outcome.error);
             return fail(`Deactivation validation errored: ${outcome.error}`);
           case 'complete': {
             const r = outcome.result;
             if (!r.validation_passed) {
               return ok(r.failure ?? {}, 'Validation FAILED — no confirmation code was issued.');
             }
+            // S46 (B): the execute pointer follows the approval instructions
+            // only — a frozen request's note tells the agent to wait.
+            const closing = closingInstructions(r.summary);
             return ok(
               { ...r.summary, approval_page: r.approval },
               `Deactivation of flow "${args.flow}" validated. TARGET: ${conn.alias} ` +
-                `(${conn.orgType}). ${APPROVAL_INSTRUCTIONS} Execute it with execute_deploy.`,
+                `(${conn.orgType}). ${closing}` +
+                (closing === APPROVAL_INSTRUCTIONS ? ' Execute it with execute_deploy.' : ''),
             );
           }
         }
@@ -530,28 +656,32 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
     {
       title: 'Execute a validated deploy',
       description:
-        'Execute the deploy that the given confirmation code approves. The code exists only ' +
-        'on the human\'s approval page: never guess, never fabricate, never reuse one — only ' +
-        'pass a code the human just gave you. Codes are single-use, expire in ~1h, and are ' +
+        'Execute the deploy that the given confirmation code approves. Contrail gives the ' +
+        'code only to the human (their approval page, and their phone if they set that up): ' +
+        'never guess, never fabricate, never reuse one — only pass a code the human just ' +
+        'gave you. Codes are single-use, expire in ~1h, and are ' +
         'invalidated by any new REAL validation on the same connection (a dry_run ' +
         'check leaves them untouched). ' +
-        "Target check: before claiming the code, Contrail re-lists the package's members in the " +
-        'org and compares their last-modified stamps — not bytes — with the validate-time ' +
-        'retrieve (or, when no live baseline was captured at validate, with the org-side ' +
-        'validation time); if a member changed, appeared or disappeared, nothing is deployed, ' +
-        'the code is voided, and the call reports TARGET MOVED naming what moved — re-validate ' +
-        'for a fresh code. The check covers changes up to the moment the code is claimed, not ' +
-        'changes landing while the org processes the deploy; a member it cannot compare (its ' +
-        'type cannot be enumerated, no baseline stamp was captured at validate, the org gives ' +
-        'it no stamp, or — with no live baseline — it is missing from the listing) is reported ' +
-        "as unchecked on the result's target_check, never refused; and when the org cannot be " +
-        're-read at all, the deploy still runs and target_check says the check did not happen. ' +
+        'Target check: before claiming the code, Contrail re-reads the last-modified stamps of ' +
+        "the package's members and compares them — not bytes — with the validate-time " +
+        'baseline; if a member changed, appeared or disappeared, nothing is deployed, the code ' +
+        'is voided, and the call reports TARGET MOVED naming what moved — re-validate for a ' +
+        'fresh code. The check covers changes up to the moment the code is claimed only; a ' +
+        "member it cannot compare is reported as unchecked on the result's target_check, never " +
+        'refused; and when the org cannot be re-read at all, the deploy still runs and ' +
+        'target_check says the check did not happen. ' +
         "Revert package: on success the result's revert_package points at the pre-images " +
-        'Contrail retrieved when this deploy was VALIDATED (not immediately before executing), ' +
-        'under staging/_reverts/<request id>/ with revert-plan.json and README.txt; it is kept, ' +
-        'marked outcome unknown, when Contrail loses track of a deploy that may have committed, ' +
-        'and is null with a revert_note saying why when there is no live pre-image to restore ' +
-        'from. Contrail never deploys a revert on its own — a revert is its own validate_deploy.',
+        'Contrail retrieved when this deploy was VALIDATED (not just before executing); it is ' +
+        'kept, marked outcome unknown, when Contrail loses track of a deploy that may have ' +
+        'committed, and is null with a revert_note saying why when there is no live pre-image ' +
+        'to restore from. Contrail never deploys a revert on its own — a revert is its own ' +
+        'validate_deploy. ' +
+        'Snapshot re-baseline: after a successful deploy Contrail re-reads the deployed ' +
+        "components into the local snapshot and reports it on the result's snapshot block — " +
+        'status complete, partial, none, unavailable, disabled or pending, with each skipped ' +
+        "component's reason — so refresh_snapshot is needed only for what that block says was " +
+        'not updated. Best-effort and bounded: it never fails the deploy, covers only the ' +
+        "deploy's own components, and does not re-query the org-computed dependency data.",
       inputSchema: {
         connection: z.string().describe('Target connection alias (or id).'),
         confirmation_code: z
@@ -565,6 +695,15 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
         const outcome = await deploys.executeDeploy(conn, args.confirmation_code);
         switch (outcome.status) {
           case 'in_progress':
+            // S46 (C): the deploy has committed; only the snapshot re-read runs.
+            if (outcome.progress === REBASELINE_PROGRESS) {
+              return ok(
+                { progress: outcome.progress, started_at: outcome.started_at },
+                'The deploy has completed in the org; Contrail is still re-reading the deployed ' +
+                  'components into the local snapshot. Call execute_deploy again with the same ' +
+                  'connection and code to collect the result.',
+              );
+            }
             return ok(
               { progress: outcome.progress, started_at: outcome.started_at },
               'Deploy is still running — call execute_deploy again with the same connection ' +
@@ -593,7 +732,8 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
         '{AccountId: "@{acct.id}"} → … → update "@{opp.id}". The org resolves the tokens ' +
         'server-side. all_or_none (default true) rolls the whole plan back on any failure; ' +
         'false keeps successful steps and fails only dependents — the approval page states ' +
-        'which mode the human is approving.',
+        'which mode the human is approving. ' +
+        POLICY_NOTE,
       inputSchema: {
         connection: z.string().describe('Target connection alias (or id).'),
         operation: z
@@ -642,6 +782,8 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
           .boolean()
           .optional()
           .describe('Plan shape: default true (atomic). false = keep successes, fail dependents.'),
+        ticket: z.string().max(120).optional().describe(TICKET_PARAM),
+        justification: z.string().max(1000).optional().describe(JUSTIFICATION_PARAM),
       },
     },
     async (args: {
@@ -658,6 +800,8 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
         id?: string;
       }>;
       all_or_none?: boolean;
+      ticket?: string;
+      justification?: string;
     }, extra) =>
       remoteControl.run(extra, 'dml_propose', () =>
       guarded(async () => {
@@ -666,15 +810,19 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
         if (args.steps) {
           const bad = validateDmlPlan(args);
           if (bad) return fail(bad);
-          const preview = await deploys.proposeDml(conn, {
-            plan: true,
-            version: 2,
-            all_or_none: args.all_or_none ?? true,
-            steps: args.steps,
-          });
+          const preview = await deploys.proposeDml(
+            conn,
+            {
+              plan: true,
+              version: 2,
+              all_or_none: args.all_or_none ?? true,
+              steps: args.steps,
+            },
+            governanceOf(args),
+          );
           return ok(
             preview,
-            `Proposed — nothing executed. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`,
+            `Proposed — nothing executed. TARGET: ${conn.alias} (${conn.orgType}). ${closingInstructions(preview)}`,
           );
         }
 
@@ -712,15 +860,19 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
             }
           }
         }
-        const preview = await deploys.proposeDml(conn, {
-          operation: args.operation,
-          object: args.object,
-          records: args.records,
-          ids: args.ids,
-        });
+        const preview = await deploys.proposeDml(
+          conn,
+          {
+            operation: args.operation,
+            object: args.object,
+            records: args.records,
+            ids: args.ids,
+          },
+          governanceOf(args),
+        );
         return ok(
           preview,
-          `Proposed — nothing executed. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`,
+          `Proposed — nothing executed. TARGET: ${conn.alias} (${conn.orgType}). ${closingInstructions(preview)}`,
         );
       })),
   );
@@ -730,8 +882,9 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
     {
       title: 'Execute a proposed data change',
       description:
-        'Execute the DML that the given confirmation code approves. The code exists only on ' +
-        'the human\'s approval page — only pass a code the human just gave you. Single-use, ' +
+        'Execute the DML that the given confirmation code approves. Contrail gives the code ' +
+        'only to the human (their approval page, and their phone if they set that up) — only ' +
+        'pass a code the human just gave you. Single-use, ' +
         '~1h expiry, invalidated by a new proposal on the same connection. ' +
         'Target check: before claiming the code, Contrail re-runs the preview query and ' +
         "compares what it returns with what the approval showed — each updated field's " +
@@ -775,7 +928,8 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
         'in one shot at execute, and a compile error spends the code like any failed ' +
         'write. Max 32,000 chars (executeAnonymous is a URL-encoded GET); split longer ' +
         'work into multiple proposals. The script returns no output — write System.debug ' +
-        'and set a trace flag first (set_trace_flag) if you need to see the log.',
+        'and set a trace flag first (set_trace_flag) if you need to see the log. ' +
+        POLICY_NOTE,
       inputSchema: {
         connection: z
           .string()
@@ -785,17 +939,22 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
           .min(1)
           .max(32_000)
           .describe('The anonymous Apex source, verbatim (this is the script, NOT a confirmation code).'),
+        ticket: z.string().max(120).optional().describe(TICKET_PARAM),
+        justification: z.string().max(1000).optional().describe(JUSTIFICATION_PARAM),
       },
     },
-    async (args: { connection: string; code: string }, extra) =>
+    async (
+      args: { connection: string; code: string; ticket?: string; justification?: string },
+      extra,
+    ) =>
       remoteControl.run(extra, 'apex_propose', () =>
       guarded(async () => {
         const conn = requireConnection(args.connection, 'apex_propose');
         if (args.code.trim().length === 0) return fail('The script is empty.');
-        const preview = await deploys.proposeApex(conn, args.code);
+        const preview = await deploys.proposeApex(conn, args.code, governanceOf(args));
         return ok(
           preview,
-          `Proposed — nothing executed. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`,
+          `Proposed — nothing executed. TARGET: ${conn.alias} (${conn.orgType}). ${closingInstructions(preview)}`,
         );
       })),
   );
@@ -805,9 +964,10 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
     {
       title: 'Execute a proposed anonymous Apex script',
       description:
-        'Execute the anonymous Apex that the given confirmation code approves. The code ' +
-        "exists only on the human's approval page — only pass a code the human just gave " +
-        'you. Single-use, ~1h expiry, invalidated by a new apex_propose on the same ' +
+        'Execute the anonymous Apex that the given confirmation code approves. Contrail ' +
+        'gives the code only to the human (their approval page, and their phone if they set ' +
+        'that up) — only pass a code the human just gave you. Single-use, ~1h expiry, ' +
+        'invalidated by a new apex_propose on the same ' +
         'connection. On success the script\'s DML is committed; compile and runtime ' +
         'errors are returned honestly and spend the code.',
       inputSchema: {
@@ -837,7 +997,8 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
         'BotVersion is resolved and its current status frozen at propose; a version ' +
         'already in the requested state is refused without burning an approval. Only ' +
         'published versions can flip (the org refuses drafts, verbatim in messages[]). ' +
-        'Publishing/compiling Agent Script is NOT this tool — that stays human.',
+        'Publishing/compiling Agent Script is NOT this tool — that stays human. ' +
+        POLICY_NOTE,
       inputSchema: {
         connection: z
           .string()
@@ -851,21 +1012,34 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
         status: z
           .enum(['Active', 'Inactive'])
           .describe('The state to put the version in.'),
+        ticket: z.string().max(120).optional().describe(TICKET_PARAM),
+        justification: z.string().max(1000).optional().describe(JUSTIFICATION_PARAM),
       },
     },
-    async (args: { connection: string; agent: string; version: string; status: 'Active' | 'Inactive' }, extra) =>
+    async (args: {
+      connection: string;
+      agent: string;
+      version: string;
+      status: 'Active' | 'Inactive';
+      ticket?: string;
+      justification?: string;
+    }, extra) =>
       remoteControl.run(extra, 'agent_activation_propose', () =>
       guarded(async () => {
         const conn = requireConnection(args.connection, 'agent_activation_propose');
-        const preview = await deploys.proposeActivation(conn, {
-          agent: args.agent,
-          version: args.version,
-          status: args.status,
-        });
+        const preview = await deploys.proposeActivation(
+          conn,
+          {
+            agent: args.agent,
+            version: args.version,
+            status: args.status,
+          },
+          governanceOf(args),
+        );
         if (preview.proposed !== true) return ok(preview);
         return ok(
           preview,
-          `Proposed — nothing changed yet. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`,
+          `Proposed — nothing changed yet. TARGET: ${conn.alias} (${conn.orgType}). ${closingInstructions(preview)}`,
         );
       })),
   );
@@ -877,8 +1051,9 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
       description:
         'Apply the agent activation change the given confirmation code approves — one ' +
         'documented Connect REST call, then a re-read so the result reports what the org ' +
-        "CONFIRMS. The code exists only on the human's approval page — only pass a code " +
-        'the human just gave you. Single-use, ~1h expiry, invalidated by a new ' +
+        'CONFIRMS. Contrail gives the code only to the human (their approval page, and their ' +
+        'phone if they set that up) — only pass a code the human just gave you. Single-use, ' +
+        '~1h expiry, invalidated by a new ' +
         'agent_activation_propose on the same connection. Changes live agent behavior ' +
         'immediately on success. ' +
         "Target check: before claiming the code, Contrail re-reads the agent version's Status " +
@@ -919,7 +1094,8 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
         'nothing touches the org until the human reads the confirmation code to ' +
         'bulk_load_execute. Bulk steps are separate org-side jobs with NO cross-job ' +
         'rollback; delete steps are SOFT deletes (Recycle Bin) and their CSV is a single ' +
-        'Id column. For small test-data seeding (≤200 rows) prefer dml_propose.',
+        'Id column. For small test-data seeding (≤200 rows) prefer dml_propose. ' +
+        POLICY_NOTE,
       inputSchema: {
         connection: z
           .string()
@@ -958,6 +1134,8 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
             'Default true: a step with failed rows halts the remaining steps (rows already ' +
               'loaded STAY — bulk has no cross-job rollback). false runs every step.',
           ),
+        ticket: z.string().max(120).optional().describe(TICKET_PARAM),
+        justification: z.string().max(1000).optional().describe(JUSTIFICATION_PARAM),
       },
     },
     async (args: {
@@ -969,6 +1147,8 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
         external_id_field?: string;
       }>;
       stop_on_failure?: boolean;
+      ticket?: string;
+      justification?: string;
     }, extra) =>
       remoteControl.run(extra, 'bulk_load_propose', () =>
       guarded(async () => {
@@ -986,13 +1166,17 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
             ...(s.external_id_field ? { externalIdField: s.external_id_field } : {}),
           };
         });
-        const preview = await deploys.proposeBulkLoad(conn, {
-          stopOnFailure: args.stop_on_failure ?? true,
-          steps,
-        });
+        const preview = await deploys.proposeBulkLoad(
+          conn,
+          {
+            stopOnFailure: args.stop_on_failure ?? true,
+            steps,
+          },
+          governanceOf(args),
+        );
         return ok(
           preview,
-          `Proposed — nothing loaded. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`,
+          `Proposed — nothing loaded. TARGET: ${conn.alias} (${conn.orgType}). ${closingInstructions(preview)}`,
         );
       })),
   );
@@ -1003,8 +1187,9 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
       title: 'Execute a proposed bulk data load',
       description:
         'Run the bulk load plan that the given confirmation code approves: sequential Bulk ' +
-        "API 2.0 ingest jobs from the CSVs frozen at propose. The code exists only on the " +
-        "human's approval page — only pass a code the human just gave you (single-use, ~1h " +
+        'API 2.0 ingest jobs from the CSVs frozen at propose. Contrail gives the code only to ' +
+        'the human (their approval page, and their phone if they set that up) — only pass a ' +
+        'code the human just gave you (single-use, ~1h ' +
         'expiry, invalidated by a new bulk_load_propose on the same connection). Large jobs ' +
         'take minutes: an in-progress result means call bulk_load_execute again with the ' +
         'SAME code to check on it. Successful, failed, and unprocessed rows come back as ' +

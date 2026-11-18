@@ -197,8 +197,9 @@ real impact evidence, not noise. Then the approval ritual: present the result
 with the target org unmissable, the human reads the confirmation code from the
 approval page, and only then `execute_deploy` — see **salesforce-house-rules §3**.
 
-**4. After success**, `refresh_snapshot` so the snapshot and dependency graph
-include the new rule.
+**4. After success** the result's `snapshot` block shows the object re-read (the
+rule rides its CustomObject); run `refresh_snapshot` only if that block reports
+it as not updated.
 
 ## Modifying and deleting
 

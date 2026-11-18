@@ -460,9 +460,11 @@ your summary. Then:
 
 1. Round-trip `retrieve_metadata` — the org normalizes; keep its spelling as
    the new baseline (and send the differences back into this skill's §9).
-2. `refresh_snapshot` with `types: ["AiTestingDefinition"]` (and/or
-   `"AiAgentScorerDefinition"`) — both are explicit-refresh-only, like the
-   rest of the Agentforce family.
+2. **Check the result's `snapshot` block** — it says whether the deployed
+   suite (or scorer) was re-read into the snapshot; if it was skipped with
+   `type_not_in_snapshot`, run `refresh_snapshot` with
+   `types: ["AiTestingDefinition"]` (and/or `"AiAgentScorerDefinition"`) —
+   both are explicit-refresh-only, like the rest of the Agentforce family.
 3. Do not expect the suite in the **Tests** tab yet: on the org probed a
    deployed suite was listed in neither the Tests tab nor Testing Center
    until `run_agent_eval` had run it once (§8, §9); after that first run it

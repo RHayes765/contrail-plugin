@@ -15,6 +15,38 @@ import { indexSnapshotFiles } from './indexer.js';
 import crypto from 'node:crypto';
 import { buildKnownArtifacts, extractAllEdges } from '../deps/extract.js';
 import { fetchOrgDependencyEdges } from '../deps/orgdeps.js';
+import {
+  listDates,
+  listedPropFor,
+  retrieveNamedMembers,
+  type PreImageListing,
+} from '../deploy/preimage.js';
+import {
+  CONNECTION_REMOVED_TEXT,
+  MEMBER_REFRESH_MAX,
+  MEMBER_REFRESH_NOTES,
+  MEMBER_RESULT_REUSE_MS,
+  REBASELINE_QUEUE_WAIT_MS,
+  absenceVerdict,
+  applyMemberUnits,
+  isPackageOwnedState,
+  memberJobId,
+  memberKey,
+  memberOutcomes,
+  memberRetrieveManifest,
+  noMetadataReadText,
+  noSnapshotText,
+  partialWriteText,
+  planMemberUnits,
+  removableUnitKeys,
+  unitTypeCoverage,
+  type MemberApplyResult,
+  type MemberOutcome,
+  type MemberRefreshSummary,
+  type MemberSkipReason,
+  type RebaselineOutcome,
+  type SnapshotMember,
+} from './members.js';
 import { ContrailError } from '../core/errors.js';
 import { log } from '../core/log.js';
 
@@ -23,6 +55,14 @@ import { log } from '../core/log.js';
  * references. Runs as a per-connection background job with a short inline
  * wait, mirroring the connect_org pattern, so MCP client timeouts never bite
  * on large orgs.
+ *
+ * S46 Part C adds member-scoped runs (refreshMembers, and rebaselineMembers
+ * after a deploy): only the named components' units are re-read, into an
+ * existing snapshot, on the same per-connection chain and the same lease.
+ * The planning, coverage, absence, whole-document and filesystem rules and
+ * every text live in the byte-identical snapshot/members.ts; this file keeps
+ * the org calls, the commit point and every SQLite write. Hand-mirror to the
+ * desktop snapshot/engine.ts.
  */
 
 export interface RefreshSummary {
@@ -36,17 +76,66 @@ export interface RefreshSummary {
 
 export interface RefreshJobState {
   job_id: string;
+  /** The requested type set; [] for a member job. */
   types: string[];
+  /** S46: the requested members of a member job. */
+  members?: SnapshotMember[];
   startedAt: string;
   progress: string;
   done: boolean;
-  result?: RefreshSummary;
+  result?: RefreshSummary | MemberRefreshSummary;
   error?: string;
 }
 
 interface RefreshJob extends RefreshJobState {
-  promise: Promise<RefreshSummary>;
+  kind: 'types' | 'members';
+  promise: Promise<RefreshSummary | MemberRefreshSummary>;
   finishedAt?: number;
+}
+
+/**
+ * S46: what a refresh call hands back. `complete` is discriminated by `kind`
+ * — whichever entry delivered it, a job_id poll included — and a consumer
+ * branches on `kind`, never on the summary's shape.
+ */
+export type RefreshComplete =
+  | { status: 'complete'; kind: 'types'; job_id: string; summary: RefreshSummary }
+  | { status: 'complete'; kind: 'members'; job_id: string; summary: MemberRefreshSummary };
+
+type JobOutcome =
+  | RefreshComplete
+  | { status: 'failed'; job_id: string; error: string }
+  | { status: 'in_progress'; job_id: string; state: RefreshJobState };
+
+export type MemberRefreshOutcome =
+  | { status: 'complete'; kind: 'members'; job_id: string; summary: MemberRefreshSummary }
+  | { status: 'failed'; job_id: string; error: string }
+  | { status: 'in_progress'; job_id: string; state: RefreshJobState };
+
+/**
+ * S46: what a refresh called WITHOUT a job_id returns. Its job id is always
+ * `refresh-…` (the type set), so only a type job can answer it; a job_id
+ * poll may deliver either kind.
+ */
+export type TypeRefreshOutcome =
+  | { status: 'complete'; kind: 'types'; job_id: string; summary: RefreshSummary }
+  | { status: 'failed'; job_id: string; error: string }
+  | { status: 'in_progress'; job_id: string; state: RefreshJobState };
+
+/** How a member run was started, and what it reports to. */
+interface MemberRunContext {
+  origin: 'refresh_snapshot' | 'execute_deploy';
+  /** The deploy request (execute path only). */
+  requestId?: string;
+  /** The deploy's destructive members (execute path; possibly empty). */
+  deleted?: SnapshotMember[];
+  signal?: AbortSignal;
+  /** Epoch ms the re-read must finish by (execute path). */
+  deadline?: number;
+  /** Progress sink (tool path). */
+  job?: RefreshJob;
+  /** Called once, at the commit point. */
+  onCommit?: () => void;
 }
 
 /** Finished-but-never-collected jobs are swept after this long. */
@@ -54,6 +143,8 @@ const STALE_JOB_MS = 30 * 60_000;
 
 /** Matches the desktop app's snapshot lease TTL (its app_locks lease). */
 const SNAPSHOT_LOCK_TTL_MS = 15 * 60 * 1000;
+
+const QUEUED_PROGRESS = 'queued behind an earlier refresh on this connection';
 
 /**
  * S41 (§3.1): a refresh job's identity is its REQUESTED TYPE SET, never the
@@ -108,6 +199,10 @@ export class SnapshotEngine {
    */
   private readonly chains = new Map<string, Promise<unknown>>();
   private readonly lockHolder = `plugin:${process.pid}`;
+  /** S46: told which members a member run wrote or removed (the plugin leaves it unset). */
+  private membersObserver:
+    | ((info: { connectionId: string; members: MemberOutcome[] }) => void)
+    | null = null;
 
   constructor(
     private readonly db: ContrailDb,
@@ -117,23 +212,30 @@ export class SnapshotEngine {
     private readonly audit: AuditLog,
   ) {}
 
+  setMembersObserver(
+    obs: (info: { connectionId: string; members: MemberOutcome[] }) => void,
+  ): void {
+    this.membersObserver = obs;
+  }
+
   /**
    * Start (or observe) a refresh. Returns within ~toolWaitMs either the
    * finished summary or an in-progress state the caller reports back.
    * Pass pollJobId (alone) to check on a job from an earlier call without
    * re-sending types; a result is only ever delivered to the input that
-   * asked for it.
+   * asked for it. A poll serves type jobs and member jobs alike.
    */
+  refresh(conn: ConnectionRecord, types?: string[]): Promise<TypeRefreshOutcome>;
+  refresh(
+    conn: ConnectionRecord,
+    types?: string[],
+    pollJobId?: string,
+  ): Promise<JobOutcome | { status: 'unknown_job'; job_id: string }>;
   async refresh(
     conn: ConnectionRecord,
     types?: string[],
     pollJobId?: string,
-  ): Promise<
-    | { status: 'complete'; job_id: string; summary: RefreshSummary }
-    | { status: 'failed'; job_id: string; error: string }
-    | { status: 'in_progress'; job_id: string; state: RefreshJobState }
-    | { status: 'unknown_job'; job_id: string }
-  > {
+  ): Promise<JobOutcome | { status: 'unknown_job'; job_id: string }> {
     this.sweepStaleJobs();
     let jobId: string;
     let normalized: string[] | null = null;
@@ -151,9 +253,7 @@ export class SnapshotEngine {
       // A finished job whose result was never collected is delivered now.
       // `!== undefined`, never truthiness: an empty error string must still
       // deliver as FAILED, not fall through and restart work under a poll.
-      if (job.result !== undefined) {
-        return { status: 'complete', job_id: jobId, summary: job.result };
-      }
+      if (job.result !== undefined) return completeOutcome(job, job.result);
       if (job.error !== undefined) return { status: 'failed', job_id: jobId, error: job.error };
       job = undefined;
     }
@@ -163,11 +263,159 @@ export class SnapshotEngine {
       job = this.startJob(conn, normalized!, jobId);
       this.jobs.set(key, job);
     }
+    return this.awaitJob(key, job);
+  }
+
+  /**
+   * S46: re-read ONLY the named components into an existing snapshot. Its
+   * own job id (`members-…`, the sorted member set), the same job map, the
+   * same per-connection chain and lease as a whole-type refresh. A re-send
+   * of the same members (any order or case) attaches to a RUNNING job; a
+   * finished one nobody collected is handed to a re-send only within
+   * MEMBER_RESULT_REUSE_MS, so a re-send never returns an older re-read as
+   * its own — a job_id poll still collects it until the 30-minute sweep.
+   */
+  async refreshMembers(
+    conn: ConnectionRecord,
+    members: SnapshotMember[],
+  ): Promise<MemberRefreshOutcome> {
+    this.sweepStaleJobs();
+    const jobId = memberJobId(members);
+    const distinct = new Set(members.map((m) => memberKey(m.type, m.api_name))).size;
+    if (distinct > MEMBER_REFRESH_MAX) {
+      return {
+        status: 'failed',
+        job_id: jobId,
+        error:
+          `a member-scoped refresh takes at most ${MEMBER_REFRESH_MAX} components ` +
+          `(${distinct} were named)`,
+      };
+    }
+    const key = `${conn.id}:${jobId}`;
+    let job = this.jobs.get(key);
+    if (job?.done) {
+      this.jobs.delete(key);
+      const fresh =
+        job.finishedAt !== undefined && Date.now() - job.finishedAt <= MEMBER_RESULT_REUSE_MS;
+      if (fresh && job.result !== undefined) {
+        return completeOutcome(job, job.result) as MemberRefreshOutcome;
+      }
+      if (fresh && job.error !== undefined) {
+        return { status: 'failed', job_id: jobId, error: job.error };
+      }
+      job = undefined;
+    }
+    if (!job) {
+      job = this.startMemberJob(conn, members, jobId);
+      this.jobs.set(key, job);
+    }
+    // A member job only ever completes with kind 'members'.
+    return (await this.awaitJob(key, job)) as MemberRefreshOutcome;
+  }
+
+  /**
+   * S46: the re-baseline after a successful deploy. Never throws and
+   * registers no job (nothing polls it). Waits at most
+   * min(timeoutMs, REBASELINE_QUEUE_WAIT_MS) for its turn on the connection
+   * (else `refresh_running`) and at most timeoutMs in all (else `timeout`) —
+   * unless the run has reached its commit point, which is always awaited. An
+   * aborted run that later reaches the front of the chain returns before
+   * taking the lease, and a run aborted before its commit point writes
+   * nothing.
+   */
+  async rebaselineMembers(
+    conn: ConnectionRecord,
+    members: SnapshotMember[],
+    opts: { timeoutMs: number; requestId: string; deleted: SnapshotMember[] },
+  ): Promise<RebaselineOutcome> {
+    try {
+      const distinct = new Set(members.map((m) => memberKey(m.type, m.api_name))).size;
+      if (distinct > MEMBER_REFRESH_MAX) {
+        let types: string[];
+        try {
+          types = planMemberUnits(members).units.map((u) => u.type);
+        } catch {
+          types = members.map((m) => m.type);
+        }
+        return {
+          status: 'unavailable',
+          reason: 'too_many_members',
+          detail: [...new Set(types)].sort().join(', '),
+        };
+      }
+      const timeoutMs = Math.max(0, opts.timeoutMs);
+      // The budget runs from this call, not from the run's turn on the
+      // chain: the retrieve gets only what the queue left of it (§C1 step 5).
+      const deadline = Date.now() + timeoutMs;
+      const controller = new AbortController();
+      let started = false;
+      let committing = false;
+      const run = this.chainRun(
+        conn,
+        () =>
+          this.runMemberRefresh(conn, members, {
+            origin: 'execute_deploy',
+            requestId: opts.requestId,
+            deleted: opts.deleted,
+            signal: controller.signal,
+            deadline,
+            onCommit: () => {
+              committing = true;
+            },
+          }),
+        {
+          signal: controller.signal,
+          onStart: () => {
+            started = true;
+          },
+        },
+      );
+      run.catch(() => {});
+      const timers: Array<ReturnType<typeof setTimeout>> = [];
+      const first = await new Promise<'settled' | 'queue' | 'timeout'>((resolve) => {
+        run.then(
+          () => resolve('settled'),
+          () => resolve('settled'),
+        );
+        timers.push(
+          setTimeout(() => {
+            if (!started) resolve('queue');
+          }, Math.min(timeoutMs, REBASELINE_QUEUE_WAIT_MS)),
+        );
+        timers.push(setTimeout(() => resolve('timeout'), timeoutMs));
+      });
+      for (const t of timers) clearTimeout(t);
+      if (first === 'queue') {
+        controller.abort();
+        return { status: 'unavailable', reason: 'refresh_running' };
+      }
+      if (first === 'timeout' && !committing) {
+        controller.abort();
+        return { status: 'unavailable', reason: 'timeout' };
+      }
+      return { status: 'ran', summary: await run };
+    } catch (err) {
+      return rebaselineFailure(err);
+    }
+  }
+
+  private sweepStaleJobs(): void {
+    const cutoff = Date.now() - STALE_JOB_MS;
+    for (const [key, job] of this.jobs) {
+      if (job.done && job.finishedAt !== undefined && job.finishedAt < cutoff) {
+        this.jobs.delete(key);
+      }
+    }
+  }
+
+  /** The soft wait both entries share: the result, or an in-progress state after toolWaitMs. */
+  private async awaitJob(key: string, job: RefreshJob): Promise<JobOutcome> {
+    const jobId = job.job_id;
     const winner = await Promise.race([
       job.promise.then(
-        (summary) => ({ status: 'complete' as const, job_id: jobId, summary }),
-        (err) => ({
-          status: 'failed' as const,
+        (summary): JobOutcome => completeOutcome(job, summary),
+        (err): JobOutcome => ({
+          status: 'failed',
           job_id: jobId,
           error: String(err instanceof Error ? err.message : err),
         }),
@@ -181,37 +429,28 @@ export class SnapshotEngine {
     return { status: 'in_progress', job_id: jobId, state: publicState(job) };
   }
 
-  private sweepStaleJobs(): void {
-    const cutoff = Date.now() - STALE_JOB_MS;
-    for (const [key, job] of this.jobs) {
-      if (job.done && job.finishedAt !== undefined && job.finishedAt < cutoff) {
-        this.jobs.delete(key);
-      }
-    }
-  }
-
-  private startJob(conn: ConnectionRecord, types: string[], jobId: string): RefreshJob {
-    const job: RefreshJob = {
-      job_id: jobId,
-      types,
-      startedAt: new Date().toISOString(),
-      progress: 'starting',
-      done: false,
-      promise: undefined as unknown as Promise<RefreshSummary>,
-    };
-    // Serialise RUNS per connection: a second refresh queues behind the
-    // running one and starts only after it settles (success or failure).
-    // Across PROCESSES the desktop app's snapshot lease applies too — the
-    // plugin participates opportunistically (see db.tryAcquireAppLock): on a
-    // machine where the desktop app shares ~/.contrail, a refresh held by
-    // the other process fails honestly instead of interleaving wholesale
-    // snapshot-dir rewrites with it.
+  /**
+   * Serialise RUNS per connection: a run queues behind the one before it and
+   * starts only after it settles (success or failure). Across PROCESSES the
+   * desktop app's snapshot lease applies too — the plugin participates
+   * opportunistically (see db.tryAcquireAppLock): on a machine where the
+   * desktop app shares ~/.contrail, a refresh held by the other process
+   * fails honestly instead of interleaving snapshot rewrites with it. A run
+   * whose signal was aborted while it queued returns before taking the
+   * lease; `onStart` marks that its turn has come.
+   */
+  private chainRun<T>(
+    conn: ConnectionRecord,
+    work: () => Promise<T>,
+    gate?: { signal?: AbortSignal; onStart?: () => void },
+  ): Promise<T> {
     const prev = this.chains.get(conn.id);
-    if (prev) job.progress = 'queued behind an earlier refresh on this connection';
     const lockName = `snapshot:${conn.id}`;
     const run = (prev ?? Promise.resolve())
       .catch(() => {})
       .then(async () => {
+        if (gate?.signal?.aborted) throw cancelledError();
+        gate?.onStart?.();
         if (!this.db.tryAcquireAppLock(lockName, this.lockHolder, SNAPSHOT_LOCK_TTL_MS)) {
           throw new ContrailError(
             'another Contrail process (the desktop app) is refreshing this connection — ' +
@@ -220,7 +459,7 @@ export class SnapshotEngine {
           );
         }
         try {
-          return await this.runRefresh(conn, types, job);
+          return await work();
         } finally {
           this.db.releaseAppLock(lockName, this.lockHolder);
         }
@@ -230,6 +469,16 @@ export class SnapshotEngine {
     void tail.then(() => {
       if (this.chains.get(conn.id) === tail) this.chains.delete(conn.id);
     });
+    return run;
+  }
+
+  /** Record a job's settlement (and audit its failure) on the job itself. */
+  private settleJob(
+    conn: ConnectionRecord,
+    job: RefreshJob,
+    run: Promise<RefreshSummary | MemberRefreshSummary>,
+    failedEvent: 'snapshot.refresh_failed' | 'snapshot.members_refresh_failed',
+  ): void {
     job.promise = run
       .then((summary) => {
         job.done = true;
@@ -241,7 +490,7 @@ export class SnapshotEngine {
         job.done = true;
         job.finishedAt = Date.now();
         job.error = String(err instanceof Error ? err.message : err);
-        this.audit.record('snapshot.refresh_failed', {
+        this.audit.record(failedEvent, {
           connectionId: conn.id,
           tool: 'refresh_snapshot',
           outcome: 'error',
@@ -251,7 +500,294 @@ export class SnapshotEngine {
       });
     // Prevent unhandled rejection when nobody is awaiting after soft-return.
     job.promise.catch(() => {});
+  }
+
+  private startJob(conn: ConnectionRecord, types: string[], jobId: string): RefreshJob {
+    const job: RefreshJob = {
+      kind: 'types',
+      job_id: jobId,
+      types,
+      startedAt: new Date().toISOString(),
+      progress: 'starting',
+      done: false,
+      promise: undefined as unknown as Promise<RefreshSummary>,
+    };
+    if (this.chains.has(conn.id)) job.progress = QUEUED_PROGRESS;
+    const run = this.chainRun(conn, () => this.runRefresh(conn, types, job));
+    this.settleJob(conn, job, run, 'snapshot.refresh_failed');
     return job;
+  }
+
+  private startMemberJob(
+    conn: ConnectionRecord,
+    members: SnapshotMember[],
+    jobId: string,
+  ): RefreshJob {
+    const job: RefreshJob = {
+      kind: 'members',
+      job_id: jobId,
+      types: [],
+      members: members.map((m) => ({ type: m.type, api_name: m.api_name })),
+      startedAt: new Date().toISOString(),
+      progress: 'starting',
+      done: false,
+      promise: undefined as unknown as Promise<MemberRefreshSummary>,
+    };
+    if (this.chains.has(conn.id)) job.progress = QUEUED_PROGRESS;
+    const run = this.chainRun(conn, () =>
+      this.runMemberRefresh(conn, members, { origin: 'refresh_snapshot', job }),
+    );
+    this.settleJob(conn, job, run, 'snapshot.members_refresh_failed');
+    return job;
+  }
+
+  /**
+   * One member run, in the order of design C §C1: snapshot check → plan →
+   * unit-level listing (never a child type) → coverage, unsupported and
+   * package-owned skips → ONE retrieve of whole documents → the commit
+   * point (the connection and its metadata_read grant re-read; nothing has
+   * been written before it, and everything after it runs to completion) →
+   * files (staged, then swapped) → rows → extractor edges → outcomes →
+   * audit. A failure after the commit point is `snapshot_partial_write`.
+   */
+  private async runMemberRefresh(
+    conn: ConnectionRecord,
+    members: SnapshotMember[],
+    ctx: MemberRunContext,
+  ): Promise<MemberRefreshSummary> {
+    const started = Date.now();
+    const progress = (p: string): void => {
+      if (ctx.job) ctx.job.progress = p;
+    };
+    const checkAbort = (): void => {
+      if (ctx.signal?.aborted) throw cancelledError();
+    };
+    const deleted = ctx.deleted ?? [];
+
+    // 1. Only an existing snapshot is updated.
+    const counts = this.db.countArtifactsByType(conn.id);
+    if (Object.keys(counts).length === 0) {
+      throw new ContrailError(noSnapshotText(conn.alias), 'no_snapshot');
+    }
+    // 2. Members → units; no unit means no org call.
+    const plan = planMemberUnits(members);
+    const preSkipped = new Map<string, MemberSkipReason>();
+    let listing: PreImageListing = { props: [], unsupported: new Set() };
+    let retrievedAt: string | null = null;
+    let applied: MemberApplyResult | null = null;
+    let retrievedProps: FileProperties[] = [];
+    const oldRows: Array<{ type: string; apiName: string }> = [];
+    const touched: string[] = [];
+    let edgeCount = 0;
+
+    if (plan.units.length > 0) {
+      const soap = new MetadataSoapClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
+      // 3. The unit-level listing: unit types only, never a child type.
+      checkAbort();
+      progress('listing members');
+      listing = await listDates(
+        soap,
+        plan.units.map((u) => ({ type: u.type, api_name: u.name })),
+      );
+      checkAbort();
+
+      // 4. Unsupported, uncovered and package-owned units are left out.
+      const coverage = unitTypeCoverage({ counts, units: plan.units, listing });
+      for (const u of plan.units) {
+        if (listing.unsupported.has(u.type)) preSkipped.set(u.key, 'type_unsupported');
+        else if (!coverage.get(u.type)) preSkipped.set(u.key, 'type_not_in_snapshot');
+        else if (
+          listing.props !== null &&
+          this.db.getArtifact(conn.id, u.type, u.name) === null &&
+          isPackageOwnedState(listedPropFor(listing.props, u.type, u.name))
+        ) {
+          preSkipped.set(u.key, 'package_owned');
+        }
+      }
+      const units = plan.units.filter((u) => !preSkipped.has(u.key));
+      // After a deploy only the deploy's own deletions may be removed. Planned
+      // here, before the commit point, so a deleted member that cannot be
+      // placed fails the run with nothing written.
+      const removable = ctx.origin === 'execute_deploy' ? removableUnitKeys(deleted) : null;
+
+      if (units.length > 0) {
+        // 5. ONE retrieve of whole documents (the manifest refuses a child type).
+        const manifest = memberRetrieveManifest(units);
+        const timeoutMs =
+          ctx.deadline !== undefined
+            ? Math.max(0, ctx.deadline - Date.now())
+            : this.config.snapshot.retrieveTimeoutMs;
+        progress('retrieving members');
+        const retrieved = await retrieveNamedMembers(soap, manifest, {
+          timeoutMs,
+          pollIntervalMs: this.config.snapshot.pollIntervalMs,
+          signal: ctx.signal,
+          label: 'retrieving members',
+          onProgress: progress,
+        });
+        if (!retrieved.ok) {
+          if (retrieved.reason === 'cancelled') throw cancelledError();
+          if (retrieved.reason === 'timeout') {
+            throw new ContrailError(
+              `retrieve did not complete within ${Math.round(timeoutMs / 1000)} s`,
+              'retrieve_timeout',
+            );
+          }
+          throw new ContrailError(
+            `retrieve failed: ${retrieved.reason.replace(/^retrieve_failed:/, '')}`,
+            'retrieve_failed',
+          );
+        }
+        // 6. After the retrieve, as a whole refresh stamps it. No saveZip.
+        const at = new Date().toISOString();
+        retrievedAt = at;
+        retrievedProps = retrieved.fileProperties;
+
+        // 7. Last abort checkpoint, then the commit point: the connection
+        // and its grant are re-read once, synchronously. Nothing has been
+        // written yet; from here the write runs to completion.
+        checkAbort();
+        const live = this.db.getConnection(conn.id);
+        if (!live) throw new ContrailError(CONNECTION_REMOVED_TEXT, 'connection_removed');
+        if (!live.grants.metadata_read) {
+          throw new ContrailError(noMetadataReadText(conn.alias), 'no_metadata_read');
+        }
+        ctx.onCommit?.();
+        progress('writing the snapshot');
+        try {
+          // 8. What the snapshot holds for each unit now.
+          const before = new Map<string, Array<{ type: string; apiName: string }>>();
+          const inputs = units.map((u) => {
+            const oldRoot = this.db.getArtifact(conn.id, u.type, u.name);
+            const rows = oldRoot?.filePath
+              ? this.db.listArtifactsByFilePath(conn.id, oldRoot.filePath)
+              : oldRoot
+                ? [oldRoot]
+                : [];
+            before.set(
+              u.key,
+              rows.map((r) => ({ type: r.type, apiName: r.apiName })),
+            );
+            const verdict = absenceVerdict(u, listing);
+            return {
+              key: u.key,
+              type: u.type,
+              name: u.name,
+              bundle: u.bundle,
+              oldFilePath: oldRoot?.filePath ?? null,
+              // After a deploy only the deploy's own deletions may be removed.
+              ifAbsent:
+                removable === null || (verdict === 'remove' && removable.has(u.key))
+                  ? verdict
+                  : ('keep' as const),
+              skipIfPackageOwned: oldRoot === null,
+            };
+          });
+          // 9. Files: staged, then swapped; only this run's own retrieve.
+          const done = applyMemberUnits(this.store, {
+            connectionId: conn.id,
+            zip: retrieved.zip,
+            manifest,
+            units: inputs,
+            fileProps: mergeProps(
+              (listing.props ?? []).filter((p) => p.lastModifiedDate),
+              retrieved.fileProperties,
+            ),
+            retrievedAt: at,
+          });
+          applied = done;
+          // 10. Rows: the old rows of every written or removed unit go.
+          const replaced = done.units.filter((u) => u.applied !== 'kept');
+          for (const u of replaced) {
+            oldRows.push(...(before.get(u.key) ?? []));
+            const unit = units.find((x) => x.key === u.key);
+            if (unit) touched.push(`${unit.type}:${unit.name}`);
+          }
+          this.db.replaceArtifactRows(
+            conn.id,
+            oldRows,
+            done.artifacts.map((a) => ({ ...a, connectionId: conn.id })),
+          );
+          // 11. Extractor edges FROM the re-read components, against the
+          // whole post-replace index; org edges are not re-queried.
+          progress('extracting references');
+          const known = buildKnownArtifacts(this.db.listArtifacts(conn.id));
+          const edges = extractAllEdges(conn.id, done.artifacts, known);
+          const fresh = new Set(done.artifacts.map((a) => memberKey(a.type, a.apiName)));
+          this.db.replaceEdgesFromArtifacts(conn.id, {
+            refreshed: done.artifacts.map((a) => ({ type: a.type, name: a.apiName })),
+            removed: oldRows
+              .filter((r) => !fresh.has(memberKey(r.type, r.apiName)))
+              .map((r) => ({ type: r.type, name: r.apiName })),
+            edges,
+          });
+          edgeCount = edges.length;
+        } catch (err) {
+          throw new ContrailError(
+            partialWriteText(err instanceof Error ? err.message : String(err)),
+            'snapshot_partial_write',
+          );
+        }
+      }
+    }
+
+    // 12. One outcome per member.
+    const outcomes = memberOutcomes({
+      plan,
+      origin: ctx.origin,
+      deleted,
+      preSkipped,
+      applied,
+      oldRows,
+      listing,
+      retrievedProps,
+    });
+    const tally = { refreshed: 0, removed: 0, skipped: 0 };
+    for (const o of outcomes) tally[o.outcome] += 1;
+    const summary: MemberRefreshSummary = {
+      connection: conn.alias,
+      members: outcomes,
+      counts: tally,
+      units: touched,
+      artifact_counts: countByType(applied?.artifacts ?? []),
+      edge_counts: { extractor: edgeCount },
+      retrieved_at: retrievedAt,
+      notes: touched.length > 0 ? [...MEMBER_REFRESH_NOTES] : [],
+      duration_ms: Date.now() - started,
+    };
+
+    // 13. Audit (the six keys a dossier may show, plus requestId), then the observer.
+    this.audit.record('snapshot.members_refreshed', {
+      connectionId: conn.id,
+      tool: ctx.origin,
+      outcome: 'success',
+      detail: {
+        origin: ctx.origin,
+        ...(ctx.origin === 'execute_deploy' && ctx.requestId !== undefined
+          ? { requestId: ctx.requestId }
+          : {}),
+        refreshed: tally.refreshed,
+        removed: tally.removed,
+        skipped: tally.skipped,
+        units: touched,
+        duration_ms: summary.duration_ms,
+      },
+    });
+    log('info', 'snapshot members refreshed', {
+      connection: conn.alias,
+      refreshed: tally.refreshed,
+      removed: tally.removed,
+      skipped: tally.skipped,
+    });
+    const changed = outcomes.filter((o) => o.outcome !== 'skipped');
+    if (this.membersObserver && changed.length > 0) {
+      try {
+        this.membersObserver({ connectionId: conn.id, members: changed });
+      } catch (err) {
+        log('warn', 'members observer failed', { error: String(err) });
+      }
+    }
+    return summary;
   }
 
   private async runRefresh(
@@ -574,6 +1110,55 @@ function isManaged(p: FileProperties): boolean {
   return isPackageOwned(p) ? p.namespacePrefix !== undefined && p.namespacePrefix !== '' : false;
 }
 
+function cancelledError(): ContrailError {
+  return new ContrailError(
+    'the member refresh was cancelled before it wrote anything',
+    'cancelled',
+  );
+}
+
+/** A finished job's `complete` outcome, discriminated by the job's kind. */
+function completeOutcome(
+  job: RefreshJob,
+  summary: RefreshSummary | MemberRefreshSummary,
+): RefreshComplete {
+  return job.kind === 'members'
+    ? {
+        status: 'complete',
+        kind: 'members',
+        job_id: job.job_id,
+        summary: summary as MemberRefreshSummary,
+      }
+    : { status: 'complete', kind: 'types', job_id: job.job_id, summary: summary as RefreshSummary };
+}
+
+/**
+ * Map a member run's failure to the re-baseline outcome. `failed` is only
+ * ever a failure BEFORE the commit point, where nothing was written; a
+ * failure after it is `failed_after_write`.
+ */
+function rebaselineFailure(err: unknown): RebaselineOutcome {
+  const code = err instanceof ContrailError ? err.code : '';
+  const message = (err instanceof Error ? err.message : String(err)).slice(0, 200);
+  switch (code) {
+    case 'snapshot_locked':
+      return { status: 'unavailable', reason: 'locked' };
+    case 'no_snapshot':
+      return { status: 'unavailable', reason: 'no_snapshot' };
+    case 'retrieve_timeout':
+    case 'cancelled':
+      return { status: 'unavailable', reason: 'timeout' };
+    case 'no_metadata_read':
+      return { status: 'unavailable', reason: 'no_metadata_read' };
+    case 'connection_removed':
+      return { status: 'unavailable', reason: 'connection_removed' };
+    case 'snapshot_partial_write':
+      return { status: 'unavailable', reason: 'failed_after_write', detail: message };
+    default:
+      return { status: 'unavailable', reason: 'failed', detail: message };
+  }
+}
+
 function withChildTypes(types: string[]): string[] {
   const all = new Set(types);
   for (const t of types) for (const child of CHILD_TYPES[t] ?? []) all.add(child);
@@ -685,6 +1270,7 @@ function publicState(job: RefreshJob): RefreshJobState {
   return {
     job_id: job.job_id,
     types: job.types,
+    ...(job.members !== undefined ? { members: job.members } : {}),
     startedAt: job.startedAt,
     progress: job.progress,
     done: job.done,

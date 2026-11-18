@@ -68,4 +68,18 @@ describe('grants', () => {
       expect(TOOL_GRANT_MAP, `${tool} must be classified`).toHaveProperty(tool);
     }
   });
+
+  it('classifies the S46 skill tools as grant-free and render_flow as a metadata read', () => {
+    // The skill pack is served from the install itself: no org, no grant.
+    expect(TOOL_GRANT_MAP).toHaveProperty('list_skills', null);
+    expect(TOOL_GRANT_MAP).toHaveProperty('read_skill', null);
+    // render_flow reads flow XML from a connection, so every connection it
+    // reads must hold metadata_read.
+    expect(TOOL_GRANT_MAP).toHaveProperty('render_flow', 'metadata_read');
+  });
+
+  it('classifies export_change_evidence as grant-free (Contrail\'s own local record)', () => {
+    // The dossier is written from Contrail's own database: no org call, no grant.
+    expect(TOOL_GRANT_MAP).toHaveProperty('export_change_evidence', null);
+  });
 });

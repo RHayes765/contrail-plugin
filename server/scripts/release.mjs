@@ -2,6 +2,7 @@ import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ignoredSkillFiles } from './ignored-skills.mjs';
 
 /**
  * Cut a release: sync the version from server/package.json into every file
@@ -109,6 +110,36 @@ run(
       .join(' '),
   repoRoot,
 );
+// Skill-presence gate, same reasoning: the server reads its skills from the
+// install, and the teammate zip and CI's clean checkout (which packs the
+// .mcpb) hold only the tracked tree. An untracked house-rules file or flow
+// template would pass every local gate (the working tree has it) and be
+// missing from what ships.
+run(
+  'git ls-files --error-unmatch ' +
+    [
+      'skills/salesforce-house-rules/SKILL.md',
+      'skills/salesforce-flow-visualize/SKILL.md',
+      'skills/salesforce-flow-visualize/assets/flow-diff-template.html',
+    ]
+      .map((f) => `"${f}"`)
+      .join(' '),
+  repoRoot,
+);
+// ...and every other skill file. The unanchored `dist/`, `*.log` and
+// `node_modules/` rules match under skills/ too, and a file they catch passes
+// the gate above and the local mcpb build, then is missing from all three
+// channels (see scripts/ignored-skills.mjs).
+const ignoredSkills = ignoredSkillFiles(repoRoot);
+if (ignoredSkills.length > 0) {
+  throw new Error(
+    `${ignoredSkills.length} gitignored file(s) under skills/ would not ship: ` +
+      ignoredSkills.slice(0, 10).join(', ') +
+      (ignoredSkills.length > 10 ? ', ...' : '') +
+      '. Track each with `git add -f`, or add a .gitignore negation as for server/vendor/apex-ls/dist/.',
+  );
+}
+console.error('skills: no gitignored skill files');
 run('npm run bundle');
 fs.mkdirSync(path.join(serverRoot, 'dist-plugin'), { recursive: true });
 fs.copyFileSync(

@@ -235,10 +235,10 @@ function assignProp(target, prop, value) {
     configurable: true
   });
 }
-function getElementAtPath(obj, path14) {
-  if (!path14)
+function getElementAtPath(obj, path17) {
+  if (!path17)
     return obj;
-  return path14.reduce((acc, key2) => acc?.[key2], obj);
+  return path17.reduce((acc, key2) => acc?.[key2], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -487,11 +487,11 @@ function aborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path14, issues) {
+function prefixIssues(path17, issues) {
   return issues.map((iss) => {
     var _a2;
     (_a2 = iss).path ?? (_a2.path = []);
-    iss.path.unshift(path14);
+    iss.path.unshift(path17);
     return iss;
   });
 }
@@ -6792,8 +6792,8 @@ var init_parseUtil = __esm({
     init_errors3();
     init_en2();
     makeIssue = (params) => {
-      const { data, path: path14, errorMaps, issueData } = params;
-      const fullPath = [...path14, ...issueData.path || []];
+      const { data, path: path17, errorMaps, issueData } = params;
+      const fullPath = [...path17, ...issueData.path || []];
       const fullIssue = {
         ...issueData,
         path: fullPath
@@ -7101,11 +7101,11 @@ var init_types2 = __esm({
     init_parseUtil();
     init_util2();
     ParseInputLazyPath = class {
-      constructor(parent, value, path14, key2) {
+      constructor(parent, value, path17, key2) {
         this._cachedPath = [];
         this.parent = parent;
         this.data = value;
-        this._path = path14;
+        this._path = path17;
         this._key = key2;
       }
       get path() {
@@ -10676,11 +10676,11 @@ function normalizeObjectSchema(schema) {
   }
   return void 0;
 }
-function getDotPath(path14) {
-  if (path14.length === 0) {
+function getDotPath(path17) {
+  if (path17.length === 0) {
     return "object root";
   }
-  return path14.reduce((acc, seg, index) => {
+  return path17.reduce((acc, seg, index) => {
     if (index === 0) {
       return String(seg);
     }
@@ -16548,8 +16548,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path14) {
-      let input = path14;
+    function removeDotSegments(path17) {
+      let input = path17;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -16801,8 +16801,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path14, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path14 && path14 !== "/" ? path14 : void 0;
+        const [path17, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path17 && path17 !== "/" ? path17 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -19993,7 +19993,7 @@ var require_formats = __commonJS({
       return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
     }
     var DATE = /^(\d\d\d\d)-(\d\d)-(\d\d)$/;
-    var DAYS = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    var DAYS2 = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
     function date3(str) {
       const matches = DATE.exec(str);
       if (!matches)
@@ -20001,7 +20001,7 @@ var require_formats = __commonJS({
       const year = +matches[1];
       const month = +matches[2];
       const day = +matches[3];
-      return month >= 1 && month <= 12 && day >= 1 && day <= (month === 2 && isLeapYear(year) ? 29 : DAYS[month]);
+      return month >= 1 && month <= 12 && day >= 1 && day <= (month === 2 && isLeapYear(year) ? 29 : DAYS2[month]);
     }
     function compareDate(d1, d2) {
       if (!(d1 && d2))
@@ -20221,12 +20221,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs17, exportName) {
+    function addFormats(ajv, list, fs20, exportName) {
       var _a2;
       var _b2;
       (_a2 = (_b2 = ajv.opts.code).formats) !== null && _a2 !== void 0 ? _a2 : _b2.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs17[f]);
+        ajv.addFormat(f, fs20[f]);
     }
     module.exports = exports = formatsPlugin;
     Object.defineProperty(exports, "__esModule", { value: true });
@@ -21873,7 +21873,7 @@ var ENGINE_VERSION, SERVER_NAME;
 var init_version = __esm({
   "src/core/version.ts"() {
     "use strict";
-    ENGINE_VERSION = "0.39.0";
+    ENGINE_VERSION = "0.40.0";
     SERVER_NAME = "contrail-engine";
   }
 });
@@ -22044,6 +22044,51 @@ function vendorDir() {
   }
   return null;
 }
+function resolveSkillsDir(fromDir = path2.dirname(fileURLToPath(import.meta.url))) {
+  const override = process.env.CONTRAIL_SKILLS_DIR;
+  if (override) {
+    try {
+      if (fs.statSync(override).isDirectory()) {
+        return { dir: fs.realpathSync(override), source: "override", looked: [override] };
+      }
+    } catch {
+    }
+    return { dir: null, source: "override_missing", looked: [override] };
+  }
+  const looked = [];
+  for (const up of [[".."], ["..", ".."], ["..", "..", ".."]]) {
+    const candidate = path2.join(fromDir, ...up, "skills");
+    looked.push(candidate);
+    try {
+      if (fs.existsSync(path2.join(candidate, "salesforce-house-rules", "SKILL.md")) && isContrailRoot(path2.dirname(candidate))) {
+        return { dir: fs.realpathSync(candidate), source: "bundled", looked };
+      }
+    } catch {
+    }
+  }
+  return { dir: null, source: "absent", looked };
+}
+function isContrailRoot(dir) {
+  for (const marker of [
+    path2.join(dir, ".claude-plugin", "plugin.json"),
+    path2.join(dir, "manifest.json")
+  ]) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(marker, "utf8"));
+      if (parsed !== null && typeof parsed === "object" && parsed.name === "contrail") {
+        return true;
+      }
+    } catch {
+    }
+  }
+  return false;
+}
+function rendersDir() {
+  return ensureDir(path2.join(dataDir(), "renders"));
+}
+function evidenceDir() {
+  return ensureDir(path2.join(dataDir(), "evidence"));
+}
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
   return dir;
@@ -22169,7 +22214,18 @@ var init_grants = __esm({
       // Local static diagnostics (vendored language servers): no org, no grant —
       // zero-cost local reads, the same class as list_connections.
       check_apex: null,
-      check_soql: null
+      check_soql: null,
+      // S46: the bundled skill pack, served from the install itself. No org, no
+      // grant - plugin-only tools (the desktop app has its own skill library and
+      // its own project tool named read_skill, which never passes this gate).
+      list_skills: null,
+      read_skill: null,
+      // S46: reads flow XML (snapshot or Tooling) and writes a local HTML page.
+      // Gated per connection - EVERY connection it reads must hold the grant.
+      render_flow: "metadata_read",
+      // S46: writes a dossier from Contrail's own local records - no org call,
+      // no grant.
+      export_change_evidence: null
     };
   }
 });
@@ -22582,6 +22638,65 @@ var init_db = __esm({
         });
         tx();
       }
+      /**
+       * S46 (member-scoped refresh): replace named rows only, in one
+       * transaction. Every row named by `remove` AND every row an incoming
+       * artifact would occupy is deleted first — matched by type and
+       * case-insensitive api_name, so a case-changed rename never leaves two
+       * rows under the case-sensitive UNIQUE key — with its FTS rows; then the
+       * incoming artifacts are inserted as replaceArtifactsForTypes inserts
+       * them. Every other row keeps its id. The FTS delete is chunked (400 ids)
+       * because artifact_id is UNINDEXED: one table scan per chunk.
+       * Hand-mirror to the desktop db.ts.
+       */
+      replaceArtifactRows(connectionId, remove, artifacts) {
+        const find = this.db.prepare(
+          `SELECT id FROM artifacts WHERE connection_id = ? AND type = ? AND api_name = ? COLLATE NOCASE`
+        );
+        const ins = this.db.prepare(
+          `INSERT INTO artifacts
+         (id, workspace_id, connection_id, type, api_name, file_path, content_hash,
+          last_modified_date, last_modified_by, retrieved_at)
+       VALUES (?, 'default', ?, ?, ?, ?, ?, ?, ?, ?)`
+        );
+        const insFts = this.db.prepare(
+          `INSERT INTO artifact_fts (api_name, type, content, connection_id, artifact_id)
+       VALUES (?, ?, ?, ?, ?)`
+        );
+        const tx = this.db.transaction(() => {
+          const ids = /* @__PURE__ */ new Set();
+          for (const r of [...remove, ...artifacts]) {
+            for (const row of find.all(connectionId, r.type, r.apiName)) {
+              ids.add(row.id);
+            }
+          }
+          const all = [...ids];
+          let deleted = 0;
+          for (let i = 0; i < all.length; i += 400) {
+            const chunk = all.slice(i, i + 400);
+            const marks = chunk.map(() => "?").join(",");
+            this.db.prepare(`DELETE FROM artifact_fts WHERE artifact_id IN (${marks})`).run(...chunk);
+            deleted += this.db.prepare(`DELETE FROM artifacts WHERE id IN (${marks})`).run(...chunk).changes;
+          }
+          for (const a of artifacts) {
+            const id = randomUUID();
+            ins.run(
+              id,
+              connectionId,
+              a.type,
+              a.apiName,
+              a.filePath,
+              a.contentHash,
+              a.lastModifiedDate,
+              a.lastModifiedBy,
+              a.retrievedAt
+            );
+            insFts.run(a.apiName, a.type, a.content ?? "", connectionId, id);
+          }
+          return { deleted, inserted: artifacts.length };
+        });
+        return tx();
+      }
       listArtifacts(connectionId, type) {
         const rows = type ? this.db.prepare(
           `SELECT * FROM artifacts WHERE connection_id = ? AND type = ? ORDER BY api_name`
@@ -22593,6 +22708,17 @@ var init_db = __esm({
           `SELECT * FROM artifacts WHERE connection_id = ? AND type = ? AND api_name = ? COLLATE NOCASE`
         ).get(connectionId, type, apiName);
         return row ? rowToArtifact(row) : null;
+      }
+      /**
+       * S46: every row stored under one snapshot file — a document's root row
+       * and all its children (one row for a bundle). Hand-mirror to the desktop
+       * db.ts.
+       */
+      listArtifactsByFilePath(connectionId, filePath) {
+        const rows = this.db.prepare(
+          `SELECT * FROM artifacts WHERE connection_id = ? AND file_path = ? ORDER BY type, api_name`
+        ).all(connectionId, filePath);
+        return rows.map(rowToArtifact);
       }
       countArtifactsByType(connectionId) {
         const rows = this.db.prepare(
@@ -22658,6 +22784,36 @@ var init_db = __esm({
           for (const t of fromTypes) del.run(connectionId, source, t);
           for (const e of edges) {
             ins.run(randomUUID(), connectionId, e.fromType, e.fromName, e.toType, e.toName, source);
+          }
+        });
+        tx();
+      }
+      /**
+       * S46 (member-scoped refresh): in one transaction, drop the extractor
+       * edges FROM each re-read component, drop every edge (both sources) FROM
+       * each removed one, then insert the new edges as extractor edges. Edges
+       * TO those components, and org edges from a re-read one, are untouched.
+       * Hand-mirror to the desktop db.ts.
+       */
+      replaceEdgesFromArtifacts(connectionId, input) {
+        const delExtractor = this.db.prepare(
+          `DELETE FROM dependency_edges
+       WHERE connection_id = ? AND source = 'extractor' AND from_type = ? AND from_name = ? COLLATE NOCASE`
+        );
+        const delAll = this.db.prepare(
+          `DELETE FROM dependency_edges
+       WHERE connection_id = ? AND from_type = ? AND from_name = ? COLLATE NOCASE`
+        );
+        const ins = this.db.prepare(
+          `INSERT OR IGNORE INTO dependency_edges
+         (id, workspace_id, connection_id, from_type, from_name, to_type, to_name, source)
+       VALUES (?, 'default', ?, ?, ?, ?, ?, ?)`
+        );
+        const tx = this.db.transaction(() => {
+          for (const r of input.refreshed) delExtractor.run(connectionId, r.type, r.name);
+          for (const r of input.removed) delAll.run(connectionId, r.type, r.name);
+          for (const e of input.edges) {
+            ins.run(randomUUID(), connectionId, e.fromType, e.fromName, e.toType, e.toName, "extractor");
           }
         });
         tx();
@@ -22796,6 +22952,55 @@ var init_db = __esm({
           `UPDATE deploy_requests SET status = ?, executed_at = ?, result_json = ? WHERE id = ?`
         ).run(status, (/* @__PURE__ */ new Date()).toISOString(), resultJson, id);
       }
+      /**
+       * S46 (re-baseline): amend an EXECUTED request's stored result — the
+       * post-deploy re-read replaces the `pending` snapshot block with its
+       * outcome. Predicated on status = 'executed'; never touches status or
+       * executed_at. Hand-mirror to the desktop db.ts.
+       */
+      amendDeployRequestResult(id, resultJson) {
+        const result = this.db.prepare(`UPDATE deploy_requests SET result_json = ? WHERE id = ? AND status = 'executed'`).run(resultJson, id);
+        return result.changes === 1;
+      }
+      /** S46: one request by id, any status (the desktop db.ts has the same accessor). */
+      getDeployRequest(id) {
+        const row = this.db.prepare(`SELECT * FROM deploy_requests WHERE id = ?`).get(id);
+        return row ? rowToDeployRequest(row) : null;
+      }
+      /**
+       * S46: requests by connection, creation window or id — newest first
+       * (created_at DESC, id DESC, a total order, so `offset` pages without
+       * gaps or repeats). `since` and `until` bound created_at inclusively;
+       * limit 1–1000, default 200. Hand-mirror to the desktop db.ts.
+       */
+      queryDeployRequests(filter) {
+        const clauses = [];
+        const params = [];
+        if (filter.connectionId) {
+          clauses.push("connection_id = ?");
+          params.push(filter.connectionId);
+        }
+        if (filter.since) {
+          clauses.push("created_at >= ?");
+          params.push(filter.since);
+        }
+        if (filter.until) {
+          clauses.push("created_at <= ?");
+          params.push(filter.until);
+        }
+        if (filter.id) {
+          clauses.push("id = ?");
+          params.push(filter.id);
+        }
+        const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+        const limit = Math.min(Math.max(Math.trunc(filter.limit ?? 200), 1), 1e3);
+        const offset = Math.max(Math.trunc(filter.offset ?? 0), 0);
+        const rows = this.db.prepare(
+          `SELECT * FROM deploy_requests ${where}
+         ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`
+        ).all(...params, limit, offset);
+        return rows.map(rowToDeployRequest);
+      }
       getDeployRequestStatus(id) {
         const row = this.db.prepare(`SELECT status FROM deploy_requests WHERE id = ?`).get(id);
         return row?.status ?? null;
@@ -22812,6 +23017,30 @@ var init_db = __esm({
        */
       setDeployRequestSummaryJson(id, summaryJson) {
         this.db.prepare(`UPDATE deploy_requests SET summary_json = ? WHERE id = ?`).run(summaryJson, id);
+      }
+      /**
+       * S46: the one writer of a PRESENTED request's summary_json — the page
+       * view, the justification, a freeze override and the execute-time policy
+       * record all go through it, so no write can erase another's keys. Reads
+       * the row and writes `patch(summary)` in one IMMEDIATE transaction (the
+       * write lock is taken before the read; the plugin and the desktop share
+       * this database), and only while the row is still 'validated' — the
+       * UPDATE is predicated on that too, so a patch can never land on a
+       * claimed, voided or expired row. Returns false, writing nothing, when
+       * the row is missing or no longer 'validated'. A summary that is not a
+       * JSON object is patched from {}. Hand-mirror to the desktop db.ts.
+       */
+      patchDeployRequestSummary(id, patch) {
+        const tx = this.db.transaction(() => {
+          const row = this.db.prepare(`SELECT summary_json, status FROM deploy_requests WHERE id = ?`).get(id);
+          if (!row || row.status !== "validated") return false;
+          const parsed = safeParse4(row.summary_json);
+          const summary = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+          const next = JSON.stringify(patch(summary));
+          const result = this.db.prepare(`UPDATE deploy_requests SET summary_json = ? WHERE id = ? AND status = 'validated'`).run(next, id);
+          return result.changes === 1;
+        });
+        return tx.immediate();
       }
       updateDeployRequestStatus(id, status) {
         this.db.prepare(`UPDATE deploy_requests SET status = ?, executed_at = ? WHERE id = ?`).run(status, status === "executed" ? (/* @__PURE__ */ new Date()).toISOString() : null, id);
@@ -22897,16 +23126,66 @@ var init_db = __esm({
         );
         return evt;
       }
+      /**
+       * S46 widens the filter: `until` (inclusive), `requestId` (events whose
+       * detail names that request — as its requestId, or in a requestIds list
+       * such as the expiry sweep's; validated as a UUID first, so neither LIKE
+       * pattern holds a wildcard) and `eventType` (exact, or every type under a
+       * prefix ending in a dot). `since` and `until` are compared as the instants
+       * they name (stored ts is always toISOString, so each bound is re-formatted
+       * the same way); a bound that is not a timestamp is refused. A malformed
+       * requestId or eventType is refused, never matched loosely. Hand-mirror to
+       * the desktop db.ts.
+       */
       queryAuditEvents(filter) {
         const clauses = [];
         const params = [];
+        const bound = (name, v) => {
+          const ms = Date.parse(v);
+          if (Number.isNaN(ms)) {
+            throw new ContrailError(
+              `${name} must be an ISO 8601 timestamp (for example 2026-11-17T09:00:00Z), got "${v}".`,
+              "bad_timestamp"
+            );
+          }
+          return new Date(ms).toISOString();
+        };
         if (filter.connectionId) {
           clauses.push("connection_id = ?");
           params.push(filter.connectionId);
         }
         if (filter.since) {
           clauses.push("ts >= ?");
-          params.push(filter.since);
+          params.push(bound("since", filter.since));
+        }
+        if (filter.until) {
+          clauses.push("ts <= ?");
+          params.push(bound("until", filter.until));
+        }
+        if (filter.requestId !== void 0) {
+          if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(filter.requestId)) {
+            throw new ContrailError(
+              `request id must be the request_id a validate or propose result returned (a UUID), got "${filter.requestId}"`,
+              "bad_request_id"
+            );
+          }
+          clauses.push("(detail_json LIKE ? OR detail_json LIKE ?)");
+          params.push(`%"requestId":"${filter.requestId}"%`, `%"requestIds":[%"${filter.requestId}"%`);
+        }
+        if (filter.eventType !== void 0) {
+          if (!/^[a-z_]+\.[a-z_]*$/.test(filter.eventType)) {
+            throw new ContrailError(
+              `event type must look like policy.refused, or a prefix ending in a dot such as policy., got "${filter.eventType}"`,
+              "bad_event_type"
+            );
+          }
+          if (filter.eventType.endsWith(".")) {
+            clauses.push("substr(event_type, 1, ?) = ?");
+            params.push(filter.eventType.length, filter.eventType);
+          } else {
+            clauses.push("event_type = ?");
+            params.push(filter.eventType);
+          }
         }
         const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
         const limit = Math.min(Math.max(filter.limit ?? 100, 1), 1e3);
@@ -23063,14 +23342,791 @@ var init_audit = __esm({
   }
 });
 
+// src/core/policy.ts
+import vm from "node:vm";
+function hostTimeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+function fail(path17, text2) {
+  throw new PolicyParseError(path17 === "" ? text2 : `${path17}: ${text2}`);
+}
+function kindOf(value) {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "a list";
+  if (typeof value === "object") return "an object";
+  if (typeof value === "string") return `"${value}"`;
+  return String(value);
+}
+function isPlainObject3(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function checkKeys(obj, known, path17) {
+  for (const key2 of Object.keys(obj)) {
+    if (!known.includes(key2)) fail(path17, `unknown key "${key2}" (known: ${known.join(", ")})`);
+  }
+}
+function parseName(raw, path17, what) {
+  if (raw === void 0) fail(path17, `missing \u2014 every ${what} needs a name`);
+  if (typeof raw !== "string") fail(path17, `expected a name (text), got ${kindOf(raw)}`);
+  const name = raw.trim();
+  if (name === "") fail(path17, `empty \u2014 every ${what} needs a name`);
+  if (CONTROL_RE.test(name)) fail(path17, "must be one line with no control characters");
+  if (name.length > POLICY_LIMITS.nameMax) {
+    fail(path17, `longer than ${POLICY_LIMITS.nameMax} characters`);
+  }
+  return name;
+}
+function parseStringList(raw, path17) {
+  if (!Array.isArray(raw)) fail(path17, `expected a list, got ${kindOf(raw)}`);
+  if (raw.length === 0) fail(path17, "empty list \u2014 remove the key to match every connection");
+  return raw.map((entry, i) => {
+    if (typeof entry !== "string" || entry.trim() === "") {
+      fail(`${path17}[${i}]`, `expected non-empty text, got ${kindOf(entry)}`);
+    }
+    return entry.trim();
+  });
+}
+function compilePattern(pattern) {
+  new RegExp(pattern);
+  return new RegExp(`^(?:${pattern})$`);
+}
+function ticketMatches(pattern, ticket) {
+  ticketTest ??= { script: new vm.Script("re.test(t)"), context: vm.createContext({}) };
+  const { script, context } = ticketTest;
+  context.re = compilePattern(pattern);
+  context.t = ticket;
+  try {
+    return script.runInContext(context, { timeout: TICKET_TEST_MS }) === true;
+  } finally {
+    context.re = null;
+    context.t = null;
+  }
+}
+function knownTimeZone(zone) {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: zone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+function realWallClock(text2) {
+  const m = RANGE_RE.exec(text2);
+  if (!m) return false;
+  const [year, month, day, hour, minute] = m.slice(1).map(Number);
+  if (month < 1 || month > 12 || day < 1 || hour > 23 || minute > 59) return false;
+  const leap = year % 4 === 0 && year % 100 !== 0 || year % 400 === 0;
+  const lengths = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day <= (lengths[month - 1] ?? 0);
+}
+function parseSpan(raw, path17, form) {
+  if (!isPlainObject3(raw)) fail(path17, `expected {"from": \u2026, "to": \u2026}, got ${kindOf(raw)}`);
+  checkKeys(raw, SPAN_KEYS, path17);
+  const out = { from: "", to: "" };
+  for (const end of ["from", "to"]) {
+    const value = raw[end];
+    const at = `${path17}.${end}`;
+    if (form === "weekly") {
+      const text2 = typeof value === "string" ? value.trim().toLowerCase() : "";
+      if (!WEEKLY_RE.test(text2)) {
+        fail(
+          at,
+          `expected "<day> HH:MM" (day mon|tue|wed|thu|fri|sat|sun, 24-hour time), got ${typeof value === "string" ? `"${value}"` : kindOf(value)}`
+        );
+      }
+      out[end] = text2;
+    } else {
+      const text2 = typeof value === "string" ? value.trim() : "";
+      if (!RANGE_RE.test(text2)) {
+        fail(
+          at,
+          `expected "YYYY-MM-DDTHH:MM" (local wall-clock time), got ${typeof value === "string" ? `"${value}"` : kindOf(value)}`
+        );
+      }
+      if (!realWallClock(text2)) fail(at, `"${text2}" is not a real date and time`);
+      out[end] = text2;
+    }
+  }
+  if (form === "weekly" && out.from === out.to) {
+    fail(path17, "from and to are the same time \u2014 a window must have a length");
+  }
+  if (form === "range" && out.from >= out.to) fail(path17, "from must be before to");
+  return out;
+}
+function parseWindow(raw, path17) {
+  if (!isPlainObject3(raw)) fail(path17, `expected an object, got ${kindOf(raw)}`);
+  checkKeys(raw, WINDOW_KEYS, path17);
+  const window2 = { name: parseName(raw.name, `${path17}.name`, "freeze window") };
+  const hasWeekly = raw.weekly !== void 0;
+  const hasRange = raw.range !== void 0;
+  if (hasWeekly === hasRange) {
+    fail(path17, "give exactly one of weekly or range");
+  }
+  if (hasWeekly) window2.weekly = parseSpan(raw.weekly, `${path17}.weekly`, "weekly");
+  else window2.range = parseSpan(raw.range, `${path17}.range`, "range");
+  if (raw.timeZone !== void 0) {
+    if (typeof raw.timeZone !== "string" || raw.timeZone.trim() === "") {
+      fail(`${path17}.timeZone`, `expected an IANA time zone name, got ${kindOf(raw.timeZone)}`);
+    }
+    const zone = raw.timeZone.trim();
+    if (!knownTimeZone(zone)) {
+      fail(`${path17}.timeZone`, `"${zone}" is not a time zone this machine knows`);
+    }
+    window2.timeZone = zone;
+  }
+  return window2;
+}
+function parseRule(raw, path17) {
+  if (!isPlainObject3(raw)) fail(path17, `expected an object, got ${kindOf(raw)}`);
+  checkKeys(raw, RULE_KEYS, path17);
+  const rule = { name: parseName(raw.name, `${path17}.name`, "rule") };
+  if (raw.match !== void 0) {
+    const m = raw.match;
+    if (!isPlainObject3(m)) fail(`${path17}.match`, `expected an object, got ${kindOf(m)}`);
+    checkKeys(m, MATCH_KEYS, `${path17}.match`);
+    const match = {};
+    if (m.orgTypes !== void 0) {
+      const at = `${path17}.match.orgTypes`;
+      match.orgTypes = parseStringList(m.orgTypes, at).map((t, i) => {
+        if (!ORG_TYPES.includes(t)) {
+          fail(`${at}[${i}]`, `"${t}" is not an org type (${ORG_TYPES.join(", ")})`);
+        }
+        return t;
+      });
+    }
+    if (m.connections !== void 0) {
+      match.connections = parseStringList(m.connections, `${path17}.match.connections`);
+    }
+    if (m.orgIds !== void 0) {
+      const at = `${path17}.match.orgIds`;
+      match.orgIds = parseStringList(m.orgIds, at).map((id, i) => {
+        if (!ORG_ID_RE.test(id)) {
+          fail(`${at}[${i}]`, `expected a 15- or 18-character org id, got "${id}"`);
+        }
+        return id;
+      });
+    }
+    rule.match = match;
+  }
+  for (const flag of RULE_FLAGS) {
+    const value = raw[flag];
+    if (value === void 0) continue;
+    if (typeof value !== "boolean") fail(`${path17}.${flag}`, `expected true or false, got ${kindOf(value)}`);
+    rule[flag] = value;
+  }
+  if (raw.ticketPattern !== void 0) {
+    const at = `${path17}.ticketPattern`;
+    const p = raw.ticketPattern;
+    if (typeof p !== "string" || p === "") fail(at, `expected a regular expression (text), got ${kindOf(p)}`);
+    if (p.length > POLICY_LIMITS.patternMax) {
+      fail(at, `longer than ${POLICY_LIMITS.patternMax} characters`);
+    }
+    try {
+      compilePattern(p);
+    } catch (err2) {
+      fail(at, `does not compile as a regular expression (${err2 instanceof Error ? err2.message : String(err2)})`);
+    }
+    rule.ticketPattern = p;
+  }
+  if (raw.minTestLevel !== void 0) {
+    const level = raw.minTestLevel;
+    if (typeof level !== "string" || !TEST_LEVEL_ORDER.includes(level)) {
+      fail(
+        `${path17}.minTestLevel`,
+        `${kindOf(level)} is not a test level (${TEST_LEVEL_ORDER.join(", ")})`
+      );
+    }
+    rule.minTestLevel = level;
+  }
+  if (raw.freezeWindows !== void 0) {
+    const at = `${path17}.freezeWindows`;
+    const list = raw.freezeWindows;
+    if (!Array.isArray(list)) fail(at, `expected a list, got ${kindOf(list)}`);
+    if (list.length > POLICY_LIMITS.maxWindows) {
+      fail(at, `at most ${POLICY_LIMITS.maxWindows} windows, got ${list.length}`);
+    }
+    const seen = /* @__PURE__ */ new Map();
+    rule.freezeWindows = list.map((w, i) => {
+      const parsed = parseWindow(w, `${at}[${i}]`);
+      const key2 = parsed.name.toLowerCase();
+      const first = seen.get(key2);
+      if (first !== void 0) {
+        fail(
+          `${at}[${i}].name`,
+          `"${parsed.name}" is already used by ${at}[${first}] \u2014 window names must be unique within a rule`
+        );
+      }
+      seen.set(key2, i);
+      return parsed;
+    });
+  }
+  return rule;
+}
+function parsePolicies(raw) {
+  try {
+    if (!isPlainObject3(raw)) fail("", `expected {"rules": [ \u2026 ]}, got ${kindOf(raw)}`);
+    checkKeys(raw, ROOT_KEYS, "");
+    if (raw.rules === void 0) fail("rules", "missing \u2014 expected a list of rules");
+    if (!Array.isArray(raw.rules)) fail("rules", `expected a list, got ${kindOf(raw.rules)}`);
+    if (raw.rules.length > POLICY_LIMITS.maxRules) {
+      fail("rules", `at most ${POLICY_LIMITS.maxRules} rules, got ${raw.rules.length}`);
+    }
+    const seen = /* @__PURE__ */ new Map();
+    const rules = raw.rules.map((r, i) => {
+      const rule = parseRule(r, `rules[${i}]`);
+      const key2 = rule.name.toLowerCase();
+      const first = seen.get(key2);
+      if (first !== void 0) {
+        fail(
+          `rules[${i}].name`,
+          `"${rule.name}" is already used by rules[${first}] \u2014 rule names must be unique`
+        );
+      }
+      seen.set(key2, i);
+      return rule;
+    });
+    return { ok: true, policies: { rules } };
+  } catch (err2) {
+    if (err2 instanceof PolicyParseError) return { ok: false, problem: err2.message };
+    throw err2;
+  }
+}
+function orgKey(orgId) {
+  return orgId ? orgId.slice(0, 15) : null;
+}
+function labelMatches(pattern, alias) {
+  const re = new RegExp(
+    `^${pattern.split("*").map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`,
+    "i"
+  );
+  return re.test(alias);
+}
+function identityMatches(match, aliases, orgId) {
+  if (match.connections && !match.connections.some((p) => aliases.some((a) => labelMatches(p, a)))) {
+    return false;
+  }
+  if (match.orgIds) {
+    const key2 = orgKey(orgId);
+    if (key2 === null || !match.orgIds.some((id) => orgKey(id) === key2)) return false;
+  }
+  return true;
+}
+function ruleApplies(rule, c) {
+  const match = rule.match;
+  if (!match) return true;
+  if (match.orgTypes && !match.orgTypes.some((t) => t === c.orgType || t === "production" && c.orgType === "unknown")) {
+    return false;
+  }
+  return identityMatches(match, [c.alias, ...c.orgAliases], c.orgId);
+}
+function testLevelRank(level) {
+  return TEST_LEVEL_ORDER.indexOf(level);
+}
+function wallClock(now, timeZone) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    weekday: "short",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(new Date(now));
+  const get = (type) => parts.find((p) => p.type === type)?.value ?? "";
+  const day = DAYS.indexOf(get("weekday").toLowerCase().slice(0, 3));
+  const hour = get("hour");
+  const minute = get("minute");
+  return {
+    minuteOfWeek: day * 1440 + Number(hour) * 60 + Number(minute),
+    stamp: `${get("year")}-${get("month")}-${get("day")}T${hour}:${minute}`
+  };
+}
+function minuteOfWeek(token) {
+  const m = WEEKLY_RE.exec(token);
+  if (!m) return -1;
+  return DAYS.indexOf(m[1]) * 1440 + Number(m[2]) * 60 + Number(m[3]);
+}
+function stampMinutes(stamp) {
+  const m = RANGE_RE.exec(stamp);
+  if (!m) return Number.NaN;
+  const [year, month, day, hour, minute] = m.slice(1).map(Number);
+  return Date.UTC(year, month - 1, day, hour, minute) / 6e4;
+}
+function windowActive(w, clock) {
+  if (w.weekly) {
+    const from = minuteOfWeek(w.weekly.from);
+    const to = minuteOfWeek(w.weekly.to);
+    const t = clock.minuteOfWeek;
+    return from < to ? t >= from && t < to : t >= from || t < to;
+  }
+  if (w.range) return clock.stamp >= w.range.from && clock.stamp < w.range.to;
+  return false;
+}
+function windowMinutesLeft(w, now, zone) {
+  let clock;
+  try {
+    clock = wallClock(now, zone);
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+  if (!windowActive(w, clock)) return null;
+  if (w.weekly) {
+    const left = ((minuteOfWeek(w.weekly.to) - clock.minuteOfWeek) % WEEK_MINUTES + WEEK_MINUTES) % WEEK_MINUTES;
+    return left === 0 ? WEEK_MINUTES : left;
+  }
+  if (w.range) {
+    const left = stampMinutes(w.range.to) - stampMinutes(clock.stamp);
+    return Number.isNaN(left) ? Number.POSITIVE_INFINITY : left;
+  }
+  return null;
+}
+function windowWhen(w) {
+  if (w.weekly) return `every ${w.weekly.from} to ${w.weekly.to}`;
+  if (w.range) return `${w.range.from.replace("T", " ")} to ${w.range.to.replace("T", " ")}`;
+  return "";
+}
+function windowUntil(w, zone) {
+  const end = w.weekly ? w.weekly.to : (w.range?.to ?? "").replace("T", " ");
+  return `${end} ${zone}`;
+}
+function ruleLines(rule, hostZone) {
+  const r = rule.name;
+  const lines = [];
+  if (rule.requireJustification) lines.push(`A justification is required (rule "${r}").`);
+  if (rule.requireTicket) lines.push(`A ticket is required (rule "${r}").`);
+  if (rule.ticketPattern) {
+    lines.push(`A ticket, when given, must match ${rule.ticketPattern} (rule "${r}").`);
+  }
+  if (rule.denyDestructiveMetadata) {
+    lines.push(`Destructive metadata changes are denied (rule "${r}").`);
+  }
+  if (rule.denyDataDeletes) {
+    lines.push(
+      `Data deletes through dml_propose and bulk_load_propose are denied (rule "${r}"); anonymous Apex is not inspected.`
+    );
+  }
+  if (rule.denyAnonymousApex) lines.push(`Anonymous Apex is denied (rule "${r}").`);
+  if (rule.minTestLevel) {
+    lines.push(`Deploys need test_level ${rule.minTestLevel} or stricter, passed explicitly (rule "${r}").`);
+  }
+  for (const w of rule.freezeWindows ?? []) {
+    lines.push(`Freeze window "${w.name}": ${windowWhen(w)} ${w.timeZone ?? hostZone} (rule "${r}").`);
+  }
+  return lines;
+}
+function policyInEffect(p, c) {
+  const matched = p.rules.filter((rule) => ruleApplies(rule, c));
+  const out = {
+    rules: matched.map((r) => r.name),
+    requirements: {
+      justification: false,
+      ticket: false,
+      ticketPatterns: [],
+      denyDestructiveMetadata: false,
+      denyDataDeletes: false,
+      denyAnonymousApex: false,
+      minTestLevel: null
+    },
+    lines: [],
+    windows: [],
+    freeze: null
+  };
+  const req = out.requirements;
+  let namedLeft = Number.NEGATIVE_INFINITY;
+  for (const rule of matched) {
+    req.justification ||= rule.requireJustification === true;
+    req.ticket ||= rule.requireTicket === true;
+    if (rule.ticketPattern) req.ticketPatterns.push(rule.ticketPattern);
+    req.denyDestructiveMetadata ||= rule.denyDestructiveMetadata === true;
+    req.denyDataDeletes ||= rule.denyDataDeletes === true;
+    req.denyAnonymousApex ||= rule.denyAnonymousApex === true;
+    if (rule.minTestLevel && (req.minTestLevel === null || testLevelRank(rule.minTestLevel) > testLevelRank(req.minTestLevel))) {
+      req.minTestLevel = rule.minTestLevel;
+    }
+    out.lines.push(...ruleLines(rule, c.hostTimeZone));
+    for (const w of rule.freezeWindows ?? []) {
+      const zone = w.timeZone ?? c.hostTimeZone;
+      out.windows.push({ rule: rule.name, name: w.name, when: windowWhen(w), timeZone: zone });
+      const left = windowMinutesLeft(w, c.now, zone);
+      if (left !== null && left > namedLeft) {
+        namedLeft = left;
+        out.freeze = { rule: rule.name, window: w.name, until: windowUntil(w, zone), timeZone: zone };
+      }
+    }
+  }
+  return out;
+}
+function evaluatePolicies(p, c) {
+  const inEffect = policyInEffect(p, c);
+  const matched = p.rules.filter((rule) => ruleApplies(rule, c));
+  const first = (test) => matched.find(test)?.name ?? null;
+  const alias = c.alias;
+  const ticket = c.ticket !== null && c.ticket.trim() !== "" ? c.ticket.trim() : null;
+  const justified = c.justification !== null && c.justification.trim() !== "";
+  const violations = [];
+  const jRule = first((r) => r.requireJustification === true);
+  if (jRule !== null && !justified) {
+    violations.push({
+      code: "justification_required",
+      rule: jRule,
+      text: `policy rule "${jRule}" requires a justification for every change to "${alias}" \u2014 pass justification: one or two sentences, drafted from what the human asked for, on why this change is being made now`
+    });
+  }
+  const tRule = first((r) => r.requireTicket === true);
+  if (tRule !== null && ticket === null) {
+    violations.push({
+      code: "ticket_required",
+      rule: tRule,
+      text: `policy rule "${tRule}" requires a ticket for every change to "${alias}" \u2014 pass ticket with the reference the human gave you; if they gave none, ask them (never invent one)`
+    });
+  }
+  if (ticket !== null) {
+    for (const rule of matched) {
+      if (!rule.ticketPattern) continue;
+      let ok2 = false;
+      try {
+        ok2 = ticketMatches(rule.ticketPattern, ticket);
+      } catch {
+        ok2 = false;
+      }
+      if (!ok2) {
+        violations.push({
+          code: "ticket_pattern",
+          rule: rule.name,
+          text: `policy rule "${rule.name}" requires the ticket to match ${rule.ticketPattern} \u2014 "${ticket}" does not; ask the human for the correct reference (never adjust one to fit)`
+        });
+      }
+    }
+  }
+  if (c.kind === "deploy" && c.destructive) {
+    const rule = first((r) => r.denyDestructiveMetadata === true);
+    if (rule !== null) {
+      violations.push({
+        code: "destructive_metadata_denied",
+        rule,
+        text: `policy rule "${rule}" denies destructive metadata changes on "${alias}" \u2014 this package contains deletions`
+      });
+    }
+  }
+  if ((c.kind === "dml" || c.kind === "bulk") && c.destructive) {
+    const rule = first((r) => r.denyDataDeletes === true);
+    if (rule !== null) {
+      violations.push({
+        code: "data_deletes_denied",
+        rule,
+        text: `policy rule "${rule}" denies data deletes on "${alias}" \u2014 this ${c.kind === "bulk" ? "bulk plan" : "data change"} deletes records`
+      });
+    }
+  }
+  if (c.kind === "apex") {
+    const rule = first((r) => r.denyAnonymousApex === true);
+    if (rule !== null) {
+      violations.push({
+        code: "anonymous_apex_denied",
+        rule,
+        text: `policy rule "${rule}" denies anonymous Apex on "${alias}"`
+      });
+    }
+  }
+  const min = inEffect.requirements.minTestLevel;
+  if (c.kind === "deploy" && min !== null) {
+    const rule = first((r) => r.minTestLevel === min) ?? "";
+    if (c.testLevel === null) {
+      violations.push({
+        code: "min_test_level",
+        rule,
+        text: `policy rule "${rule}" requires test_level ${min} or stricter on "${alias}" \u2014 test_level was omitted, which leaves the choice to the org's own default, so Contrail cannot show the minimum is met; pass test_level explicitly`
+      });
+    } else if (testLevelRank(c.testLevel) < testLevelRank(min)) {
+      violations.push({
+        code: "min_test_level",
+        rule,
+        text: `policy rule "${rule}" requires test_level ${min} or stricter on "${alias}" \u2014 ${c.testLevel} is weaker (weakest to strictest: NoTestRun, RunSpecifiedTests, RunLocalTests, RunAllTestsInOrg)`
+      });
+    }
+  }
+  return { ...inEffect, violations };
+}
+function unmatchedRules(p, connections) {
+  const aliasesOf = (orgId, alias) => {
+    const key2 = orgKey(orgId);
+    const same2 = key2 === null ? [] : connections.filter((o) => orgKey(o.orgId) === key2).map((o) => o.alias);
+    return [alias, ...same2];
+  };
+  return p.rules.filter((rule) => rule.match && (rule.match.connections || rule.match.orgIds)).filter(
+    (rule) => !connections.some(
+      (conn) => identityMatches(rule.match, aliasesOf(conn.orgId, conn.alias), conn.orgId)
+    )
+  ).map((rule) => rule.name);
+}
+function foldLineBreaks(text2) {
+  return text2.replace(/\r\n?/g, "\n");
+}
+function normalizeTicket(raw) {
+  const problem = `ticket must be one line of at most ${POLICY_LIMITS.ticketMax} characters with no control characters`;
+  if (raw === void 0 || raw === null) return { ok: true, value: null };
+  if (typeof raw !== "string") return { ok: false, problem };
+  const value = raw.trim();
+  if (value === "") return { ok: true, value: null };
+  if (CONTROL_RE.test(value) || value.length > POLICY_LIMITS.ticketMax) return { ok: false, problem };
+  return { ok: true, value };
+}
+function normalizeJustification(raw) {
+  const problem = `justification must be at most ${POLICY_LIMITS.justificationMax} characters with no control characters other than line breaks`;
+  if (raw === void 0 || raw === null) return { ok: true, value: null };
+  if (typeof raw !== "string") return { ok: false, problem };
+  const value = foldLineBreaks(raw).trim();
+  if (value === "") return { ok: true, value: null };
+  if (CONTROL_EXCEPT_LF_RE.test(value) || value.length > POLICY_LIMITS.justificationMax) {
+    return { ok: false, problem };
+  }
+  return { ok: true, value };
+}
+function normalizeFreezeReason(raw) {
+  if (typeof raw !== "string") return { ok: false, code: "invalid_text" };
+  const value = foldLineBreaks(raw).trim();
+  if (CONTROL_EXCEPT_LF_RE.test(value)) return { ok: false, code: "invalid_text" };
+  if (value.length < POLICY_LIMITS.freezeReasonMin) return { ok: false, code: "override_too_short" };
+  if (value.length > POLICY_LIMITS.freezeReasonMax) return { ok: false, code: "override_too_long" };
+  return { ok: true, value };
+}
+function sourceSentence(source) {
+  return source === "config" ? "These rules are in the policies section of Contrail's config.json." : "This is Contrail's built-in default rule: config.json has no policies section (rules written there replace it).";
+}
+function policyRefusalText(alias, orgType, violations, phase, source) {
+  const list = violations.map((v) => `- ${v.text}`);
+  const S = sourceSentence(source);
+  if (phase === "execute") {
+    return [
+      `POLICY REFUSAL \u2014 not executed. The code was not used up and the request is still pending, but it cannot run on "${alias}" (${orgType}) while this holds:`,
+      ...list,
+      `Contrail re-checks the policies when a change executes, and this request does not satisfy them as they stand now. ${S} No Contrail tool can change that file, and you must not edit it yourself. Relay this to the human \u2014 if the change is still wanted, propose it again so the approval reflects the current rules.`
+    ].join("\n");
+  }
+  const head = phase === "propose" ? `POLICY REFUSAL \u2014 nothing was validated, proposed or sent to "${alias}" (${orgType}), and any pending approval on it is untouched.` : phase === "attach" ? `POLICY REFUSAL \u2014 this call was not attached to the validation already running on "${alias}" (${orgType}) with these arguments; this call sent nothing and left any pending approval untouched. That validation goes on and is checked against the policies again when it finishes \u2014 no approval is created unless they then allow it; poll it by job_id to see its outcome. The policies now do not allow this request:` : `POLICY REFUSAL \u2014 the check-only validation ran on "${alias}" (${orgType}), but no approval was created and any pending approval on it is untouched. Contrail re-read the policies when the validation finished, and they do not allow this request:`;
+  return [
+    head,
+    ...list,
+    `${S} ${HUMAN_ONLY} Relay this refusal to them as it stands \u2014 do not try another tool, connection or route to make the same change.`
+  ].join("\n");
+}
+function policyUnreadableText(problem, phase) {
+  if (phase === "after_validation") {
+    return `POLICY CHECK FAILED CLOSED \u2014 the check-only validation ran, but no approval was created and any pending approval is untouched. Contrail could not read the policies in config.json when the validation finished: ${problem}. No Contrail tool edits config.json, and repairing it is the human's job \u2014 do not edit it yourself. Relay this message to them exactly; once the file is fixed, validate again.`;
+  }
+  if (phase === "execute") {
+    return `POLICY CHECK FAILED CLOSED \u2014 not executed. Contrail could not read the policies in config.json: ${problem}. The code was not used up; once the human has fixed the file, the same code works again until it expires. No Contrail tool edits config.json, and you must not edit it yourself.`;
+  }
+  if (phase === "attach") {
+    return `POLICY CHECK FAILED CLOSED \u2014 this call was not attached to the validation already running with these arguments, and it sent nothing. Contrail could not read the policies in config.json: ${problem}. That validation goes on and is checked again when it finishes \u2014 no approval is created while the file cannot be read; poll it by job_id to see its outcome. Until that file is fixed, no write can be proposed and no agent test run started on any connection (reads still work). No Contrail tool edits config.json, and repairing it is the human's job \u2014 do not edit it yourself. Relay this message to them exactly \u2014 do not try another route.`;
+  }
+  return `POLICY CHECK FAILED CLOSED \u2014 nothing was validated, proposed or sent. Contrail could not read the policies in config.json: ${problem}. Until that file is fixed, no write can be proposed and no agent test run started on any connection (reads still work). No Contrail tool edits config.json, and repairing it is the human's job \u2014 do not edit it yourself. Relay this message to them exactly \u2014 do not try another route.`;
+}
+function freezeBannerText(alias, f) {
+  return `FREEZE \u2014 policy rule "${f.rule}" freezes changes to "${alias}" during "${f.window}" (until ${f.until}).`;
+}
+function freezeProposeNote(alias, f, surface) {
+  const lead = `CHANGE FREEZE in effect \u2014 policy rule "${f.rule}" freezes changes to "${alias}" during "${f.window}" (until ${f.until}).`;
+  if (surface === "native") {
+    return `${lead} The request is waiting in the app's Deploy Review screen, where, while the freeze lasts, Approve stays disabled until the human types an emergency reason. No Contrail tool can do that, and you must not do it for them or change the freeze yourself. Present the summary, tell the human a freeze is in effect and what it asks of them, then call the execute tool WITHOUT a confirmation code and wait for their decision. If the change can wait, say so.`;
+  }
+  return `${lead} The approval page shows NO confirmation code, and none was pushed to a phone. Releasing this request is the human's decision alone, at their desk, by typing an emergency reason on that page \u2014 the code appears there afterwards. No Contrail tool can do that, and you must not do it for them or change the freeze yourself. Present the summary, tell the human a freeze is in effect and what it asks of them, and wait. If the change can wait, say so: once the freeze has ended, reloading the page shows the code with no override, provided the code has not expired by then (otherwise propose again). If Contrail is restarted before then (a new session or a reconnect), the page closes and this request can no longer be released; propose it again only if the human asks.`;
+}
+function freezePageNotOpenedText() {
+  return "The approval page could not be opened automatically. Its URL was written to the Contrail server log (stderr) for the human to open \u2014 it is deliberately NOT provided to you. Ask the human to open the Contrail log and visit the page; while the freeze lasts it shows no code until they type an emergency reason there.";
+}
+function freezeExecuteRefusalText(alias, f, surface) {
+  const lead = `CHANGE FREEZE \u2014 not executed. Policy rule "${f.rule}" freezes changes to "${alias}" during "${f.window}" (until ${f.until}).`;
+  if (surface === "native") {
+    return `${lead} Releasing this request is the human's decision alone, in the Contrail desktop app: Deploy Review asks for an emergency reason before Approve. No Contrail tool can record that reason, and you must not enter one or change the freeze yourself. Tell the human exactly this and wait \u2014 do not propose again or try another route.`;
+  }
+  return `${lead} The code was not used up. Releasing this request is the human's decision alone, at their desk: they reload the approval page, type an emergency reason there, and then the same code works. No Contrail tool can record that reason, and you must not enter one or change the freeze yourself. Tell the human exactly this and wait \u2014 do not try another route. If the approval page no longer loads (Contrail was restarted since this request was proposed), this request cannot be released while the freeze lasts; propose it again only if the human asks.`;
+}
+function freezeStartRefusalText(alias, f) {
+  return `CHANGE FREEZE \u2014 the test run was not started. Policy rule "${f.rule}" freezes changes to "${alias}" during "${f.window}" (until ${f.until}). A test run executes the agent's real actions and has no approval page on which the human could record an emergency reason, so Contrail starts none while the freeze lasts. Tell the human; the run can be started once the freeze has ended, or the test can be run in a sandbox instead.`;
+}
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+function localTime(iso) {
+  const d = new Date(iso);
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+function localDate(iso) {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+function policyChangedText(at) {
+  return `Contrail noticed at ${localTime(at)} on ${localDate(at)} that the policies section of config.json had changed. The policies listed below are what applies now \u2014 a rule or freeze window that was removed is not shown. If you did not edit that file, do not approve this request.`;
+}
+function unmatchedRuleText(name) {
+  return `Not applied to any connection on this machine: rule "${name}" \u2014 its label or org id matches none.`;
+}
+function justificationProvenance(j) {
+  if (!j || j.source === "agent" && j.text === "") return "None given.";
+  if (j.source === "agent") {
+    return j.confirmed_at ? `Drafted by the agent; approved unchanged in Deploy Review at ${localTime(j.confirmed_at)}.` : "Drafted by the agent. Edit it if it is not what you would say.";
+  }
+  const at = j.edited_at ? localTime(j.edited_at) : "--:--";
+  const where = j.surface === "deploy_review" ? "in Deploy Review" : "on the approval page";
+  return j.text === "" ? `Cleared ${where} at ${at}.` : `Typed ${where} at ${at}.`;
+}
+function apexDeletesNote(rule) {
+  return `POLICY NOTE \u2014 rule "${rule}" denies data deletes on this connection through dml_propose and bulk_load_propose. Contrail does not inspect anonymous Apex, so it cannot tell whether this script deletes records \u2014 read it.`;
+}
+function dryRunPolicyNote(status, problem) {
+  if (status === "unreadable") {
+    return `Dry run: Contrail could not read the policies in config.json (${problem ?? "unknown problem"}), so none were evaluated. A real validation would be refused until the human fixes that file.`;
+  }
+  return "Dry run: policies were evaluated and are reported here, not enforced. A real validation with these arguments would be refused for each entry in would_refuse.";
+}
+var POLICY_LIMITS, TEST_LEVEL_ORDER, DEFAULT_POLICIES, ORG_TYPES, DAYS, ROOT_KEYS, RULE_KEYS, MATCH_KEYS, WINDOW_KEYS, SPAN_KEYS, RULE_FLAGS, WEEKLY_RE, RANGE_RE, ORG_ID_RE, CONTROL_RE, CONTROL_EXCEPT_LF_RE, PolicyParseError, TICKET_TEST_MS, ticketTest, WEEK_MINUTES, HUMAN_ONLY, APPROVAL_NOTICES;
+var init_policy = __esm({
+  "src/core/policy.ts"() {
+    "use strict";
+    POLICY_LIMITS = {
+      ticketMax: 120,
+      justificationMax: 1e3,
+      freezeReasonMin: 15,
+      freezeReasonMax: 1e3,
+      nameMax: 80,
+      maxRules: 50,
+      maxWindows: 50,
+      patternMax: 200
+    };
+    TEST_LEVEL_ORDER = [
+      "NoTestRun",
+      "RunSpecifiedTests",
+      "RunLocalTests",
+      "RunAllTestsInOrg"
+    ];
+    DEFAULT_POLICIES = {
+      rules: [
+        {
+          name: "default: production needs a justification",
+          match: { orgTypes: ["production", "unknown"] },
+          requireJustification: true
+        }
+      ]
+    };
+    ORG_TYPES = ["production", "sandbox", "developer", "trial", "unknown"];
+    DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+    ROOT_KEYS = ["rules"];
+    RULE_KEYS = [
+      "name",
+      "match",
+      "requireJustification",
+      "requireTicket",
+      "ticketPattern",
+      "denyDestructiveMetadata",
+      "denyDataDeletes",
+      "denyAnonymousApex",
+      "minTestLevel",
+      "freezeWindows"
+    ];
+    MATCH_KEYS = ["orgTypes", "connections", "orgIds"];
+    WINDOW_KEYS = ["name", "weekly", "range", "timeZone"];
+    SPAN_KEYS = ["from", "to"];
+    RULE_FLAGS = [
+      "requireJustification",
+      "requireTicket",
+      "denyDestructiveMetadata",
+      "denyDataDeletes",
+      "denyAnonymousApex"
+    ];
+    WEEKLY_RE = /^(mon|tue|wed|thu|fri|sat|sun) ([01]\d|2[0-3]):([0-5]\d)$/;
+    RANGE_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
+    ORG_ID_RE = /^[A-Za-z0-9]{15}(?:[A-Za-z0-9]{3})?$/;
+    CONTROL_RE = /[\u0000-\u001f\u007f-\u009f]/;
+    CONTROL_EXCEPT_LF_RE = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/;
+    PolicyParseError = class extends Error {
+    };
+    TICKET_TEST_MS = 100;
+    ticketTest = null;
+    WEEK_MINUTES = 7 * 1440;
+    HUMAN_ONLY = "No Contrail tool can change the policies, and changing them is the human's decision alone: do not edit config.json yourself and do not ask the human to loosen it for this change.";
+    APPROVAL_NOTICES = {
+      justification_saved: {
+        kind: "success",
+        text: "Justification saved. It is recorded as typed on this page."
+      },
+      justification_cleared: {
+        kind: "success",
+        text: "Justification cleared. It is recorded as cleared on this page."
+      },
+      justification_unchanged: {
+        kind: "success",
+        text: "No change \u2014 the justification is the same as before."
+      },
+      justification_required: {
+        kind: "error",
+        text: "This connection's policy requires a justification \u2014 it cannot be left empty. Nothing was changed."
+      },
+      justification_too_long: {
+        kind: "error",
+        text: "The justification is limited to 1,000 characters. Nothing was changed."
+      },
+      override_recorded: {
+        kind: "success",
+        text: "Emergency reason recorded. The confirmation code is shown below; the freeze itself stays configured."
+      },
+      override_too_short: {
+        kind: "error",
+        text: "The emergency reason must be at least 15 characters. Nothing was recorded."
+      },
+      override_too_long: {
+        kind: "error",
+        text: "The emergency reason is limited to 1,000 characters. Nothing was recorded."
+      },
+      override_not_needed: {
+        kind: "success",
+        text: "No freeze is in effect for this request right now, so there is nothing to override."
+      },
+      override_already_recorded: {
+        kind: "success",
+        text: "An emergency reason is already recorded for this request. Nothing was changed."
+      },
+      override_blocked: {
+        kind: "error",
+        text: "This request is blocked by policy, so no emergency reason was recorded."
+      },
+      request_closed: {
+        kind: "error",
+        text: "This request is no longer pending, so nothing was changed."
+      },
+      invalid_text: {
+        kind: "error",
+        text: "The text contains control characters. Nothing was changed."
+      },
+      policies_unreadable: {
+        kind: "error",
+        text: "Contrail could not read the policies in config.json, so nothing was recorded."
+      }
+    };
+  }
+});
+
 // src/core/config.ts
 import fs3 from "node:fs";
+function readConfigText(file) {
+  const bytes = fs3.readFileSync(file);
+  if (bytes.length >= 2 && (bytes[0] === 255 && bytes[1] === 254 || bytes[0] === 254 && bytes[1] === 255)) {
+    throw new ConfigEncodingError(UTF16_PROBLEM);
+  }
+  const text2 = bytes.toString("utf8");
+  return text2.charCodeAt(0) === 65279 ? text2.slice(1) : text2;
+}
 function loadConfig() {
   const file = configPath();
   let fromDisk = {};
   if (fs3.existsSync(file)) {
     try {
-      fromDisk = JSON.parse(fs3.readFileSync(file, "utf8"));
+      fromDisk = JSON.parse(readConfigText(file));
     } catch (err2) {
       log("warn", `config.json is unreadable; using defaults`, { file, err: String(err2) });
     }
@@ -23089,7 +24145,12 @@ function loadConfig() {
     notifications: { ...DEFAULT_CONFIG.notifications, ...fromDisk.notifications },
     localDiagnostics: { ...DEFAULT_CONFIG.localDiagnostics, ...fromDisk.localDiagnostics },
     deploy: { ...DEFAULT_CONFIG.deploy, ...fromDisk.deploy },
-    bulkLoad: { ...DEFAULT_CONFIG.bulkLoad, ...fromDisk.bulkLoad }
+    bulkLoad: { ...DEFAULT_CONFIG.bulkLoad, ...fromDisk.bulkLoad },
+    // A rules array on disk replaces the built-in rule wholesale. Not
+    // validated here: a wired engine reads policies through loadPolicies(),
+    // which fails closed on a bad section; this copy is what an engine built
+    // with an injected config evaluates (through parsePolicies).
+    policies: { ...DEFAULT_CONFIG.policies, ...fromDisk.policies }
   };
   if (process.env.CONTRAIL_SF_CLIENT_ID) {
     merged.salesforce.clientId = process.env.CONTRAIL_SF_CLIENT_ID;
@@ -23114,8 +24175,11 @@ function saveConfigSection(section, patch) {
   if (fs3.existsSync(file)) {
     let parsed;
     try {
-      parsed = JSON.parse(fs3.readFileSync(file, "utf8"));
+      parsed = JSON.parse(readConfigText(file));
     } catch (err2) {
+      if (err2 instanceof ConfigEncodingError) {
+        throw new Error(`${err2.message} (${file}), then save again \u2014 nothing was written.`);
+      }
       throw new Error(
         `config.json exists but is not valid JSON (${String(err2 instanceof Error ? err2.message : err2)}). Fix or remove ${file}, then save again \u2014 nothing was written.`
       );
@@ -23133,7 +24197,7 @@ function readConfigSection(section) {
   const file = configPath();
   if (!fs3.existsSync(file)) return null;
   try {
-    const parsed = JSON.parse(fs3.readFileSync(file, "utf8"));
+    const parsed = JSON.parse(readConfigText(file));
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
     const value = parsed[section];
     return value && typeof value === "object" && !Array.isArray(value) ? value : null;
@@ -23141,12 +24205,54 @@ function readConfigSection(section) {
     return null;
   }
 }
-var DEFAULT_CONFIG;
+function readPoliciesOnce(file) {
+  if (!fs3.existsSync(file)) {
+    return { load: { ok: true, policies: DEFAULT_POLICIES, source: "default" }, retry: true };
+  }
+  let text2;
+  try {
+    text2 = readConfigText(file);
+  } catch (err2) {
+    if (err2 instanceof ConfigEncodingError) {
+      return { load: { ok: false, problem: err2.message }, retry: false };
+    }
+    const message2 = err2 instanceof Error ? err2.message : String(err2);
+    return { load: { ok: false, problem: `config.json could not be read (${message2})` }, retry: true };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text2);
+  } catch (err2) {
+    const message2 = err2 instanceof Error ? err2.message : String(err2);
+    return { load: { ok: false, problem: `config.json is not valid JSON (${message2})` }, retry: true };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { load: { ok: false, problem: "config.json is not a JSON object" }, retry: false };
+  }
+  if (!Object.prototype.hasOwnProperty.call(parsed, "policies")) {
+    return { load: { ok: true, policies: DEFAULT_POLICIES, source: "default" }, retry: false };
+  }
+  const result = parsePolicies(parsed.policies);
+  if (!result.ok) {
+    const problem = result.problem.startsWith("rules") ? `policies.${result.problem}` : `policies: ${result.problem}`;
+    return { load: { ok: false, problem }, retry: false };
+  }
+  return { load: { ok: true, policies: result.policies, source: "config" }, retry: false };
+}
+function loadPolicies() {
+  const file = configPath();
+  const first = readPoliciesOnce(file);
+  if (!first.retry) return first.load;
+  Atomics.wait(RETRY_PAUSE, 0, 0, RETRY_PAUSE_MS);
+  return readPoliciesOnce(file).load;
+}
+var DEFAULT_CONFIG, ConfigEncodingError, UTF16_PROBLEM, RETRY_PAUSE, RETRY_PAUSE_MS;
 var init_config = __esm({
   "src/core/config.ts"() {
     "use strict";
     init_paths();
     init_log();
+    init_policy();
     DEFAULT_CONFIG = {
       salesforce: {
         clientId: "PlatformCLI",
@@ -23220,7 +24326,9 @@ var init_config = __esm({
         ],
         pollIntervalMs: 2e3,
         retrieveTimeoutMs: 10 * 60 * 1e3,
-        toolWaitMs: 25 * 1e3
+        toolWaitMs: 25 * 1e3,
+        rebaselineAfterDeploy: true,
+        rebaselineTimeoutMs: 6e4
       },
       updates: {
         checkEnabled: true
@@ -23253,8 +24361,17 @@ var init_config = __esm({
         maxFilesPerPlan: 20,
         resultsRetentionDays: 14,
         toolWaitMs: 25 * 1e3
-      }
+      },
+      // Written into fresh config files only: an existing config.json is never
+      // back-filled, so an install upgraded from 0.39 has no policies section and
+      // loadPolicies() reports the built-in rule with source 'default'.
+      policies: DEFAULT_POLICIES
     };
+    ConfigEncodingError = class extends Error {
+    };
+    UTF16_PROBLEM = "config.json is saved as UTF-16; save it as UTF-8";
+    RETRY_PAUSE = new Int32Array(new SharedArrayBuffer(4));
+    RETRY_PAUSE_MS = 50;
   }
 });
 
@@ -24058,10 +25175,10 @@ function renderGrantsPage(opts) {
       <div class="org-row"><span class="k">Instance</span><span class="v">${esc2(opts.org.instanceUrl)}</span></div>
       <div class="org-row"><span class="k">Logged in as</span><span class="v">${esc2(opts.org.username ?? "(unknown)")}</span></div>
     </div>
-    <div class="warn">Grants are set on this page only. The AI agent cannot see this page,
-      cannot set grants, and cannot change them later \u2014 changes always come back here.
-      Every deploy or data write additionally requires your explicit confirmation, in every
-      environment.</div>
+    <div class="warn">Grants are set on this page only. Contrail does not show the AI agent
+      this page; the agent cannot set grants and cannot change them later \u2014 changes always
+      come back here. Every deploy or data write additionally requires your explicit
+      confirmation, in every environment.</div>
     <form method="post" action="${esc2(opts.actionPath)}" class="card">
       <input type="hidden" name="session" value="${esc2(opts.sessionId)}">
       ${labelField}
@@ -24099,6 +25216,9 @@ function renderApprovalPage(opts) {
   const isProd = opts.org.orgType === "production";
   const badgeClass = isProd ? "production" : opts.org.orgType === "sandbox" ? "sandbox" : "other";
   const title = opts.kind === "deploy" ? "Approve this deploy" : opts.kind === "apex" ? "Approve this anonymous Apex script" : opts.kind === "bulk" ? "Approve this bulk data load" : opts.kind === "activation" ? "Approve this agent activation change" : "Approve this data change";
+  const gate = opts.governance?.gate;
+  const codeShown = opts.code !== "" && gate !== "blocked" && gate !== "frozen";
+  const codeHidden = gate === "frozen" ? "Hidden while the change freeze is in effect \u2014 record an emergency reason above to show it." : gate === "blocked" ? 'Not shown \u2014 see "Blocked by policy" above.' : null;
   const row = (c, danger) => `
     <div class="chg${danger ? " danger" : ""}">
       <div class="chg-label">${esc2(c.label)}</div>
@@ -24121,6 +25241,7 @@ function renderApprovalPage(opts) {
       opts.org.instanceUrl
     )}</span></div>
     </div>
+    ${opts.governance ? renderGovernance(opts.governance) : ""}
     ${opts.warnings && opts.warnings.length ? `<div class="warn">${opts.warnings.map((w) => esc2(w)).join("<br><br>")}</div>` : ""}
     ${opts.destructive.length ? `<div class="card danger-card"><h2>Destructive changes</h2>${opts.destructive.map((c) => row(c, true)).join("")}</div>` : ""}
     ${opts.changes.length ? `<div class="card"><h2>Changes</h2>${opts.changes.map((c) => row(c, false)).join("")}</div>` : ""}
@@ -24131,11 +25252,14 @@ function renderApprovalPage(opts) {
     ${opts.blast.length ? `<div class="card"><h2>Blast radius</h2>${opts.blast.map((b) => `<div class="chg"><div class="chg-label">${esc2(b)}</div></div>`).join("")}</div>` : ""}
     <div class="card code-card" id="code-card">
       <h2>Confirmation code</h2>
-      <div class="code" id="code">${esc2(opts.code)}</div>
+      ${codeShown ? `<div class="code" id="code">${esc2(opts.code)}</div>
       <p class="note">If \u2014 and only if \u2014 you approve everything above, read this code back to
-        the agent. The agent cannot see this page. If anything looks wrong, close this tab and
-        nothing happens. The code is single-use and expires
-        ${esc2(new Date(opts.expiresAt).toLocaleTimeString())}; re-validating replaces it.</p>
+        the agent. Contrail itself never gives the agent this page or the code \u2014 but anything that
+        shows the agent this page hands it the code too (a screenshot or copy pasted into the chat,
+        or an agent that can view your screen), so share it only if you mean to approve. If anything
+        looks wrong, close this tab and do not give the agent the code; if the agent has already
+        seen this page, tell it you do not approve. The code is single-use and expires
+        ${esc2(new Date(opts.expiresAt).toLocaleTimeString())}; re-validating replaces it.</p>` : codeHidden !== null ? `<p class="note">${codeHidden}</p>` : ""}
     </div>
     <div class="card danger-card" id="dead" style="display:none">
       <h2>This code is no longer valid</h2>
@@ -24150,6 +25274,19 @@ function renderApprovalPage(opts) {
       // Backend claimCode() is the real gate; this is defense-in-depth so a
       // stale tab is never misread as a live code.
       (function () {
+        // S46 (B): a form on this page answers with ?n=<notice>. Drop it from
+        // the address before the first poll, so a reload never replays the
+        // notice; ?s= stays, because the /status poll reads it.
+        var q = new URLSearchParams(location.search);
+        if (q.has('n')) {
+          var s = q.get('s') || '';
+          history.replaceState(null, '', location.pathname + '?s=' + encodeURIComponent(s));
+        }
+        // S46 (B): the request's policy state as this render drew it. When
+        // /status reports another one \u2014 a freeze began or ended, a reason was
+        // recorded, the policies changed \u2014 the page reloads, so a code that
+        // is no longer to be shown leaves the screen within one poll.
+        var REV = ${JSON.stringify(opts.governance ? opts.governance.rev : null).replace(/</g, "\\u003c")};
         var reasons = {
           executed: 'This change has already been executed.',
           executing: 'This change is currently being executed.',
@@ -24182,6 +25319,7 @@ function renderApprovalPage(opts) {
             .then(function (s) {
               fails = 0;
               if (s && s.active === false) invalidate(s.status);
+              else if (REV !== null && s && s.rev && s.rev !== REV) location.reload();
               else setTimeout(check, 3000);
             })
             .catch(function () {
@@ -24196,6 +25334,43 @@ function renderApprovalPage(opts) {
       })();
     </script>`
   );
+}
+function renderGovernance(g) {
+  const notice = g.notice ? `<div class="${g.notice.kind}">${esc2(g.notice.text)}</div>` : "";
+  return `${notice}${renderGateCard(g)}${renderChangeRecord(g)}`;
+}
+function wallClock2(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "--:--";
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+function renderGateCard(g) {
+  const freezeLine = g.freezeLine ? `<p class="freeze-line">${esc2(g.freezeLine)}</p>` : "";
+  if (g.gate === "frozen") {
+    const lead = g.frozenAtMint ? "No confirmation code is shown, and none was sent to your phone." : "No confirmation code is shown. This freeze began after the request was proposed, so its code may already have been shown on this page or sent to your phone; while the freeze lasts that code does not execute until an emergency reason is recorded here.";
+    const form = g.sessionId ? `<form method="post" action="/override" id="gov-override"><input type="hidden" name="session" value="${esc2(g.sessionId)}"><div class="field"><label for="reason">Emergency reason</label><textarea id="reason" name="reason" rows="3" required minlength="${g.limits.reasonMin}" maxlength="${g.limits.reasonMax}" placeholder="Why this cannot wait until the freeze ends"></textarea><div class="hint">At least ${g.limits.reasonMin} characters. Kept with this request in the audit log and the change-evidence dossier.</div></div><div class="actions"><button type="submit">Record emergency reason and show the code</button></div></form>` : "";
+    return `<div class="card danger-card" id="gov-freeze"><h2>CHANGE FREEZE</h2>${freezeLine}<p class="note">${lead} If this change cannot wait, type the emergency reason below: the code then appears on this page, and the reason is recorded in Contrail's audit log as a freeze override for this request only. The freeze itself stays configured \u2014 only editing config.json changes it.</p>${form}</div>`;
+  }
+  if (g.gate === "overridden") {
+    const recorded = g.override ? `<p class="note">You recorded an emergency reason at ${esc2(wallClock2(g.override.at))}: \u201C${esc2(g.override.reason)}\u201D. The override applies to this request only and is in the audit log; the freeze stays configured.</p>` : "";
+    return `<div class="card danger-card" id="gov-freeze"><h2>CHANGE FREEZE \u2014 OVERRIDDEN FOR THIS REQUEST</h2>${freezeLine}${recorded}</div>`;
+  }
+  if (g.gate === "blocked") {
+    const lines = (g.blockedLines ?? []).map((l) => `<div class="chg-warn">${esc2(l)}</div>`).join("");
+    const closing = g.blockedBy === "unreadable" ? "No confirmation code is shown: Contrail could not read the policies in config.json \u2014 the line above says why. Once the file is fixed, this page updates by itself within a few seconds." : "No confirmation code is shown: this request does not satisfy this connection's policies as they stand now \u2014 the lines above say what is missing. If it is a justification, type it under Change record below and save; otherwise ask the agent to propose the change again.";
+    return `<div class="card danger-card" id="gov-block"><h2>BLOCKED BY POLICY</h2>${lines}<p class="note">${closing}</p></div>`;
+  }
+  return "";
+}
+function renderChangeRecord(g) {
+  const changed = g.policyChangedAt ? `<p class="chg-warn" id="gov-changed">${esc2(policyChangedText(g.policyChangedAt))}</p>` : "";
+  const ticket = `<div class="org-row"><span class="k">Ticket</span><span class="v">${esc2(g.ticket ?? "none given")}</span></div>`;
+  const j = g.justification;
+  const label = `Justification${j.required ? " (required by policy)" : ""}`;
+  const justification = g.sessionId ? `<form method="post" action="/justification" id="gov-justification"><input type="hidden" name="session" value="${esc2(g.sessionId)}"><div class="field"><label for="justification">${label}</label><textarea id="justification" name="justification" rows="3" maxlength="${g.limits.justificationMax}">${esc2(j.text)}</textarea><div class="hint">${esc2(j.provenance)}</div></div><div class="actions"><button type="submit" class="secondary">Save justification</button></div><p class="note">Saving records the text as typed on this page. It approves nothing and does not change the code.</p></form>` : `<div class="field" id="gov-justification"><div class="gov-k">${label}</div>` + (j.text ? `<div class="gov-text">${esc2(j.text)}</div>` : "") + `<div class="hint">${esc2(j.provenance)}</div></div>`;
+  const policies = g.blockedBy === "unreadable" ? "" : `<div class="gov-k">${g.policySource === "config" ? "Policies on this connection (from config.json):" : "Policies on this connection (Contrail's built-in default \u2014 config.json has no policies section):"}</div>` + (g.policyLines.length ? `<ul class="gov-list">${g.policyLines.map((l) => `<li>${esc2(l)}</li>`).join("")}</ul>` : '<p class="note">No policy rule applies to this connection.</p>');
+  const unmatched = (g.unmatchedRules ?? []).map((name) => `<p class="note">${esc2(unmatchedRuleText(name))}</p>`).join("");
+  return `<div class="card" id="gov-record"><h2>Change record</h2>${changed}${ticket}${justification}${policies}${unmatched}</div>`;
 }
 function renderRowDiff(d) {
   if (d.identical) return `<div class="chg-diff">${esc2(d.summary)}</div>`;
@@ -24275,6 +25450,7 @@ var init_pages = __esm({
   "src/connect/pages.ts"() {
     "use strict";
     init_grants();
+    init_policy();
     STYLE = `
   :root { color-scheme: light dark; }
   * { box-sizing: border-box; }
@@ -24304,10 +25480,11 @@ var init_pages = __esm({
   label.grant p { margin: 0.15rem 0 0; font-size: 0.83rem; color: light-dark(#5b6472, #9aa4b2); }
   .field { margin-bottom: 1rem; }
   .field label { display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem; }
-  .field input[type=text], .field input[type=password], .field select { width: 100%;
-      padding: 0.5rem 0.65rem; border-radius: 8px;
+  .field input[type=text], .field input[type=password], .field select, .field textarea {
+      width: 100%; padding: 0.5rem 0.65rem; border-radius: 8px;
       border: 1px solid light-dark(#c9cfd8, #3a3f48); background: light-dark(#fff, #14161a);
       color: inherit; font-size: 0.95rem; }
+  .field textarea { font: inherit; resize: vertical; }
   .field .hint { font-size: 0.8rem; color: light-dark(#5b6472, #9aa4b2); margin-top: 0.3rem; }
   .success { font-size: 0.9rem; background: #1a7c3a22; border: 1px solid #1a7c3a55;
              color: light-dark(#176b33, #8ce8a8); border-radius: 8px; padding: 0.6rem 0.8rem;
@@ -24359,6 +25536,10 @@ var init_pages = __esm({
                overflow-wrap: anywhere; }
   .auto-nc { font-size: 0.78rem; color: light-dark(#5b6472, #9aa4b2); margin-top: 0.6rem; }
   .auto-nc ul { margin: 0.2rem 0 0; padding-left: 1.1rem; }
+  .gov-k { font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem; }
+  .gov-text { font-size: 0.9rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .gov-list { margin: 0.3rem 0 0; padding-left: 1.1rem; font-size: 0.85rem; }
+  .freeze-line { font-weight: 600; }
 `;
   }
 });
@@ -26097,6 +27278,129 @@ var init_store = __esm({
           fs9.mkdirSync(path4.dirname(target), { recursive: true });
           fs9.writeFileSync(target, bytes);
         }
+      }
+      /**
+       * S46 (member-scoped refresh): replace named units of the current/ tree —
+       * remove `removeFiles` and `removeDirs`, write `files` — without touching
+       * anything else. applyMemberUnits is its only caller.
+       *
+       * Every entry is validated BEFORE the first filesystem change, so a bad
+       * entry changes nothing: forward-slash relative, no empty, `.` or `..`
+       * segment, no backslash, no absolute or drive segment, at least two
+       * segments (a top-level directory and package.xml are unrepresentable);
+       * a `removeDirs` entry has exactly two segments (`<typeDir>/<bundle>`)
+       * and its first is one of `bundleTypeDirs` — the store deletes a
+       * directory only under a type directory the caller declared as holding
+       * bundles, so `reports/<Folder>` can never be removed; each target stays
+       * inside current/ lexically and by the realpath of its nearest existing
+       * ancestor, so with no current/ tree every entry is refused; a directory
+       * at a `removeFiles` or `files` path is refused, and so is a file where a
+       * parent directory must go — unless the path is a `files` entry and that
+       * file is one of the removals, which the swap makes first.
+       *
+       * Then stage, then swap. Every new file is first written under a sibling
+       * staged/ directory (cleared first — a leftover from a crash included); a
+       * failure there removes staged/ and rethrows with current/ untouched.
+       * Only then are the removals made and each staged file renamed into
+       * place; a failure in that phase is `snapshot_partial_write`. Never
+       * touches archive/, never creates or removes current/ itself.
+       */
+      replaceCurrentUnits(connectionId, input) {
+        const conn = this.connDir(connectionId);
+        const current = path4.join(conn, "current");
+        const staged = path4.join(conn, "staged");
+        const currentResolved = path4.resolve(current);
+        const currentReal = fs9.existsSync(current) ? fs9.realpathSync(current) : null;
+        const present = (p) => {
+          try {
+            return fs9.lstatSync(p, { throwIfNoEntry: false }) !== void 0;
+          } catch {
+            return false;
+          }
+        };
+        const check2 = (rel, kind, removing2) => {
+          const unsafe = () => {
+            throw new ContrailError(`unsafe snapshot path: ${rel}`, "unsafe_zip_entry");
+          };
+          if (typeof rel !== "string" || rel.includes("\\")) unsafe();
+          const segments = rel.split("/");
+          if (segments.some(
+            (s) => s === "" || s === "." || s === ".." || path4.isAbsolute(s) || /^[A-Za-z]:/.test(s)
+          )) {
+            unsafe();
+          }
+          if (segments.length < 2) unsafe();
+          if (kind === "dir" && (segments.length !== 2 || !input.bundleTypeDirs.includes(segments[0]))) {
+            unsafe();
+          }
+          const target = path4.resolve(current, ...segments);
+          if (!target.startsWith(currentResolved + path4.sep)) unsafe();
+          if (currentReal === null) return unsafe();
+          let probe = target;
+          while (probe !== currentResolved && !present(probe)) {
+            probe = path4.dirname(probe);
+          }
+          let real;
+          let isDir;
+          try {
+            real = fs9.realpathSync(probe);
+            isDir = fs9.statSync(probe).isDirectory();
+          } catch {
+            return unsafe();
+          }
+          if (real !== currentReal && !real.startsWith(currentReal + path4.sep)) unsafe();
+          if (probe === target) {
+            if (kind === "file" && isDir) unsafe();
+          } else if (!isDir && !removing2?.has(probe)) {
+            unsafe();
+          }
+          return target;
+        };
+        const dirTargets = input.removeDirs.map((rel) => check2(rel, "dir"));
+        const fileTargets = input.removeFiles.map((rel) => check2(rel, "file"));
+        const removing = /* @__PURE__ */ new Set([...dirTargets, ...fileTargets]);
+        const writes = [...input.files].map(([rel, bytes]) => ({
+          target: check2(rel, "file", removing),
+          rel,
+          bytes
+        }));
+        try {
+          fs9.rmSync(staged, { recursive: true, force: true });
+          for (const w of writes) {
+            const file = path4.join(staged, ...w.rel.split("/"));
+            fs9.mkdirSync(path4.dirname(file), { recursive: true });
+            fs9.writeFileSync(file, w.bytes);
+          }
+        } catch (err2) {
+          try {
+            fs9.rmSync(staged, { recursive: true, force: true });
+          } catch {
+          }
+          throw err2;
+        }
+        let removed = 0;
+        try {
+          for (const target of [...dirTargets, ...fileTargets]) {
+            if (fs9.lstatSync(target, { throwIfNoEntry: false })) removed += 1;
+          }
+          for (const target of dirTargets) fs9.rmSync(target, { recursive: true, force: true });
+          for (const target of fileTargets) fs9.rmSync(target, { force: true });
+          for (const w of writes) {
+            fs9.mkdirSync(path4.dirname(w.target), { recursive: true });
+            fs9.renameSync(path4.join(staged, ...w.rel.split("/")), w.target);
+          }
+        } catch (err2) {
+          throw new ContrailError(
+            `snapshot files only partly replaced: ${err2 instanceof Error ? err2.message : String(err2)}`,
+            "snapshot_partial_write"
+          );
+        } finally {
+          try {
+            fs9.rmSync(staged, { recursive: true, force: true });
+          } catch {
+          }
+        }
+        return { removed, written: writes.length };
       }
       /**
        * Absolute path of a file in the current/ tree, or null if it would escape.
@@ -28264,9 +29568,9 @@ function asArray(value) {
   if (value === void 0 || value === null) return [];
   return Array.isArray(value) ? value : [value];
 }
-function xmlDig(node, ...path14) {
+function xmlDig(node, ...path17) {
   let current = node;
-  for (const key2 of path14) {
+  for (const key2 of path17) {
     if (current === null || typeof current !== "object") return void 0;
     const obj = current;
     if (key2 in obj) {
@@ -28445,8 +29749,8 @@ var init_metadataSoap = __esm({
         for (const item of asArray(result)) {
           if (item && typeof item === "object" && item.fullName && item.type) {
             const folderSet = foldersByType.get(item.type);
-            const folder = folderSet?.size === 1 ? [...folderSet][0] : void 0;
-            const fullName = folder && !item.fullName.includes("/") ? `${folder}/${item.fullName}` : item.fullName;
+            const folder2 = folderSet?.size === 1 ? [...folderSet][0] : void 0;
+            const fullName = folder2 && !item.fullName.includes("/") ? `${folder2}/${item.fullName}` : item.fullName;
             all.push({
               type: item.type,
               fullName,
@@ -28496,7 +29800,8 @@ var init_metadataSoap = __esm({
             lastModifiedByName: p.lastModifiedByName ?? "",
             manageableState: p.manageableState,
             namespacePrefix: p.namespacePrefix
-          }))
+          })),
+          messages: asArray(result.messages).map((m) => ({ fileName: m.fileName ?? "", problem: m.problem ?? "" })).filter((m) => m.problem !== "")
         };
       }
       /**
@@ -28677,9 +29982,17 @@ var init_rest = __esm({
       async toolingQuery(soql, maxRows = 2e3) {
         return (await this.runQuery(`/services/data/${this.apiVersion}/tooling/query`, soql, maxRows)).records;
       }
-      /** S30: tooling flavor of queryWithCount (the agent-graph sObjects are Tooling-only). */
-      async toolingQueryWithCount(soql, maxRows = 2e3) {
-        return this.runQuery(`/services/data/${this.apiVersion}/tooling/query`, soql, maxRows);
+      /**
+       * S30: tooling flavor of queryWithCount (the agent-graph sObjects are Tooling-only).
+       * S46 D1: takes the same optional `init.signal` as queryWithCount.
+       */
+      async toolingQueryWithCount(soql, maxRows = 2e3, init) {
+        return this.runQuery(
+          `/services/data/${this.apiVersion}/tooling/query`,
+          soql,
+          maxRows,
+          init
+        );
       }
       async describeSObject(name) {
         const res = await this.request(
@@ -28714,35 +30027,35 @@ var init_rest = __esm({
       async runQuery(basePath, soql, maxRows, init) {
         const records = [];
         let totalSize = null;
-        let path14 = `${basePath}?q=${encodeURIComponent(soql)}`;
-        while (path14 && records.length < maxRows) {
-          const res = await this.request(path14, init);
+        let path17 = `${basePath}?q=${encodeURIComponent(soql)}`;
+        while (path17 && records.length < maxRows) {
+          const res = await this.request(path17, init);
           const data = await res.json();
           if (totalSize === null && typeof data.totalSize === "number") totalSize = data.totalSize;
           records.push(...data.records ?? []);
-          path14 = data.done === false && data.nextRecordsUrl ? data.nextRecordsUrl : null;
+          path17 = data.done === false && data.nextRecordsUrl ? data.nextRecordsUrl : null;
         }
         return { records: records.slice(0, maxRows), totalSize };
       }
       /** Authenticated request against the connection's instance; 401 → refresh once and retry. */
-      async request(path14, init) {
-        let res = await this.rawRequest(path14, init);
+      async request(path17, init) {
+        let res = await this.rawRequest(path17, init);
         if (res.status === 401) {
           this.tokenMgr.invalidate(this.conn.id);
-          res = await this.rawRequest(path14, init);
+          res = await this.rawRequest(path17, init);
         }
         if (!res.ok) {
           const body = await res.text();
           throw new ContrailError(
-            `Salesforce API error ${res.status} on ${path14.split("?")[0]}: ${truncate(body, 500)}`,
+            `Salesforce API error ${res.status} on ${path17.split("?")[0]}: ${truncate(body, 500)}`,
             "salesforce_api_error"
           );
         }
         return res;
       }
-      async rawRequest(path14, init) {
+      async rawRequest(path17, init) {
         const accessToken = await this.tokenMgr.getAccessToken(this.conn);
-        const url = path14.startsWith("http") ? path14 : new URL(path14, this.conn.instanceUrl).toString();
+        const url = path17.startsWith("http") ? path17 : new URL(path17, this.conn.instanceUrl).toString();
         return fetch(url, {
           ...init,
           headers: {
@@ -29576,10 +30889,2602 @@ var init_orgdeps = __esm({
   }
 });
 
-// src/snapshot/engine.ts
+// src/deploy/package.ts
+function flowDeactivationXml() {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<FlowDefinition xmlns="${XMLNS_META}">
+    <activeVersionNumber>0</activeVersionNumber>
+</FlowDefinition>
+`;
+}
+function typeEntry(table, type) {
+  return Object.hasOwn(table, type) ? table[type] : void 0;
+}
+function isRegisteredType(type) {
+  return Object.hasOwn(FILE_TYPES, type) || Object.hasOwn(CHILD_TYPES, type);
+}
+function retrieveMemberFor(type, apiName) {
+  const fileSpec = typeEntry(FILE_TYPES, type);
+  if (fileSpec) return { type: fileSpec.manifestType ?? type, member: apiName };
+  const childSpec = typeEntry(CHILD_TYPES, type);
+  if (childSpec) {
+    const parent = childSpec.parentFromName(apiName);
+    return parent ? { type: childSpec.containerRoot, member: parent } : null;
+  }
+  return null;
+}
+function parseEnvelopeFor(type, apiName, content) {
+  const spec = typeEntry(FILE_TYPES, type);
+  if (!spec?.envelope) {
+    throw new ContrailError(`${type} is not a bundle (envelope) type`, "bad_component");
+  }
+  return parseBundleEnvelope(type, apiName, content, spec);
+}
+function validateAuraBundle(apiName, files, main2) {
+  const kind = main2.slice(apiName.length);
+  const metaName = `${main2}-meta.xml`;
+  const allowed = /* @__PURE__ */ new Set([
+    main2,
+    metaName,
+    ...(AURA_SECONDARIES[kind] ?? []).map((s) => `${apiName}${s}`)
+  ]);
+  for (const [rel, body] of Object.entries(files)) {
+    if (!allowed.has(rel)) {
+      const reason = /(Provider|Model|Test)\.js$/.test(rel) ? `"${rel}" is not a deployable Aura definition \u2014 Provider/Model/Test files are not part of the bundle format` : rel.endsWith("-meta.xml") ? `"${rel}" \u2014 the only meta file is "${metaName}", named after the primary` : rel === `${apiName}.design` ? `"${rel}" \u2014 a .design belongs only to a component (.cmp) bundle` : !rel.startsWith(apiName) ? `"${rel}" \u2014 every file in an Aura bundle starts with the bundle name "${apiName}"` : `"${rel}" is not a valid file for a ${kind} bundle`;
+      throw new ContrailError(`AuraDefinitionBundle ${apiName}: ${reason}.`, "bad_component");
+    }
+    if (Buffer.byteLength(body, "utf8") > AURA_MAX_FILE_BYTES) {
+      throw new ContrailError(
+        `AuraDefinitionBundle ${apiName}: "${rel}" exceeds the 1,000,000-byte per-file limit.`,
+        "bad_component"
+      );
+    }
+  }
+}
+function parseBundleEnvelope(type, apiName, content, spec) {
+  const suffixes = Array.isArray(spec.envelopeMainSuffix) ? spec.envelopeMainSuffix : [spec.envelopeMainSuffix ?? spec.ext];
+  const exampleMain = `${apiName}${suffixes[0] ?? ""}`;
+  let parsed;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    throw new ContrailError(
+      `${type} ${apiName}: content must be a Contrail bundle envelope \u2014 JSON of the shape {"contrail_bundle":1, "files": {"${exampleMain}": "<xml>", "input/schema.json": "\u2026"}}. Bundle types are directories of files; retrieve_metadata's bundle_files listing shows the real file set to carry over.`,
+      "bad_component"
+    );
+  }
+  const env = parsed;
+  if (env.contrail_bundle !== 1 || typeof env.files !== "object" || env.files === null) {
+    throw new ContrailError(
+      `${type} ${apiName}: envelope must carry contrail_bundle: 1 and a files object.`,
+      "bad_component"
+    );
+  }
+  const files = env.files;
+  const entries = Object.entries(files);
+  if (entries.length === 0 || entries.length > BUNDLE_MAX_FILES) {
+    throw new ContrailError(
+      `${type} ${apiName}: envelope carries ${entries.length} files (1\u2013${BUNDLE_MAX_FILES} allowed).`,
+      "bad_component"
+    );
+  }
+  const out = {};
+  for (const [rel, body] of entries) {
+    if (rel.includes("\\") || rel.includes("..")) {
+      throw new ContrailError(
+        `${type} ${apiName}: invalid envelope path "${rel}"`,
+        "bad_component"
+      );
+    }
+    if (spec.flat && rel.includes("/")) {
+      throw new ContrailError(
+        `${type} ${apiName}: "${rel}" \u2014 ${type} bundles are FLAT: no subfolders, every file directly in the bundle directory.`,
+        "bad_component"
+      );
+    }
+    const segs = rel.split("/");
+    if (segs.length === 0 || segs.length > BUNDLE_MAX_DEPTH || segs.some((s) => !BUNDLE_REL_SEGMENT_RE.test(s))) {
+      throw new ContrailError(
+        `${type} ${apiName}: invalid envelope path "${rel}"`,
+        "bad_component"
+      );
+    }
+    if (segs.some((s) => s.toLowerCase() === "__tests__")) {
+      throw new ContrailError(
+        `${type} ${apiName}: envelope path "${rel}" \u2014 local test files never deploy. Carry only the files a retrieve shows.`,
+        "bad_component"
+      );
+    }
+    if (typeof body !== "string") {
+      throw new ContrailError(
+        `${type} ${apiName}: envelope file "${rel}" must be a string body.`,
+        "bad_component"
+      );
+    }
+    out[rel] = body;
+  }
+  const candidates = suffixes.map((s) => `${apiName}${s}`);
+  const mains = candidates.filter((f) => f in out);
+  if (mains.length === 0) {
+    throw new ContrailError(
+      candidates.length === 1 ? `${type} ${apiName}: envelope is missing its main file "${candidates[0]}".` : `${type} ${apiName}: envelope has NO primary file \u2014 exactly one of ${candidates.join(", ")} is required.`,
+      "bad_component"
+    );
+  }
+  if (mains.length > 1) {
+    throw new ContrailError(
+      `${type} ${apiName}: envelope carries MORE THAN ONE primary (${mains.join(", ")}) \u2014 a bundle has exactly one.`,
+      "bad_component"
+    );
+  }
+  const main2 = mains[0];
+  if (spec.requireMainMeta && !(`${main2}-meta.xml` in out)) {
+    throw new ContrailError(
+      `${type} ${apiName}: envelope is missing "${main2}-meta.xml" \u2014 Contrail requires the bundle meta on deploy to pin apiVersion (the platform would silently default it; retrieves of old bundles may lack one \u2014 add it).`,
+      "bad_component"
+    );
+  }
+  const alsoRequired = (spec.requiredSuffixes ?? []).map((s) => `${apiName}${s}`);
+  for (const name of alsoRequired) {
+    if (!(name in out)) {
+      throw new ContrailError(
+        `${type} ${apiName}: envelope is missing required file "${name}" \u2014 this bundle type requires ${[main2, ...alsoRequired].join(" + ")}.`,
+        "bad_component"
+      );
+    }
+  }
+  if (type === "AuraDefinitionBundle") validateAuraBundle(apiName, out, main2);
+  return { files: out, main: main2 };
+}
+function buildDeployZip(components, deletions, apiVersionNumber, metaXmlLookup) {
+  const files = /* @__PURE__ */ new Map();
+  const members = /* @__PURE__ */ new Map();
+  const addMember = (type, name) => {
+    const list = members.get(type) ?? [];
+    list.push(name);
+    members.set(type, list);
+  };
+  const containers = /* @__PURE__ */ new Map();
+  for (const c of components) {
+    validateTypeAndName(c.type, c.api_name);
+    const fileSpec = typeEntry(FILE_TYPES, c.type);
+    if (fileSpec?.envelope) {
+      const { files: bundleFiles } = parseBundleEnvelope(c.type, c.api_name, c.content, fileSpec);
+      const dirPrefix = `${fileSpec.dir}/${fileSafeSegment(c.api_name)}/`;
+      for (const [rel, body] of Object.entries(bundleFiles)) {
+        files.set(`${dirPrefix}${rel}`, strToU8(body));
+      }
+      addMember(fileSpec.manifestType ?? c.type, c.api_name);
+      continue;
+    }
+    if (fileSpec) {
+      if (/^\s*\{\s*"contrail_bundle"/.test(c.content)) {
+        throw new ContrailError(
+          `${c.type} ${c.api_name}: a Contrail bundle envelope was passed but ${c.type} is a single-file type \u2014 pass the document itself as content.`,
+          "bad_component"
+        );
+      }
+      const path17 = zipPathFor(fileSpec, c.api_name);
+      files.set(path17, strToU8(c.content));
+      if (fileSpec.metaRoot) {
+        const meta = metaXmlLookup(c.type, c.api_name) ?? fileSpec.metaXml?.(apiVersionNumber, c.api_name) ?? `<?xml version="1.0" encoding="UTF-8"?>
+<${fileSpec.metaRoot} xmlns="${XMLNS}">
+    <apiVersion>${escapeXml(apiVersionNumber)}</apiVersion>
+    <status>Active</status>
+</${fileSpec.metaRoot}>
+`;
+        files.set(`${path17}-meta.xml`, strToU8(meta));
+      }
+      addMember(fileSpec.manifestType ?? c.type, c.api_name);
+      continue;
+    }
+    const childSpec = typeEntry(CHILD_TYPES, c.type);
+    if (childSpec) {
+      const parent = childSpec.parentFromName(c.api_name);
+      if (!parent) {
+        throw new ContrailError(
+          `${c.type} names are dotted (Parent.Child), got "${c.api_name}"`,
+          "bad_component"
+        );
+      }
+      const path17 = `${childSpec.dir}/${parent}${childSpec.ext}`;
+      const key2 = `${childSpec.containerRoot}:${path17}`;
+      const container = containers.get(key2) ?? { root: childSpec.containerRoot, path: path17, blocks: [] };
+      container.blocks.push(c.content.trim());
+      containers.set(key2, container);
+      addMember(c.type, c.api_name);
+      continue;
+    }
+    throw new ContrailError(
+      `Type "${c.type}" is not deployable through Contrail yet. Deployable types: ${[...Object.keys(FILE_TYPES), ...Object.keys(CHILD_TYPES)].join(", ")}.`,
+      "bad_component"
+    );
+  }
+  for (const container of containers.values()) {
+    if (files.has(container.path)) {
+      throw new ContrailError(
+        `Cannot deploy both the full ${container.path} file and individual children of it in one request \u2014 pick one form.`,
+        "bad_component"
+      );
+    }
+    const doc = `<?xml version="1.0" encoding="UTF-8"?>
+<${container.root} xmlns="${XMLNS}">
+` + container.blocks.map((b) => `    ${b}`).join("\n") + `
+</${container.root}>
+`;
+    files.set(container.path, strToU8(doc));
+  }
+  for (const d of deletions) {
+    validateTypeAndName(d.type, d.api_name);
+  }
+  const packageXml = manifestXml(members, apiVersionNumber, "Package", true);
+  files.set("package.xml", strToU8(packageXml));
+  let destructiveXml = null;
+  if (deletions.length > 0) {
+    const delMembers = /* @__PURE__ */ new Map();
+    for (const d of deletions) {
+      const manifestType = typeEntry(FILE_TYPES, d.type)?.manifestType ?? d.type;
+      const list = delMembers.get(manifestType) ?? [];
+      list.push(d.api_name);
+      delMembers.set(manifestType, list);
+    }
+    destructiveXml = manifestXml(delMembers, apiVersionNumber, "Package", false);
+    files.set("destructiveChangesPost.xml", strToU8(destructiveXml));
+  }
+  return {
+    zip: Buffer.from(zipSync(Object.fromEntries(files))),
+    files: [...files.keys()].sort(),
+    packageXml,
+    destructiveXml
+  };
+}
+function orderManifestTypes(types, dependencyOrder) {
+  const sorted = [...types].sort((a, b) => a.localeCompare(b));
+  if (!dependencyOrder) return sorted;
+  for (const [late2, befores] of Object.entries(MANIFEST_TYPE_AFTER)) {
+    const i = sorted.indexOf(late2);
+    if (i < 0) continue;
+    const lastBefore = Math.max(...befores.map((b) => sorted.indexOf(b)));
+    if (lastBefore > i) {
+      sorted.splice(i, 1);
+      sorted.splice(lastBefore, 0, late2);
+    }
+  }
+  return sorted;
+}
+function manifestXml(members, apiVersionNumber, root, dependencyOrder) {
+  const types = orderManifestTypes([...members.keys()], dependencyOrder).map((type) => {
+    const names = members.get(type);
+    return `    <types>
+${names.sort().map((n) => `        <members>${escapeXml(n)}</members>`).join("\n")}
+        <name>${escapeXml(type)}</name>
+    </types>`;
+  }).join("\n");
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<${root} xmlns="${XMLNS}">
+${types}
+    <version>${escapeXml(apiVersionNumber)}</version>
+</${root}>
+`;
+}
+function fileSafeName(name) {
+  return name.replace(
+    /[^A-Za-z0-9 _.\-]/g,
+    (ch) => Array.from(new TextEncoder().encode(ch)).map((b) => "%" + b.toString(16).toUpperCase().padStart(2, "0")).join("")
+  );
+}
+function fileSafeSegment(s) {
+  return s.replace(
+    /[^A-Za-z0-9 _.\-$]/g,
+    (ch) => Array.from(new TextEncoder().encode(ch)).map((b) => "%" + b.toString(16).toUpperCase().padStart(2, "0")).join("")
+  );
+}
+function zipPathFor(spec, apiName) {
+  if (spec.metaOnly) return `${spec.dir}/${fileSafeSegment(apiName)}-meta.xml`;
+  const name = spec.foldered ? apiName.split("/").map(fileSafeSegment).join("/") : fileSafeName(apiName);
+  return `${spec.dir}/${name}${spec.ext}`;
+}
+function deployZipEntryPath(type, apiName, opts) {
+  const childSpec = typeEntry(CHILD_TYPES, type);
+  if (childSpec) {
+    const parent = childSpec.parentFromName(apiName);
+    if (!parent) return null;
+    return {
+      path: `${childSpec.dir}/${fileSafeName(parent)}${childSpec.ext}`,
+      child: true,
+      childTag: childSpec.tag,
+      childName: apiName.includes(".") ? apiName.slice(apiName.indexOf(".") + 1) : apiName
+    };
+  }
+  const spec = typeEntry(FILE_TYPES, type);
+  if (!spec) return null;
+  if (spec.envelope) {
+    const dirPrefix = `${spec.dir}/${fileSafeSegment(apiName)}/`;
+    const suffixes = Array.isArray(spec.envelopeMainSuffix) ? spec.envelopeMainSuffix : [spec.envelopeMainSuffix ?? spec.ext];
+    const candidates = suffixes.map((s) => `${dirPrefix}${apiName}${s}`);
+    const resolved = candidates.length === 1 ? candidates[0] : candidates.find((p) => opts?.zipEntries?.includes(p));
+    if (resolved === void 0) {
+      return { path: "", child: false, bundleDir: dirPrefix, mainCandidates: candidates };
+    }
+    return { path: resolved, child: false, bundleDir: dirPrefix };
+  }
+  return { path: zipPathFor(spec, apiName), child: false };
+}
+function validateTypeAndName(type, name) {
+  if (!/^[A-Za-z]+$/.test(type)) throw new ContrailError(`invalid type "${type}"`, "bad_component");
+  if (name.includes("\\") || name.includes("..")) {
+    throw new ContrailError(`invalid component name "${name}"`, "bad_component");
+  }
+  const spec = typeEntry(FILE_TYPES, type);
+  if (spec?.foldered) {
+    const segs = name.split("/");
+    if (segs.length !== 2 || segs.some((s) => !FOLDER_SEGMENT_RE.test(s))) {
+      throw new ContrailError(
+        `invalid ${type} name "${name}" \u2014 expected "FolderDevName/Name" (letters, digits, underscores)`,
+        "bad_component"
+      );
+    }
+    return;
+  }
+  if (spec?.metaOnly) {
+    if (!FOLDER_SEGMENT_RE.test(name)) {
+      throw new ContrailError(
+        `invalid ${type} name "${name}" \u2014 a folder dev name (letters, digits, underscores)`,
+        "bad_component"
+      );
+    }
+    return;
+  }
+  if (type === "AuraDefinitionBundle") {
+    if (/__/.test(name)) {
+      throw new ContrailError(
+        `AuraDefinitionBundle "${name}": a namespaced bundle (ns__Name) belongs to its package \u2014 only namespace-free bundles deploy through Contrail (reading it still works via retrieve_metadata).`,
+        "bad_component"
+      );
+    }
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(name) || name.endsWith("_")) {
+      throw new ContrailError(
+        `invalid AuraDefinitionBundle name "${name}" \u2014 a Lightning developer name: start with a letter; letters, digits, single underscores; no trailing underscore.`,
+        "bad_component"
+      );
+    }
+    return;
+  }
+  if (!NAME_RE.test(name) || name.includes("/")) {
+    throw new ContrailError(`invalid component name "${name}"`, "bad_component");
+  }
+}
+function isValidComponentName(type, name) {
+  try {
+    validateTypeAndName(type, name);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function changeDependentWarnings(input) {
+  const { type, api_name, change, proposed, before } = input;
+  const warnings = [];
+  if (input.bundleFiles) {
+    const { proposed: newFiles, main: main2, before: oldFiles } = input.bundleFiles;
+    if (change === "modify") {
+      const added = Object.keys(newFiles).filter((k) => !(k in oldFiles));
+      const removed = Object.keys(oldFiles).filter((k) => !(k in newFiles));
+      const changed = Object.keys(newFiles).filter(
+        (k) => k in oldFiles && oldFiles[k].trim() !== newFiles[k].trim()
+      );
+      const describe = (label, list) => list.length > 0 ? `${label} ${list.slice(0, 8).join(", ")}${list.length > 8 ? "\u2026" : ""}` : "";
+      const delta = [
+        describe("changed:", changed),
+        describe("added:", added),
+        describe("removed:", removed)
+      ].filter(Boolean).join("; ");
+      warnings.push(
+        `BUNDLE REPLACE \u2014 this deploy replaces the org's whole ${type} directory (${Object.keys(newFiles).length} files; ${delta}).`
+      );
+    }
+    if (type === "GenAiPlannerBundle" && change === "modify") {
+      warnings.push(
+        `AGENT MUST BE DEACTIVATED FIRST \u2014 deploying GenAiPlannerBundle changes for an ACTIVE agent version fails, and version-suffixed bundles are PUBLISHED SNAPSHOTS: a modified deploy of one fails org-side even deactivated (unmodified re-deploys "succeed" as no-ops). Deactivate first (agent_activation_propose/execute, or Agent Builder), deploy, then reactivate; verify with BotVersion.Status. On Agent-Script agents the next publish overwrites hand-edits.`
+      );
+    }
+    if (type === "AuraDefinitionBundle") {
+      const kind = main2.slice(api_name.length);
+      const oldMain = [".cmp", ".app", ".evt", ".intf", ".tokens"].map((s) => `${api_name}${s}`).find((f) => f in oldFiles);
+      const verOf = (files, mainName) => mainName ? parseFloat(files[`${mainName}-meta.xml`]?.match(/<apiVersion>\s*([\d.]+)/)?.[1] ?? "") : NaN;
+      const newVer = verOf(newFiles, main2);
+      const oldVer = verOf(oldFiles, oldMain);
+      if (Number.isFinite(newVer) && Number.isFinite(oldVer) && newVer < 40 !== oldVer < 40) {
+        warnings.push(
+          `API VERSION ${oldVer} \u2192 ${newVer} crosses the 39/40 boundary \u2014 in orgs still on Lightning Locker this toggles Locker for the component (LWS is an org setting, unaffected by apiVersion).`
+        );
+      }
+      const mainBody = newFiles[main2] ?? "";
+      const isBackgroundItem = /lightning:backgroundUtilityItem/.test(mainBody);
+      if (change === "add" && (kind === ".cmp" || kind === ".app") && /lightning:(backgroundUtilityItem|utilityItem|availableForFlow(Actions|Screens))|flexipage:availableFor\w*|force:lightningQuickAction/.test(
+        mainBody
+      ) && input.referenced !== void 0 && !input.referenced()) {
+        warnings.push(
+          `INERT UNTIL PLACED \u2014 this component declares surface interfaces but nothing in this package or the snapshot references c:${api_name}; it renders NOWHERE until host metadata places it` + (isBackgroundItem ? ` (a background utility item sits in a utility bar's Background region, and the bar needs at least one VISIBLE item or it does not appear).` : `.`)
+        );
+      }
+      if (change !== "unchanged_content") {
+        warnings.push(
+          `The deploy compiles markup and design (each design:attribute must match an aura:attribute) and parses the JS; runtime errors in a background item surface only in the browser console. Consoles already open keep the OLD definition until reloaded.`
+        );
+      }
+    }
+    return warnings;
+  }
+  if (type === "CustomField" && before) {
+    const oldType = before.match(/<type>([^<]+)<\/type>/)?.[1];
+    const newType = proposed.match(/<type>([^<]+)<\/type>/)?.[1];
+    if (oldType && newType && oldType !== newType) {
+      warnings.push(
+        `FIELD TYPE CHANGE ${oldType} \u2192 ${newType} \u2014 possible irreversible data loss`
+      );
+    }
+  }
+  if ((type === "FlexiPage" || type === "CustomApplication" || type === "Layout" || type === "Report" || type === "Dashboard" || type === "GenAiPlugin" || type === "GenAiPromptTemplate" || type === "Bot" || type === "LeadConvertSettings" || type === "NamedCredential" || type === "ExternalCredential" || type === "AuthProvider" || type === "PermissionSetGroup" || type === "MutingPermissionSet" || // S44: both agent-test suite types are single documents of
+  // <testCase> blocks (the legacy one was a parity gap since S30).
+  // AiAgentScorerDefinition is deliberately NOT here — its versions
+  // are documented append-only, which makes the generic "removed"
+  // sentence false; it has its own arm below.
+  type === "AiEvaluationDefinition" || type === "AiTestingDefinition") && change === "modify") {
+    warnings.push(
+      `WHOLE-DOCUMENT REPLACE \u2014 this deploy fully replaces the org's ${type}; anything not present in the proposed content is removed.` + (type === "Bot" ? " A <botVersions> block omitted from a Bot document is a VERSION DELETE." : type === "LeadConvertSettings" ? " An <objectMapping> omitted here is a lead field mapping DELETED org-wide." : type === "ExternalCredential" ? " A principal parameter omitted here is DELETED org-side \u2014 along with the credential values a human entered for it in Setup." : type === "PermissionSetGroup" ? " A <permissionSets> member omitted here is DETACHED from the group org-side \u2014 users assigned the group lose that permission set." : type === "MutingPermissionSet" ? " A muted permission omitted here is UN-MUTED org-side, silently RESTORING it to every user assigned the group." : type === "AiEvaluationDefinition" || type === "AiTestingDefinition" ? " A <testCase> omitted here is removed from the suite org-side." : "")
+    );
+  }
+  if (type === "GenAiPromptTemplate" && change === "modify") {
+    const oldId = before?.match(/<activeVersionIdentifier>([^<]*)</)?.[1];
+    const newId = proposed.match(/<activeVersionIdentifier>([^<]*)</)?.[1];
+    if (oldId && newId && oldId !== newId) {
+      warnings.push(
+        `activeVersionIdentifier ALTERED (${oldId.slice(0, 12)}\u2026 \u2192 ${newId.slice(0, 12)}\u2026) \u2014 these tokens are org-generated; a hand-edited value is rejected or mis-targets the active version. To activate a new version, retrieve after deploying it and repoint using the versionIdentifier the org minted.`
+      );
+    }
+  }
+  if (type === "AiAgentScorerDefinition" && change === "modify") {
+    const oldVersions = scorerVersionStatuses(before ?? "");
+    const newVersions = scorerVersionStatuses(proposed);
+    const omitted = [...oldVersions.keys()].filter((n) => !newVersions.has(n));
+    const regressed = [...oldVersions.entries()].filter(([n, was]) => {
+      const now = newVersions.get(n);
+      return now !== void 0 && SCORER_STATUS_RANK[was] !== void 0 && SCORER_STATUS_RANK[now] !== void 0 && SCORER_STATUS_RANK[now] < SCORER_STATUS_RANK[was];
+    }).map(([n, was]) => `${n} (${was} \u2192 ${newVersions.get(n)})`);
+    warnings.push(
+      `SCORER VERSIONS ARE APPEND-ONLY \u2014 the org never deletes a <scorerVersion>: one omitted from this document is NOT removed` + (omitted.length > 0 ? ` (org-side versions omitted here: ${omitted.join(", ")})` : "") + `. Status is documented one-way (Draft \u2192 Available \u2192 Archived); a regression here is not something the org performs` + (regressed.length > 0 ? ` (regressed here: ${regressed.join("; ")})` : "") + `. Retrieve-first, carry every existing version forward, edit only Draft versions.`
+    );
+  }
+  if ((type === "ReportFolder" || type === "DashboardFolder") && change === "modify") {
+    warnings.push(
+      `FOLDER REPLACE \u2014 the folderShares in this content fully replace the folder's sharing; shares omitted here are revoked.`
+    );
+  }
+  if (type === "CustomMetadata" && change === "modify") {
+    warnings.push(
+      `FULL-RECORD REPLACE \u2014 fields omitted from this content are reset to null/default on the deployed record.`
+    );
+  }
+  if (type === "QuickAction" && change === "add") {
+    warnings.push(
+      `NEW QUICK ACTION is surfaced NOWHERE until a page layout, a global publisher layout, or a Lightning record page using dynamic actions includes it \u2014 this deploy creates the action but places it on no UI.`
+    );
+  }
+  if (type === "Layout" && change === "add") {
+    warnings.push(
+      `NEW LAYOUT IS NOT ASSIGNED by this deploy \u2014 profiles keep their current layout until layoutAssignments change (Profile metadata or Setup).`
+    );
+  }
+  if ((type === "Report" || type === "Dashboard") && change === "add") {
+    warnings.push(
+      `NEW ${type.toUpperCase()} visibility is governed by its FOLDER's sharing (folderShares on the folder component), not by permission sets \u2014 this deploy grants nobody new access by itself.`
+    );
+  }
+  if (type === "GenAiPromptTemplate" && change === "add" && /<activeVersionIdentifier>[^<]/.test(proposed)) {
+    warnings.push(
+      `activeVersionIdentifier on a NET-NEW template \u2014 this token is org-generated and cannot be authored from scratch. Omit it (the org mints one on deploy), or retrieve-first if this template already exists under another name.`
+    );
+  }
+  if (type === "GenAiPlugin" && change === "modify") {
+    warnings.push(
+      `AGENT MUST BE DEACTIVATED FIRST \u2014 deploying ${type} changes for an ACTIVE agent version fails. Deactivate first (agent_activation_propose/execute, or Agent Builder), deploy, then reactivate \u2014 each flip its own approval; verify with BotVersion.Status.`
+    );
+  }
+  if (type === "ExternalCredential" && change === "add") {
+    warnings.push(
+      `NEW EXTERNAL CREDENTIAL carries no secrets and grants nobody access \u2014 a human enters each principal's credential values in Setup (External Credentials) after the deploy, and callouts fail until a permission set grants externalCredentialPrincipalAccesses for its principals.`
+    );
+  }
+  return warnings;
+}
+function auraBundleReferenced(db, conn, components, c) {
+  const refRe = new RegExp(`c:${c.api_name}\\b`);
+  return components.some((o) => o !== c && refRe.test(o.content)) || db.edgesTo(conn.id, "AuraDefinitionBundle", c.api_name).length > 0;
+}
+function analyzeChanges(db, store, conn, components, deletions) {
+  const changes = [];
+  for (const c of components) {
+    if (c.type === "FlowDefinition" && /<activeVersionNumber>\s*0\s*<\/activeVersionNumber>/.test(c.content)) {
+      changes.push({
+        type: c.type,
+        api_name: c.api_name,
+        change: "modify",
+        warnings: [`DEACTIVATES flow ${c.api_name} \u2014 turns off its active version.`],
+        ...sourceOf(c)
+      });
+      continue;
+    }
+    const envSpec = typeEntry(FILE_TYPES, c.type);
+    if (envSpec?.envelope) {
+      const { files: proposed, main: mainFile } = parseBundleEnvelope(
+        c.type,
+        c.api_name,
+        c.content,
+        envSpec
+      );
+      const existingBundle = db.getArtifact(conn.id, c.type, c.api_name);
+      const warnings2 = [];
+      let change2;
+      const old = existingBundle ? readBundleFiles(store, conn, envSpec.dir, c.api_name) : {};
+      if (!existingBundle) {
+        change2 = "add";
+      } else {
+        const added = Object.keys(proposed).filter((k) => !(k in old));
+        const removed = Object.keys(old).filter((k) => !(k in proposed));
+        const changed = Object.keys(proposed).filter(
+          (k) => k in old && old[k].trim() !== proposed[k].trim()
+        );
+        change2 = added.length + removed.length + changed.length === 0 ? "unchanged_content" : "modify";
+      }
+      warnings2.push(
+        ...changeDependentWarnings({
+          type: c.type,
+          api_name: c.api_name,
+          change: change2,
+          proposed: c.content,
+          before: null,
+          bundleFiles: { proposed, main: mainFile, before: old },
+          referenced: () => auraBundleReferenced(db, conn, components, c)
+        })
+      );
+      if (c.type === "AiAuthoringBundle") {
+        warnings2.push(
+          `DRAFT STAGE ONLY \u2014 this deploy stages Agent Script as a draft in Agentforce Studio. Nothing is compiled and the RUNNING AGENT IS UNCHANGED: topics, actions, and behavior go live only when a human publishes the draft (Agentforce Studio, or Salesforce's Agentforce DX publish command). A green deploy here is a staged draft, not a shipped agent.`
+        );
+        const target = proposed[`${c.api_name}.bundle-meta.xml`]?.match(
+          /<target>\s*([^<]+?)\s*<\/target>/
+        )?.[1];
+        if (target) {
+          warnings2.push(
+            `TARGET LINK, NOT A COMPILE \u2014 <target> pins this bundle to runtime version "${target}"; the deploy FAILS unless that Bot/BotVersion already exists in the org or ships in this same package. Linking never compiles or publishes anything.`
+          );
+        }
+        if (/_\d+$/.test(c.api_name)) {
+          warnings2.push(
+            `PUBLISHED-SNAPSHOT NAME \u2014 "${c.api_name}" is a version-suffixed published snapshot; the platform owns those. The editable draft is the NAKED bundle name \u2014 deploy a suffixed name only when promoting retrieved bytes.`
+          );
+        }
+      }
+      if (c.type === "AuraDefinitionBundle") {
+        const kind = mainFile.slice(c.api_name.length);
+        const oldMain = [".cmp", ".app", ".evt", ".intf", ".tokens"].map((s) => `${c.api_name}${s}`).find((f) => f in old);
+        if (oldMain && oldMain.slice(c.api_name.length) !== kind) {
+          throw new ContrailError(
+            `AuraDefinitionBundle ${c.api_name}: the SNAPSHOT's copy of this bundle is ${oldMain.slice(c.api_name.length)} and this envelope is ${kind} \u2014 changing a bundle's kind under the same name is untested platform behavior. Delete the old bundle first (its own destructive approval) or use a new name; if the org-side bundle already changed since the last refresh, run refresh_snapshot types:["AuraDefinitionBundle"] and validate again.`,
+            "bad_component"
+          );
+        }
+        const mainBody = proposed[mainFile] ?? "";
+        const controller = mainBody.match(/\bcontroller="([A-Za-z][A-Za-z0-9_]*)"/)?.[1];
+        if (controller) {
+          const containerText = components.filter((p) => p.type === "PermissionSet" || p.type === "Profile").map((p) => p.content).join("\n");
+          const granted = permissionBlocks(containerText, "classAccesses").some(
+            (b) => new RegExp(`<apexClass>\\s*${controller}\\s*</apexClass>`, "i").test(b) && /<enabled>\s*true\s*<\/enabled>/i.test(b)
+          );
+          if (!granted) {
+            warnings2.push(
+              `server-side controller "${controller}" \u2014 users need Apex class access (classAccesses) for it, and no permission set in this package grants it (it may already be granted org-side; not checkable from here).`
+            );
+          }
+        }
+      }
+      changes.push({ type: c.type, api_name: c.api_name, change: change2, warnings: warnings2, ...sourceOf(c) });
+      continue;
+    }
+    const existing = db.getArtifact(conn.id, c.type, c.api_name);
+    const warnings = [];
+    let change;
+    let oldContent = null;
+    if (!existing) {
+      change = "add";
+    } else {
+      oldContent = existing.filePath ? readOldContent(store, conn, c.type, c.api_name, existing.filePath) : null;
+      change = oldContent !== null && oldContent.trim() === c.content.trim() ? "unchanged_content" : "modify";
+    }
+    warnings.push(
+      ...changeDependentWarnings({
+        type: c.type,
+        api_name: c.api_name,
+        change,
+        proposed: c.content,
+        before: oldContent
+      })
+    );
+    if (c.type === "AiTestingDefinition") {
+      warnings.push(
+        `BETA SUITE, RUNS NOTHING \u2014 this deploy stores an Agentforce Studio test suite; it executes no test. Runs happen through run_agent_eval (on the org probed a deployed suite appeared in the Studio Tests tab only after its first run, never in Testing Center); Salesforce marks both the type and its runner Beta (grammar and runner can change). Contrail does not validate scorer names; per Salesforce's library the org refuses an unknown name at deploy \u2014 not yet live-confirmed, so a green deploy never proves a scorer ran.`
+      );
+      const cases = c.content.match(/<testCase>[\s\S]*?<\/testCase>/g) ?? [];
+      const multi = cases.filter((t) => /<conversationHistory>/.test(t)).length;
+      const single = cases.length - multi;
+      if (multi > 0 && single > 0) {
+        warnings.push(
+          `MIXED SINGLE- AND MULTI-TURN CASES \u2014 ${multi} case(s) carry <conversationHistory> and ${single} do not. Salesforce's guidance keeps them in separate suites (a mixed suite has been reported to stall, and the Studio runner has no cancel endpoint). Split the suite unless a mixed one has completed on this org.`
+        );
+      }
+    }
+    if (c.type === "AiAgentScorerDefinition" && /^std_/.test(c.api_name)) {
+      warnings.push(
+        `SYSTEM-PROVISIONED SCORER \u2014 Salesforce creates std_* scorers for each agent (last modified by Automated Process); an edit may be overwritten or refused org-side. Author your own scorer name for custom logic.`
+      );
+    }
+    if (c.type === "PermissionSetGroup") {
+      warnings.push(
+        `PERMISSION SET GROUP RECALCULATES ASYNCHRONOUSLY \u2014 after this deploy the org rebuilds the group's aggregated permissions (Status: Updating \u2192 Updated). Verify with soql_query (SELECT Status FROM PermissionSetGroup WHERE DeveloperName = '${c.api_name}') before relying on the grants.`
+      );
+    }
+    {
+      const secretTags = c.type === "NamedCredential" ? ["password", "awsAccessSecret", "oauthToken", "oauthRefreshToken"] : c.type === "AuthProvider" ? ["consumerSecret"] : [];
+      for (const tag of secretTags) {
+        if (new RegExp(`<${tag}>[^<]`).test(c.content)) {
+          warnings.push(
+            `LITERAL SECRET IN DEPLOY CONTENT (<${tag}>) \u2014 this value becomes part of the local snapshot, the audit trail, and this approval page, and a retrieve returns only a placeholder (it will not round-trip). Prefer External Credentials, where secrets are entered in Setup and never touch metadata.`
+          );
+        }
+      }
+    }
+    changes.push({ type: c.type, api_name: c.api_name, change, warnings, ...sourceOf(c) });
+  }
+  {
+    const packagedBundles = new Set(
+      components.filter(
+        (x) => x.type === "AuraDefinitionBundle" || x.type === "LightningComponentBundle"
+      ).map((x) => x.api_name)
+    );
+    const refHosts = /* @__PURE__ */ new Set(["FlexiPage", "QuickAction", "Flow", "CustomTab"]);
+    for (const entry of changes) {
+      if (!refHosts.has(entry.type)) continue;
+      const comp = components.find(
+        (x) => x.type === entry.type && x.api_name === entry.api_name
+      );
+      if (!comp) continue;
+      const missing = /* @__PURE__ */ new Set();
+      for (const m of comp.content.matchAll(/\bc:([A-Za-z][A-Za-z0-9_]*)/g)) {
+        const name = m[1];
+        if (packagedBundles.has(name)) continue;
+        if (db.getArtifact(conn.id, "AuraDefinitionBundle", name) || db.getArtifact(conn.id, "LightningComponentBundle", name)) {
+          continue;
+        }
+        missing.add(name);
+      }
+      if (missing.size > 0) {
+        const list = [...missing].slice(0, 5).join(", ");
+        entry.warnings.push(
+          `references ${list} (c: namespace) \u2014 in neither this package nor the snapshot index. If the org lacks the bundle too, this deploy fails or leaves a broken reference; ship the bundle first or in this same package.`
+        );
+      }
+    }
+  }
+  const destructive = deletions.map((d) => {
+    const warnings = ["DELETION \u2014 cannot be undone by rollback"];
+    const existing = db.getArtifact(conn.id, d.type, d.api_name);
+    if (!existing) {
+      warnings.push("not present in the local snapshot \u2014 verify the name before approving");
+    }
+    if (!isRegisteredType(d.type)) {
+      warnings.push(
+        `UNREGISTERED TYPE DELETE \u2014 Contrail cannot read ${d.type} or list its dependents; the component name and the org's own refusal rules are the only checks this delete gets.`
+      );
+    }
+    if (d.type === "AuraDefinitionBundle") {
+      const usedBy = db.edgesTo(conn.id, d.type, d.api_name).slice(0, 8);
+      warnings.push(
+        `deletes the ENTIRE bundle (every file \u2014 there is no per-file delete)` + (usedBy.length > 0 ? `; the org will REFUSE while it is referenced \u2014 known dependents: ` + usedBy.map((e) => `${e.fromType}:${e.fromName}`).join(", ") : `; the org refuses the delete if a FlexiPage, Flow, QuickAction, or action override still references it`)
+      );
+    }
+    return { type: d.type, api_name: d.api_name, change: "delete", warnings };
+  });
+  return { changes, destructive };
+}
+function sourceOf(c) {
+  return c.source_path ? { source_path: c.source_path, source_sha256: c.source_sha256 } : {};
+}
+function externalCredentialPrincipals(xml) {
+  const names = [];
+  for (const block of xml.match(/<externalCredentialParameters>[\s\S]*?<\/externalCredentialParameters>/g) ?? []) {
+    const type = block.match(/<parameterType>\s*([^<]+?)\s*<\/parameterType>/)?.[1] ?? "";
+    if (!/^(NamedPrincipal|PerUserPrincipal)$/i.test(type)) continue;
+    const name = block.match(/<parameterName>\s*([^<]+?)\s*<\/parameterName>/)?.[1];
+    if (name) names.push(name);
+  }
+  return names;
+}
+function scorerVersionStatuses(xml) {
+  const out = /* @__PURE__ */ new Map();
+  for (const block of xml.match(/<scorerVersion>[\s\S]*?<\/scorerVersion>/g) ?? []) {
+    const n = block.match(/<versionNumber>\s*(\d+)\s*<\/versionNumber>/)?.[1];
+    const s = block.match(/<status>\s*([A-Za-z]+)\s*<\/status>/)?.[1];
+    if (n) out.set(n, s ?? "");
+  }
+  return out;
+}
+function isCustomEntity(name) {
+  return /__(c|b|e|x)$/i.test(name);
+}
+function inlineFieldNames(objectXml) {
+  const names = [];
+  for (const block of objectXml.match(/<fields>[\s\S]*?<\/fields>/g) ?? []) {
+    const m = block.match(/<fullName>([^<]+)<\/fullName>/);
+    if (m?.[1]) names.push(m[1].trim());
+  }
+  return names;
+}
+function permissionBlocks(text2, tag) {
+  return text2.match(new RegExp(`<${tag}>[\\s\\S]*?</${tag}>`, "g")) ?? [];
+}
+function isGranted(containerText, need) {
+  const named = (block, tag, name) => new RegExp(`<${tag}>\\s*${escapeRegex2(name)}\\s*</${tag}>`, "i").test(block);
+  const flagOn = (block, flag) => new RegExp(`<${flag}>\\s*true\\s*</${flag}>`, "i").test(block);
+  switch (need.kind) {
+    case "field":
+      return permissionBlocks(containerText, "fieldPermissions").some(
+        (b) => named(b, "field", need.api_name) && flagOn(b, "readable")
+      );
+    case "object":
+      return permissionBlocks(containerText, "objectPermissions").some(
+        (b) => named(b, "object", need.api_name) && flagOn(b, "allowRead")
+      );
+    case "class":
+      return permissionBlocks(containerText, "classAccesses").some(
+        (b) => named(b, "apexClass", need.api_name) && flagOn(b, "enabled")
+      );
+    case "page":
+      return permissionBlocks(containerText, "pageAccesses").some(
+        (b) => named(b, "apexPage", need.api_name) && flagOn(b, "enabled")
+      );
+    case "application":
+      return permissionBlocks(containerText, "applicationVisibilities").some(
+        (b) => named(b, "application", need.api_name) && flagOn(b, "visible")
+      );
+    case "agent":
+      return permissionBlocks(containerText, "agentAccesses").some(
+        (b) => named(b, "agentName", need.api_name) && flagOn(b, "enabled")
+      );
+    case "credentialPrincipal":
+      return permissionBlocks(containerText, "externalCredentialPrincipalAccesses").some(
+        (b) => named(b, "externalCredentialPrincipal", need.api_name) && flagOn(b, "enabled")
+      );
+    case "customPermission":
+      return permissionBlocks(containerText, "customPermissions").some(
+        (b) => named(b, "name", need.api_name) && flagOn(b, "enabled")
+      );
+    case "tab": {
+      const blocks = [
+        ...permissionBlocks(containerText, "tabVisibilities"),
+        ...permissionBlocks(containerText, "tabSettings")
+      ];
+      return blocks.some((b) => {
+        if (!named(b, "tab", need.api_name)) return false;
+        const vis = b.match(/<visibility>\s*([^<]+?)\s*<\/visibility>/i)?.[1] ?? "";
+        return !/^(hidden|none)$/i.test(vis);
+      });
+    }
+  }
+}
+function analyzePermissionCoverage(components, presence) {
+  const containers = components.filter((c) => c.type === "PermissionSet" || c.type === "Profile");
+  const hasContainer = containers.length > 0;
+  const containerText = containers.map((c) => c.content).join("\n");
+  const needs = [];
+  for (const c of components) {
+    if (c.type === "CustomField") {
+      if (!/__mdt\./i.test(c.api_name)) {
+        needs.push({ type: "CustomField", api_name: c.api_name, permission: "field-level security (FLS)", kind: "field" });
+      }
+    } else if (c.type === "ApexClass") {
+      needs.push({ type: "ApexClass", api_name: c.api_name, permission: "Apex class access", kind: "class" });
+    } else if (c.type === "CustomTab") {
+      needs.push({ type: "CustomTab", api_name: c.api_name, permission: "tab visibility", kind: "tab" });
+    } else if (c.type === "ApexPage") {
+      needs.push({ type: "ApexPage", api_name: c.api_name, permission: "Visualforce page access", kind: "page" });
+    } else if (c.type === "CustomApplication") {
+      needs.push({ type: "CustomApplication", api_name: c.api_name, permission: "app visibility", kind: "application" });
+    } else if (c.type === "Bot") {
+      needs.push({ type: "Bot", api_name: c.api_name, permission: "agent access (agentAccesses)", kind: "agent" });
+    } else if (c.type === "CustomPermission") {
+      needs.push({
+        type: "CustomPermission",
+        api_name: c.api_name,
+        permission: "custom permission access (customPermissions)",
+        kind: "customPermission"
+      });
+    } else if (c.type === "ExternalCredential") {
+      for (const principal of externalCredentialPrincipals(c.content)) {
+        needs.push({
+          type: "ExternalCredential",
+          api_name: `${c.api_name}-${principal}`,
+          permission: "external credential principal access (externalCredentialPrincipalAccesses)",
+          kind: "credentialPrincipal",
+          owner: { type: "ExternalCredential", api_name: c.api_name }
+        });
+      }
+    } else if (c.type === "CustomObject") {
+      if (isCustomEntity(c.api_name)) {
+        needs.push({ type: "CustomObject", api_name: c.api_name, permission: "object permissions", kind: "object" });
+      }
+      if (/__mdt$/i.test(c.api_name)) continue;
+      for (const field of inlineFieldNames(c.content)) {
+        needs.push({
+          type: "CustomField",
+          api_name: `${c.api_name}.${field}`,
+          permission: "field-level security (FLS)",
+          kind: "field",
+          owner: { type: "CustomObject", api_name: c.api_name }
+        });
+      }
+    }
+  }
+  const presenceOf = (need) => {
+    const p = presence?.(need.type, need.api_name);
+    if (p === true) return "in_org";
+    if (p === false) return "new";
+    if (need.owner && presence?.(need.owner.type, need.owner.api_name) === false) return "new";
+    return "unknown";
+  };
+  const uncovered = needs.filter((n) => !isGranted(containerText, n)).map((n) => ({
+    type: n.type,
+    api_name: n.api_name,
+    permission: n.permission,
+    presence: presenceOf(n)
+  }));
+  const sentences = [];
+  const group = (wanted) => {
+    const members = uncovered.filter((u) => u.presence === wanted);
+    return {
+      n: members.length,
+      list: members.map((u) => `${u.type}:${u.api_name} (${u.permission})`).join("; ")
+    };
+  };
+  const fresh = group("new");
+  if (fresh.n > 0) {
+    sentences.push(
+      hasContainer ? `These new components are not granted by the permission set/profile in this package and will be invisible or inaccessible to users until permissions are set: ${fresh.list}.` : `This package adds ${fresh.n} component(s) that need permissions but includes no permission set or profile to grant them \u2014 they will deploy but stay invisible or inaccessible until you set permissions (deploy a permission set alongside, or grant FLS/access afterward): ${fresh.list}.`
+    );
+  }
+  const inOrg = group("in_org");
+  if (inOrg.n > 0) {
+    sentences.push(
+      hasContainer ? `These components are already in the org and are not granted by the permission set/profile in this package \u2014 who can use them depends on the permissions already in the org, which Contrail did not check: ${inOrg.list}.` : `This package includes ${inOrg.n} component(s) that are already in the org and need permissions to be usable, and no permission set or profile for them \u2014 who can use them depends on the permissions already in the org, which Contrail did not check: ${inOrg.list}.`
+    );
+  }
+  const unplaced = group("unknown");
+  if (unplaced.n > 0) {
+    sentences.push(
+      hasContainer ? `These components are not granted by the permission set/profile in this package, and Contrail did not confirm whether they already exist in the org \u2014 any that are new will be invisible or inaccessible to users until permissions are set: ${unplaced.list}.` : `This package includes ${unplaced.n} component(s) that need permissions to be usable and no permission set or profile to grant them. Contrail did not confirm whether they already exist in the org \u2014 any that are new will deploy but stay invisible or inaccessible until you set permissions (deploy a permission set alongside, or grant FLS/access afterward): ${unplaced.list}.`
+    );
+  }
+  const warning = sentences.length > 0 ? sentences.join(" ") : null;
+  return { uncovered, has_permission_container: hasContainer, warning };
+}
+function escapeRegex2(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function readBundleFiles(store, conn, dir, apiName) {
+  const prefix = `${dir}/${fileSafeSegment(apiName)}/`;
+  const out = {};
+  for (const rel of store.listCurrentFiles(conn.id, prefix)) {
+    const body = store.readCurrentFile(conn.id, rel);
+    if (body !== null) out[rel.slice(prefix.length)] = body;
+  }
+  return out;
+}
+function readOldContent(store, conn, type, apiName, filePath) {
+  const file = store.readCurrentFile(conn.id, filePath);
+  if (file === null) return null;
+  const child = typeEntry(CHILD_TYPES, type);
+  if (!child) return file;
+  const childName = type === "CustomLabel" ? apiName : apiName.split(".").slice(1).join(".");
+  const re = new RegExp(`<${child.tag}>[\\s\\S]*?</${child.tag}>`, "g");
+  for (const block of file.match(re) ?? []) {
+    const m = block.match(/<fullName>([^<]+)<\/fullName>/);
+    if (m?.[1]?.toLowerCase() === childName.toLowerCase()) return block;
+  }
+  return null;
+}
+var FILE_TYPES, XMLNS_META, CHILD_TYPES, NAME_RE, FOLDER_SEGMENT_RE, BUNDLE_REL_SEGMENT_RE, BUNDLE_MAX_FILES, BUNDLE_MAX_DEPTH, AURA_SECONDARIES, AURA_MAX_FILE_BYTES, AURA_DEFTYPE_FILES, XMLNS, MANIFEST_TYPE_AFTER, SCORER_STATUS_RANK;
+var init_package = __esm({
+  "src/deploy/package.ts"() {
+    "use strict";
+    init_esm2();
+    init_xml();
+    init_errors4();
+    FILE_TYPES = {
+      ApexClass: { dir: "classes", ext: ".cls", metaRoot: "ApexClass" },
+      ApexTrigger: { dir: "triggers", ext: ".trigger", metaRoot: "ApexTrigger" },
+      Flow: { dir: "flows", ext: ".flow" },
+      CustomObject: { dir: "objects", ext: ".object" },
+      PermissionSet: { dir: "permissionsets", ext: ".permissionset" },
+      Profile: { dir: "profiles", ext: ".profile" },
+      CustomTab: { dir: "tabs", ext: ".tab" },
+      FlowDefinition: { dir: "flowDefinitions", ext: ".flowDefinition" },
+      // S17: declarative UI / reporting types.
+      FlexiPage: { dir: "flexipages", ext: ".flexipage" },
+      CustomApplication: { dir: "applications", ext: ".app" },
+      ReportType: { dir: "reportTypes", ext: ".reportType" },
+      GlobalValueSet: { dir: "globalValueSets", ext: ".globalValueSet" },
+      ApexPage: {
+        dir: "pages",
+        ext: ".page",
+        metaRoot: "ApexPage",
+        // ApexPage meta requires a <label> and has no <status>.
+        metaXml: (v, name) => `<?xml version="1.0" encoding="UTF-8"?>
+<ApexPage xmlns="${XMLNS}">
+    <apiVersion>${escapeXml(v)}</apiVersion>
+    <label>${escapeXml(name)}</label>
+</ApexPage>
+`
+      },
+      // S17: integration / eventing types (deployable + indexable; not in the
+      // default snapshot manifest — retrieve explicitly via refresh_snapshot types).
+      ConnectedApp: { dir: "connectedApps", ext: ".connectedApp" },
+      NamedCredential: { dir: "namedCredentials", ext: ".namedCredential" },
+      ExternalCredential: { dir: "externalCredentials", ext: ".externalCredential" },
+      // S33: lowercase dir AND extension — unusual but live-confirmed (a dev org
+      // retrieve 2026-09-24), matching the metadata catalog.
+      AuthProvider: { dir: "authproviders", ext: ".authprovider" },
+      PlatformEventChannel: { dir: "platformEventChannels", ext: ".platformEventChannel" },
+      PlatformEventChannelMember: {
+        dir: "platformEventChannelMembers",
+        ext: ".platformEventChannelMember"
+      },
+      ManagedEventSubscription: {
+        dir: "managedEventSubscriptions",
+        ext: ".managedEventSubscription"
+      },
+      // S19: legacy page layouts. fullName is "Object-Layout Name" — spaces,
+      // parens, apostrophes are all normal ("Account-Account (Marketing) Layout").
+      // Retrieve zips percent-encode such characters in FILE names (the indexer
+      // decodes); deploy zips mirror that via fileSafeName, with the literal
+      // fullName in package.xml members.
+      Layout: { dir: "layouts", ext: ".layout" },
+      // S19: custom metadata RECORDS (the record's TYPE is a CustomObject named
+      // X__mdt and deploys through the CustomObject path — one package may carry
+      // the type and its records together). fullName is dotted "Type.Record"
+      // with the type name WITHOUT the __mdt suffix; metadata format uses the
+      // bare .md extension.
+      CustomMetadata: { dir: "customMetadata", ext: ".md" },
+      // S31: lead-conversion field mappings. A SINGLETON — exactly one component
+      // per org, fullName literally 'LeadConvertSettings'. The naming is the
+      // platform's own quirk (live-confirmed): CAPITALIZED directory and a
+      // singular '.LeadConvertSetting' extension. The component does not exist
+      // until an org saves custom lead mappings (a wildcard retrieve then
+      // returns nothing — harmless).
+      LeadConvertSettings: { dir: "LeadConvertSettings", ext: ".LeadConvertSetting" },
+      // S29: analytics types (folder-based). EXPLICIT-REFRESH-ONLY — absent from
+      // the default snapshot manifest (S17 precedent; big orgs carry thousands of
+      // reports). api_name is 'FolderDevName/Name' ('unfiled$public/Name' for
+      // unfiled reports). Folders deploy as members of the CONTENT type in
+      // package.xml (manifestType), their file being the -meta.xml itself; a
+      // report deployed into a NEW folder needs that folder in the same package.
+      Report: { dir: "reports", ext: ".report", foldered: true },
+      Dashboard: { dir: "dashboards", ext: ".dashboard", foldered: true },
+      ReportFolder: { dir: "reports", ext: "", metaOnly: true, manifestType: "Report" },
+      DashboardFolder: { dir: "dashboards", ext: "", metaOnly: true, manifestType: "Dashboard" },
+      // S30: Agentforce types (v66+ — see the config apiVersion note). The Bot
+      // document carries its versions INLINE (<botVersions>) in metadata format
+      // — BotVersion deploys as a dotted-name child (see CHILD_TYPES). The
+      // deployable bundle types carry a Contrail bundle ENVELOPE as content
+      // (see FileSpec.envelope).
+      Bot: { dir: "bots", ext: ".bot" },
+      GenAiFunction: {
+        dir: "genAiFunctions",
+        ext: ".genAiFunction",
+        envelope: true,
+        envelopeMainSuffix: ".genAiFunction-meta.xml"
+      },
+      GenAiPlannerBundle: {
+        dir: "genAiPlannerBundles",
+        ext: ".genAiPlannerBundle",
+        envelope: true,
+        envelopeMainSuffix: ".genAiPlannerBundle"
+      },
+      GenAiPlugin: { dir: "genAiPlugins", ext: ".genAiPlugin" },
+      GenAiPromptTemplate: { dir: "genAiPromptTemplates", ext: ".genAiPromptTemplate" },
+      GenAiPromptTemplateActv: {
+        dir: "genAiPromptTemplateActivations",
+        ext: ".genAiPromptTemplateActivation"
+      },
+      AiEvaluationDefinition: { dir: "aiEvaluationDefinitions", ext: ".aiEvaluationDefinition" },
+      // S44: the Agentforce Studio Tests-tab suite and its companion custom-
+      // scorer type. AiTestingDefinition is BETA per Salesforce (the type AND
+      // its runner); AiAgentScorerDefinition is documented (Agentforce dev
+      // guide). Both dir/suffix pairs live-confirmed via describeMetadata
+      // 2026-11-08 at v66 and v68: neither inFolder, neither metaFile, no
+      // children — plain single-file documents, no meta sidecar, no
+      // permission-set block (analyzePermissionCoverage says so). Scorer
+      // VERSIONS are documented append-only org-side — the analyzeChanges arm
+      // carries that honesty — and when a GenAiPromptTemplate a scorer engines
+      // on ships in the same package, MANIFEST_TYPE_AFTER lists the template's
+      // <types> block first (the one documented order-sensitive pair).
+      AiTestingDefinition: { dir: "aiTestingDefinitions", ext: ".aiTestingDefinition" },
+      AiAgentScorerDefinition: {
+        dir: "aiAgentScorerDefinitions",
+        ext: ".aiAgentScorerDefinition"
+      },
+      BotTemplate: { dir: "botTemplates", ext: ".botTemplate" },
+      BotBlock: { dir: "botBlocks", ext: ".botBlock" },
+      // S34: Agent Script deploys as a DRAFT STAGE (reversing S30's read-only
+      // stance, which guarded against a real lie — pretending a deploy compiles.
+      // It never does, at any API version: a no-<target> deploy lands the script
+      // as a DRAFT in Agentforce Studio, documented and runtime-inert, and the
+      // D1 warning in analyzeChanges says exactly that on every approval page.
+      // Compiling/publishing stays human — Studio or Salesforce's Agentforce DX
+      // publish command; the undocumented publish endpoints are a permanent
+      // non-goal). Exactly two files, live-confirmed: <Name>.agent (PLAINTEXT
+      // Agent Script) + <Name>.bundle-meta.xml.
+      AiAuthoringBundle: {
+        dir: "aiAuthoringBundles",
+        ext: ".agent",
+        envelope: true,
+        envelopeMainSuffix: ".agent",
+        requiredSuffixes: [".bundle-meta.xml"]
+      },
+      // S36: permissions & UI-action types. CustomPermission pairs with a
+      // permission set's customPermissions block (coverage arm below).
+      CustomPermission: { dir: "customPermissions", ext: ".customPermission" },
+      // S36: permission set groups recalculate ASYNCHRONOUSLY after deploy
+      // (Status Updating → Updated — retrieves carry <status>, live-confirmed);
+      // the analyzeChanges arms say so on every approval page. Dir casing
+      // live-confirmed all-lowercase (S33 authproviders precedent held).
+      PermissionSetGroup: { dir: "permissionsetgroups", ext: ".permissionsetgroup" },
+      MutingPermissionSet: { dir: "mutingpermissionsets", ext: ".mutingpermissionset" },
+      // S36: quick actions. Object-scoped actions have DOTTED fullNames
+      // ("Account.New_X") that are NOT parent.child fragments — QuickAction is a
+      // plain top-level type (CustomMetadata precedent): NAME_RE admits the dot,
+      // fileSafeName keeps it literal, and the retrieve file is the literal
+      // "quickActions/Account.New_X.quickAction" (live-confirmed). Global
+      // actions are undotted. '*' retrieves BOTH shapes (live-confirmed).
+      QuickAction: { dir: "quickActions", ext: ".quickAction" },
+      // S36: Lightning web components. A bundle: <n>.js (main) + <n>.js-meta.xml
+      // (required — carries isExposed/targets) + optional .html/.css/.svg and
+      // subdirectories (secondary templates like templates/x.html are real,
+      // live-confirmed). JS-only service components are normal (no .html).
+      LightningComponentBundle: {
+        dir: "lwc",
+        ext: ".js",
+        envelope: true,
+        envelopeMainSuffix: ".js",
+        requiredSuffixes: [".js-meta.xml"]
+      },
+      // S41: Aura component bundles. FLAT directories (live-confirmed on a
+      // real partial-org retrieve, 2026-11-04: every file `<N>`-prefixed, no
+      // subfolders); exactly ONE primary per bundle (.cmp component, .app
+      // application, .evt event, .intf interface, .tokens tokens); the primary's
+      // own -meta.xml is required on deploy (pins apiVersion — Developer Console
+      // creates bundles at the org's CURRENT version otherwise) and tolerated
+      // absent on retrieve. Deploy names are namespace-free developer names; the
+      // index/read path also serves ns__Name bundles (read-only). The deploy
+      // REPLACES the whole bundle: a file the org has that the envelope omits is
+      // deleted (SDR supportsPartialDelete; the BUNDLE REPLACE arm says so).
+      AuraDefinitionBundle: {
+        dir: "aura",
+        ext: ".cmp",
+        envelope: true,
+        envelopeMainSuffix: [".cmp", ".app", ".evt", ".intf", ".tokens"],
+        requireMainMeta: true,
+        flat: true
+      }
+    };
+    XMLNS_META = "http://soap.sforce.com/2006/04/metadata";
+    CHILD_TYPES = {
+      CustomField: {
+        containerRoot: "CustomObject",
+        dir: "objects",
+        ext: ".object",
+        tag: "fields",
+        parentFromName: (n) => n.split(".")[0] ?? ""
+      },
+      ValidationRule: {
+        containerRoot: "CustomObject",
+        dir: "objects",
+        ext: ".object",
+        tag: "validationRules",
+        parentFromName: (n) => n.split(".")[0] ?? ""
+      },
+      CustomLabel: {
+        containerRoot: "CustomLabels",
+        dir: "labels",
+        ext: ".labels",
+        tag: "labels",
+        parentFromName: () => "CustomLabels"
+      },
+      ListView: {
+        containerRoot: "CustomObject",
+        dir: "objects",
+        ext: ".object",
+        tag: "listViews",
+        parentFromName: (n) => n.split(".")[0] ?? ""
+      },
+      RecordType: {
+        containerRoot: "CustomObject",
+        dir: "objects",
+        ext: ".object",
+        tag: "recordTypes",
+        parentFromName: (n) => n.split(".")[0] ?? ""
+      },
+      // S30: bot versions are children of the Bot document (dotted MyBot.v1 —
+      // the same fullName shape the Metadata API uses for standalone BotVersion
+      // deploys).
+      BotVersion: {
+        containerRoot: "Bot",
+        dir: "bots",
+        ext: ".bot",
+        tag: "botVersions",
+        parentFromName: (n) => n.split(".")[0] ?? ""
+      }
+    };
+    NAME_RE = /^[A-Za-z0-9_.\- ()'&]+$/;
+    FOLDER_SEGMENT_RE = /^[A-Za-z0-9_$]+$/;
+    BUNDLE_REL_SEGMENT_RE = /^[A-Za-z0-9_$][A-Za-z0-9_$.\-]*$/;
+    BUNDLE_MAX_FILES = 100;
+    BUNDLE_MAX_DEPTH = 8;
+    AURA_SECONDARIES = {
+      ".cmp": ["Controller.js", "Helper.js", "Renderer.js", ".css", ".design", ".svg", ".auradoc"],
+      ".app": ["Controller.js", "Helper.js", "Renderer.js", ".css", ".svg", ".auradoc"],
+      ".evt": [".auradoc"],
+      ".intf": [".auradoc"],
+      ".tokens": []
+    };
+    AURA_MAX_FILE_BYTES = 1e6;
+    AURA_DEFTYPE_FILES = {
+      APPLICATION: ".app",
+      COMPONENT: ".cmp",
+      EVENT: ".evt",
+      INTERFACE: ".intf",
+      TOKENS: ".tokens",
+      CONTROLLER: "Controller.js",
+      HELPER: "Helper.js",
+      RENDERER: "Renderer.js",
+      STYLE: ".css",
+      DESIGN: ".design",
+      SVG: ".svg",
+      DOCUMENTATION: ".auradoc"
+    };
+    XMLNS = "http://soap.sforce.com/2006/04/metadata";
+    MANIFEST_TYPE_AFTER = {
+      AiAgentScorerDefinition: ["GenAiPromptTemplate"]
+    };
+    SCORER_STATUS_RANK = { Draft: 0, Available: 1, Archived: 2 };
+  }
+});
+
+// src/deploy/stampprobe.ts
+function stampQueryFailedReason(reason) {
+  return `the stamp query failed: ${reason.slice(0, 160)}`;
+}
+function stampKey(type, apiName) {
+  return `${type}:${apiName}`;
+}
+function stampSourceFor(type) {
+  return STAMP_PROBES.get(type)?.source ?? "listMetadata";
+}
+function stampSourceLabel(source) {
+  switch (source) {
+    case "tooling:CustomField":
+      return "a Tooling query on CustomField";
+    case "tooling:ValidationRule":
+      return "a Tooling query on ValidationRule";
+    case "tooling:ExternalString":
+      return "a Tooling query on ExternalString";
+    case "data:ListView":
+      return "a query on ListView";
+    default:
+      return "listMetadata";
+  }
+}
+function stampAbsenceEvidence(source) {
+  if (source === void 0 || source === "listMetadata") {
+    return "listMetadata reports no such member";
+  }
+  return `the retrieve returned nothing for it and ${stampSourceLabel(source)} found no row`;
+}
+function planProbe(member) {
+  const spec = STAMP_PROBES.get(member.type);
+  if (!spec || !isValidComponentName(member.type, member.api_name)) {
+    return { reason: "name_not_probeable" };
+  }
+  let parent = null;
+  let child = member.api_name;
+  if (spec.parentColumn !== null) {
+    const dot = member.api_name.indexOf(".");
+    if (dot < 0) return { reason: "name_not_probeable" };
+    parent = member.api_name.slice(0, dot);
+    child = member.api_name.slice(dot + 1);
+    if (parent === "" || child === "" || child.includes(".") || !IDENT.test(parent)) {
+      return { reason: "name_not_probeable" };
+    }
+  }
+  let base = child;
+  if (member.type === "CustomField") {
+    if (!/__c$/i.test(child)) return { reason: "standard_field" };
+    base = child.slice(0, -3);
+  }
+  if (!IDENT.test(base)) return { reason: "name_not_probeable" };
+  const i = base.indexOf("__");
+  const namespace = i > 0 ? base.slice(0, i) : null;
+  const name = i > 0 ? base.slice(i + 2) : base;
+  if (!IDENT.test(name) || name.includes("__")) return { reason: "name_not_probeable" };
+  return { target: { type: member.type, api_name: member.api_name, parent, name, namespace } };
+}
+function isProbeable(member) {
+  return "target" in planProbe(member);
+}
+function lit(v) {
+  return v.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+function clauseFor(spec, target) {
+  const name = `${spec.nameColumn} = '${lit(target.name)}'`;
+  if (spec.parentColumn === null || target.parent === null) return name;
+  const parent = `${spec.parentColumn} = '${lit(target.parent)}'`;
+  return spec.parentFirst ? `(${parent} AND ${name})` : `(${name} AND ${parent})`;
+}
+function soqlFor(spec, clauses) {
+  return `SELECT Id, ${spec.nameColumn}, NamespacePrefix, LastModifiedDate, LastModifiedBy.Name FROM ${spec.sobject} WHERE ${clauses.join(" OR ")}`;
+}
+function planQueries(members) {
+  const open2 = [];
+  const unprobed = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const member of members) {
+    const spec = STAMP_PROBES.get(member.type);
+    if (!spec) continue;
+    const key2 = stampKey(member.type, member.api_name);
+    if (seen.has(key2)) continue;
+    seen.add(key2);
+    const planned = planProbe(member);
+    if ("reason" in planned) {
+      unprobed.push({ type: member.type, api_name: member.api_name, reason: planned.reason });
+      continue;
+    }
+    const target = planned.target;
+    const clause = clauseFor(spec, target);
+    const lowered = target.name.toLowerCase();
+    let placed = false;
+    for (const q of open2) {
+      if (q.plan.type !== member.type) continue;
+      if (q.plan.targets.length >= STAMP_QUERY_MAX_PAIRS) continue;
+      const nameOnAnotherParent = q.plan.targets.some(
+        (t) => t.name.toLowerCase() === lowered && t.parent !== target.parent
+      );
+      if (nameOnAnotherParent) continue;
+      const clauses = q.clauses.includes(clause) ? q.clauses : [...q.clauses, clause];
+      const soql = soqlFor(spec, clauses);
+      if (soql.length > STAMP_QUERY_MAX_CHARS) continue;
+      q.clauses = clauses;
+      q.plan.soql = soql;
+      q.plan.targets.push(target);
+      placed = true;
+      break;
+    }
+    if (placed) continue;
+    open2.push({
+      spec,
+      clauses: [clause],
+      plan: {
+        type: member.type,
+        source: spec.source,
+        api: spec.api,
+        soql: soqlFor(spec, [clause]),
+        targets: [target]
+      }
+    });
+  }
+  return { planned: open2, unprobed };
+}
+function normalizeStamp(raw) {
+  if (typeof raw !== "string") return null;
+  const m = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:?\d{2})$/.exec(raw);
+  if (!m) return null;
+  const fraction = `${m[2] ?? ""}000`.slice(0, 3);
+  const zone = m[3] ?? "Z";
+  const offset = zone === "Z" || zone.includes(":") ? zone : `${zone.slice(0, 3)}:${zone.slice(3)}`;
+  const ms = Date.parse(`${m[1]}.${fraction}${offset}`);
+  return Number.isNaN(ms) ? null : new Date(ms).toISOString();
+}
+function stampOf(row) {
+  const by = row.LastModifiedBy;
+  const name = by !== null && typeof by === "object" ? by.Name : null;
+  return {
+    last_modified_date: normalizeStamp(row.LastModifiedDate),
+    last_modified_by: typeof name === "string" && name !== "" ? name : null
+  };
+}
+function matchRows(plan, nameColumn, records) {
+  const stamps = /* @__PURE__ */ new Map();
+  const seen = /* @__PURE__ */ new Map();
+  const strangers = /* @__PURE__ */ new Set();
+  for (const row of records) {
+    if (row === null || typeof row !== "object") continue;
+    const rawName = row[nameColumn];
+    if (typeof rawName !== "string") continue;
+    const rowName = rawName.toLowerCase();
+    const named = plan.targets.filter((t) => t.name.toLowerCase() === rowName);
+    if (named.length === 0) continue;
+    const rowNs = typeof row.NamespacePrefix === "string" ? row.NamespacePrefix.toLowerCase() : "";
+    const own = named.filter((t) => (t.namespace ?? "").toLowerCase() === rowNs);
+    if (own.length === 0) {
+      strangers.add(rowName);
+      continue;
+    }
+    for (const t of own) {
+      const key2 = stampKey(t.type, t.api_name);
+      const count = (seen.get(key2) ?? 0) + 1;
+      seen.set(key2, count);
+      stamps.set(
+        key2,
+        count === 1 ? stampOf(row) : { last_modified_date: null, last_modified_by: null }
+      );
+    }
+  }
+  const unmatched = [];
+  for (const t of plan.targets) {
+    const key2 = stampKey(t.type, t.api_name);
+    if (strangers.has(t.name.toLowerCase()) && !stamps.has(key2)) unmatched.push(key2);
+  }
+  return { stamps, unmatched };
+}
+function errorText(err2) {
+  const text2 = err2 instanceof Error ? err2.message || err2.name : String(err2);
+  return text2.slice(0, 300);
+}
+function timeoutReason(timeoutMs) {
+  const span = timeoutMs >= 1e3 ? `${Math.round(timeoutMs / 1e3)} s` : `${timeoutMs} ms`;
+  return `no answer within ${span}`;
+}
+async function readMemberStamps(query, members, opts) {
+  const result = {
+    rows: /* @__PURE__ */ new Map(),
+    failed: /* @__PURE__ */ new Map(),
+    unprobed: /* @__PURE__ */ new Map(),
+    unmatched: /* @__PURE__ */ new Set()
+  };
+  const { planned, unprobed } = planQueries(members);
+  for (const u of unprobed) result.unprobed.set(stampKey(u.type, u.api_name), u.reason);
+  if (planned.length === 0) return result;
+  if (opts?.signal?.aborted) {
+    for (const q of planned) result.failed.set(q.plan.type, "cancelled");
+    return result;
+  }
+  const ctl = new AbortController();
+  let abortReason = "cancelled";
+  let settleAborted = () => {
+  };
+  const aborted2 = new Promise((resolve) => {
+    settleAborted = resolve;
+  });
+  const abort = (reason) => {
+    if (ctl.signal.aborted) return;
+    abortReason = reason;
+    ctl.abort();
+    settleAborted(reason);
+  };
+  const onCallerAbort = () => abort("cancelled");
+  opts?.signal?.addEventListener("abort", onCallerAbort, { once: true });
+  const timeoutMs = opts?.timeoutMs;
+  const timer = timeoutMs !== void 0 && Number.isFinite(timeoutMs) ? setTimeout(() => abort(timeoutReason(timeoutMs)), Math.max(0, timeoutMs)) : void 0;
+  const run = async (plan) => {
+    try {
+      const records = await query(plan.api, plan.soql, ctl.signal);
+      if (!Array.isArray(records)) return { reason: "the query returned no record list" };
+      return { records };
+    } catch (err2) {
+      return { reason: ctl.signal.aborted ? abortReason : errorText(err2) };
+    }
+  };
+  let answers;
+  try {
+    answers = await Promise.all(
+      planned.map(async (q) => ({
+        q,
+        outcome: await Promise.race([
+          run(q.plan),
+          aborted2.then((reason) => ({ reason }))
+        ])
+      }))
+    );
+  } finally {
+    if (timer !== void 0) clearTimeout(timer);
+    opts?.signal?.removeEventListener("abort", onCallerAbort);
+  }
+  const matched = [];
+  for (const { q, outcome } of answers) {
+    const type = q.plan.type;
+    if (result.failed.has(type)) continue;
+    if ("reason" in outcome) {
+      result.failed.set(type, outcome.reason);
+      continue;
+    }
+    try {
+      matched.push({ type, ...matchRows(q.plan, q.spec.nameColumn, outcome.records) });
+    } catch (err2) {
+      result.failed.set(type, errorText(err2));
+    }
+  }
+  for (const m of matched) {
+    if (result.failed.has(m.type)) continue;
+    for (const [key2, stamp] of m.stamps) result.rows.set(key2, stamp);
+    for (const key2 of m.unmatched) result.unmatched.add(key2);
+  }
+  return result;
+}
+var STAMP_SCHEME, STAMP_QUERY_MAX_PAIRS, STAMP_QUERY_MAX_CHARS, STAMP_QUERY_MAX_ROWS, STAMP_PROBE_TIMEOUT_MS, UNCHECKED_STAMP_QUERY_FAILED, UNCHECKED_STAMP_NOT_PROBEABLE, UNCHECKED_STAMP_SOURCE_MISMATCH, UNCHECKED_STAMP_ROW_UNMATCHED, STAMP_NO_ROW_REASON, STAMP_NOT_QUERIED_REASON, STAMP_PROBES, IDENT;
+var init_stampprobe = __esm({
+  "src/deploy/stampprobe.ts"() {
+    "use strict";
+    init_package();
+    STAMP_SCHEME = 2;
+    STAMP_QUERY_MAX_PAIRS = 20;
+    STAMP_QUERY_MAX_CHARS = 3500;
+    STAMP_QUERY_MAX_ROWS = 200;
+    STAMP_PROBE_TIMEOUT_MS = 3e4;
+    UNCHECKED_STAMP_QUERY_FAILED = "stamp_query_failed_at_execute";
+    UNCHECKED_STAMP_NOT_PROBEABLE = "stamp_not_probeable";
+    UNCHECKED_STAMP_SOURCE_MISMATCH = "stamp_source_mismatch";
+    UNCHECKED_STAMP_ROW_UNMATCHED = "stamp_row_unmatched";
+    STAMP_NO_ROW_REASON = "the stamp query returned no usable stamp for them";
+    STAMP_NOT_QUERIED_REASON = "Contrail has no stamp query for them";
+    STAMP_PROBES = /* @__PURE__ */ new Map([
+      [
+        "CustomField",
+        {
+          source: "tooling:CustomField",
+          api: "tooling",
+          sobject: "CustomField",
+          nameColumn: "DeveloperName",
+          parentColumn: "EntityDefinition.QualifiedApiName",
+          parentFirst: false
+        }
+      ],
+      [
+        "ValidationRule",
+        {
+          source: "tooling:ValidationRule",
+          api: "tooling",
+          sobject: "ValidationRule",
+          nameColumn: "ValidationName",
+          parentColumn: "EntityDefinition.QualifiedApiName",
+          parentFirst: false
+        }
+      ],
+      [
+        "CustomLabel",
+        {
+          source: "tooling:ExternalString",
+          api: "tooling",
+          sobject: "ExternalString",
+          nameColumn: "Name",
+          parentColumn: null,
+          parentFirst: false
+        }
+      ],
+      [
+        "ListView",
+        {
+          source: "data:ListView",
+          api: "data",
+          sobject: "ListView",
+          nameColumn: "DeveloperName",
+          parentColumn: "SobjectType",
+          parentFirst: true
+        }
+      ]
+    ]);
+    IDENT = /^[A-Za-z][A-Za-z0-9_]*$/;
+  }
+});
+
+// src/deploy/preimage.ts
 import crypto2 from "node:crypto";
+import fs10 from "node:fs";
+import path5 from "node:path";
+function preImageKey(type, apiName) {
+  return `${type}:${apiName}`;
+}
+function preImageRetrieveMemberFor(type, apiName) {
+  if (stampSourceFor(type) !== "listMetadata" && isProbeable({ type, api_name: apiName })) {
+    return { type, member: apiName };
+  }
+  return retrieveMemberFor(type, apiName);
+}
+function buildPreImageRetrieveMembers(members) {
+  const out = {};
+  const add = (target) => {
+    const list = out[target.type] ?? [];
+    if (!list.includes(target.member)) list.push(target.member);
+    out[target.type] = list;
+  };
+  const childTyped = [];
+  for (const m of members) {
+    const container = retrieveMemberFor(m.type, m.api_name);
+    if (!container) continue;
+    const own = preImageRetrieveMemberFor(m.type, m.api_name);
+    if (own && (own.type !== container.type || own.member !== container.member)) {
+      childTyped.push({ own, container });
+    } else {
+      add(container);
+    }
+  }
+  for (const { own, container } of childTyped) {
+    if (out[container.type]?.includes(container.member)) continue;
+    add(own);
+  }
+  return out;
+}
+function preImageListQueryFor(member) {
+  const slash = member.api_name.indexOf("/");
+  if (FOLDERED_TYPES[member.type]) {
+    if (slash <= 0) return null;
+    return { type: member.type, folder: member.api_name.slice(0, slash) };
+  }
+  if (slash >= 0) return null;
+  return { type: member.type };
+}
+function buildPreImageListQueries(members) {
+  const types = [];
+  const folderQueries = [];
+  const seenFolders = /* @__PURE__ */ new Set();
+  for (const m of members) {
+    const q = preImageListQueryFor(m);
+    if (!q) continue;
+    if (q.folder !== void 0) {
+      const key2 = `${q.type}\0${q.folder}`;
+      if (seenFolders.has(key2)) continue;
+      seenFolders.add(key2);
+      folderQueries.push(q);
+    } else if (!types.includes(q.type)) {
+      types.push(q.type);
+    }
+  }
+  return { types, folderQueries };
+}
+function listedPropFor(props, type, apiName) {
+  const want = apiName.toLowerCase();
+  return props.find((p) => p.type === type && p.fullName.toLowerCase() === want);
+}
+function summarizePreImage(image) {
+  const out = {
+    present: image.present,
+    source: image.source,
+    stamp_source: image.stamp_source,
+    last_modified_date: image.last_modified_date,
+    last_modified_by: image.last_modified_by,
+    comparable: image.comparable,
+    restorable: image.restorable
+  };
+  if (image.sha256 !== void 0) out.sha256 = image.sha256;
+  return out;
+}
+function bundleEnvelopeJson(files) {
+  const sorted = {};
+  for (const rel of [...files.keys()].sort()) sorted[rel] = files.get(rel);
+  return JSON.stringify({ contrail_bundle: 1, files: sorted }, null, 2);
+}
+function retrieveMessageTexts(messages) {
+  const out = [];
+  for (const m of messages) {
+    if (typeof m?.problem !== "string") continue;
+    const problem = m.problem.slice(0, RETRIEVE_MESSAGE_MAX_CHARS);
+    if (problem === "" || out.includes(problem)) continue;
+    out.push(problem);
+    if (out.length >= RETRIEVE_MESSAGES_MAX) break;
+  }
+  return out;
+}
+async function retrievePreImages(soap, members, opts) {
+  const started_at = opts.startedAt;
+  const manifest = buildPreImageRetrieveMembers(members);
+  const listed = members.filter((m) => stampSourceFor(m.type) === "listMetadata");
+  const probed = members.filter((m) => stampSourceFor(m.type) !== "listMetadata");
+  const listingP = listDates(soap, listed);
+  const probeP = readMemberStamps(opts.queryStamps, probed, {
+    signal: opts.signal,
+    timeoutMs: Math.min(opts.timeoutMs, STAMP_PROBE_TIMEOUT_MS)
+  });
+  const retrieveP = Object.keys(manifest).length === 0 ? Promise.resolve({ ok: true, files: /* @__PURE__ */ new Map(), messages: [] }) : runRetrieve(soap, manifest, opts);
+  const [retrieved, listing, probe] = await Promise.all([retrieveP, listingP, probeP]);
+  const at = (/* @__PURE__ */ new Date()).toISOString();
+  const retrieve_messages = retrieveMessageTexts(retrieved.messages);
+  if (!retrieved.ok) {
+    const unavailable2 = {
+      status: "unavailable",
+      started_at,
+      at,
+      reason: retrieved.reason
+    };
+    if (retrieve_messages.length > 0) unavailable2.retrieve_messages = retrieve_messages;
+    return unavailable2;
+  }
+  const zipEntries = [...retrieved.files.keys()];
+  const images = /* @__PURE__ */ new Map();
+  for (const m of members) {
+    const key2 = preImageKey(m.type, m.api_name);
+    if (images.has(key2)) continue;
+    images.set(key2, resolveMember(m, retrieved.files, zipEntries, listing, probe));
+  }
+  const result = {
+    status: "ok",
+    started_at,
+    at,
+    images,
+    dates_unavailable_types: [.../* @__PURE__ */ new Set([...listing.unsupported, ...probe.failed.keys()])].sort(),
+    probe_failures: Object.fromEntries(probe.failed),
+    probe_unmatched: [...probe.unmatched].sort(),
+    retrieve_messages
+  };
+  if (listing.failure !== void 0) result.dates_unavailable = listing.failure;
+  return result;
+}
+async function retrieveNamedMembers(soap, manifest, opts) {
+  const failed = (reason, messages = []) => ({
+    ok: false,
+    reason,
+    messages
+  });
+  if (opts.signal?.aborted) return failed("cancelled");
+  const label = opts.label ?? "retrieving live pre-images";
+  try {
+    const retrieveId = await soap.retrieve(manifest);
+    const deadline = Date.now() + opts.timeoutMs;
+    let poll = 0;
+    for (; ; ) {
+      if (opts.signal?.aborted) return failed("cancelled");
+      const status = await soap.checkRetrieveStatus(retrieveId, true);
+      if (status.done) {
+        const messages = status.messages ?? [];
+        if (!status.success || !status.zipFile) {
+          return failed(`retrieve_failed:${status.errorMessage ?? status.status}`, messages);
+        }
+        return {
+          ok: true,
+          zip: status.zipFile,
+          fileProperties: status.fileProperties,
+          messages
+        };
+      }
+      if (Date.now() > deadline) return failed("timeout");
+      poll += 1;
+      opts.onProgress?.(`${label} (poll ${poll}, status ${status.status})`);
+      opts.onPoll?.();
+      if (opts.signal?.aborted) return failed("cancelled");
+      await delay2(opts.pollIntervalMs, opts.signal);
+    }
+  } catch (err2) {
+    return failed(`retrieve_failed:${errorMessage(err2)}`);
+  }
+}
+async function runRetrieve(soap, manifest, opts) {
+  const retrieved = await retrieveNamedMembers(soap, manifest, opts);
+  if (!retrieved.ok) return retrieved;
+  try {
+    return { ok: true, files: opts.extractZip(retrieved.zip), messages: retrieved.messages };
+  } catch (err2) {
+    return {
+      ok: false,
+      reason: `retrieve_failed:${errorMessage(err2)}`,
+      messages: retrieved.messages
+    };
+  }
+}
+async function listDates(soap, members) {
+  const { types, folderQueries } = buildPreImageListQueries(members);
+  const unsupported = /* @__PURE__ */ new Set();
+  try {
+    const none = { props: [], unsupportedTypes: [] };
+    const [flat, foldered] = await Promise.all([
+      types.length > 0 ? soap.listMetadataDetailed(types) : Promise.resolve(none),
+      folderQueries.length > 0 ? soap.listMetadataQueries(folderQueries) : Promise.resolve(none)
+    ]);
+    for (const t of [...flat.unsupportedTypes, ...foldered.unsupportedTypes]) unsupported.add(t);
+    return { props: [...flat.props, ...foldered.props], unsupported };
+  } catch (err2) {
+    return { props: null, unsupported, failure: errorMessage(err2) };
+  }
+}
+function resolveMember(m, files, zipEntries, listing, probe) {
+  const source = stampSourceFor(m.type);
+  if (source !== "listMetadata") return resolveProbedMember(m, source, files, zipEntries, probe);
+  const listed = listing.props ? listedPropFor(listing.props, m.type, m.api_name) : void 0;
+  const enumerable = listing.props !== null && !listing.unsupported.has(m.type) && preImageListQueryFor(m) !== null;
+  const dates = {
+    last_modified_date: listed?.lastModifiedDate ? listed.lastModifiedDate : null,
+    last_modified_by: listed?.lastModifiedByName ? listed.lastModifiedByName : null
+  };
+  const entry = retrieveMemberFor(m.type, m.api_name) === null ? null : deployZipEntryPath(m.type, m.api_name, { zipEntries });
+  if (!entry) {
+    return {
+      present: enumerable ? listed !== void 0 : null,
+      source: "list",
+      stamp_source: "listMetadata",
+      ...dates,
+      comparable: false,
+      restorable: false
+    };
+  }
+  const captured = captureFromZip(entry, files);
+  const present = captured !== null || listed !== void 0;
+  if (captured === null) {
+    return {
+      present,
+      source: "retrieve",
+      stamp_source: "listMetadata",
+      ...dates,
+      comparable: false,
+      restorable: false
+    };
+  }
+  const usable = m.type !== "Profile";
+  return {
+    present: true,
+    source: "retrieve",
+    stamp_source: "listMetadata",
+    ...captured,
+    ...dates,
+    comparable: usable,
+    restorable: usable
+  };
+}
+function resolveProbedMember(m, source, files, zipEntries, probe) {
+  const row = probe.rows.get(stampKey(m.type, m.api_name));
+  const dates = {
+    last_modified_date: row?.last_modified_date ?? null,
+    last_modified_by: row?.last_modified_by ?? null
+  };
+  if (row === void 0 && retrieveMemberFor(m.type, m.api_name) === null) {
+    return {
+      present: null,
+      source: "retrieve",
+      stamp_source: source,
+      ...dates,
+      comparable: false,
+      restorable: false
+    };
+  }
+  const entry = deployZipEntryPath(m.type, m.api_name, { zipEntries });
+  const captured = entry ? captureFromZip(entry, files) : null;
+  if (captured === null) {
+    return {
+      present: row !== void 0,
+      source: "retrieve",
+      stamp_source: source,
+      ...dates,
+      comparable: false,
+      restorable: false
+    };
+  }
+  return {
+    present: true,
+    source: "retrieve",
+    stamp_source: source,
+    ...captured,
+    ...dates,
+    comparable: true,
+    restorable: true
+  };
+}
+function captureFromZip(entry, files) {
+  if (entry.child) {
+    const parent = files.get(entry.path);
+    if (!parent) return null;
+    const block = findChildBlock(text(parent), entry.childTag, entry.childName);
+    if (block === null) return null;
+    return { content: block, sha256: sha2562(block) };
+  }
+  if (entry.bundleDir) {
+    const bundle = /* @__PURE__ */ new Map();
+    for (const [name, bytes] of files) {
+      if (name.startsWith(entry.bundleDir) && name.length > entry.bundleDir.length) {
+        bundle.set(name.slice(entry.bundleDir.length), text(bytes));
+      }
+    }
+    if (bundle.size === 0) return null;
+    return { files: bundle, sha256: sha2562(bundleEnvelopeJson(bundle)) };
+  }
+  const main2 = files.get(entry.path);
+  if (!main2) return null;
+  const content = text(main2);
+  const out = { content, sha256: sha2562(content) };
+  const meta = files.get(`${entry.path}-meta.xml`);
+  if (meta) out.files = /* @__PURE__ */ new Map([[`${entry.path}-meta.xml`, text(meta)]]);
+  return out;
+}
+function retrieveMessagesNote(messages) {
+  const n = messages.length;
+  if (n === 0) return void 0;
+  const shown = messages.slice(0, 3).map((m) => m.slice(0, 200)).join(" | ");
+  const more = n > 3 ? ` (+${n - 3} more)` : "";
+  return `The org's retrieve returned ${n} message(s) \u2014 reported as sent; Contrail does not decide what exists from them: ${shown}${more}`;
+}
+function text(bytes) {
+  return Buffer.from(bytes).toString("utf8");
+}
+function sha2562(content) {
+  return crypto2.createHash("sha256").update(content, "utf8").digest("hex");
+}
+function errorMessage(err2) {
+  return String(err2 instanceof Error ? err2.message : err2);
+}
+function delay2(ms, signal) {
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    timer.unref?.();
+    signal?.addEventListener("abort", done, { once: true });
+  });
+}
+function revertDirFor(stagingDir2, requestId) {
+  if (!/^[A-Za-z0-9-]+$/.test(requestId)) {
+    throw new ContrailError(`invalid request id "${requestId}"`, "bad_request_id");
+  }
+  return path5.join(stagingDir2, "_reverts", requestId);
+}
+function writeRevertPreImages(dir, entries) {
+  const result = {
+    components: [],
+    not_restorable: [],
+    absent: [],
+    covered: []
+  };
+  const root = path5.resolve(dir);
+  fs10.mkdirSync(root, { recursive: true });
+  const rootReal = fs10.realpathSync(root);
+  const written = /* @__PURE__ */ new Set();
+  const unsafe = (rel) => new ContrailError(`unsafe revert path: ${rel}`, "unsafe_zip_entry");
+  const write = (rel, body) => {
+    const target = path5.resolve(root, rel);
+    if (target !== root && !target.startsWith(root + path5.sep)) throw unsafe(rel);
+    if (written.has(target)) return target;
+    let cur = root;
+    for (const seg of path5.relative(root, path5.dirname(target)).split(path5.sep)) {
+      if (!seg) continue;
+      cur = path5.join(cur, seg);
+      try {
+        fs10.mkdirSync(cur);
+      } catch (err2) {
+        if (err2.code !== "EEXIST") throw err2;
+        const stat = fs10.lstatSync(cur);
+        if (stat.isSymbolicLink() || !stat.isDirectory()) throw unsafe(rel);
+      }
+    }
+    const parentReal = fs10.realpathSync(path5.dirname(target));
+    if (parentReal !== rootReal && !parentReal.startsWith(rootReal + path5.sep)) {
+      throw unsafe(rel);
+    }
+    fs10.writeFileSync(target, body, { encoding: "utf8", flag: "wx" });
+    written.add(target);
+    return target;
+  };
+  const seen = /* @__PURE__ */ new Set();
+  const unique = entries.filter((e) => {
+    const key2 = preImageKey(e.type, e.api_name);
+    if (seen.has(key2)) return false;
+    seen.add(key2);
+    return true;
+  });
+  const wholeDocuments = /* @__PURE__ */ new Map();
+  for (const { type, api_name, image } of unique) {
+    if (image.present !== true || !image.restorable) continue;
+    const entry = deployZipEntryPath(type, api_name);
+    if (!entry || entry.child || entry.bundleDir) continue;
+    const target = retrieveMemberFor(type, api_name);
+    if (target) wholeDocuments.set(`${target.type}:${target.member}`, { type, api_name });
+  }
+  for (const { type, api_name, image } of unique) {
+    const member = { type, api_name };
+    if (image.present === false) {
+      result.absent.push(member);
+      continue;
+    }
+    if (image.present === null) {
+      const unplaced = image.stamp_source !== "listMetadata" || preImageListQueryFor(member) === null;
+      result.not_restorable.push({
+        ...member,
+        reason: unplaced ? NOT_RESTORABLE_UNPLACED : NOT_RESTORABLE_UNENUMERABLE
+      });
+      continue;
+    }
+    if (!image.restorable) {
+      const reason = type === "Profile" ? NOT_RESTORABLE_PROFILE : image.source === "list" ? NOT_RESTORABLE_LIST_ONLY : NOT_RESTORABLE_NO_BYTES;
+      result.not_restorable.push({ ...member, reason });
+      continue;
+    }
+    const entry = deployZipEntryPath(type, api_name);
+    if (!entry) {
+      result.not_restorable.push({ ...member, reason: NOT_RESTORABLE_LIST_ONLY });
+      continue;
+    }
+    let contentFile;
+    if (entry.child) {
+      const target = retrieveMemberFor(type, api_name);
+      const container = target ? wholeDocuments.get(`${target.type}:${target.member}`) : void 0;
+      if (container) {
+        result.covered.push({ ...member, container });
+        continue;
+      }
+      contentFile = write(`children/${type}/${api_name}.xml`, image.content ?? "");
+    } else if (entry.bundleDir && image.files) {
+      contentFile = write(
+        `bundles/${type}/${fileSafePathSegment(api_name)}.contrail-bundle.json`,
+        bundleEnvelopeJson(image.files)
+      );
+    } else {
+      contentFile = write(entry.path, image.content ?? "");
+      for (const [rel, body] of image.files ?? []) write(rel, body);
+    }
+    result.components.push({ ...member, content_file: contentFile });
+  }
+  return result;
+}
+function fileSafePathSegment(name) {
+  return name.replace(
+    /[^A-Za-z0-9 _.\-$]/g,
+    (ch) => Array.from(new TextEncoder().encode(ch)).map((b) => "%" + b.toString(16).toUpperCase().padStart(2, "0")).join("")
+  );
+}
+function finalizeRevertPackage(dir, plan) {
+  fs10.mkdirSync(dir, { recursive: true });
+  const plan_path = path5.join(dir, "revert-plan.json");
+  const readme_path = path5.join(dir, "README.txt");
+  const readme = revertReadmeText(plan);
+  fs10.writeFileSync(plan_path, JSON.stringify(plan, null, 2) + "\n", {
+    encoding: "utf8",
+    flag: "wx"
+  });
+  try {
+    fs10.writeFileSync(readme_path, readme + "\n", { encoding: "utf8", flag: "wx" });
+  } catch (err2) {
+    try {
+      fs10.rmSync(plan_path, { force: true });
+    } catch {
+    }
+    throw err2;
+  }
+  return { plan_path, readme_path, readme };
+}
+function reasonList(items) {
+  return items.map((i) => `${i.type} ${i.api_name} \u2014 ${i.reason}`).join(", ");
+}
+function revertReadmeText(plan) {
+  const check2 = plan.target_check;
+  const passed = check2 !== null && check2.status === "ok" && check2.checked.length > 0 ? check2 : null;
+  const considered = passed ? passed.checked.length + passed.unchecked.length : 0;
+  const restores = plan.components.length;
+  const deletes = plan.destructive.length;
+  const stampChecked = passed ? passed.checked.filter((c) => c.absent !== true).length : 0;
+  const absentChecked = passed ? passed.checked.length - stampChecked : 0;
+  const when = plan.executed_at === null ? "Before submitting this deploy (whose outcome Contrail lost track of \u2014 see the note in revert-plan.json)" : `Before executing at ${plan.executed_at}`;
+  const describes = restores > 0 ? "these files describe" : "revert-plan.json describes";
+  const compared = passed ? absentChecked === 0 ? `${when}, Contrail compared the org's last-modified stamps against that retrieve for ${stampChecked} of ${considered} members and found them unchanged; it did not re-read their contents, and a matching stamp is evidence, not a byte comparison.` : stampChecked === 0 ? `${when}, Contrail re-checked ${absentChecked} member(s) that were absent from the org at validate \u2014 of ${considered} member(s) it considered \u2014 and the execute-time read of their stamp source again returned nothing for them; no last-modified stamp was compared.` : `${when}, Contrail compared the org's last-modified stamps against that retrieve for ${stampChecked} of ${considered} members and found them unchanged, and re-checked ${absentChecked} member(s) that were absent from the org at validate, and the execute-time read of their stamp source again returned nothing for them; it did not re-read any contents, and a matching stamp is evidence, not a byte comparison.` : check2 !== null && check2.status === "unavailable" ? `${when}, Contrail could not re-read the org to compare last-modified stamps (${check2.reason}); the deploy was submitted unverified, and ${describes} the org as of the validate-time retrieve only.` : `${when}, Contrail did not re-check the org's last-modified stamps; ${describes} the org as of the validate-time retrieve only.`;
+  let text2;
+  if (restores > 0) {
+    text2 = `A revert re-deploys what Contrail retrieved from "${plan.connection}" at ${plan.retrieved_at}, when this deploy was validated. ${compared} It does not undo data changes, automation that ran, permission effects, or changes made since to components outside this package. For the components it restores it is a wholesale replace: re-deploying these files OVERWRITES anything changed in them since that retrieve, another user's edits included \u2014 the revert's own validate_deploy page diffs it against the org as it is then (or against the local snapshot when the org cannot be re-read). Re-deploying a Flow whose latest version is active creates a NEW version; an inactive latest version is overwritten in place. Deleting the components this deploy added is destructive; revert-plan.json lists them under "destructive". Contrail never deploys a revert on its own: pass each component's content_file (and the destructive list) to validate_deploy, and a human approves it like any deploy. DML is out of scope \u2014 the persisted before-values and created_ids make a manual revert possible.`;
+  } else if (deletes > 0) {
+    text2 = `This revert package holds no files to re-deploy: when Contrail retrieved from "${plan.connection}" at ${plan.retrieved_at}, while this deploy was validated, it captured nothing a revert could restore. What this package can revert is the ${deletes} component(s) this deploy added${plan.outcome === "unknown" ? ", if it committed" : ""}: a revert deletes them \u2014 revert-plan.json lists them under "destructive". ${compared} A revert does not undo data changes, automation that ran, permission effects, or changes made since to components outside this package. Deleting the components this deploy added is destructive. Contrail never deploys a revert on its own: pass the destructive list to validate_deploy, and a human approves it like any deploy. DML is out of scope \u2014 the persisted before-values and created_ids make a manual revert possible.`;
+  } else {
+    text2 = `This revert package holds no files to re-deploy and lists nothing to delete: when Contrail retrieved from "${plan.connection}" at ${plan.retrieved_at}, while this deploy was validated, it captured nothing a revert could restore. ${compared} A revert does not undo data changes, automation that ran, permission effects, or changes made since to components outside this package. Contrail never deploys a revert on its own. DML is out of scope \u2014 the persisted before-values and created_ids make a manual revert possible.`;
+  }
+  if (passed && passed.unchecked.length > 0) {
+    text2 += ` ${passed.unchecked.length} member(s) could not be re-checked (${reasonList(passed.unchecked)}); their pre-image is as of ${plan.retrieved_at} only.`;
+  }
+  if (plan.not_restorable.length > 0) {
+    text2 += ` ${plan.not_restorable.length} member(s) cannot be restored from this package (${reasonList(plan.not_restorable)}) \u2014 if this deploy changed or deleted them, reverting that needs another source.`;
+  }
+  const covered = plan.covered ?? [];
+  if (covered.length > 0) {
+    const children = covered.map((c) => `${c.type} ${c.api_name}`).join(", ");
+    const containers = [
+      ...new Set(covered.map((c) => `${c.container.type} ${c.container.api_name}`))
+    ].join(", ");
+    text2 += ` ${covered.length} child member(s) (${children}) are restored by their container's document (${containers}), whose retrieved bytes include them; they have no file of their own because validate_deploy refuses a container document and its own children in one package.`;
+  }
+  if (plan.outcome === "unknown" && plan.note) text2 += `
+
+${plan.note}`;
+  return text2;
+}
+function hhmm(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function targetMovedRefusalText(kind, details) {
+  const head = "TARGET MOVED \u2014 not executed, and this code is now void. ";
+  if (kind === "deploy") {
+    const d = details;
+    const clauses = d.moved.map((m) => deployMovedClause(m, d.degrade));
+    const degrade = d.degrade;
+    const inMargin = degrade !== void 0 && d.moved.some((m) => withinMargin(m, degrade));
+    const { subject, verb } = movedSubject(d.moved);
+    return head + `${subject} (${d.at}) ${verb} members changed in "${d.alias}" since` + (inMargin ? ", or within 5 seconds before," : "") + ` this package was validated: ${clauses.join("; ")}. The approved diff no longer describes what this deploy would overwrite. Re-run validate_deploy to see the current state and get a fresh code. This check is best-effort: Contrail re-reads the org immediately before claiming the code and compares last-modified stamps, not bytes; a change landing after that read \u2014 while the deploy is submitted and processed by the org \u2014 is not caught.`;
+  }
+  if (kind === "dml") {
+    const d = details;
+    const clauses = d.changed.map(
+      (c) => `${c.object} ${c.id} ${c.field} is now ${c.now} (the approval showed ${c.before})`
+    );
+    d.missing.forEach((m, i) => {
+      let clause = `${m.object} ${m.id} was returned by the preview query at propose but not at ${d.at}`;
+      if (i === d.missing.length - 1) {
+        clause += (d.missing.length > 1 ? " \u2014 each" : " \u2014 it") + ` was deleted, or is no longer visible to this connection's user (a converted Lead also drops out); those cases look identical from here`;
+      }
+      clauses.push(clause);
+    });
+    return head + `Re-running the preview query at ${d.at} shows the records you approved have changed since dml_propose: ${clauses.join("; ")}. Re-run dml_propose to see the current values and get a fresh code.`;
+  }
+  const a = details;
+  return head + `SELECT Status at ${a.at} reports BotVersion ${a.version} of ${a.agent} is ${a.now}; the approval was for a change from ${a.from}. Re-run agent_activation_propose.`;
+}
+function movedSubject(moved) {
+  const labels = [];
+  for (const m of moved) {
+    const label = stampSourceLabel(m.source);
+    if (!labels.includes(label)) labels.push(label);
+  }
+  const listing = stampSourceLabel(void 0);
+  const last = labels.pop() ?? listing;
+  const joined = labels.length > 0 ? `${labels.join(", ")} and ${last}` : last;
+  return {
+    subject: joined.startsWith(listing) ? joined : joined.charAt(0).toUpperCase() + joined.slice(1),
+    verb: labels.length > 0 ? "report" : "reports"
+  };
+}
+function deployMovedClause(m, degrade) {
+  const who = m.last_modified_by ?? "an unknown user";
+  const when = m.last_modified_date ?? "an unknown time";
+  const name = `${m.type} ${m.api_name}`;
+  const reporter = stampSourceLabel(m.source);
+  const baseline = m.frozen_date !== null ? `the approval was based on the version last modified at ${m.frozen_date}` : "the approval was based on the version then in the org";
+  switch (m.state ?? "changed") {
+    case "gone":
+      return `${name} \u2014 ${reporter} no longer reports it (${baseline})`;
+    case "created":
+      return `${name} \u2014 ${reporter} now reports it, last modified by ${who} at ${when} (the approval was based on the org reporting no such member)`;
+    default:
+      if (degrade && !withinMargin(m, degrade)) {
+        return `${name} \u2014 last modified by ${who} at ${when}, after this package was validated at ${degrade.org_clock_created_date} (no live baseline was captured at validate: ${degrade.live_check_reason}; Contrail compared against the org-side validation time, minus a 5-second ordering margin)`;
+      }
+      if (degrade) {
+        return `${name} \u2014 last modified by ${who} at ${when}, within 5 seconds before this package's org-side validation started at ${degrade.org_clock_created_date}, too close to rule out that the approved diff missed it (no live baseline was captured at validate: ${degrade.live_check_reason}; Contrail compared against the org-side validation time, minus a 5-second ordering margin)`;
+      }
+      return `${name} \u2014 last modified by ${who} at ${when} (${baseline})`;
+  }
+}
+function withinMargin(m, degrade) {
+  if ((m.state ?? "changed") !== "changed") return false;
+  const stamp = Date.parse(m.last_modified_date ?? "");
+  const created = Date.parse(degrade.org_clock_created_date);
+  return Number.isNaN(stamp) || Number.isNaN(created) || stamp < created;
+}
+var RETRIEVE_MESSAGES_MAX, RETRIEVE_MESSAGE_MAX_CHARS, NOT_RESTORABLE_PROFILE, NOT_RESTORABLE_LIST_ONLY, NOT_RESTORABLE_UNENUMERABLE, NOT_RESTORABLE_UNPLACED, NOT_RESTORABLE_NO_BYTES;
+var init_preimage = __esm({
+  "src/deploy/preimage.ts"() {
+    "use strict";
+    init_errors4();
+    init_metadataSoap();
+    init_indexer();
+    init_package();
+    init_stampprobe();
+    RETRIEVE_MESSAGES_MAX = 20;
+    RETRIEVE_MESSAGE_MAX_CHARS = 300;
+    NOT_RESTORABLE_PROFILE = "Profile \u2014 a single-member retrieve is package-relative, so the captured bytes are not a restorable image";
+    NOT_RESTORABLE_LIST_ONLY = "not a type Contrail can read or author \u2014 only the org listing was consulted, no bytes were captured";
+    NOT_RESTORABLE_UNENUMERABLE = "the org could not enumerate this type, so Contrail cannot say whether the member existed";
+    NOT_RESTORABLE_UNPLACED = "Contrail could not place this name in any read of the org (no retrieve, listing or stamp query named it), so it cannot say whether the member existed";
+    NOT_RESTORABLE_NO_BYTES = "the org reports this member, but the retrieve returned no bytes for it";
+  }
+});
+
+// src/snapshot/members.ts
+import crypto3 from "node:crypto";
+function memberKey(type, apiName) {
+  return `${type}:${apiName.toLowerCase()}`;
+}
+function memberJobId(members) {
+  const keys = [...new Set(members.map((m) => memberKey(m.type, m.api_name)))].sort();
+  const digest = crypto3.createHash("sha256").update(JSON.stringify(keys)).digest("hex");
+  return `members-${digest.slice(0, 12)}`;
+}
+function invalidMemberText(member) {
+  return `invalid member "${member.type}:${member.api_name}" \u2014 expected a metadata type name and a full API name (children dotted, foldered names "Folder/Name").`;
+}
+function folderedConfig(type) {
+  return Object.hasOwn(FOLDERED_TYPES, type) ? FOLDERED_TYPES[type] : void 0;
+}
+function folderContentType(type) {
+  return Object.hasOwn(FOLDER_TYPES, type) ? FOLDER_TYPES[type] : void 0;
+}
+function namesChildType(type, name) {
+  const entry = deployZipEntryPath(type, name);
+  return entry?.child === true || entry === null && isRegisteredType(type);
+}
+function wholeDocumentError(type) {
+  return new ContrailError(
+    `a snapshot unit must be a whole document, never a child type: ${type}`,
+    "snapshot_partial_container"
+  );
+}
+function isPackageOwnedState(p) {
+  return p?.manageableState === "installed" || p?.manageableState === "installedEditable";
+}
+function planMemberUnits(members) {
+  const plan = { members: [], units: [], unitOf: /* @__PURE__ */ new Map(), skipped: [] };
+  const byKey = /* @__PURE__ */ new Map();
+  const addUnit = (type, name, bundle, companion) => {
+    const key2 = memberKey(type, name);
+    const existing = byKey.get(key2);
+    if (existing) {
+      if (!companion) existing.companion = false;
+      return existing;
+    }
+    const unit = { key: key2, type, name, bundle, companion };
+    byKey.set(key2, unit);
+    plan.units.push(unit);
+    return unit;
+  };
+  const seen = /* @__PURE__ */ new Set();
+  for (const m of members) {
+    const key2 = memberKey(m.type, m.api_name);
+    if (seen.has(key2)) continue;
+    seen.add(key2);
+    const member = { type: m.type, api_name: m.api_name };
+    plan.members.push(member);
+    let unit;
+    if (m.type === "FlowDefinition") {
+      unit = addUnit("Flow", m.api_name, false, false);
+    } else if (m.type === "Profile") {
+      plan.skipped.push({ ...member, outcome: "skipped", reason: "profile" });
+      continue;
+    } else if (m.type === "CustomLabels") {
+      if (m.api_name.toLowerCase() !== "customlabels") {
+        throw new ContrailError(invalidMemberText(member), "bad_member");
+      }
+      unit = addUnit("CustomLabels", "CustomLabels", false, false);
+    } else if (!isRegisteredType(m.type)) {
+      plan.skipped.push({ ...member, outcome: "skipped", reason: "unregistered_type" });
+      continue;
+    } else {
+      const entry = deployZipEntryPath(m.type, m.api_name);
+      const container = retrieveMemberFor(m.type, m.api_name);
+      if (entry === null || container === null) {
+        throw new ContrailError(invalidMemberText(member), "bad_member");
+      }
+      if (entry.child) {
+        unit = addUnit(container.type, container.member, false, false);
+      } else {
+        unit = addUnit(m.type, m.api_name, entry.bundleDir !== void 0, false);
+        const cfg = folderedConfig(m.type);
+        const slash = m.api_name.indexOf("/");
+        if (cfg && slash > 0) {
+          const folder2 = m.api_name.slice(0, slash);
+          if (folder2 !== cfg.unfiledFolder) addUnit(cfg.folderType, folder2, false, true);
+        }
+      }
+    }
+    plan.unitOf.set(key2, unit.key);
+  }
+  return plan;
+}
+function memberRetrieveManifest(units) {
+  const out = {};
+  for (const u of units) {
+    if (namesChildType(u.type, u.name)) throw wholeDocumentError(u.type);
+    const target = retrieveMemberFor(u.type, u.name) ?? { type: u.type, member: u.name };
+    const list = out[target.type] ?? [];
+    const want = target.member.toLowerCase();
+    if (!list.some((n) => n.toLowerCase() === want)) list.push(target.member);
+    out[target.type] = list;
+  }
+  return out;
+}
+function unitTypeCoverage(input) {
+  const rowsOf = (type) => Object.hasOwn(input.counts, type) ? input.counts[type] ?? 0 : 0;
+  const out = /* @__PURE__ */ new Map();
+  for (const u of input.units) {
+    if (out.has(u.type)) continue;
+    const t = u.type;
+    if (rowsOf(t) > 0) {
+      out.set(t, true);
+      continue;
+    }
+    const coupled = folderedConfig(t)?.folderType ?? folderContentType(t);
+    if (coupled !== void 0) {
+      out.set(t, rowsOf(coupled) > 0);
+      continue;
+    }
+    const props = input.listing.props;
+    if (props === null || input.listing.unsupported.has(t)) {
+      out.set(t, false);
+      continue;
+    }
+    const run = new Set(
+      input.units.filter((x) => x.type === t).map((x) => x.name.toLowerCase())
+    );
+    const listed = props.filter((p) => p.type === t);
+    out.set(
+      t,
+      listed.some((p) => run.has(p.fullName.toLowerCase())) && listed.every((p) => isPackageOwnedState(p) || run.has(p.fullName.toLowerCase()))
+    );
+  }
+  return out;
+}
+function absenceVerdict(unit, listing) {
+  if (listing.props === null || listing.unsupported.has(unit.type)) return "keep";
+  if (preImageListQueryFor({ type: unit.type, api_name: unit.name }) === null) return "keep";
+  return listedPropFor(listing.props, unit.type, unit.name) === void 0 ? "remove" : "keep";
+}
+function removableUnitKeys(deleted) {
+  const out = /* @__PURE__ */ new Set();
+  const plan = planMemberUnits(deleted);
+  for (const d of plan.members) {
+    if (deployZipEntryPath(d.type, d.api_name)?.child === true) continue;
+    const unit = plan.unitOf.get(memberKey(d.type, d.api_name));
+    if (unit !== void 0) out.add(unit);
+  }
+  return out;
+}
+function applyMemberUnits(store, input) {
+  for (const [type, names] of Object.entries(input.manifest)) {
+    if (namesChildType(type, "") || names.some((n) => namesChildType(type, n))) {
+      throw wholeDocumentError(type);
+    }
+  }
+  const extracted = input.zip === null ? /* @__PURE__ */ new Map() : store.extractRetrieveZip(Buffer.isBuffer(input.zip) ? input.zip : Buffer.from(input.zip));
+  const rows = indexSnapshotFiles(extracted, input.fileProps, input.retrievedAt);
+  const props = /* @__PURE__ */ new Map();
+  for (const p of input.fileProps) props.set(memberKey(p.type, p.fullName), p);
+  const removeFiles = /* @__PURE__ */ new Set();
+  const removeDirs = /* @__PURE__ */ new Set();
+  const bundleTypeDirs = /* @__PURE__ */ new Set();
+  const files = /* @__PURE__ */ new Map();
+  const artifacts = [];
+  const units = [];
+  const dropDocument = (filePath) => {
+    if (!filePath) return;
+    removeFiles.add(filePath);
+    if (!filePath.endsWith("-meta.xml")) removeFiles.add(`${filePath}-meta.xml`);
+  };
+  const bundleDirOf = (filePath) => {
+    const segments = filePath?.split("/") ?? [];
+    return segments.length >= 3 ? segments.slice(0, 2).join("/") : null;
+  };
+  const dropBundle = (unit, filePath) => {
+    const dir = bundleDirOf(filePath);
+    if (dir === null) return;
+    removeDirs.add(dir);
+    const declared = deployZipEntryPath(unit.type, unit.name);
+    const typeDir = declared && !declared.child ? declared.bundleDir?.split("/")[0] : void 0;
+    if (typeDir) bundleTypeDirs.add(typeDir);
+  };
+  let changed = false;
+  for (const unit of input.units) {
+    const want = unit.name.toLowerCase();
+    const root = rows.find((r) => r.type === unit.type && r.apiName.toLowerCase() === want);
+    if (root) {
+      const prop = props.get(memberKey(unit.type, unit.name));
+      if (unit.skipIfPackageOwned && isPackageOwnedState(prop)) {
+        units.push({
+          key: unit.key,
+          applied: "kept",
+          keptReason: "package_owned",
+          filePath: unit.oldFilePath
+        });
+        continue;
+      }
+      if (unit.bundle) {
+        const dir = bundleDirOf(root.filePath);
+        if (dir !== null) {
+          for (const [rel, bytes] of extracted) {
+            if (rel.startsWith(`${dir}/`)) files.set(rel, bytes);
+          }
+        }
+        dropBundle(unit, unit.oldFilePath);
+        dropBundle(unit, root.filePath);
+      } else {
+        const bytes = extracted.get(root.filePath);
+        if (bytes) files.set(root.filePath, bytes);
+        if (!root.filePath.endsWith("-meta.xml")) {
+          const sidecar = extracted.get(`${root.filePath}-meta.xml`);
+          if (sidecar) files.set(`${root.filePath}-meta.xml`, sidecar);
+        }
+        dropDocument(unit.oldFilePath);
+        dropDocument(root.filePath);
+      }
+      for (const r of rows) if (r.filePath === root.filePath) artifacts.push(r);
+      units.push({ key: unit.key, applied: "written", filePath: root.filePath });
+      changed = true;
+    } else if (unit.ifAbsent === "remove") {
+      if (unit.bundle) dropBundle(unit, unit.oldFilePath);
+      else dropDocument(unit.oldFilePath);
+      units.push({ key: unit.key, applied: "removed", filePath: unit.oldFilePath });
+      changed = true;
+    } else {
+      units.push({ key: unit.key, applied: "kept", filePath: unit.oldFilePath });
+    }
+  }
+  let filesWritten = 0;
+  let filesRemoved = 0;
+  if (changed) {
+    const done = store.replaceCurrentUnits(input.connectionId, {
+      removeFiles: [...removeFiles],
+      removeDirs: [...removeDirs],
+      bundleTypeDirs: [...bundleTypeDirs],
+      files
+    });
+    filesWritten = done.written;
+    filesRemoved = done.removed;
+  }
+  return { artifacts, units, filesWritten, filesRemoved };
+}
+function memberOutcomes(input) {
+  const { plan, listing } = input;
+  const skippedByKey = new Map(plan.skipped.map((o) => [memberKey(o.type, o.api_name), o]));
+  const unitByKey = new Map(plan.units.map((u) => [u.key, u]));
+  const appliedByKey = new Map((input.applied?.units ?? []).map((u) => [u.key, u]));
+  const newRows = new Set(
+    (input.applied?.artifacts ?? []).map((a) => memberKey(a.type, a.apiName))
+  );
+  const oldRows = new Set(input.oldRows.map((r) => memberKey(r.type, r.apiName)));
+  const deleted = new Set(input.deleted.map((d) => memberKey(d.type, d.api_name)));
+  const returned = new Set(
+    input.retrievedProps.filter((p) => p.fileName).map((p) => memberKey(p.type, p.fullName))
+  );
+  const out = [];
+  for (const m of plan.members) {
+    const key2 = memberKey(m.type, m.api_name);
+    const planned = skippedByKey.get(key2);
+    if (planned) {
+      out.push(planned);
+      continue;
+    }
+    const unit = unitByKey.get(plan.unitOf.get(key2) ?? "");
+    if (!unit) continue;
+    const base = { type: m.type, api_name: m.api_name, unit: `${unit.type}:${unit.name}` };
+    const skip = (reason, detail) => {
+      out.push(
+        detail === void 0 ? { ...base, outcome: "skipped", reason } : { ...base, outcome: "skipped", reason, detail }
+      );
+    };
+    const pre = input.preSkipped.get(unit.key);
+    if (pre) {
+      skip(pre);
+      continue;
+    }
+    const own = memberKey(m.type === "FlowDefinition" ? "Flow" : m.type, m.api_name);
+    const mayRemove = input.origin === "refresh_snapshot" || deleted.has(key2);
+    const applied = appliedByKey.get(unit.key);
+    if (newRows.has(own)) {
+      out.push({ ...base, outcome: "refreshed" });
+    } else if (applied?.applied === "written") {
+      if (mayRemove) out.push({ ...base, outcome: "removed", detail: NOT_IN_PARENT_DETAIL });
+      else skip("child_not_in_parent");
+    } else if (applied?.applied === "removed") {
+      if (!mayRemove) skip("child_not_in_parent");
+      else if (oldRows.has(own)) out.push({ ...base, outcome: "removed" });
+      else out.push({ ...base, outcome: "removed", detail: ALREADY_ABSENT_DETAIL });
+    } else if (applied?.keptReason === "package_owned") {
+      skip("package_owned");
+    } else {
+      const enumerable = listing.props !== null && !listing.unsupported.has(unit.type) && preImageListQueryFor({ type: unit.type, api_name: unit.name }) !== null;
+      const listed = enumerable && listedPropFor(listing.props ?? [], unit.type, unit.name) !== void 0;
+      if (returned.has(unit.key)) skip("not_indexable");
+      else if (listed) skip("not_returned");
+      else if (!enumerable) {
+        skip("presence_unknown", listing.failure ?? `${unit.type} cannot be listed by this name`);
+      } else skip("not_confirmed");
+    }
+  }
+  return out;
+}
+function noSnapshotText(alias) {
+  return `"${alias}" has no snapshot yet \u2014 a member-scoped refresh only updates an existing snapshot. Run refresh_snapshot without members first.`;
+}
+function noMetadataReadText(alias) {
+  return `"${alias}" no longer grants metadata_read \u2014 nothing was written to the snapshot.`;
+}
+function partialWriteText(message2) {
+  return `the snapshot may be only partly updated for these components (${message2}) \u2014 its files and its index can disagree until they are re-read`;
+}
+function memberSkipText(reason, ctx) {
+  const t = ctx.unitType;
+  switch (reason) {
+    case "unregistered_type":
+      return `${ctx.type} is not a type Contrail snapshots.`;
+    case "profile":
+      return "Profile is never snapshotted \u2014 a single-profile retrieve is package-relative, so its bytes would not be a faithful copy.";
+    case "type_not_in_snapshot":
+      return `This connection's snapshot holds no ${t}, and Contrail could not confirm from the org's listing that the named components are the only ones of that type \u2014 writing just these would make any other ${t} in the org read as new or missing. Run refresh_snapshot with types: ["${t}"].`;
+    case "type_unsupported":
+      return `The org reports ${t} as unsupported at this API version.`;
+    case "package_owned":
+      return `The org lists its ${t} as package-owned and this snapshot holds no copy of it. get_org_changes leaves package-owned components out of its comparison, so a copy added here would read as gone from the org \u2014 not added. A member-scoped refresh will skip it again.`;
+    case "not_returned":
+      return "The org lists it, but the retrieve returned no file for it \u2014 the snapshot copy was left as it was.";
+    case "presence_unknown":
+      return `The retrieve returned no file for it and the org's listing could not be read (${ctx.detail ?? "no detail"}) \u2014 the snapshot copy was left as it was.`;
+    case "not_confirmed":
+      return "This deploy changed it, but the org's listing did not name it and the retrieve returned no file for it under this name \u2014 the snapshot copy was left as it was.";
+    case "child_not_in_parent":
+      return "The re-read parent document does not contain it, so the snapshot holds no copy of it now. Contrail did not check the org for it separately.";
+    case "not_indexable":
+      return "The org returned a file Contrail has no snapshot mapping for \u2014 nothing was written.";
+  }
+}
+function unitTypesList(members) {
+  let types;
+  try {
+    types = planMemberUnits(members).units.map((u) => u.type);
+  } catch {
+    types = members.map((m) => m.type);
+  }
+  return [...new Set(types)].sort().map((t) => `"${t}"`).join(", ");
+}
+function seconds(ms) {
+  return String(Number((ms / 1e3).toFixed(3)));
+}
+function executeSnapshotResult(outcome, members, timeoutMs) {
+  const block = (status, note, extra2 = {}) => ({
+    snapshot: {
+      status,
+      ...extra2.reason !== void 0 ? { reason: extra2.reason } : {},
+      rebaselined: extra2.rebaselined ?? [],
+      removed: extra2.removed ?? [],
+      skipped: extra2.skipped ?? [],
+      ...extra2.retrieved_at !== void 0 ? { retrieved_at: extra2.retrieved_at } : {},
+      note: extra2.note ?? note.replace(/^Deployed\. /, "")
+    },
+    note
+  });
+  if (outcome.status === "pending") {
+    return block(
+      "pending",
+      `Deployed. Contrail had not finished re-reading this deploy's components into the local snapshot when this result was stored. If snapshot.status still reads "pending", the snapshot may be stale for them \u2014 run refresh_snapshot with members set to this deploy's components.`
+    );
+  }
+  if (outcome.status === "disabled") {
+    return block(
+      "disabled",
+      "Deployed. Automatic snapshot re-baseline is turned off (snapshot.rebaselineAfterDeploy) \u2014 run refresh_snapshot to bring the local snapshot up to date."
+    );
+  }
+  if (outcome.status === "unavailable") {
+    const detail = (outcome.detail ?? "no detail").slice(0, 200);
+    const notUpdated = (why) => `Deployed. The local snapshot was NOT updated for this deploy (${why}). Run refresh_snapshot with members set to this deploy's components to bring it up to date.`;
+    let note;
+    switch (outcome.reason) {
+      case "timeout":
+        note = notUpdated(`the re-read did not finish within ${seconds(timeoutMs)} s`);
+        break;
+      case "locked":
+        note = notUpdated("another Contrail process is refreshing this connection's snapshot");
+        break;
+      case "refresh_running":
+        note = notUpdated("a snapshot refresh was already running on this connection");
+        break;
+      case "failed":
+        note = notUpdated(`the re-read failed: ${detail}`);
+        break;
+      case "failed_after_write":
+        note = `Deployed. The local snapshot may be only PARTLY updated for this deploy (the re-read stopped while writing: ${detail}) \u2014 its files and its index can disagree for these components. Run refresh_snapshot with members set to this deploy's components to repair it.`;
+        break;
+      case "no_snapshot":
+        note = "Deployed. This connection has no local snapshot, so there was nothing to re-baseline. Run refresh_snapshot when you need one.";
+        break;
+      case "too_many_members": {
+        const n2 = new Set(members.map((m) => memberKey(m.type, m.api_name))).size;
+        note = `Deployed. The local snapshot was NOT updated: this deploy has ${n2} components, more than the ${MEMBER_REFRESH_MAX} a member-scoped re-read takes. Run refresh_snapshot with types: [${unitTypesList(members)}] to bring it up to date.`;
+        break;
+      }
+      case "no_metadata_read":
+        note = "Deployed. The local snapshot was NOT updated: this connection no longer grants metadata_read, so Contrail did not copy org metadata into the snapshot.";
+        break;
+      case "connection_removed":
+        note = "Deployed. The local snapshot was NOT updated: this connection was removed before Contrail finished re-reading the deployed components.";
+        break;
+    }
+    return block("unavailable", note, { reason: outcome.reason });
+  }
+  const summary = outcome.summary;
+  const member = (o) => ({ type: o.type, api_name: o.api_name });
+  const rebaselined = summary.members.filter((o) => o.outcome === "refreshed").map(member);
+  const removed = summary.members.filter((o) => o.outcome === "removed").map(member);
+  const skipped = summary.members.filter((o) => o.outcome === "skipped").map((o) => {
+    const code = o.reason ?? "not_confirmed";
+    const unitType = o.unit ? o.unit.slice(0, o.unit.indexOf(":")) : o.type;
+    return {
+      type: o.type,
+      api_name: o.api_name,
+      code,
+      reason: memberSkipText(code, { type: o.type, unitType, detail: o.detail })
+    };
+  });
+  const n = summary.members.length;
+  const done = rebaselined.length + removed.length;
+  const extra = {
+    rebaselined,
+    removed,
+    skipped,
+    ...summary.retrieved_at !== null ? { retrieved_at: summary.retrieved_at } : {}
+  };
+  if (skipped.length === 0) {
+    return block(
+      "complete",
+      `Deployed. Contrail re-read the ${n} component(s) in this deploy from the org into the local snapshot \u2014 no refresh_snapshot is needed for them.`,
+      { ...extra, note: EXECUTE_REREAD_NOTE }
+    );
+  }
+  if (done === 0 && summary.units.length === 0) {
+    return block(
+      "none",
+      "Deployed. The local snapshot was NOT updated for this deploy \u2014 snapshot.skipped gives the reason for each component. Run refresh_snapshot for those you need current.",
+      extra
+    );
+  }
+  if (done === 0) {
+    return block(
+      "none",
+      "Deployed. None of the components in this deploy was re-baselined \u2014 snapshot.skipped gives the reason for each. Contrail did write to the local snapshot one or more documents it re-read for them (a parent document or a folder). Run refresh_snapshot for those you need current.",
+      { ...extra, note: EXECUTE_REREAD_NOTE }
+    );
+  }
+  return block(
+    "partial",
+    `Deployed. Contrail re-read ${done} of ${n} component(s) in this deploy into the local snapshot; ${skipped.length} were not re-baselined \u2014 snapshot.skipped gives the reason for each. Run refresh_snapshot for those you need current.`,
+    { ...extra, note: EXECUTE_REREAD_NOTE }
+  );
+}
+var MEMBER_REFRESH_MAX, REBASELINE_QUEUE_WAIT_MS, MEMBER_RESULT_REUSE_MS, REBASELINE_PROGRESS, NOT_IN_PARENT_DETAIL, ALREADY_ABSENT_DETAIL, CONNECTION_REMOVED_TEXT, MEMBER_REFRESH_NOTES, EXECUTE_REREAD_NOTE;
+var init_members = __esm({
+  "src/snapshot/members.ts"() {
+    "use strict";
+    init_errors4();
+    init_package();
+    init_preimage();
+    init_metadataSoap();
+    init_indexer();
+    MEMBER_REFRESH_MAX = 100;
+    REBASELINE_QUEUE_WAIT_MS = 1e4;
+    MEMBER_RESULT_REUSE_MS = 6e4;
+    REBASELINE_PROGRESS = "deployed \u2014 re-reading the deployed components into the local snapshot";
+    NOT_IN_PARENT_DETAIL = "not in the parent document the org returned";
+    ALREADY_ABSENT_DETAIL = "already absent from the snapshot";
+    CONNECTION_REMOVED_TEXT = "The connection was removed while the member refresh was running \u2014 nothing was written.";
+    MEMBER_REFRESH_NOTES = [
+      "Dependency edges extracted FROM the re-read components were rebuilt. References TO a new or deleted component from other components, and the org-computed dependency data (MetadataComponentDependency), were not rebuilt \u2014 a whole-type refresh_snapshot does that.",
+      "Only the named components were re-read (a child re-reads its whole parent document). Anything else that changed in the org is not in the snapshot until a whole-type refresh_snapshot."
+    ];
+    EXECUTE_REREAD_NOTE = "Dependency edges extracted FROM the re-read components were rebuilt. References TO a new or deleted component from other components, and the org-computed dependency data (MetadataComponentDependency), were not rebuilt \u2014 a whole-type refresh_snapshot does that. Only the components in this deploy were re-read (a child re-reads its whole parent document); anything else the deploy caused the org to create or change is not in the snapshot until a whole-type refresh_snapshot.";
+  }
+});
+
+// src/snapshot/engine.ts
+import crypto4 from "node:crypto";
 function refreshJobId(normalizedTypes) {
-  const digest = crypto2.createHash("sha256").update(JSON.stringify([...normalizedTypes].sort())).digest("hex");
+  const digest = crypto4.createHash("sha256").update(JSON.stringify([...normalizedTypes].sort())).digest("hex");
   return `refresh-${digest.slice(0, 12)}`;
 }
 function normalizeRefreshTypes(types) {
@@ -29653,9 +33558,44 @@ function isPackageOwned(p) {
 function isManaged(p) {
   return isPackageOwned(p) ? p.namespacePrefix !== void 0 && p.namespacePrefix !== "" : false;
 }
+function cancelledError() {
+  return new ContrailError(
+    "the member refresh was cancelled before it wrote anything",
+    "cancelled"
+  );
+}
+function completeOutcome(job, summary) {
+  return job.kind === "members" ? {
+    status: "complete",
+    kind: "members",
+    job_id: job.job_id,
+    summary
+  } : { status: "complete", kind: "types", job_id: job.job_id, summary };
+}
+function rebaselineFailure(err2) {
+  const code = err2 instanceof ContrailError ? err2.code : "";
+  const message2 = (err2 instanceof Error ? err2.message : String(err2)).slice(0, 200);
+  switch (code) {
+    case "snapshot_locked":
+      return { status: "unavailable", reason: "locked" };
+    case "no_snapshot":
+      return { status: "unavailable", reason: "no_snapshot" };
+    case "retrieve_timeout":
+    case "cancelled":
+      return { status: "unavailable", reason: "timeout" };
+    case "no_metadata_read":
+      return { status: "unavailable", reason: "no_metadata_read" };
+    case "connection_removed":
+      return { status: "unavailable", reason: "connection_removed" };
+    case "snapshot_partial_write":
+      return { status: "unavailable", reason: "failed_after_write", detail: message2 };
+    default:
+      return { status: "unavailable", reason: "failed", detail: message2 };
+  }
+}
 function withChildTypes(types) {
   const all = new Set(types);
-  for (const t of types) for (const child of CHILD_TYPES[t] ?? []) all.add(child);
+  for (const t of types) for (const child of CHILD_TYPES2[t] ?? []) all.add(child);
   return [...all];
 }
 function ownedDirsForTypes(types) {
@@ -29691,13 +33631,14 @@ function countByType(artifacts) {
   for (const a of artifacts) counts[a.type] = (counts[a.type] ?? 0) + 1;
   return counts;
 }
-function delay2(ms) {
+function delay3(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms).unref?.());
 }
 function publicState(job) {
   return {
     job_id: job.job_id,
     types: job.types,
+    ...job.members !== void 0 ? { members: job.members } : {},
     startedAt: job.startedAt,
     progress: job.progress,
     done: job.done,
@@ -29705,7 +33646,7 @@ function publicState(job) {
     error: job.error
   };
 }
-var STALE_JOB_MS, SNAPSHOT_LOCK_TTL_MS, CHILD_TYPES, COUPLED_TYPES, SnapshotEngine, TYPE_DIRS;
+var STALE_JOB_MS, SNAPSHOT_LOCK_TTL_MS, QUEUED_PROGRESS, CHILD_TYPES2, COUPLED_TYPES, SnapshotEngine, TYPE_DIRS;
 var init_engine = __esm({
   "src/snapshot/engine.ts"() {
     "use strict";
@@ -29714,11 +33655,14 @@ var init_engine = __esm({
     init_indexer();
     init_extract();
     init_orgdeps();
+    init_preimage();
+    init_members();
     init_errors4();
     init_log();
     STALE_JOB_MS = 30 * 6e4;
     SNAPSHOT_LOCK_TTL_MS = 15 * 60 * 1e3;
-    CHILD_TYPES = {
+    QUEUED_PROGRESS = "queued behind an earlier refresh on this connection";
+    CHILD_TYPES2 = {
       CustomObject: ["CustomField", "ValidationRule", "ListView", "RecordType"],
       CustomLabels: ["CustomLabel"],
       // S30: Bot versions live inline in the Bot document (metadata format).
@@ -29748,13 +33692,11 @@ var init_engine = __esm({
        */
       chains = /* @__PURE__ */ new Map();
       lockHolder = `plugin:${process.pid}`;
-      /**
-       * Start (or observe) a refresh. Returns within ~toolWaitMs either the
-       * finished summary or an in-progress state the caller reports back.
-       * Pass pollJobId (alone) to check on a job from an earlier call without
-       * re-sending types; a result is only ever delivered to the input that
-       * asked for it.
-       */
+      /** S46: told which members a member run wrote or removed (the plugin leaves it unset). */
+      membersObserver = null;
+      setMembersObserver(obs) {
+        this.membersObserver = obs;
+      }
       async refresh(conn, types, pollJobId) {
         this.sweepStaleJobs();
         let jobId;
@@ -29770,9 +33712,7 @@ var init_engine = __esm({
         let job = this.jobs.get(key2);
         if (job?.done) {
           this.jobs.delete(key2);
-          if (job.result !== void 0) {
-            return { status: "complete", job_id: jobId, summary: job.result };
-          }
+          if (job.result !== void 0) return completeOutcome(job, job.result);
           if (job.error !== void 0) return { status: "failed", job_id: jobId, error: job.error };
           job = void 0;
         }
@@ -29780,22 +33720,125 @@ var init_engine = __esm({
           job = this.startJob(conn, normalized, jobId);
           this.jobs.set(key2, job);
         }
-        const winner = await Promise.race([
-          job.promise.then(
-            (summary) => ({ status: "complete", job_id: jobId, summary }),
-            (err2) => ({
-              status: "failed",
-              job_id: jobId,
-              error: String(err2 instanceof Error ? err2.message : err2)
-            })
-          ),
-          delay2(this.config.snapshot.toolWaitMs).then(() => null)
-        ]);
-        if (winner) {
-          this.jobs.delete(key2);
-          return winner;
+        return this.awaitJob(key2, job);
+      }
+      /**
+       * S46: re-read ONLY the named components into an existing snapshot. Its
+       * own job id (`members-…`, the sorted member set), the same job map, the
+       * same per-connection chain and lease as a whole-type refresh. A re-send
+       * of the same members (any order or case) attaches to a RUNNING job; a
+       * finished one nobody collected is handed to a re-send only within
+       * MEMBER_RESULT_REUSE_MS, so a re-send never returns an older re-read as
+       * its own — a job_id poll still collects it until the 30-minute sweep.
+       */
+      async refreshMembers(conn, members) {
+        this.sweepStaleJobs();
+        const jobId = memberJobId(members);
+        const distinct = new Set(members.map((m) => memberKey(m.type, m.api_name))).size;
+        if (distinct > MEMBER_REFRESH_MAX) {
+          return {
+            status: "failed",
+            job_id: jobId,
+            error: `a member-scoped refresh takes at most ${MEMBER_REFRESH_MAX} components (${distinct} were named)`
+          };
         }
-        return { status: "in_progress", job_id: jobId, state: publicState(job) };
+        const key2 = `${conn.id}:${jobId}`;
+        let job = this.jobs.get(key2);
+        if (job?.done) {
+          this.jobs.delete(key2);
+          const fresh = job.finishedAt !== void 0 && Date.now() - job.finishedAt <= MEMBER_RESULT_REUSE_MS;
+          if (fresh && job.result !== void 0) {
+            return completeOutcome(job, job.result);
+          }
+          if (fresh && job.error !== void 0) {
+            return { status: "failed", job_id: jobId, error: job.error };
+          }
+          job = void 0;
+        }
+        if (!job) {
+          job = this.startMemberJob(conn, members, jobId);
+          this.jobs.set(key2, job);
+        }
+        return await this.awaitJob(key2, job);
+      }
+      /**
+       * S46: the re-baseline after a successful deploy. Never throws and
+       * registers no job (nothing polls it). Waits at most
+       * min(timeoutMs, REBASELINE_QUEUE_WAIT_MS) for its turn on the connection
+       * (else `refresh_running`) and at most timeoutMs in all (else `timeout`) —
+       * unless the run has reached its commit point, which is always awaited. An
+       * aborted run that later reaches the front of the chain returns before
+       * taking the lease, and a run aborted before its commit point writes
+       * nothing.
+       */
+      async rebaselineMembers(conn, members, opts) {
+        try {
+          const distinct = new Set(members.map((m) => memberKey(m.type, m.api_name))).size;
+          if (distinct > MEMBER_REFRESH_MAX) {
+            let types;
+            try {
+              types = planMemberUnits(members).units.map((u) => u.type);
+            } catch {
+              types = members.map((m) => m.type);
+            }
+            return {
+              status: "unavailable",
+              reason: "too_many_members",
+              detail: [...new Set(types)].sort().join(", ")
+            };
+          }
+          const timeoutMs = Math.max(0, opts.timeoutMs);
+          const deadline = Date.now() + timeoutMs;
+          const controller = new AbortController();
+          let started = false;
+          let committing = false;
+          const run = this.chainRun(
+            conn,
+            () => this.runMemberRefresh(conn, members, {
+              origin: "execute_deploy",
+              requestId: opts.requestId,
+              deleted: opts.deleted,
+              signal: controller.signal,
+              deadline,
+              onCommit: () => {
+                committing = true;
+              }
+            }),
+            {
+              signal: controller.signal,
+              onStart: () => {
+                started = true;
+              }
+            }
+          );
+          run.catch(() => {
+          });
+          const timers = [];
+          const first = await new Promise((resolve) => {
+            run.then(
+              () => resolve("settled"),
+              () => resolve("settled")
+            );
+            timers.push(
+              setTimeout(() => {
+                if (!started) resolve("queue");
+              }, Math.min(timeoutMs, REBASELINE_QUEUE_WAIT_MS))
+            );
+            timers.push(setTimeout(() => resolve("timeout"), timeoutMs));
+          });
+          for (const t of timers) clearTimeout(t);
+          if (first === "queue") {
+            controller.abort();
+            return { status: "unavailable", reason: "refresh_running" };
+          }
+          if (first === "timeout" && !committing) {
+            controller.abort();
+            return { status: "unavailable", reason: "timeout" };
+          }
+          return { status: "ran", summary: await run };
+        } catch (err2) {
+          return rebaselineFailure(err2);
+        }
       }
       sweepStaleJobs() {
         const cutoff = Date.now() - STALE_JOB_MS;
@@ -29805,20 +33848,43 @@ var init_engine = __esm({
           }
         }
       }
-      startJob(conn, types, jobId) {
-        const job = {
-          job_id: jobId,
-          types,
-          startedAt: (/* @__PURE__ */ new Date()).toISOString(),
-          progress: "starting",
-          done: false,
-          promise: void 0
-        };
+      /** The soft wait both entries share: the result, or an in-progress state after toolWaitMs. */
+      async awaitJob(key2, job) {
+        const jobId = job.job_id;
+        const winner = await Promise.race([
+          job.promise.then(
+            (summary) => completeOutcome(job, summary),
+            (err2) => ({
+              status: "failed",
+              job_id: jobId,
+              error: String(err2 instanceof Error ? err2.message : err2)
+            })
+          ),
+          delay3(this.config.snapshot.toolWaitMs).then(() => null)
+        ]);
+        if (winner) {
+          this.jobs.delete(key2);
+          return winner;
+        }
+        return { status: "in_progress", job_id: jobId, state: publicState(job) };
+      }
+      /**
+       * Serialise RUNS per connection: a run queues behind the one before it and
+       * starts only after it settles (success or failure). Across PROCESSES the
+       * desktop app's snapshot lease applies too — the plugin participates
+       * opportunistically (see db.tryAcquireAppLock): on a machine where the
+       * desktop app shares ~/.contrail, a refresh held by the other process
+       * fails honestly instead of interleaving snapshot rewrites with it. A run
+       * whose signal was aborted while it queued returns before taking the
+       * lease; `onStart` marks that its turn has come.
+       */
+      chainRun(conn, work, gate) {
         const prev = this.chains.get(conn.id);
-        if (prev) job.progress = "queued behind an earlier refresh on this connection";
         const lockName = `snapshot:${conn.id}`;
         const run = (prev ?? Promise.resolve()).catch(() => {
         }).then(async () => {
+          if (gate?.signal?.aborted) throw cancelledError();
+          gate?.onStart?.();
           if (!this.db.tryAcquireAppLock(lockName, this.lockHolder, SNAPSHOT_LOCK_TTL_MS)) {
             throw new ContrailError(
               "another Contrail process (the desktop app) is refreshing this connection \u2014 try again once its sync finishes",
@@ -29826,7 +33892,7 @@ var init_engine = __esm({
             );
           }
           try {
-            return await this.runRefresh(conn, types, job);
+            return await work();
           } finally {
             this.db.releaseAppLock(lockName, this.lockHolder);
           }
@@ -29837,6 +33903,10 @@ var init_engine = __esm({
         void tail.then(() => {
           if (this.chains.get(conn.id) === tail) this.chains.delete(conn.id);
         });
+        return run;
+      }
+      /** Record a job's settlement (and audit its failure) on the job itself. */
+      settleJob(conn, job, run, failedEvent) {
         job.promise = run.then((summary) => {
           job.done = true;
           job.finishedAt = Date.now();
@@ -29846,7 +33916,7 @@ var init_engine = __esm({
           job.done = true;
           job.finishedAt = Date.now();
           job.error = String(err2 instanceof Error ? err2.message : err2);
-          this.audit.record("snapshot.refresh_failed", {
+          this.audit.record(failedEvent, {
             connectionId: conn.id,
             tool: "refresh_snapshot",
             outcome: "error",
@@ -29856,7 +33926,240 @@ var init_engine = __esm({
         });
         job.promise.catch(() => {
         });
+      }
+      startJob(conn, types, jobId) {
+        const job = {
+          kind: "types",
+          job_id: jobId,
+          types,
+          startedAt: (/* @__PURE__ */ new Date()).toISOString(),
+          progress: "starting",
+          done: false,
+          promise: void 0
+        };
+        if (this.chains.has(conn.id)) job.progress = QUEUED_PROGRESS;
+        const run = this.chainRun(conn, () => this.runRefresh(conn, types, job));
+        this.settleJob(conn, job, run, "snapshot.refresh_failed");
         return job;
+      }
+      startMemberJob(conn, members, jobId) {
+        const job = {
+          kind: "members",
+          job_id: jobId,
+          types: [],
+          members: members.map((m) => ({ type: m.type, api_name: m.api_name })),
+          startedAt: (/* @__PURE__ */ new Date()).toISOString(),
+          progress: "starting",
+          done: false,
+          promise: void 0
+        };
+        if (this.chains.has(conn.id)) job.progress = QUEUED_PROGRESS;
+        const run = this.chainRun(
+          conn,
+          () => this.runMemberRefresh(conn, members, { origin: "refresh_snapshot", job })
+        );
+        this.settleJob(conn, job, run, "snapshot.members_refresh_failed");
+        return job;
+      }
+      /**
+       * One member run, in the order of design C §C1: snapshot check → plan →
+       * unit-level listing (never a child type) → coverage, unsupported and
+       * package-owned skips → ONE retrieve of whole documents → the commit
+       * point (the connection and its metadata_read grant re-read; nothing has
+       * been written before it, and everything after it runs to completion) →
+       * files (staged, then swapped) → rows → extractor edges → outcomes →
+       * audit. A failure after the commit point is `snapshot_partial_write`.
+       */
+      async runMemberRefresh(conn, members, ctx) {
+        const started = Date.now();
+        const progress = (p) => {
+          if (ctx.job) ctx.job.progress = p;
+        };
+        const checkAbort = () => {
+          if (ctx.signal?.aborted) throw cancelledError();
+        };
+        const deleted = ctx.deleted ?? [];
+        const counts = this.db.countArtifactsByType(conn.id);
+        if (Object.keys(counts).length === 0) {
+          throw new ContrailError(noSnapshotText(conn.alias), "no_snapshot");
+        }
+        const plan = planMemberUnits(members);
+        const preSkipped = /* @__PURE__ */ new Map();
+        let listing = { props: [], unsupported: /* @__PURE__ */ new Set() };
+        let retrievedAt = null;
+        let applied = null;
+        let retrievedProps = [];
+        const oldRows = [];
+        const touched = [];
+        let edgeCount = 0;
+        if (plan.units.length > 0) {
+          const soap = new MetadataSoapClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
+          checkAbort();
+          progress("listing members");
+          listing = await listDates(
+            soap,
+            plan.units.map((u) => ({ type: u.type, api_name: u.name }))
+          );
+          checkAbort();
+          const coverage = unitTypeCoverage({ counts, units: plan.units, listing });
+          for (const u of plan.units) {
+            if (listing.unsupported.has(u.type)) preSkipped.set(u.key, "type_unsupported");
+            else if (!coverage.get(u.type)) preSkipped.set(u.key, "type_not_in_snapshot");
+            else if (listing.props !== null && this.db.getArtifact(conn.id, u.type, u.name) === null && isPackageOwnedState(listedPropFor(listing.props, u.type, u.name))) {
+              preSkipped.set(u.key, "package_owned");
+            }
+          }
+          const units = plan.units.filter((u) => !preSkipped.has(u.key));
+          const removable = ctx.origin === "execute_deploy" ? removableUnitKeys(deleted) : null;
+          if (units.length > 0) {
+            const manifest = memberRetrieveManifest(units);
+            const timeoutMs = ctx.deadline !== void 0 ? Math.max(0, ctx.deadline - Date.now()) : this.config.snapshot.retrieveTimeoutMs;
+            progress("retrieving members");
+            const retrieved = await retrieveNamedMembers(soap, manifest, {
+              timeoutMs,
+              pollIntervalMs: this.config.snapshot.pollIntervalMs,
+              signal: ctx.signal,
+              label: "retrieving members",
+              onProgress: progress
+            });
+            if (!retrieved.ok) {
+              if (retrieved.reason === "cancelled") throw cancelledError();
+              if (retrieved.reason === "timeout") {
+                throw new ContrailError(
+                  `retrieve did not complete within ${Math.round(timeoutMs / 1e3)} s`,
+                  "retrieve_timeout"
+                );
+              }
+              throw new ContrailError(
+                `retrieve failed: ${retrieved.reason.replace(/^retrieve_failed:/, "")}`,
+                "retrieve_failed"
+              );
+            }
+            const at = (/* @__PURE__ */ new Date()).toISOString();
+            retrievedAt = at;
+            retrievedProps = retrieved.fileProperties;
+            checkAbort();
+            const live = this.db.getConnection(conn.id);
+            if (!live) throw new ContrailError(CONNECTION_REMOVED_TEXT, "connection_removed");
+            if (!live.grants.metadata_read) {
+              throw new ContrailError(noMetadataReadText(conn.alias), "no_metadata_read");
+            }
+            ctx.onCommit?.();
+            progress("writing the snapshot");
+            try {
+              const before = /* @__PURE__ */ new Map();
+              const inputs = units.map((u) => {
+                const oldRoot = this.db.getArtifact(conn.id, u.type, u.name);
+                const rows = oldRoot?.filePath ? this.db.listArtifactsByFilePath(conn.id, oldRoot.filePath) : oldRoot ? [oldRoot] : [];
+                before.set(
+                  u.key,
+                  rows.map((r) => ({ type: r.type, apiName: r.apiName }))
+                );
+                const verdict = absenceVerdict(u, listing);
+                return {
+                  key: u.key,
+                  type: u.type,
+                  name: u.name,
+                  bundle: u.bundle,
+                  oldFilePath: oldRoot?.filePath ?? null,
+                  // After a deploy only the deploy's own deletions may be removed.
+                  ifAbsent: removable === null || verdict === "remove" && removable.has(u.key) ? verdict : "keep",
+                  skipIfPackageOwned: oldRoot === null
+                };
+              });
+              const done = applyMemberUnits(this.store, {
+                connectionId: conn.id,
+                zip: retrieved.zip,
+                manifest,
+                units: inputs,
+                fileProps: mergeProps(
+                  (listing.props ?? []).filter((p) => p.lastModifiedDate),
+                  retrieved.fileProperties
+                ),
+                retrievedAt: at
+              });
+              applied = done;
+              const replaced = done.units.filter((u) => u.applied !== "kept");
+              for (const u of replaced) {
+                oldRows.push(...before.get(u.key) ?? []);
+                const unit = units.find((x) => x.key === u.key);
+                if (unit) touched.push(`${unit.type}:${unit.name}`);
+              }
+              this.db.replaceArtifactRows(
+                conn.id,
+                oldRows,
+                done.artifacts.map((a) => ({ ...a, connectionId: conn.id }))
+              );
+              progress("extracting references");
+              const known = buildKnownArtifacts(this.db.listArtifacts(conn.id));
+              const edges = extractAllEdges(conn.id, done.artifacts, known);
+              const fresh = new Set(done.artifacts.map((a) => memberKey(a.type, a.apiName)));
+              this.db.replaceEdgesFromArtifacts(conn.id, {
+                refreshed: done.artifacts.map((a) => ({ type: a.type, name: a.apiName })),
+                removed: oldRows.filter((r) => !fresh.has(memberKey(r.type, r.apiName))).map((r) => ({ type: r.type, name: r.apiName })),
+                edges
+              });
+              edgeCount = edges.length;
+            } catch (err2) {
+              throw new ContrailError(
+                partialWriteText(err2 instanceof Error ? err2.message : String(err2)),
+                "snapshot_partial_write"
+              );
+            }
+          }
+        }
+        const outcomes = memberOutcomes({
+          plan,
+          origin: ctx.origin,
+          deleted,
+          preSkipped,
+          applied,
+          oldRows,
+          listing,
+          retrievedProps
+        });
+        const tally = { refreshed: 0, removed: 0, skipped: 0 };
+        for (const o of outcomes) tally[o.outcome] += 1;
+        const summary = {
+          connection: conn.alias,
+          members: outcomes,
+          counts: tally,
+          units: touched,
+          artifact_counts: countByType(applied?.artifacts ?? []),
+          edge_counts: { extractor: edgeCount },
+          retrieved_at: retrievedAt,
+          notes: touched.length > 0 ? [...MEMBER_REFRESH_NOTES] : [],
+          duration_ms: Date.now() - started
+        };
+        this.audit.record("snapshot.members_refreshed", {
+          connectionId: conn.id,
+          tool: ctx.origin,
+          outcome: "success",
+          detail: {
+            origin: ctx.origin,
+            ...ctx.origin === "execute_deploy" && ctx.requestId !== void 0 ? { requestId: ctx.requestId } : {},
+            refreshed: tally.refreshed,
+            removed: tally.removed,
+            skipped: tally.skipped,
+            units: touched,
+            duration_ms: summary.duration_ms
+          }
+        });
+        log("info", "snapshot members refreshed", {
+          connection: conn.alias,
+          refreshed: tally.refreshed,
+          removed: tally.removed,
+          skipped: tally.skipped
+        });
+        const changed = outcomes.filter((o) => o.outcome !== "skipped");
+        if (this.membersObserver && changed.length > 0) {
+          try {
+            this.membersObserver({ connectionId: conn.id, members: changed });
+          } catch (err2) {
+            log("warn", "members observer failed", { error: String(err2) });
+          }
+        }
+        return summary;
       }
       async runRefresh(conn, types, job) {
         const started = Date.now();
@@ -29904,7 +34207,7 @@ var init_engine = __esm({
           }
           poll += 1;
           job.progress = `retrieving (poll ${poll}, status ${status.status})`;
-          await delay2(this.config.snapshot.pollIntervalMs);
+          await delay3(this.config.snapshot.pollIntervalMs);
           status = await soap.checkRetrieveStatus(retrieveId, true);
         }
         if (!status.success || !status.zipFile) {
@@ -30998,7 +35301,10 @@ var init_codes = __esm({
 // src/deploy/approval.ts
 import http2 from "node:http";
 import { randomUUID as randomUUID3 } from "node:crypto";
-var DEFAULT_SESSION_TTL_MS, ApprovalPageServer;
+function isNoticeCode(value) {
+  return value !== null && Object.prototype.hasOwnProperty.call(APPROVAL_NOTICES, value);
+}
+var DEFAULT_SESSION_TTL_MS, ROUTES, ApprovalPageServer;
 var init_approval = __esm({
   "src/deploy/approval.ts"() {
     "use strict";
@@ -31006,7 +35312,14 @@ var init_approval = __esm({
     init_localhttp();
     init_pages();
     init_log();
+    init_policy();
     DEFAULT_SESSION_TTL_MS = 20 * 60 * 1e3;
+    ROUTES = /* @__PURE__ */ new Map([
+      ["/approve", "approve"],
+      ["/status", "status"],
+      ["/justification", "justification"],
+      ["/override", "override"]
+    ]);
     ApprovalPageServer = class {
       constructor(openBrowser = async (url) => {
         await open_default(url);
@@ -31014,11 +35327,19 @@ var init_approval = __esm({
         this.openBrowser = openBrowser;
       }
       sessions = /* @__PURE__ */ new Map();
-      /** Render `html` at a fresh session URL and open the human's browser at it. */
-      async present(html, statusCheck, ttlMs = DEFAULT_SESSION_TTL_MS) {
+      /**
+       * Render `html` at a fresh session URL and open the human's browser at it.
+       * `html` is the first render; with `live`, every later GET re-renders.
+       */
+      async present(html, statusCheck, ttlMs = DEFAULT_SESSION_TTL_MS, live) {
         const sessionId = randomUUID3();
         const server = http2.createServer((req, res) => {
-          this.handle(sessionId, req, res);
+          this.handle(sessionId, req, res).catch((err2) => {
+            log("error", "approval page request handler failed", {
+              err: err2 instanceof Error ? err2.name : typeof err2
+            });
+            safeRespond(res, 500, renderErrorPage("Internal error; see server log."));
+          });
         });
         await listen(server, 0);
         const addr = server.address();
@@ -31028,6 +35349,7 @@ var init_approval = __esm({
           server,
           html,
           statusCheck,
+          ...live ? { live } : {},
           // Keep the page's status endpoint reachable at least as long as the code
           // can be valid, so the self-invalidation poll can observe it going dead.
           hardTimeout: setTimeout(() => this.close(sessionId), ttlMs)
@@ -31043,22 +35365,30 @@ var init_approval = __esm({
         }
         return { url, opened };
       }
-      handle(sessionId, req, res) {
+      async handle(sessionId, req, res) {
         const session = this.sessions.get(sessionId);
         if (!session) {
           safeRespond(res, 410, renderErrorPage("This approval page has expired."));
           return;
         }
+        let url;
+        try {
+          url = new URL(req.url ?? "/", "http://localhost");
+        } catch {
+          url = new URL("http://localhost/");
+        }
+        const route = ROUTES.get(url.pathname) ?? "other";
+        const live = session.live;
         if (!hostAllowed(req, session.server)) {
+          live?.refused("bad_host_header", route);
           safeRespond(res, 403, renderErrorPage("Request refused: unexpected Host header."));
           return;
         }
-        const url = new URL(req.url ?? "/", "http://localhost");
         if (url.pathname === "/favicon.ico") {
           res.writeHead(204).end();
           return;
         }
-        if (req.method === "GET" && url.pathname === "/status" && url.searchParams.get("s") === sessionId) {
+        if (req.method === "GET" && route === "status" && url.searchParams.get("s") === sessionId) {
           const state = session.statusCheck ? session.statusCheck() : { active: true, status: "unknown" };
           res.writeHead(200, {
             "Content-Type": "application/json",
@@ -31068,8 +35398,47 @@ var init_approval = __esm({
           res.end(JSON.stringify(state));
           return;
         }
-        if (req.method === "GET" && url.pathname === "/approve" && url.searchParams.get("s") === sessionId) {
-          safeRespond(res, 200, session.html);
+        if (req.method === "GET" && route === "approve" && url.searchParams.get("s") === sessionId) {
+          if (!live) {
+            safeRespond(res, 200, session.html);
+            return;
+          }
+          let html;
+          try {
+            const n = url.searchParams.get("n");
+            html = live.render({ sessionId, notice: isNoticeCode(n) ? n : null });
+          } catch (err2) {
+            log("error", "approval page could not be rendered", {
+              err: err2 instanceof Error ? err2.name : typeof err2
+            });
+            safeRespond(res, 500, renderErrorPage("This approval page could not be rendered."));
+            return;
+          }
+          safeRespond(res, 200, html);
+          return;
+        }
+        if (req.method === "POST" && (route === "justification" || route === "override")) {
+          if (!live) {
+            safeRespond(res, 404, renderErrorPage("Not found."));
+            return;
+          }
+          let raw;
+          try {
+            raw = await readBody(req);
+          } catch (err2) {
+            if (err2 instanceof Error && err2.message === "request body too large") {
+              live.refused("body_too_large", route);
+            }
+            return;
+          }
+          const body = new URLSearchParams(raw);
+          if (body.get("session") !== sessionId) {
+            live.refused("invalid_session_token", route);
+            safeRespond(res, 403, renderErrorPage("Invalid session token."));
+            return;
+          }
+          const notice = route === "justification" ? live.saveJustification(body.get("justification") ?? "") : live.recordFreezeOverride(body.get("reason") ?? "");
+          redirect2(res, `/approve?s=${encodeURIComponent(sessionId)}&n=${encodeURIComponent(notice)}`);
           return;
         }
         safeRespond(res, 404, renderErrorPage("Not found."));
@@ -31082,6 +35451,1404 @@ var init_approval = __esm({
         setTimeout(() => session.server.close(), 250).unref?.();
       }
     };
+  }
+});
+
+// src/deploy/evidence.ts
+import crypto5 from "node:crypto";
+import fs11 from "node:fs";
+import path6 from "node:path";
+function redactRowLabel(kind, label) {
+  if (kind !== "dml") return label;
+  const colon = label.indexOf(":");
+  return colon === -1 ? label : label.slice(0, colon).trim();
+}
+function copyCounts(c) {
+  if (!c) return null;
+  const out = {};
+  if (c.changes !== void 0) out.changes = c.changes;
+  if (c.lines_added !== void 0) out.lines_added = c.lines_added;
+  if (c.lines_removed !== void 0) out.lines_removed = c.lines_removed;
+  if (c.files_changed !== void 0) out.files_changed = c.files_changed.slice();
+  if (c.files_added !== void 0) out.files_added = c.files_added.slice();
+  if (c.files_removed !== void 0) out.files_removed = c.files_removed.slice();
+  return out;
+}
+function storedRow(kind, r) {
+  const row = {
+    label: redactRowLabel(kind, r.label),
+    warnings: r.warnings.slice()
+  };
+  if (r.detail !== void 0) {
+    if (kind === "apex") {
+      row.detail_sha256 = crypto5.createHash("sha256").update(r.detail).digest("hex");
+      row.detail_chars = r.detail.length;
+    } else if (kind !== "dml") {
+      row.detail = r.detail;
+    }
+  }
+  if (r.diff) {
+    row.diff = {
+      summary: r.diff.summary,
+      baseline_label: r.diff.baseline_label,
+      identical: r.diff.identical,
+      counts: copyCounts(r.diff.counts),
+      truncated: r.diff.truncated
+    };
+  }
+  return row;
+}
+function codeFreePageView(view) {
+  const kind = view.kind;
+  return {
+    v: 1,
+    kind,
+    org: {
+      alias: view.org.alias,
+      org_name: view.org.orgName,
+      org_type: view.org.orgType,
+      instance_url: view.org.instanceUrl
+    },
+    expires_at: view.expiresAt,
+    warnings: (view.warnings ?? []).slice(),
+    destructive: view.destructive.map((r) => storedRow(kind, r)),
+    changes: view.changes.map((r) => storedRow(kind, r)),
+    automation: (view.automation ?? []).map((a) => ({
+      object: a.object,
+      snapshot_at: a.snapshot_at,
+      summary_lines: a.summary_lines.slice(),
+      notes: a.notes.slice(),
+      not_covered: a.not_covered.slice()
+    })),
+    automation_not_covered: (view.automationNotCovered ?? []).slice(),
+    results: view.results.map((r) => {
+      const out = { label: r.label, value: r.value };
+      if (r.bad !== void 0) out.bad = r.bad;
+      return out;
+    }),
+    blast: view.blast.slice()
+  };
+}
+function asObj(v) {
+  return v !== null && typeof v === "object" && !Array.isArray(v) ? v : null;
+}
+function asStr(v) {
+  return typeof v === "string" ? v : null;
+}
+function asNum(v) {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+function asBool(v) {
+  return typeof v === "boolean" ? v : null;
+}
+function asStrList(v) {
+  return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+}
+function lengthOf(v) {
+  return Array.isArray(v) ? v.length : 0;
+}
+function parseJson(text2) {
+  if (text2 === null) return null;
+  try {
+    return JSON.parse(text2);
+  } catch {
+    return null;
+  }
+}
+function isoOf(v) {
+  if (typeof v !== "string" || v === "") return null;
+  const ms = Date.parse(v);
+  return Number.isNaN(ms) ? null : new Date(ms).toISOString();
+}
+function sha256Of(text2) {
+  return crypto5.createHash("sha256").update(text2).digest("hex");
+}
+function scalarsOf(list, keys) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const item of list) {
+    const o = asObj(item);
+    if (!o) continue;
+    const copy = {};
+    for (const k of keys) {
+      const v = o[k];
+      if (typeof v === "string" || typeof v === "boolean" || asNum(v) !== null) copy[k] = v;
+    }
+    out.push(copy);
+  }
+  return out;
+}
+function reasonText(v, leftOut) {
+  if (/^[a-z][a-z0-9_]{0,63}$/.test(v)) return v;
+  const deadline = /^the org did not answer within (\d{1,6}) s$/.exec(v);
+  return deadline ? `the org did not answer within ${Number(deadline[1])} s` : leftOut;
+}
+function reduceAuditDetail(detail) {
+  if (!detail) return null;
+  const out = {};
+  for (const key2 of EVIDENCE_DETAIL_KEYS) {
+    if (!Object.hasOwn(detail, key2)) continue;
+    const v = detail[key2];
+    if (v === void 0) continue;
+    if (key2 === "reason" && v !== null) {
+      out[key2] = typeof v === "string" ? reasonText(v, REASON_LEFT_OUT) : REASON_LEFT_OUT;
+      continue;
+    }
+    out[key2] = JSON.parse(JSON.stringify(v));
+  }
+  return out;
+}
+function identityOf(raw) {
+  const o = asObj(raw);
+  const orgId = o ? asStr(o.org_id) : null;
+  if (!o || orgId === null) return null;
+  return {
+    alias: asStr(o.alias) ?? "",
+    org_id: orgId,
+    org_name: asStr(o.org_name),
+    org_type: asStr(o.org_type) ?? "unknown",
+    username: asStr(o.username)
+  };
+}
+function justificationOf(raw) {
+  const o = asObj(raw);
+  if (!o) return null;
+  const text2 = asStr(o.text);
+  const source = o.source === "agent" || o.source === "page" ? o.source : null;
+  if (text2 === null || source === null) return null;
+  const j = { text: text2, source };
+  const edited = asStr(o.edited_at);
+  if (edited !== null) j.edited_at = edited;
+  if (o.surface === "approval_page" || o.surface === "deploy_review") j.surface = o.surface;
+  const draft = asStr(o.agent_draft);
+  if (draft) j.agent_draft = draft;
+  const confirmed = asStr(o.confirmed_at);
+  if (confirmed !== null) j.confirmed_at = confirmed;
+  return j;
+}
+function recordTime(v) {
+  return isoOf(v) ?? "a time Contrail did not record";
+}
+function justificationRecord(j) {
+  if (!j || j.source === "agent" && j.text === "") return "None given.";
+  if (j.source === "agent") {
+    return j.confirmed_at ? `Drafted by the agent; shown prefilled in Deploy Review and approved unchanged at ${recordTime(j.confirmed_at)}.` : "Drafted by the agent and not edited by the human. Contrail does not record whether the approver read it.";
+  }
+  const where = j.surface === "deploy_review" ? "in Deploy Review" : "on the approval page";
+  const at = recordTime(j.edited_at);
+  if (j.text === "") {
+    return j.agent_draft ? `Cleared ${where} at ${at}; the agent's draft that was removed follows.` : `Cleared ${where} at ${at}.`;
+  }
+  return j.agent_draft ? `Typed ${where} at ${at}. It replaced the agent's draft, which follows.` : `Typed ${where} at ${at}.`;
+}
+function commentLabel(source) {
+  switch (source) {
+    case "agent_draft_unchanged":
+      return "comment (the agent's draft, approved unchanged)";
+    case "human_text_unchanged":
+      return "comment (typed on the approval page earlier, approved unchanged)";
+    case "typed":
+      return "comment (typed in Deploy Review)";
+    default:
+      return "comment";
+  }
+}
+function countsOf(raw) {
+  const c = asObj(raw);
+  if (!c) return null;
+  const out = {};
+  const changes = asNum(c.changes);
+  if (changes !== null) out.changes = changes;
+  const added = asNum(c.lines_added);
+  if (added !== null) out.lines_added = added;
+  const removed = asNum(c.lines_removed);
+  if (removed !== null) out.lines_removed = removed;
+  if (Array.isArray(c.files_changed)) out.files_changed = asStrList(c.files_changed);
+  if (Array.isArray(c.files_added)) out.files_added = asStrList(c.files_added);
+  if (Array.isArray(c.files_removed)) out.files_removed = asStrList(c.files_removed);
+  return out;
+}
+function pageRowOf(kind, raw) {
+  const r = asObj(raw);
+  if (!r) return null;
+  const label = asStr(r.label) ?? "";
+  const row = {
+    label: kind === "dml" ? redactRowLabel("dml", label) : label,
+    warnings: asStrList(r.warnings)
+  };
+  const detail = asStr(r.detail);
+  if (kind === "apex") {
+    const sha = detail !== null ? sha256Of(detail) : asStr(r.detail_sha256);
+    const chars = detail !== null ? detail.length : asNum(r.detail_chars);
+    if (sha !== null) row.detail_sha256 = sha;
+    if (chars !== null) row.detail_chars = chars;
+  } else if (kind !== "dml" && detail !== null) {
+    row.detail = detail;
+  }
+  const diff = asObj(r.diff);
+  if (diff) {
+    row.diff = {
+      summary: asStr(diff.summary) ?? "",
+      baseline_label: asStr(diff.baseline_label) ?? "",
+      identical: diff.identical === true,
+      counts: countsOf(diff.counts),
+      truncated: diff.truncated === true
+    };
+  }
+  return row;
+}
+function pageViewOf(kind, raw) {
+  const v = asObj(raw);
+  if (!v) return null;
+  const org = asObj(v.org) ?? {};
+  const rows = (list) => Array.isArray(list) ? list.map((r) => pageRowOf(kind, r)).filter((r) => r !== null) : [];
+  return {
+    v: 1,
+    kind,
+    org: {
+      alias: asStr(org.alias) ?? "",
+      org_name: asStr(org.org_name),
+      org_type: asStr(org.org_type) ?? "",
+      instance_url: asStr(org.instance_url) ?? ""
+    },
+    expires_at: asStr(v.expires_at) ?? "",
+    warnings: asStrList(v.warnings),
+    destructive: rows(v.destructive),
+    changes: rows(v.changes),
+    automation: (Array.isArray(v.automation) ? v.automation : []).map((a) => asObj(a)).filter((a) => a !== null).map((a) => ({
+      object: asStr(a.object) ?? "",
+      snapshot_at: asStr(a.snapshot_at),
+      summary_lines: asStrList(a.summary_lines),
+      notes: asStrList(a.notes),
+      not_covered: asStrList(a.not_covered)
+    })),
+    automation_not_covered: asStrList(v.automation_not_covered),
+    results: (Array.isArray(v.results) ? v.results : []).map((r) => asObj(r)).filter((r) => r !== null).map((r) => {
+      const out = {
+        label: asStr(r.label) ?? "",
+        value: asStr(r.value) ?? ""
+      };
+      if (typeof r.bad === "boolean") out.bad = r.bad;
+      return out;
+    }),
+    blast: asStrList(v.blast)
+  };
+}
+function preImagesOf(summary) {
+  const out = [];
+  for (const list of [summary.changes, summary.destructive]) {
+    if (!Array.isArray(list)) continue;
+    for (const item of list) {
+      const c = asObj(item);
+      if (!c) continue;
+      const pre = asObj(c.pre_image);
+      out.push({
+        type: asStr(c.type) ?? "",
+        api_name: asStr(c.api_name) ?? "",
+        change: asStr(c.change),
+        present: pre ? asBool(pre.present) : null,
+        sha256: pre ? asStr(pre.sha256) : null,
+        last_modified_date: pre ? asStr(pre.last_modified_date) : null,
+        last_modified_by: pre ? asStr(pre.last_modified_by) : null,
+        source: pre ? asStr(pre.source) : null,
+        // Where the stamp was read (S46); absent on a request validated by 0.39.
+        stamp_source: pre ? asStr(pre.stamp_source) : null
+      });
+    }
+  }
+  return out;
+}
+function liveCheckOf(summary) {
+  const lc2 = asObj(summary.live_check);
+  if (!lc2) return null;
+  const failures = asObj(lc2.probe_failures);
+  return {
+    status: asStr(lc2.status),
+    at: asStr(lc2.at),
+    dates_unavailable_types: asStrList(lc2.dates_unavailable_types),
+    stamp_scheme: asNum(lc2.stamp_scheme),
+    probe_unmatched: asStrList(lc2.probe_unmatched),
+    probe_failure_types: failures ? Object.keys(failures) : []
+  };
+}
+function inputsOf(kind, raw) {
+  const p = asObj(raw);
+  if (!p) return null;
+  switch (kind) {
+    case "deploy":
+      return { test_level: asStr(p.test_level), run_tests: asStrList(p.run_tests) };
+    case "apex":
+      return { sha256: asStr(p.sha256), lines: asNum(p.lines), chars: asNum(p.chars) };
+    case "activation":
+      return { agent: asStr(p.agent), version: asStr(p.version), from: asStr(p.from), to: asStr(p.to) };
+    case "bulk":
+      return {
+        steps: scalarsOf(p.steps, ["n", "object", "operation", "row_count", "sha256"]),
+        stop_on_failure: asBool(p.stop_on_failure)
+      };
+    case "dml":
+      return { operations: scalarsOf(p.operations, ["step", "operation", "object", "rows"]) };
+    default:
+      return null;
+  }
+}
+function statusCodesOf(list) {
+  const codes = /* @__PURE__ */ new Set();
+  if (!Array.isArray(list)) return [];
+  for (const item of list) {
+    const f = asObj(item);
+    if (!f) continue;
+    for (const k of ["statusCode", "errorCode"]) {
+      const c = asStr(f[k]);
+      if (c) codes.add(c);
+    }
+    if (Array.isArray(f.errors)) {
+      for (const e of f.errors) {
+        const eo = asObj(e);
+        if (!eo) continue;
+        const c = asStr(eo.statusCode) ?? asStr(eo.errorCode);
+        if (c) codes.add(c);
+      }
+    }
+  }
+  return [...codes];
+}
+function orgResultOf(kind, raw) {
+  const r = asObj(raw);
+  if (!r) return null;
+  if (r.target_moved === true) return { executed: false, voided_by_target_check: true };
+  switch (kind) {
+    case "deploy":
+      return {
+        deployed: asBool(r.deployed),
+        deploy_id: asStr(r.deploy_id),
+        status: asStr(r.status),
+        quick_deploy: asBool(r.quick_deploy),
+        components_deployed: asNum(r.components_deployed),
+        component_errors: asNum(r.component_errors),
+        tests_run: asNum(r.tests_run),
+        test_failures: asNum(r.test_failures)
+      };
+    case "dml":
+      return r.plan === true ? {
+        executed: asBool(r.executed),
+        plan: true,
+        all_or_none: asBool(r.all_or_none),
+        steps: scalarsOf(r.steps, ["step", "operation", "object", "status"]),
+        failures: lengthOf(r.failures),
+        failure_status_codes: statusCodesOf(r.failures)
+      } : {
+        executed: asBool(r.executed),
+        operation: asStr(r.operation),
+        object: asStr(r.object),
+        rows: asNum(r.rows),
+        failures: lengthOf(r.failures),
+        failure_status_codes: statusCodesOf(r.failures)
+      };
+    case "apex":
+      return { executed: asBool(r.executed), status: asStr(r.status) };
+    case "activation":
+      return {
+        executed: asBool(r.executed),
+        agent: asStr(r.agent),
+        version: asStr(r.version),
+        requested_status: asStr(r.requested_status),
+        confirmed_status: asStr(r.confirmed_status)
+      };
+    case "bulk":
+      return {
+        executed: asBool(r.executed),
+        stop_on_failure: asBool(r.stop_on_failure),
+        total_processed: asNum(r.total_processed),
+        total_failed: asNum(r.total_failed),
+        halted_after_step: asNum(r.halted_after_step),
+        steps: scalarsOf(r.steps, [
+          "step",
+          "object",
+          "operation",
+          "state",
+          "processed",
+          "succeeded",
+          "failed"
+        ])
+      };
+    default:
+      return { executed: asBool(r.executed) };
+  }
+}
+function targetCheckNote(kind, status) {
+  switch (status) {
+    case "unavailable": {
+      const noun = kind === "deploy" ? "deploy" : kind === "dml" ? "data change" : kind === "apex" ? "Apex script" : kind === "bulk" ? "bulk data load" : kind === "activation" ? "agent activation change" : "change";
+      return `Contrail could not re-read the org before executing to confirm nothing had moved, so this ${noun} went ahead without a target check; the approval page's diff may not describe what was overwritten.`;
+    }
+    case "not_checked":
+      return "No member could be compared (each one is listed with its reason), so this write went ahead without a target check.";
+    case "not_applicable":
+      return kind === "apex" ? "An anonymous Apex script has no fixed org target to re-check." : kind === "dml" ? "No record that existed before this change to re-check: it inserts records, or changes only records it creates itself." : kind === "bulk" ? "Bulk loads are not re-checked before executing \u2014 the approval page showed no current values for their rows, so there is nothing to compare against." : "Nothing in the org was re-checked for this kind of request.";
+    default:
+      return null;
+  }
+}
+function targetCheckOf(kind, raw) {
+  const r = asObj(raw);
+  if (!r) return null;
+  const unchecked = (v) => scalarsOf(v, ["type", "api_name", "object", "id", "reason"]).map(
+    (m) => typeof m.reason === "string" ? { ...m, reason: reasonText(m.reason, REASON_LEFT_OUT) } : m
+  );
+  if (r.target_moved === true) {
+    const out2 = {
+      status: "moved",
+      checked_at: asStr(r.checked_at),
+      moved: scalarsOf(r.moved, ["type", "api_name", "object", "id", "field", "state", "source"]),
+      unchecked: unchecked(r.unchecked)
+    };
+    for (const k of ["agent", "version", "approved_from_status", "current_status"]) {
+      const v = asStr(r[k]);
+      if (v !== null) out2[k] = v;
+    }
+    return out2;
+  }
+  const tc = asObj(r.target_check);
+  if (!tc) return null;
+  const status = asStr(tc.status);
+  const out = { status };
+  if (tc.checked_at !== void 0) out.checked_at = asStr(tc.checked_at);
+  if (Array.isArray(tc.checked)) {
+    out.checked = scalarsOf(tc.checked, ["type", "api_name", "object", "id", "absent"]);
+  }
+  if (Array.isArray(tc.unchecked)) out.unchecked = unchecked(tc.unchecked);
+  const reason = asStr(tc.reason);
+  if (reason !== null) {
+    out.reason = reasonText(
+      reason,
+      status === "unavailable" ? TARGET_CHECK_READ_FAILED : REASON_LEFT_OUT
+    );
+  }
+  const note = targetCheckNote(kind, status);
+  if (note !== null) out.note = note;
+  return out;
+}
+function revertOf(kind, raw) {
+  if (kind !== "deploy") return null;
+  const r = asObj(raw);
+  if (!r || !("revert_package" in r) && !("revert_note" in r)) return null;
+  const p = asObj(r.revert_package);
+  return {
+    package: p ? {
+      dir: asStr(p.dir),
+      plan: asStr(p.plan),
+      outcome: asStr(p.outcome),
+      restores: lengthOf(p.restores),
+      deletes: lengthOf(p.deletes),
+      not_restorable: lengthOf(p.not_restorable)
+    } : null,
+    note: asStr(r.revert_note)
+  };
+}
+function eventEntry(e) {
+  const out = {
+    ts: e.ts,
+    event_type: e.event_type,
+    tool: e.tool,
+    outcome: e.outcome,
+    detail: reduceAuditDetail(e.detail)
+  };
+  if (e.connection !== void 0) out.connection = e.connection;
+  return out;
+}
+function sameIdentity(a, b) {
+  return a.org_id.slice(0, 15) === b.org_id.slice(0, 15) && a.username === b.username;
+}
+function policyChecksCell(hasPolicy, hasExecuteCheck, executed, executeRefused) {
+  if (hasPolicy && hasExecuteCheck) return "proposal + execution";
+  if (hasPolicy) {
+    if (executed) return "proposal only (executed by an older Contrail)";
+    return executeRefused ? "proposal + execution (refused)" : "proposal (not executed)";
+  }
+  if (hasExecuteCheck) return "execution only (created by an older Contrail)";
+  if (executeRefused) return "execution only (refused; created by an older Contrail)";
+  return "none (older Contrail)";
+}
+function executeRefusalOf(events) {
+  let newest2 = null;
+  for (const ev of events) {
+    if (ev.event_type !== "policy.refused" || ev.detail?.phase !== "execute") continue;
+    if (newest2 === null || ev.ts > newest2.ts) newest2 = ev;
+  }
+  if (newest2 === null) return null;
+  const reason = asStr(newest2.detail?.reason);
+  return { at: newest2.ts, reason: reason === null ? null : reasonText(reason, REASON_LEFT_OUT) };
+}
+function requestEntry(row) {
+  const summary = asObj(row.summary) ?? {};
+  const gov = asObj(summary.governance);
+  const policy = gov ? asObj(gov.policy) : null;
+  const check2 = gov ? asObj(gov.execute_check) : null;
+  const freeze = gov ? asObj(gov.freeze) : null;
+  const override = gov ? asObj(gov.freeze_override) : null;
+  const executed = EXECUTED_STATUSES.has(row.status);
+  const refusal = check2 || executed ? null : executeRefusalOf(row.events);
+  const j = justificationOf(gov?.justification);
+  const atProposal = row.target_at_proposal;
+  const atExecution = row.target_at_execution;
+  const pageView = pageViewOf(row.kind, summary.page_view);
+  const decision = row.decision ? {
+    state: row.decision.state,
+    at: row.decision.at,
+    comment: row.decision.comment,
+    comment_source: row.decision.comment_source,
+    comment_label: commentLabel(row.decision.comment_source)
+  } : null;
+  const overrideReason = override ? asStr(override.reason) : null;
+  const orgResult = orgResultOf(row.kind, row.result);
+  if (orgResult && row.kind === "deploy" && orgResult.deploy_id === null) {
+    for (const ev of row.events) {
+      const id = ev.event_type.startsWith("deploy.execut") ? asStr(ev.detail?.deployId) : null;
+      if (id !== null) orgResult.deploy_id = id;
+    }
+  }
+  return {
+    id: row.id,
+    kind: row.kind,
+    status: row.status,
+    proposed_at: row.created_at,
+    expires_at: row.expires_at,
+    executed_at: row.executed_at,
+    validation_id: row.validation_id,
+    org_and_user: {
+      at_proposal: atProposal,
+      at_execution: atExecution,
+      at_execution_differs: atProposal !== null && atExecution !== null && !sameIdentity(atProposal, atExecution),
+      connection_now: atProposal ? null : row.connection_now,
+      label: atProposal ? null : NOW_LABEL
+    },
+    ticket: gov ? asStr(gov.ticket) : null,
+    justification: {
+      text: j && j.text !== "" ? j.text : null,
+      record: justificationRecord(j),
+      agent_draft: j && j.source === "page" ? j.agent_draft ?? null : null
+    },
+    policy_at_proposal: policy ? {
+      evaluated_at: asStr(policy.evaluated_at),
+      source: asStr(policy.source),
+      sha256: asStr(policy.sha256),
+      rules: asStrList(policy.rules),
+      lines: asStrList(policy.lines)
+    } : null,
+    policy_at_proposal_note: policy ? null : POLICY_OLDER,
+    freeze_at_proposal: freeze && asStr(freeze.rule) !== null ? {
+      rule: asStr(freeze.rule) ?? "",
+      window: asStr(freeze.window) ?? "",
+      until: asStr(freeze.until) ?? "",
+      time_zone: asStr(freeze.time_zone)
+    } : null,
+    freeze_override: override && overrideReason !== null ? {
+      reason: overrideReason,
+      at: asStr(override.at),
+      surface: asStr(override.surface),
+      rule: asStr(override.rule),
+      window: asStr(override.window)
+    } : null,
+    execute_check: check2 ? {
+      at: asStr(check2.at),
+      rules: asStrList(check2.rules),
+      freeze_active: asBool(check2.freeze_active),
+      overridden: asBool(check2.overridden),
+      org_id: asStr(check2.org_id),
+      username: asStr(check2.username)
+    } : null,
+    // claimCode records execute_check before it claims, so an executed row
+    // without one was claimed by a Contrail older than 0.40.0.
+    execute_check_note: check2 ? null : executed ? EXECUTE_CHECK_OLDER : refusal ? EXECUTE_CHECK_REFUSED : EXECUTE_CHECK_NOT_RUN,
+    execute_refusal: refusal,
+    policy_checks: policyChecksCell(policy !== null, check2 !== null, executed, refusal !== null),
+    decision,
+    page_view: pageView,
+    page_view_note: pageView ? null : policy ? PAGE_VIEW_MISSING : PAGE_VIEW_OLDER,
+    inputs: inputsOf(row.kind, row.payload),
+    pre_images: row.kind === "deploy" ? preImagesOf(summary) : [],
+    live_check: row.kind === "deploy" ? liveCheckOf(summary) : null,
+    target_check: targetCheckOf(row.kind, row.result),
+    org_result: orgResult,
+    revert: revertOf(row.kind, row.result),
+    audit_events: row.events.map(eventEntry),
+    audit_events_truncated: row.events_truncated
+  };
+}
+function longestBacktickRun(s) {
+  let longest = 0;
+  for (const m of s.matchAll(/`+/g)) longest = Math.max(longest, m[0].length);
+  return longest;
+}
+function mdCode(s, opts = {}) {
+  const flat = s.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ");
+  if (flat === "") return opts.empty ?? "none";
+  const delimiter = "`".repeat(longestBacktickRun(flat) + 1);
+  const pad = flat.startsWith("`") || flat.endsWith("`") ? " " : "";
+  const body = opts.cell ? flat.replace(
+    /(\\*)\|/g,
+    (_m, slashes) => slashes.length % 2 === 0 ? `${slashes}\\|` : `${slashes}\\\\|`
+  ) : flat;
+  return `${delimiter}${pad}${body}${pad}${delimiter}`;
+}
+function mdBlock(s) {
+  const text2 = s.replace(/\r\n?/g, "\n");
+  const fence = "`".repeat(Math.max(3, longestBacktickRun(text2) + 1));
+  return `${fence}
+${text2}
+${fence}`;
+}
+function mdTime(v, none, cell = false) {
+  if (v === null || v === void 0 || v === "") return none;
+  return isoOf(v) ?? mdCode(String(v), { cell });
+}
+function mdKnown(v, known) {
+  return known.has(v) ? v : mdCode(v);
+}
+function mdList(values, none) {
+  return values.length === 0 ? none : values.map((v) => mdCode(v)).join(", ");
+}
+function mdCell(v, cell = true) {
+  if (v === null || v === void 0) return "\u2014";
+  if (typeof v === "boolean") return v ? "yes" : "no";
+  if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  return mdCode(typeof v === "string" ? v : JSON.stringify(v), { cell, empty: "\u2014" });
+}
+function mdTable(head, rows) {
+  return [
+    `| ${head.join(" | ")} |`,
+    `|${head.map(() => "---").join("|")}|`,
+    ...rows.map((r) => `| ${r.join(" | ")} |`)
+  ];
+}
+function yesNo(v) {
+  return v === null ? "not recorded" : v ? "yes" : "no";
+}
+function mdGroup(out, title, lines) {
+  if (lines.length === 0) {
+    out.push(`${title}: none.`, "");
+    return;
+  }
+  out.push(`${title}:`, "", mdBlock(lines.join("\n")), "");
+}
+function identityMd(i) {
+  return `${mdCode(i.alias, { empty: "no label" })} \xB7 org ${mdCode(i.org_name ?? "", { empty: "with no name recorded" })} \xB7 org id ${mdCode(i.org_id)} (${mdCode(i.org_type)}) \xB7 user ${mdCode(i.username ?? "", { empty: "not recorded" })}`;
+}
+function pageRowLines(rows) {
+  const lines = [];
+  for (const r of rows) {
+    lines.push(r.label);
+    for (const w of r.warnings) lines.push(`  ! ${w}`);
+    if (r.detail !== void 0) lines.push(`  ${r.detail}`);
+    if (r.detail_sha256 !== void 0) {
+      lines.push(`  script sha256 ${r.detail_sha256} (${r.detail_chars ?? "?"} characters)`);
+    }
+    if (r.diff) {
+      lines.push(
+        `  ${r.diff.summary}${r.diff.identical ? " (identical)" : ""}${r.diff.truncated ? " (diff cut on the page)" : ""}`
+      );
+    }
+  }
+  return lines;
+}
+function pageViewMd(out, e) {
+  const pv = e.page_view;
+  if (!pv) {
+    out.push(e.page_view_note ?? PAGE_VIEW_MISSING, "");
+    return;
+  }
+  out.push(
+    `Org on the page: ${mdCode(pv.org.alias, { empty: "no label" })} \xB7 ${mdCode(pv.org.org_name ?? "", { empty: "no org name" })} (${mdCode(pv.org.org_type, { empty: "type not recorded" })}) at ${mdCode(pv.org.instance_url, { empty: "no address recorded" })}. Code expiry shown: ${mdTime(pv.expires_at, "not recorded")}.`,
+    ""
+  );
+  mdGroup(out, "Page warnings", pv.warnings);
+  mdGroup(out, "Deletions", pageRowLines(pv.destructive));
+  mdGroup(out, "Changes", pageRowLines(pv.changes));
+  const automation = [];
+  for (const a of pv.automation) {
+    automation.push(`${a.object} (snapshot ${a.snapshot_at ?? "not recorded"})`);
+    for (const l of a.summary_lines) automation.push(`  ${l}`);
+    for (const n of a.notes) automation.push(`  note: ${n}`);
+    for (const n of a.not_covered) automation.push(`  not covered: ${n}`);
+  }
+  mdGroup(out, "Automation on the objects this change touches", automation);
+  mdGroup(out, "Not covered by the automation summary", pv.automation_not_covered);
+  mdGroup(
+    out,
+    "Results",
+    pv.results.map((r) => `${r.label}: ${r.value}${r.bad ? " (flagged)" : ""}`)
+  );
+  mdGroup(out, "Blast radius", pv.blast);
+}
+function inputsMd(kind, inputs) {
+  if (!inputs) return [];
+  switch (kind) {
+    case "deploy": {
+      const level = asStr(inputs.test_level);
+      const tests = asStrList(inputs.run_tests);
+      return [
+        `- Test level: ${level === null ? "not set (the org's own default)" : mdCode(level)}${tests.length > 0 ? ` \xB7 run tests: ${mdList(tests, "none")}` : ""}`
+      ];
+    }
+    case "apex":
+      return [
+        `- Script: sha256 ${mdCode(asStr(inputs.sha256) ?? "", { empty: "not recorded" })} \xB7 ${mdCell(asNum(inputs.lines), false)} line(s) \xB7 ${mdCell(asNum(inputs.chars), false)} character(s)`
+      ];
+    case "activation":
+      return [
+        `- Agent: ${mdCode(asStr(inputs.agent) ?? "", { empty: "not recorded" })} \xB7 version ${mdCode(asStr(inputs.version) ?? "", { empty: "not recorded" })} \xB7 from ${mdCode(asStr(inputs.from) ?? "", { empty: "not recorded" })} to ${mdCode(asStr(inputs.to) ?? "", { empty: "not recorded" })}`
+      ];
+    case "bulk":
+      return [
+        `- Stop on failure: ${yesNo(asBool(inputs.stop_on_failure))}`,
+        ...scalarsOf(inputs.steps, ["n", "object", "operation", "row_count", "sha256"]).map(
+          (s) => `- Step ${mdCell(s.n, false)}: ${mdCell(s.operation, false)} ${mdCell(s.object, false)} \xB7 ${mdCell(s.row_count, false)} row(s) \xB7 file sha256 ${mdCell(s.sha256, false)}`
+        )
+      ];
+    case "dml":
+      return scalarsOf(inputs.operations, ["step", "operation", "object", "rows"]).map(
+        (o) => `- ${o.step !== void 0 ? `Step ${mdCell(o.step, false)}: ` : "Operation: "}${mdCell(o.operation, false)} ${mdCell(o.object, false)} \xB7 ${mdCell(o.rows, false)} record(s)`
+      );
+    default:
+      return [];
+  }
+}
+function targetCheckMd(out, e) {
+  const tc = e.target_check;
+  if (!tc) {
+    out.push(
+      EXECUTED_STATUSES.has(e.status) || e.org_result ? "Not recorded on this request." : "Not run \u2014 the request was not executed.",
+      ""
+    );
+    return;
+  }
+  out.push(
+    `Status: ${mdCode(asStr(tc.status) ?? "", { empty: "not recorded" })}${tc.checked_at !== void 0 ? ` \xB7 checked at ${mdTime(tc.checked_at, "not recorded")}` : ""}.`,
+    ""
+  );
+  const member = (m) => [m.type, m.api_name, m.object, m.id, m.field].filter((v) => typeof v === "string").join(":");
+  if (Array.isArray(tc.moved)) {
+    mdGroup(
+      out,
+      "Moved",
+      tc.moved.map(
+        (m) => `${member(m)} \u2014 ${asStr(m.state) ?? "moved"}${typeof m.source === "string" ? ` (stamp from ${m.source})` : ""}`
+      )
+    );
+  }
+  if (Array.isArray(tc.checked)) {
+    mdGroup(
+      out,
+      "Compared",
+      tc.checked.map(
+        (m) => `${member(m)}${m.absent === true ? " \u2014 absent, as expected" : ""}`
+      )
+    );
+  }
+  if (Array.isArray(tc.unchecked)) {
+    mdGroup(
+      out,
+      "Not compared",
+      tc.unchecked.map(
+        (m) => `${member(m)} \u2014 ${asStr(m.reason) ?? "no reason recorded"}`
+      )
+    );
+  }
+  const notes = [asStr(tc.reason), asStr(tc.note)].filter((v) => v !== null);
+  if (notes.length > 0) mdGroup(out, "Reason and note", notes);
+}
+function orgResultMd(out, e) {
+  const r = e.org_result;
+  if (!r) {
+    out.push(
+      e.status === "executing" ? ORG_RESULT_EXECUTING : EXECUTED_STATUSES.has(e.status) ? "Not recorded on this request." : "None \u2014 the request was not executed.",
+      ""
+    );
+    return;
+  }
+  const lines = [];
+  for (const [k, v] of Object.entries(r)) {
+    if (k === "steps") continue;
+    if (Array.isArray(v)) lines.push(`- ${k}: ${mdList(asStrList(v), "none")}`);
+    else lines.push(`- ${k}: ${mdCell(v, false)}`);
+  }
+  out.push(...lines, "");
+  const steps = Array.isArray(r.steps) ? r.steps : [];
+  if (steps.length > 0) {
+    const keys = [...new Set(steps.flatMap((s) => Object.keys(s)))];
+    out.push(...mdTable(keys, steps.map((s) => keys.map((k) => mdCell(s[k])))), "");
+  }
+}
+function revertMd(out, e) {
+  if (e.kind !== "deploy") {
+    out.push("Not applicable \u2014 only metadata deploys have a revert package.", "");
+    return;
+  }
+  const rv = e.revert;
+  if (!rv) {
+    out.push("None recorded \u2014 the request was not executed, or no package was reported.", "");
+    return;
+  }
+  if (rv.package) {
+    const p = rv.package;
+    out.push(
+      `Location: ${mdCode(p.dir ?? "", { empty: "not recorded" })} \xB7 plan ${mdCode(p.plan ?? "", { empty: "not recorded" })}${p.outcome !== null ? ` \xB7 outcome ${mdCode(p.outcome)}` : ""}. Restores ${p.restores}, deletes ${p.deletes}, cannot restore ${p.not_restorable}.`,
+      ""
+    );
+  } else {
+    out.push("No revert package.", "");
+  }
+  if (rv.note !== null) mdGroup(out, "Revert note", [rv.note]);
+}
+function eventsTable(events, withConnection) {
+  const head = withConnection ? ["Time", "Connection", "Event", "Tool", "Outcome", "Detail"] : ["Time", "Event", "Tool", "Outcome", "Detail"];
+  return mdTable(
+    head,
+    events.map((ev) => [
+      mdTime(ev.ts, "\u2014", true),
+      ...withConnection ? [ev.connection ? mdCell(ev.connection) : "connection removed"] : [],
+      mdCell(ev.event_type),
+      mdCell(ev.tool),
+      mdCell(ev.outcome),
+      ev.detail ? mdCell(JSON.stringify(ev.detail)) : "\u2014"
+    ])
+  );
+}
+function aliasOf(e) {
+  return e.org_and_user.at_proposal?.alias ?? e.org_and_user.connection_now?.alias ?? null;
+}
+function requestMd(out, e) {
+  const alias = aliasOf(e);
+  out.push(
+    `## Request ${mdCode(e.id)} \u2014 ${mdKnown(e.kind, KNOWN_KINDS)} on ${alias !== null ? mdCode(alias, { empty: "a connection with no label" }) : "a connection that has been removed"}`,
+    ""
+  );
+  out.push(
+    `- Status: ${mdCode(e.status)}`,
+    `- Proposed: ${mdTime(e.proposed_at, "not recorded")} \xB7 code expiry: ${mdTime(e.expires_at, "not recorded")} \xB7 executed: ${mdTime(
+      e.executed_at,
+      e.status === "executing" ? "not recorded \u2014 claimed for execution, no outcome stored (see Org result)" : EXECUTED_STATUSES.has(e.status) ? "not recorded" : "not executed"
+    )}`,
+    `- Validation id: ${mdCode(e.validation_id ?? "", { empty: "none" })}`
+  );
+  const ou = e.org_and_user;
+  if (ou.at_proposal) {
+    out.push(`- Org and acting user at proposal: ${identityMd(ou.at_proposal)}`);
+  } else {
+    out.push(
+      `- ${NOW_LABEL}: ${ou.connection_now ? identityMd(ou.connection_now) : "connection removed"}`
+    );
+  }
+  if (ou.at_execution) {
+    out.push(
+      ou.at_proposal && !ou.at_execution_differs ? "- Org and acting user at execution: the same org and user." : `- Org and acting user at execution: org id ${mdCode(ou.at_execution.org_id)} \xB7 user ${mdCode(ou.at_execution.username ?? "", { empty: "not recorded" })}`
+    );
+  }
+  out.push(`- Ticket: ${mdCode(e.ticket ?? "", { empty: "none given" })}`);
+  out.push(...inputsMd(e.kind, e.inputs));
+  out.push(`- Justification: ${e.justification.record}`, "");
+  if (e.justification.text !== null) out.push(mdBlock(e.justification.text), "");
+  if (e.justification.agent_draft !== null) {
+    out.push("The agent's draft:", "", mdBlock(e.justification.agent_draft), "");
+  }
+  if (e.policy_at_proposal) {
+    const p = e.policy_at_proposal;
+    out.push(
+      `- Policies at proposal: evaluated ${mdTime(p.evaluated_at, "at a time not recorded")} \xB7 source ${mdCode(p.source ?? "", { empty: "not recorded" })} \xB7 fingerprint ${mdCode(p.sha256 ?? "", { empty: "not recorded" })} \xB7 rules: ${mdList(p.rules, "none applied")}`,
+      ""
+    );
+    mdGroup(out, "Policy lines at proposal", p.lines);
+  } else {
+    out.push(`- ${e.policy_at_proposal_note ?? POLICY_OLDER}`, "");
+  }
+  if (e.policy_at_proposal) {
+    const f = e.freeze_at_proposal;
+    out.push(
+      f ? `- Freeze at proposal: rule ${mdCode(f.rule)} \xB7 window ${mdCode(f.window)} \xB7 until ${mdCode(f.until)} \xB7 time zone ${mdCode(f.time_zone ?? "", { empty: "not recorded" })}` : "- Freeze at proposal: none."
+    );
+  }
+  const o = e.freeze_override;
+  if (o) {
+    const where = o.surface === "deploy_review" ? "in Deploy Review" : o.surface === "approval_page" ? "on the approval page" : `on ${mdCode(o.surface ?? "", { empty: "a surface not recorded" })}`;
+    out.push(
+      `- Freeze override: recorded ${mdTime(o.at, "at a time not recorded")} ${where} \xB7 rule ${mdCode(o.rule ?? "", { empty: "not recorded" })} \xB7 window ${mdCode(o.window ?? "", { empty: "not recorded" })}. Emergency reason:`,
+      "",
+      mdBlock(o.reason),
+      ""
+    );
+  } else if (e.policy_at_proposal) {
+    out.push("- Freeze override: none.", "");
+  }
+  const c = e.execute_check;
+  const x = e.execute_refusal;
+  out.push(
+    c ? `- Policy re-check at execution: ${mdTime(c.at, "at a time not recorded")} \xB7 rules: ${mdList(c.rules, "none applied")} \xB7 freeze in effect: ${yesNo(c.freeze_active)} \xB7 emergency override: ${yesNo(c.overridden)}` : x ? `- Policy re-check at execution: refused at ${mdTime(x.at, "a time not recorded")} (reason ${mdCode(x.reason ?? "", { empty: "not recorded" })}) \u2014 not executed.` : `- ${e.execute_check_note ?? EXECUTE_CHECK_NOT_RUN}`,
+    `- Policy checks: ${e.policy_checks}`,
+    ""
+  );
+  if (e.decision) {
+    const d = e.decision;
+    out.push(
+      `- Deploy Review decision: ${mdCode(d.state)} at ${mdTime(d.at, "a time not recorded")}`,
+      ""
+    );
+    if (d.comment !== null && d.comment !== "") out.push(`${d.comment_label}:`, "", mdBlock(d.comment), "");
+  }
+  out.push("### What the approval page showed", "");
+  pageViewMd(out, e);
+  out.push("### Pre-images", "");
+  if (e.kind !== "deploy") {
+    out.push("Not applicable \u2014 pre-images are recorded for metadata deploys only.", "");
+  } else {
+    const lc2 = e.live_check;
+    out.push(
+      lc2 ? `Live check at validation: ${mdCode(lc2.status ?? "", { empty: "not recorded" })} at ${mdTime(lc2.at, "a time not recorded")} \xB7 stamp scheme ${lc2.stamp_scheme === null ? "1 (listing only)" : mdCell(lc2.stamp_scheme)} \xB7 dates unavailable for: ${mdList(lc2.dates_unavailable_types, "none")} \xB7 stamp queries failed for: ${mdList(lc2.probe_failure_types, "none")} \xB7 same-name rows under another namespace: ${mdList(lc2.probe_unmatched, "none")}` : "Live check at validation: not recorded.",
+      ""
+    );
+    if (e.pre_images.length === 0) {
+      out.push("No members recorded.", "");
+    } else {
+      out.push(
+        ...mdTable(
+          ["Type", "API name", "Change", "Present", "sha256", "Last modified", "Last modified by", "Source", "Stamp source"],
+          e.pre_images.map((p) => [
+            mdCell(p.type),
+            mdCell(p.api_name),
+            mdCell(p.change),
+            p.present === null ? "unknown" : p.present ? "yes" : "no",
+            mdCell(p.sha256),
+            mdTime(p.last_modified_date, "\u2014", true),
+            mdCell(p.last_modified_by),
+            mdCell(p.source),
+            mdCell(p.stamp_source)
+          ])
+        ),
+        ""
+      );
+    }
+  }
+  out.push("### Target check at execution", "");
+  targetCheckMd(out, e);
+  out.push("### Org result", "");
+  orgResultMd(out, e);
+  out.push("### Revert package", "");
+  revertMd(out, e);
+  out.push("### Audit events", "", AUDIT_LISTED, "");
+  if (e.audit_events_truncated) {
+    out.push("Only the newest 1,000 audit events of this request are listed.", "");
+  }
+  if (e.audit_events.length === 0) out.push("None.", "");
+  else out.push(...eventsTable(e.audit_events, false), "");
+}
+function buildEvidence(input) {
+  const requests = input.requests.map(requestEntry);
+  const refusals = input.refusals.map(eventEntry);
+  const by_status = {};
+  for (const r of requests) by_status[r.status] = (by_status[r.status] ?? 0) + 1;
+  const counts = {
+    requests: requests.length,
+    by_status,
+    audit_events: requests.reduce((n, r) => n + r.audit_events.length, 0),
+    policy_refusals: refusals.length
+  };
+  const truncated = input.truncated || input.scan_cut || input.refusals_truncated || requests.some((r) => r.audit_events_truncated);
+  const json2 = {
+    v: 1,
+    generated_at: input.generated_at,
+    engine_version: input.engine_version,
+    surface: input.surface,
+    about: EVIDENCE_ABOUT,
+    filters: { ...input.filters },
+    policies_now: {
+      status: input.policies.status,
+      source: input.policies.source ?? null,
+      sha256: input.policies.sha256 ?? null
+    },
+    counts,
+    truncated,
+    requests_truncated: input.truncated,
+    requests_scan_cut: input.scan_cut,
+    requests,
+    policy_refusals: refusals,
+    policy_refusals_truncated: input.refusals_truncated
+  };
+  const f = input.filters;
+  const source = input.policies.source;
+  const policiesNow = input.policies.status !== "ok" ? "could not be read" : `readable (source ${source ? mdKnown(source, /* @__PURE__ */ new Set(["config", "default"])) : "not recorded"})`;
+  const out = [
+    "# Contrail change evidence",
+    "",
+    `Generated ${mdTime(input.generated_at, "at a time not recorded")} by Contrail ${/^\d+\.\d+\.\d+$/.test(input.engine_version) ? input.engine_version : mdCode(input.engine_version)} (${mdKnown(input.surface, /* @__PURE__ */ new Set(["plugin", "desktop"]))}). Filters: connection ${f.connection !== null ? mdCode(f.connection, { empty: "any" }) : "any"} \xB7 ticket ${f.ticket !== null ? mdCode(f.ticket, { empty: "any" }) : "any"} \xB7 request ${f.request_id !== null ? mdCode(f.request_id, { empty: "any" }) : "any"} \xB7 from ${mdTime(f.since, "the beginning")} to ${mdTime(f.until, "now")}.`,
+    "",
+    EVIDENCE_ABOUT,
+    "",
+    "## Summary",
+    "",
+    `Requests: ${counts.requests}. Policy refusals with no request: ${counts.policy_refusals}. Policies when this dossier was written: ${policiesNow}.`,
+    ""
+  ];
+  if (input.truncated) {
+    out.push(
+      `More requests matched than this dossier lists: it holds the newest ${EVIDENCE_MAX_REQUESTS}.`,
+      ""
+    );
+  }
+  if (input.scan_cut) {
+    out.push(
+      `The ticket search read only the newest ${EVIDENCE_SCAN_MAX_ROWS.toLocaleString("en-US")} requests; an older request recorded with this ticket would not be listed.`,
+      ""
+    );
+  }
+  if (requests.length === 0) {
+    out.push("No request matched.", "");
+  } else {
+    out.push(
+      ...mdTable(
+        ["Request", "Kind", "Connection", "Status", "Proposed", "Executed", "Ticket", "Policy checks"],
+        requests.map((r) => {
+          const alias = aliasOf(r);
+          return [
+            mdCell(r.id),
+            KNOWN_KINDS.has(r.kind) ? r.kind : mdCell(r.kind),
+            alias !== null ? mdCell(alias) : "connection removed",
+            mdCell(r.status),
+            mdTime(r.proposed_at, "\u2014", true),
+            mdTime(r.executed_at, "\u2014", true),
+            r.ticket !== null ? mdCode(r.ticket, { cell: true, empty: "none given" }) : "none given",
+            r.policy_checks
+          ];
+        })
+      ),
+      ""
+    );
+  }
+  for (const r of requests) requestMd(out, r);
+  out.push("## Policy refusals in this window (no request was created)", "");
+  if (input.refusals_truncated) {
+    out.push(
+      "The policy refusal list was cut: at most the newest 1,000 refusal rows per connection were read.",
+      ""
+    );
+  }
+  if (refusals.length === 0) out.push("None.", "");
+  else out.push(...eventsTable(refusals, true), "");
+  const lines = [];
+  for (const l of out) {
+    if (l === "" && (lines.length === 0 || lines[lines.length - 1] === "")) continue;
+    lines.push(l);
+  }
+  while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+  return { json: json2, markdown: `${lines.join("\n")}
+`, counts };
+}
+function evidencePayload(kind, payloadJson) {
+  const p = asObj(parseJson(payloadJson));
+  if (!p) return null;
+  switch (kind) {
+    case "deploy":
+      return { test_level: asStr(p.testLevel), run_tests: asStrList(p.runTests) };
+    case "apex": {
+      const code = asStr(p.code) ?? "";
+      return {
+        sha256: sha256Of(code),
+        lines: code.split(/\r?\n/).length,
+        chars: code.length
+      };
+    }
+    case "activation":
+      return {
+        agent: asStr(p.bot_developer_name),
+        version: asStr(p.bot_version_developer_name),
+        from: asStr(p.from_status),
+        to: asStr(p.to_status)
+      };
+    case "bulk":
+      return {
+        steps: scalarsOf(p.steps, ["n", "object", "operation", "row_count", "sha256"]),
+        stop_on_failure: asBool(p.stop_on_failure)
+      };
+    case "dml": {
+      if (p.plan === true) {
+        return {
+          operations: (Array.isArray(p.steps) ? p.steps : []).map((s, i) => {
+            const step = asObj(s) ?? {};
+            return { step: i + 1, operation: asStr(step.operation), object: asStr(step.object), rows: 1 };
+          })
+        };
+      }
+      const rows = Array.isArray(p.records) ? p.records.length : lengthOf(p.ids);
+      return { operations: [{ operation: asStr(p.operation), object: asStr(p.object), rows }] };
+    }
+    default:
+      return null;
+  }
+}
+function evidenceRequestOf(row, decision) {
+  const out = {
+    id: row.id,
+    connection_id: row.connectionId,
+    kind: row.kind,
+    status: row.status,
+    created_at: row.createdAt,
+    expires_at: row.expiresAt,
+    executed_at: row.executedAt,
+    validation_id: row.validationId,
+    summary: parseJson(row.summaryJson),
+    result: parseJson(row.resultJson),
+    payload: evidencePayload(row.kind, row.payloadJson)
+  };
+  if (decision) out.decision = decision;
+  return out;
+}
+function ticketOf(r) {
+  const t = asStr(asObj(asObj(r.summary)?.governance)?.ticket);
+  return t === null ? null : t.trim().toLowerCase();
+}
+function byTime(a, b) {
+  return a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0;
+}
+function folderLabel(alias, ticket, id) {
+  const label = [alias, ticket, id].filter((p) => typeof p === "string" && p !== "").join("-").replace(/[^A-Za-z0-9_-]+/g, "").slice(0, 60);
+  return label === "" ? "evidence" : label;
+}
+function createDossierFolder(root, base) {
+  for (let n = 1; n <= 1e3; n++) {
+    const name = n === 1 ? base : `${base}-${n}`;
+    const folder2 = path6.join(root, name);
+    const rel = path6.relative(root, folder2);
+    if (rel === "" || rel.startsWith("..") || path6.isAbsolute(rel) || rel.split(/[\\/]/).length !== 1) {
+      throw new Error("the dossier folder would not be directly inside the evidence directory");
+    }
+    try {
+      fs11.mkdirSync(folder2);
+      return { folder: folder2, name };
+    } catch (err2) {
+      if (err2.code === "EEXIST") continue;
+      throw err2;
+    }
+  }
+  throw new Error("no free folder name for the dossier");
+}
+function exportChangeEvidence(io, filters) {
+  const ticket = filters.ticket?.trim() ? filters.ticket.trim() : void 0;
+  const requestId = filters.request_id?.trim() ? filters.request_id.trim() : void 0;
+  if (!filters.connection && ticket === void 0 && requestId === void 0 && !filters.since) {
+    return { status: "refused", refusal: "no_filter" };
+  }
+  const window2 = {};
+  for (const field of ["since", "until"]) {
+    const raw = filters[field];
+    if (raw === void 0 || raw === "") continue;
+    const iso = isoOf(raw);
+    if (iso === null) return { status: "refused", refusal: "bad_timestamp", field, value: raw };
+    window2[field] = iso;
+  }
+  const base = { connectionId: filters.connection?.id, ...window2, id: requestId };
+  let matched;
+  let scanCut = false;
+  if (requestId !== void 0) {
+    const byId = io.queryRequests({ ...base, limit: EVIDENCE_PAGE_ROWS, offset: 0 });
+    if (byId.length === 0) {
+      return {
+        status: "refused",
+        refusal: "request_not_found",
+        request_id: requestId,
+        connection: filters.connection?.alias ?? null
+      };
+    }
+    const want = ticket?.toLowerCase();
+    matched = want === void 0 ? byId : byId.filter((r) => ticketOf(r) === want);
+  } else if (ticket !== void 0) {
+    const want = ticket.toLowerCase();
+    const seen = /* @__PURE__ */ new Set();
+    matched = [];
+    let scanned = 0;
+    for (; ; ) {
+      const page2 = io.queryRequests({ ...base, limit: EVIDENCE_PAGE_ROWS, offset: scanned });
+      scanned += page2.length;
+      for (const r of page2) {
+        if (seen.has(r.id)) continue;
+        seen.add(r.id);
+        if (ticketOf(r) === want) matched.push(r);
+      }
+      if (page2.length < EVIDENCE_PAGE_ROWS) break;
+      if (scanned >= EVIDENCE_SCAN_MAX_ROWS) {
+        scanCut = true;
+        break;
+      }
+    }
+  } else {
+    matched = io.queryRequests({ ...base, limit: EVIDENCE_PAGE_ROWS, offset: 0 });
+  }
+  const kept = matched.slice(0, EVIDENCE_MAX_REQUESTS);
+  const rows = kept.map((r) => {
+    const gov = asObj(asObj(r.summary)?.governance);
+    const check2 = gov ? asObj(gov.execute_check) : null;
+    const checkOrg = check2 ? asStr(check2.org_id) : null;
+    const events = io.queryAudit({ requestId: r.id, limit: EVIDENCE_MAX_EVENTS });
+    const row = {
+      id: r.id,
+      kind: r.kind,
+      status: r.status,
+      created_at: r.created_at,
+      expires_at: r.expires_at,
+      executed_at: r.executed_at,
+      validation_id: r.validation_id,
+      target_at_proposal: gov ? identityOf(gov.target) : null,
+      target_at_execution: check2 && checkOrg !== null ? { org_id: checkOrg, username: asStr(check2.username) } : null,
+      connection_now: io.getConnection(r.connection_id),
+      summary: r.summary,
+      result: r.result,
+      payload: r.payload,
+      events: events.map((e) => ({
+        ts: e.ts,
+        event_type: e.event_type,
+        tool: e.tool,
+        outcome: e.outcome,
+        detail: e.detail
+      })).sort(byTime),
+      events_truncated: events.length >= EVIDENCE_MAX_EVENTS
+    };
+    if (r.decision) row.decision = r.decision;
+    return row;
+  });
+  const scope = filters.connection || window2.since !== void 0 ? [filters.connection?.id] : [...new Set(matched.map((r) => r.connection_id))];
+  let refusalsCut = false;
+  const refusals = [];
+  for (const connectionId of scope) {
+    const found = io.queryAudit({
+      eventType: "policy.refused",
+      connectionId,
+      ...window2,
+      limit: EVIDENCE_MAX_EVENTS
+    });
+    if (found.length >= EVIDENCE_MAX_EVENTS) refusalsCut = true;
+    for (const e of found) {
+      if (e.detail && Object.hasOwn(e.detail, "requestId")) continue;
+      refusals.push({
+        ts: e.ts,
+        event_type: e.event_type,
+        tool: e.tool,
+        outcome: e.outcome,
+        detail: e.detail,
+        connection: e.connection_id ? io.getConnection(e.connection_id)?.alias ?? null : null
+      });
+    }
+  }
+  refusals.sort(byTime);
+  if (rows.length === 0 && refusals.length === 0) return { status: "empty" };
+  const generatedAt = new Date(io.now()).toISOString();
+  const built = buildEvidence({
+    generated_at: generatedAt,
+    engine_version: io.engineVersion,
+    surface: io.surface,
+    filters: {
+      connection: filters.connection?.alias ?? null,
+      ticket: ticket ?? null,
+      request_id: requestId ?? null,
+      since: window2.since ?? null,
+      until: window2.until ?? null
+    },
+    requests: rows,
+    refusals,
+    refusals_truncated: refusalsCut,
+    policies: io.policyStatus(),
+    truncated: matched.length > EVIDENCE_MAX_REQUESTS,
+    scan_cut: scanCut
+  });
+  const stamp = generatedAt.slice(0, 19).replace(/[-:]/g, "").replace("T", "-");
+  const { folder: folder2, name } = createDossierFolder(
+    io.evidenceDir(),
+    `${stamp}-${folderLabel(filters.connection?.alias, ticket, requestId)}`
+  );
+  fs11.writeFileSync(path6.join(folder2, "evidence.json"), `${JSON.stringify(built.json, null, 2)}
+`, {
+    flag: "wx"
+  });
+  fs11.writeFileSync(path6.join(folder2, "evidence.md"), built.markdown, { flag: "wx" });
+  return {
+    status: "written",
+    path: folder2,
+    folder: name,
+    files: ["evidence.md", "evidence.json"],
+    requests: built.counts.requests,
+    by_status: built.counts.by_status,
+    audit_events: built.counts.audit_events,
+    policy_refusals: built.counts.policy_refusals,
+    truncated: built.json.truncated
+  };
+}
+var EVIDENCE_MAX_REQUESTS, EVIDENCE_PAGE_ROWS, EVIDENCE_SCAN_MAX_ROWS, EVIDENCE_MAX_EVENTS, EVIDENCE_DETAIL_KEYS, EVIDENCE_ABOUT, AUDIT_LISTED, NOW_LABEL, PAGE_VIEW_OLDER, PAGE_VIEW_MISSING, POLICY_OLDER, EXECUTE_CHECK_OLDER, EXECUTE_CHECK_NOT_RUN, EXECUTE_CHECK_REFUSED, ORG_RESULT_EXECUTING, KNOWN_KINDS, EXECUTED_STATUSES, REASON_LEFT_OUT, TARGET_CHECK_READ_FAILED;
+var init_evidence = __esm({
+  "src/deploy/evidence.ts"() {
+    "use strict";
+    EVIDENCE_MAX_REQUESTS = 200;
+    EVIDENCE_PAGE_ROWS = 1e3;
+    EVIDENCE_SCAN_MAX_ROWS = 2e4;
+    EVIDENCE_MAX_EVENTS = 1e3;
+    EVIDENCE_DETAIL_KEYS = [
+      "requestId",
+      "kind",
+      "phase",
+      "reason",
+      "attempts_remaining",
+      "rule",
+      "window",
+      "until",
+      "surface",
+      "rules",
+      "violations",
+      "validationId",
+      "deployId",
+      "status",
+      "components",
+      "deletions",
+      "testLevel",
+      "componentsDeployed",
+      "rows",
+      "failures",
+      "operation",
+      "object",
+      "steps",
+      "operations",
+      "totalRows",
+      "lines",
+      "chars",
+      "agent",
+      "version",
+      "from",
+      "to",
+      "method",
+      "codeIncluded",
+      "freeze",
+      "cause",
+      "count",
+      "comment",
+      "comment_source",
+      "dryRun",
+      "had_agent_draft",
+      "origin",
+      "refreshed",
+      "removed",
+      "skipped",
+      "units",
+      "duration_ms"
+    ];
+    EVIDENCE_ABOUT = `What this is: a record of what Contrail validated, proposed and executed, as Contrail recorded it on this machine at the time. What it is not: a statement of the org's current state, or of changes made outside Contrail. "Acting user" is the Salesforce user the connection was logged in as when the request was proposed, and when it executed where that was recorded \u2014 Contrail does not know which person was at the keyboard. Confirmation codes are never included. Record field values are not included: data-change rows are reduced to operation, object and record id, scripts and CSV files to fingerprints, and failure messages to their status codes; the full text stays in Contrail's local database.`;
+    AUDIT_LISTED = "Listed: audit rows that name this request. Supersession by a newer validation is recorded per connection with a count only, not per request, and is not listed \u2014 the status above is what Contrail stored.";
+    NOW_LABEL = "Org and acting user as the connection is now \u2014 not recorded when this request was made";
+    PAGE_VIEW_OLDER = "Approval-page summary: not recorded (this request was created by a Contrail older than 0.40.0).";
+    PAGE_VIEW_MISSING = "Approval-page summary: not recorded.";
+    POLICY_OLDER = "Policies at proposal: not checked \u2014 this request was created by a Contrail older than 0.40.0, which does not evaluate policies or freeze windows.";
+    EXECUTE_CHECK_OLDER = "Policy re-check at execution: not recorded \u2014 Contrail 0.40.0 and later record it before executing, so this request was executed by an older Contrail on this machine, which does not check policies or freeze windows.";
+    EXECUTE_CHECK_NOT_RUN = "Policy re-check at execution: not applicable (not executed).";
+    EXECUTE_CHECK_REFUSED = "Policy re-check at execution: refused \u2014 not executed.";
+    ORG_RESULT_EXECUTING = "Not recorded \u2014 the request was claimed for execution (status executing) and Contrail has stored no outcome: the write may still be running, or may have committed if the Contrail process running it stopped. Check the org.";
+    KNOWN_KINDS = /* @__PURE__ */ new Set(["deploy", "dml", "apex", "bulk", "activation"]);
+    EXECUTED_STATUSES = /* @__PURE__ */ new Set(["executing", "executed", "execution_failed"]);
+    REASON_LEFT_OUT = "free text, left out (it stays in Contrail's local database)";
+    TARGET_CHECK_READ_FAILED = "the org read failed (the message stays in Contrail's local database)";
   }
 });
 
@@ -31132,41 +36899,41 @@ function rootElement(doc) {
   if (!name) return null;
   return { name, value: doc[name] };
 }
-function diffNode(a, b, path14, changes, state) {
+function diffNode(a, b, path17, changes, state) {
   if (changes.length > state.maxChanges) {
     state.truncated = true;
     return;
   }
   if (deepEqual(a, b)) return;
   if (Array.isArray(a) || Array.isArray(b)) {
-    diffCollection(asArray(a), asArray(b), path14, changes, state);
+    diffCollection(asArray(a), asArray(b), path17, changes, state);
     return;
   }
   const aKeyed = isObject2(a) && itemKey(a) !== null;
   const bKeyed = isObject2(b) && itemKey(b) !== null;
   if ((aKeyed || bKeyed) && (a == null || isObject2(a)) && (b == null || isObject2(b))) {
-    diffCollection(a == null ? [] : [a], b == null ? [] : [b], path14, changes, state);
+    diffCollection(a == null ? [] : [a], b == null ? [] : [b], path17, changes, state);
     return;
   }
   if (isObject2(a) && isObject2(b)) {
-    diffObjectFields(a, b, path14, changes, state);
+    diffObjectFields(a, b, path17, changes, state);
     return;
   }
-  changes.push({ kind: "scalar", path: path14, a: summarize(a), b: summarize(b) });
+  changes.push({ kind: "scalar", path: path17, a: summarize(a), b: summarize(b) });
 }
-function diffObjectFields(a, b, path14, changes, state) {
+function diffObjectFields(a, b, path17, changes, state) {
   const keys = /* @__PURE__ */ new Set([...Object.keys(a), ...Object.keys(b)]);
   for (const key2 of keys) {
-    diffNode(a[key2], b[key2], path14 ? `${path14}.${key2}` : key2, changes, state);
+    diffNode(a[key2], b[key2], path17 ? `${path17}.${key2}` : key2, changes, state);
   }
 }
-function diffCollection(a, b, path14, changes, state) {
+function diffCollection(a, b, path17, changes, state) {
   const aKeyed = keyItems(a);
   const bKeyed = keyItems(b);
   if (!aKeyed || !bKeyed) {
     changes.push({
       kind: "unkeyed",
-      path: path14,
+      path: path17,
       note: `list changed (${a.length} \u2192 ${b.length} items; no stable key to match on)`
     });
     return;
@@ -31174,15 +36941,15 @@ function diffCollection(a, b, path14, changes, state) {
   for (const [key2, aItem] of aKeyed) {
     const bItem = bKeyed.get(key2);
     if (bItem === void 0) {
-      changes.push({ kind: "removed", path: path14, key: key2 });
+      changes.push({ kind: "removed", path: path17, key: key2 });
     } else if (isObject2(aItem) && isObject2(bItem)) {
-      diffObjectFields(aItem, bItem, `${path14}[${key2}]`, changes, state);
+      diffObjectFields(aItem, bItem, `${path17}[${key2}]`, changes, state);
     } else {
-      diffNode(aItem, bItem, `${path14}[${key2}]`, changes, state);
+      diffNode(aItem, bItem, `${path17}[${key2}]`, changes, state);
     }
   }
   for (const key2 of bKeyed.keys()) {
-    if (!aKeyed.has(key2)) changes.push({ kind: "added", path: path14, key: key2 });
+    if (!aKeyed.has(key2)) changes.push({ kind: "added", path: path17, key: key2 });
   }
 }
 function keyItems(items) {
@@ -31391,1580 +37158,12 @@ var init_semantic = __esm({
   }
 });
 
-// src/deploy/package.ts
-function flowDeactivationXml() {
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<FlowDefinition xmlns="${XMLNS_META}">
-    <activeVersionNumber>0</activeVersionNumber>
-</FlowDefinition>
-`;
-}
-function isRegisteredType(type) {
-  return type in FILE_TYPES || type in CHILD_TYPES2;
-}
-function retrieveMemberFor(type, apiName) {
-  const fileSpec = FILE_TYPES[type];
-  if (fileSpec) return { type: fileSpec.manifestType ?? type, member: apiName };
-  const childSpec = CHILD_TYPES2[type];
-  if (childSpec) {
-    const parent = childSpec.parentFromName(apiName);
-    return parent ? { type: childSpec.containerRoot, member: parent } : null;
-  }
-  return null;
-}
-function parseEnvelopeFor(type, apiName, content) {
-  const spec = FILE_TYPES[type];
-  if (!spec?.envelope) {
-    throw new ContrailError(`${type} is not a bundle (envelope) type`, "bad_component");
-  }
-  return parseBundleEnvelope(type, apiName, content, spec);
-}
-function validateAuraBundle(apiName, files, main2) {
-  const kind = main2.slice(apiName.length);
-  const metaName = `${main2}-meta.xml`;
-  const allowed = /* @__PURE__ */ new Set([
-    main2,
-    metaName,
-    ...(AURA_SECONDARIES[kind] ?? []).map((s) => `${apiName}${s}`)
-  ]);
-  for (const [rel, body] of Object.entries(files)) {
-    if (!allowed.has(rel)) {
-      const reason = /(Provider|Model|Test)\.js$/.test(rel) ? `"${rel}" is not a deployable Aura definition \u2014 Provider/Model/Test files are not part of the bundle format` : rel.endsWith("-meta.xml") ? `"${rel}" \u2014 the only meta file is "${metaName}", named after the primary` : rel === `${apiName}.design` ? `"${rel}" \u2014 a .design belongs only to a component (.cmp) bundle` : !rel.startsWith(apiName) ? `"${rel}" \u2014 every file in an Aura bundle starts with the bundle name "${apiName}"` : `"${rel}" is not a valid file for a ${kind} bundle`;
-      throw new ContrailError(`AuraDefinitionBundle ${apiName}: ${reason}.`, "bad_component");
-    }
-    if (Buffer.byteLength(body, "utf8") > AURA_MAX_FILE_BYTES) {
-      throw new ContrailError(
-        `AuraDefinitionBundle ${apiName}: "${rel}" exceeds the 1,000,000-byte per-file limit.`,
-        "bad_component"
-      );
-    }
-  }
-}
-function parseBundleEnvelope(type, apiName, content, spec) {
-  const suffixes = Array.isArray(spec.envelopeMainSuffix) ? spec.envelopeMainSuffix : [spec.envelopeMainSuffix ?? spec.ext];
-  const exampleMain = `${apiName}${suffixes[0] ?? ""}`;
-  let parsed;
-  try {
-    parsed = JSON.parse(content);
-  } catch {
-    throw new ContrailError(
-      `${type} ${apiName}: content must be a Contrail bundle envelope \u2014 JSON of the shape {"contrail_bundle":1, "files": {"${exampleMain}": "<xml>", "input/schema.json": "\u2026"}}. Bundle types are directories of files; retrieve_metadata's bundle_files listing shows the real file set to carry over.`,
-      "bad_component"
-    );
-  }
-  const env = parsed;
-  if (env.contrail_bundle !== 1 || typeof env.files !== "object" || env.files === null) {
-    throw new ContrailError(
-      `${type} ${apiName}: envelope must carry contrail_bundle: 1 and a files object.`,
-      "bad_component"
-    );
-  }
-  const files = env.files;
-  const entries = Object.entries(files);
-  if (entries.length === 0 || entries.length > BUNDLE_MAX_FILES) {
-    throw new ContrailError(
-      `${type} ${apiName}: envelope carries ${entries.length} files (1\u2013${BUNDLE_MAX_FILES} allowed).`,
-      "bad_component"
-    );
-  }
-  const out = {};
-  for (const [rel, body] of entries) {
-    if (rel.includes("\\") || rel.includes("..")) {
-      throw new ContrailError(
-        `${type} ${apiName}: invalid envelope path "${rel}"`,
-        "bad_component"
-      );
-    }
-    if (spec.flat && rel.includes("/")) {
-      throw new ContrailError(
-        `${type} ${apiName}: "${rel}" \u2014 ${type} bundles are FLAT: no subfolders, every file directly in the bundle directory.`,
-        "bad_component"
-      );
-    }
-    const segs = rel.split("/");
-    if (segs.length === 0 || segs.length > BUNDLE_MAX_DEPTH || segs.some((s) => !BUNDLE_REL_SEGMENT_RE.test(s))) {
-      throw new ContrailError(
-        `${type} ${apiName}: invalid envelope path "${rel}"`,
-        "bad_component"
-      );
-    }
-    if (segs.some((s) => s.toLowerCase() === "__tests__")) {
-      throw new ContrailError(
-        `${type} ${apiName}: envelope path "${rel}" \u2014 local test files never deploy. Carry only the files a retrieve shows.`,
-        "bad_component"
-      );
-    }
-    if (typeof body !== "string") {
-      throw new ContrailError(
-        `${type} ${apiName}: envelope file "${rel}" must be a string body.`,
-        "bad_component"
-      );
-    }
-    out[rel] = body;
-  }
-  const candidates = suffixes.map((s) => `${apiName}${s}`);
-  const mains = candidates.filter((f) => f in out);
-  if (mains.length === 0) {
-    throw new ContrailError(
-      candidates.length === 1 ? `${type} ${apiName}: envelope is missing its main file "${candidates[0]}".` : `${type} ${apiName}: envelope has NO primary file \u2014 exactly one of ${candidates.join(", ")} is required.`,
-      "bad_component"
-    );
-  }
-  if (mains.length > 1) {
-    throw new ContrailError(
-      `${type} ${apiName}: envelope carries MORE THAN ONE primary (${mains.join(", ")}) \u2014 a bundle has exactly one.`,
-      "bad_component"
-    );
-  }
-  const main2 = mains[0];
-  if (spec.requireMainMeta && !(`${main2}-meta.xml` in out)) {
-    throw new ContrailError(
-      `${type} ${apiName}: envelope is missing "${main2}-meta.xml" \u2014 Contrail requires the bundle meta on deploy to pin apiVersion (the platform would silently default it; retrieves of old bundles may lack one \u2014 add it).`,
-      "bad_component"
-    );
-  }
-  const alsoRequired = (spec.requiredSuffixes ?? []).map((s) => `${apiName}${s}`);
-  for (const name of alsoRequired) {
-    if (!(name in out)) {
-      throw new ContrailError(
-        `${type} ${apiName}: envelope is missing required file "${name}" \u2014 this bundle type requires ${[main2, ...alsoRequired].join(" + ")}.`,
-        "bad_component"
-      );
-    }
-  }
-  if (type === "AuraDefinitionBundle") validateAuraBundle(apiName, out, main2);
-  return { files: out, main: main2 };
-}
-function buildDeployZip(components, deletions, apiVersionNumber, metaXmlLookup) {
-  const files = /* @__PURE__ */ new Map();
-  const members = /* @__PURE__ */ new Map();
-  const addMember = (type, name) => {
-    const list = members.get(type) ?? [];
-    list.push(name);
-    members.set(type, list);
-  };
-  const containers = /* @__PURE__ */ new Map();
-  for (const c of components) {
-    validateTypeAndName(c.type, c.api_name);
-    const fileSpec = FILE_TYPES[c.type];
-    if (fileSpec?.envelope) {
-      const { files: bundleFiles } = parseBundleEnvelope(c.type, c.api_name, c.content, fileSpec);
-      const dirPrefix = `${fileSpec.dir}/${fileSafeSegment(c.api_name)}/`;
-      for (const [rel, body] of Object.entries(bundleFiles)) {
-        files.set(`${dirPrefix}${rel}`, strToU8(body));
-      }
-      addMember(fileSpec.manifestType ?? c.type, c.api_name);
-      continue;
-    }
-    if (fileSpec) {
-      if (/^\s*\{\s*"contrail_bundle"/.test(c.content)) {
-        throw new ContrailError(
-          `${c.type} ${c.api_name}: a Contrail bundle envelope was passed but ${c.type} is a single-file type \u2014 pass the document itself as content.`,
-          "bad_component"
-        );
-      }
-      const path14 = zipPathFor(fileSpec, c.api_name);
-      files.set(path14, strToU8(c.content));
-      if (fileSpec.metaRoot) {
-        const meta = metaXmlLookup(c.type, c.api_name) ?? fileSpec.metaXml?.(apiVersionNumber, c.api_name) ?? `<?xml version="1.0" encoding="UTF-8"?>
-<${fileSpec.metaRoot} xmlns="${XMLNS}">
-    <apiVersion>${escapeXml(apiVersionNumber)}</apiVersion>
-    <status>Active</status>
-</${fileSpec.metaRoot}>
-`;
-        files.set(`${path14}-meta.xml`, strToU8(meta));
-      }
-      addMember(fileSpec.manifestType ?? c.type, c.api_name);
-      continue;
-    }
-    const childSpec = CHILD_TYPES2[c.type];
-    if (childSpec) {
-      const parent = childSpec.parentFromName(c.api_name);
-      if (!parent) {
-        throw new ContrailError(
-          `${c.type} names are dotted (Parent.Child), got "${c.api_name}"`,
-          "bad_component"
-        );
-      }
-      const path14 = `${childSpec.dir}/${parent}${childSpec.ext}`;
-      const key2 = `${childSpec.containerRoot}:${path14}`;
-      const container = containers.get(key2) ?? { root: childSpec.containerRoot, path: path14, blocks: [] };
-      container.blocks.push(c.content.trim());
-      containers.set(key2, container);
-      addMember(c.type, c.api_name);
-      continue;
-    }
-    throw new ContrailError(
-      `Type "${c.type}" is not deployable through Contrail yet. Deployable types: ${[...Object.keys(FILE_TYPES), ...Object.keys(CHILD_TYPES2)].join(", ")}.`,
-      "bad_component"
-    );
-  }
-  for (const container of containers.values()) {
-    if (files.has(container.path)) {
-      throw new ContrailError(
-        `Cannot deploy both the full ${container.path} file and individual children of it in one request \u2014 pick one form.`,
-        "bad_component"
-      );
-    }
-    const doc = `<?xml version="1.0" encoding="UTF-8"?>
-<${container.root} xmlns="${XMLNS}">
-` + container.blocks.map((b) => `    ${b}`).join("\n") + `
-</${container.root}>
-`;
-    files.set(container.path, strToU8(doc));
-  }
-  for (const d of deletions) {
-    validateTypeAndName(d.type, d.api_name);
-  }
-  const packageXml = manifestXml(members, apiVersionNumber, "Package", true);
-  files.set("package.xml", strToU8(packageXml));
-  let destructiveXml = null;
-  if (deletions.length > 0) {
-    const delMembers = /* @__PURE__ */ new Map();
-    for (const d of deletions) {
-      const manifestType = FILE_TYPES[d.type]?.manifestType ?? d.type;
-      const list = delMembers.get(manifestType) ?? [];
-      list.push(d.api_name);
-      delMembers.set(manifestType, list);
-    }
-    destructiveXml = manifestXml(delMembers, apiVersionNumber, "Package", false);
-    files.set("destructiveChangesPost.xml", strToU8(destructiveXml));
-  }
-  return {
-    zip: Buffer.from(zipSync(Object.fromEntries(files))),
-    files: [...files.keys()].sort(),
-    packageXml,
-    destructiveXml
-  };
-}
-function orderManifestTypes(types, dependencyOrder) {
-  const sorted = [...types].sort((a, b) => a.localeCompare(b));
-  if (!dependencyOrder) return sorted;
-  for (const [late2, befores] of Object.entries(MANIFEST_TYPE_AFTER)) {
-    const i = sorted.indexOf(late2);
-    if (i < 0) continue;
-    const lastBefore = Math.max(...befores.map((b) => sorted.indexOf(b)));
-    if (lastBefore > i) {
-      sorted.splice(i, 1);
-      sorted.splice(lastBefore, 0, late2);
-    }
-  }
-  return sorted;
-}
-function manifestXml(members, apiVersionNumber, root, dependencyOrder) {
-  const types = orderManifestTypes([...members.keys()], dependencyOrder).map((type) => {
-    const names = members.get(type);
-    return `    <types>
-${names.sort().map((n) => `        <members>${escapeXml(n)}</members>`).join("\n")}
-        <name>${escapeXml(type)}</name>
-    </types>`;
-  }).join("\n");
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<${root} xmlns="${XMLNS}">
-${types}
-    <version>${escapeXml(apiVersionNumber)}</version>
-</${root}>
-`;
-}
-function fileSafeName(name) {
-  return name.replace(
-    /[^A-Za-z0-9 _.\-]/g,
-    (ch) => Array.from(new TextEncoder().encode(ch)).map((b) => "%" + b.toString(16).toUpperCase().padStart(2, "0")).join("")
-  );
-}
-function fileSafeSegment(s) {
-  return s.replace(
-    /[^A-Za-z0-9 _.\-$]/g,
-    (ch) => Array.from(new TextEncoder().encode(ch)).map((b) => "%" + b.toString(16).toUpperCase().padStart(2, "0")).join("")
-  );
-}
-function zipPathFor(spec, apiName) {
-  if (spec.metaOnly) return `${spec.dir}/${fileSafeSegment(apiName)}-meta.xml`;
-  const name = spec.foldered ? apiName.split("/").map(fileSafeSegment).join("/") : fileSafeName(apiName);
-  return `${spec.dir}/${name}${spec.ext}`;
-}
-function deployZipEntryPath(type, apiName, opts) {
-  const childSpec = CHILD_TYPES2[type];
-  if (childSpec) {
-    const parent = childSpec.parentFromName(apiName);
-    if (!parent) return null;
-    return {
-      path: `${childSpec.dir}/${fileSafeName(parent)}${childSpec.ext}`,
-      child: true,
-      childTag: childSpec.tag,
-      childName: apiName.includes(".") ? apiName.slice(apiName.indexOf(".") + 1) : apiName
-    };
-  }
-  const spec = FILE_TYPES[type];
-  if (!spec) return null;
-  if (spec.envelope) {
-    const dirPrefix = `${spec.dir}/${fileSafeSegment(apiName)}/`;
-    const suffixes = Array.isArray(spec.envelopeMainSuffix) ? spec.envelopeMainSuffix : [spec.envelopeMainSuffix ?? spec.ext];
-    const candidates = suffixes.map((s) => `${dirPrefix}${apiName}${s}`);
-    const resolved = candidates.length === 1 ? candidates[0] : candidates.find((p) => opts?.zipEntries?.includes(p));
-    if (resolved === void 0) {
-      return { path: "", child: false, bundleDir: dirPrefix, mainCandidates: candidates };
-    }
-    return { path: resolved, child: false, bundleDir: dirPrefix };
-  }
-  return { path: zipPathFor(spec, apiName), child: false };
-}
-function validateTypeAndName(type, name) {
-  if (!/^[A-Za-z]+$/.test(type)) throw new ContrailError(`invalid type "${type}"`, "bad_component");
-  if (name.includes("\\") || name.includes("..")) {
-    throw new ContrailError(`invalid component name "${name}"`, "bad_component");
-  }
-  const spec = FILE_TYPES[type];
-  if (spec?.foldered) {
-    const segs = name.split("/");
-    if (segs.length !== 2 || segs.some((s) => !FOLDER_SEGMENT_RE.test(s))) {
-      throw new ContrailError(
-        `invalid ${type} name "${name}" \u2014 expected "FolderDevName/Name" (letters, digits, underscores)`,
-        "bad_component"
-      );
-    }
-    return;
-  }
-  if (spec?.metaOnly) {
-    if (!FOLDER_SEGMENT_RE.test(name)) {
-      throw new ContrailError(
-        `invalid ${type} name "${name}" \u2014 a folder dev name (letters, digits, underscores)`,
-        "bad_component"
-      );
-    }
-    return;
-  }
-  if (type === "AuraDefinitionBundle") {
-    if (/__/.test(name)) {
-      throw new ContrailError(
-        `AuraDefinitionBundle "${name}": a namespaced bundle (ns__Name) belongs to its package \u2014 only namespace-free bundles deploy through Contrail (reading it still works via retrieve_metadata).`,
-        "bad_component"
-      );
-    }
-    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(name) || name.endsWith("_")) {
-      throw new ContrailError(
-        `invalid AuraDefinitionBundle name "${name}" \u2014 a Lightning developer name: start with a letter; letters, digits, single underscores; no trailing underscore.`,
-        "bad_component"
-      );
-    }
-    return;
-  }
-  if (!NAME_RE.test(name) || name.includes("/")) {
-    throw new ContrailError(`invalid component name "${name}"`, "bad_component");
-  }
-}
-function changeDependentWarnings(input) {
-  const { type, api_name, change, proposed, before } = input;
-  const warnings = [];
-  if (input.bundleFiles) {
-    const { proposed: newFiles, main: main2, before: oldFiles } = input.bundleFiles;
-    if (change === "modify") {
-      const added = Object.keys(newFiles).filter((k) => !(k in oldFiles));
-      const removed = Object.keys(oldFiles).filter((k) => !(k in newFiles));
-      const changed = Object.keys(newFiles).filter(
-        (k) => k in oldFiles && oldFiles[k].trim() !== newFiles[k].trim()
-      );
-      const describe = (label, list) => list.length > 0 ? `${label} ${list.slice(0, 8).join(", ")}${list.length > 8 ? "\u2026" : ""}` : "";
-      const delta = [
-        describe("changed:", changed),
-        describe("added:", added),
-        describe("removed:", removed)
-      ].filter(Boolean).join("; ");
-      warnings.push(
-        `BUNDLE REPLACE \u2014 this deploy replaces the org's whole ${type} directory (${Object.keys(newFiles).length} files; ${delta}).`
-      );
-    }
-    if (type === "GenAiPlannerBundle" && change === "modify") {
-      warnings.push(
-        `AGENT MUST BE DEACTIVATED FIRST \u2014 deploying GenAiPlannerBundle changes for an ACTIVE agent version fails, and version-suffixed bundles are PUBLISHED SNAPSHOTS: a modified deploy of one fails org-side even deactivated (unmodified re-deploys "succeed" as no-ops). Deactivate first (agent_activation_propose/execute, or Agent Builder), deploy, then reactivate; verify with BotVersion.Status. On Agent-Script agents the next publish overwrites hand-edits.`
-      );
-    }
-    if (type === "AuraDefinitionBundle") {
-      const kind = main2.slice(api_name.length);
-      const oldMain = [".cmp", ".app", ".evt", ".intf", ".tokens"].map((s) => `${api_name}${s}`).find((f) => f in oldFiles);
-      const verOf = (files, mainName) => mainName ? parseFloat(files[`${mainName}-meta.xml`]?.match(/<apiVersion>\s*([\d.]+)/)?.[1] ?? "") : NaN;
-      const newVer = verOf(newFiles, main2);
-      const oldVer = verOf(oldFiles, oldMain);
-      if (Number.isFinite(newVer) && Number.isFinite(oldVer) && newVer < 40 !== oldVer < 40) {
-        warnings.push(
-          `API VERSION ${oldVer} \u2192 ${newVer} crosses the 39/40 boundary \u2014 in orgs still on Lightning Locker this toggles Locker for the component (LWS is an org setting, unaffected by apiVersion).`
-        );
-      }
-      const mainBody = newFiles[main2] ?? "";
-      const isBackgroundItem = /lightning:backgroundUtilityItem/.test(mainBody);
-      if (change === "add" && (kind === ".cmp" || kind === ".app") && /lightning:(backgroundUtilityItem|utilityItem|availableForFlow(Actions|Screens))|flexipage:availableFor\w*|force:lightningQuickAction/.test(
-        mainBody
-      ) && input.referenced !== void 0 && !input.referenced()) {
-        warnings.push(
-          `INERT UNTIL PLACED \u2014 this component declares surface interfaces but nothing in this package or the snapshot references c:${api_name}; it renders NOWHERE until host metadata places it` + (isBackgroundItem ? ` (a background utility item sits in a utility bar's Background region, and the bar needs at least one VISIBLE item or it does not appear).` : `.`)
-        );
-      }
-      if (change !== "unchanged_content") {
-        warnings.push(
-          `The deploy compiles markup and design (each design:attribute must match an aura:attribute) and parses the JS; runtime errors in a background item surface only in the browser console. Consoles already open keep the OLD definition until reloaded.`
-        );
-      }
-    }
-    return warnings;
-  }
-  if (type === "CustomField" && before) {
-    const oldType = before.match(/<type>([^<]+)<\/type>/)?.[1];
-    const newType = proposed.match(/<type>([^<]+)<\/type>/)?.[1];
-    if (oldType && newType && oldType !== newType) {
-      warnings.push(
-        `FIELD TYPE CHANGE ${oldType} \u2192 ${newType} \u2014 possible irreversible data loss`
-      );
-    }
-  }
-  if ((type === "FlexiPage" || type === "CustomApplication" || type === "Layout" || type === "Report" || type === "Dashboard" || type === "GenAiPlugin" || type === "GenAiPromptTemplate" || type === "Bot" || type === "LeadConvertSettings" || type === "NamedCredential" || type === "ExternalCredential" || type === "AuthProvider" || type === "PermissionSetGroup" || type === "MutingPermissionSet" || // S44: both agent-test suite types are single documents of
-  // <testCase> blocks (the legacy one was a parity gap since S30).
-  // AiAgentScorerDefinition is deliberately NOT here — its versions
-  // are documented append-only, which makes the generic "removed"
-  // sentence false; it has its own arm below.
-  type === "AiEvaluationDefinition" || type === "AiTestingDefinition") && change === "modify") {
-    warnings.push(
-      `WHOLE-DOCUMENT REPLACE \u2014 this deploy fully replaces the org's ${type}; anything not present in the proposed content is removed.` + (type === "Bot" ? " A <botVersions> block omitted from a Bot document is a VERSION DELETE." : type === "LeadConvertSettings" ? " An <objectMapping> omitted here is a lead field mapping DELETED org-wide." : type === "ExternalCredential" ? " A principal parameter omitted here is DELETED org-side \u2014 along with the credential values a human entered for it in Setup." : type === "PermissionSetGroup" ? " A <permissionSets> member omitted here is DETACHED from the group org-side \u2014 users assigned the group lose that permission set." : type === "MutingPermissionSet" ? " A muted permission omitted here is UN-MUTED org-side, silently RESTORING it to every user assigned the group." : type === "AiEvaluationDefinition" || type === "AiTestingDefinition" ? " A <testCase> omitted here is removed from the suite org-side." : "")
-    );
-  }
-  if (type === "GenAiPromptTemplate" && change === "modify") {
-    const oldId = before?.match(/<activeVersionIdentifier>([^<]*)</)?.[1];
-    const newId = proposed.match(/<activeVersionIdentifier>([^<]*)</)?.[1];
-    if (oldId && newId && oldId !== newId) {
-      warnings.push(
-        `activeVersionIdentifier ALTERED (${oldId.slice(0, 12)}\u2026 \u2192 ${newId.slice(0, 12)}\u2026) \u2014 these tokens are org-generated; a hand-edited value is rejected or mis-targets the active version. To activate a new version, retrieve after deploying it and repoint using the versionIdentifier the org minted.`
-      );
-    }
-  }
-  if (type === "AiAgentScorerDefinition" && change === "modify") {
-    const oldVersions = scorerVersionStatuses(before ?? "");
-    const newVersions = scorerVersionStatuses(proposed);
-    const omitted = [...oldVersions.keys()].filter((n) => !newVersions.has(n));
-    const regressed = [...oldVersions.entries()].filter(([n, was]) => {
-      const now = newVersions.get(n);
-      return now !== void 0 && SCORER_STATUS_RANK[was] !== void 0 && SCORER_STATUS_RANK[now] !== void 0 && SCORER_STATUS_RANK[now] < SCORER_STATUS_RANK[was];
-    }).map(([n, was]) => `${n} (${was} \u2192 ${newVersions.get(n)})`);
-    warnings.push(
-      `SCORER VERSIONS ARE APPEND-ONLY \u2014 the org never deletes a <scorerVersion>: one omitted from this document is NOT removed` + (omitted.length > 0 ? ` (org-side versions omitted here: ${omitted.join(", ")})` : "") + `. Status is documented one-way (Draft \u2192 Available \u2192 Archived); a regression here is not something the org performs` + (regressed.length > 0 ? ` (regressed here: ${regressed.join("; ")})` : "") + `. Retrieve-first, carry every existing version forward, edit only Draft versions.`
-    );
-  }
-  if ((type === "ReportFolder" || type === "DashboardFolder") && change === "modify") {
-    warnings.push(
-      `FOLDER REPLACE \u2014 the folderShares in this content fully replace the folder's sharing; shares omitted here are revoked.`
-    );
-  }
-  if (type === "CustomMetadata" && change === "modify") {
-    warnings.push(
-      `FULL-RECORD REPLACE \u2014 fields omitted from this content are reset to null/default on the deployed record.`
-    );
-  }
-  if (type === "QuickAction" && change === "add") {
-    warnings.push(
-      `NEW QUICK ACTION is surfaced NOWHERE until a page layout, a global publisher layout, or a Lightning record page using dynamic actions includes it \u2014 this deploy creates the action but places it on no UI.`
-    );
-  }
-  if (type === "Layout" && change === "add") {
-    warnings.push(
-      `NEW LAYOUT IS NOT ASSIGNED by this deploy \u2014 profiles keep their current layout until layoutAssignments change (Profile metadata or Setup).`
-    );
-  }
-  if ((type === "Report" || type === "Dashboard") && change === "add") {
-    warnings.push(
-      `NEW ${type.toUpperCase()} visibility is governed by its FOLDER's sharing (folderShares on the folder component), not by permission sets \u2014 this deploy grants nobody new access by itself.`
-    );
-  }
-  if (type === "GenAiPromptTemplate" && change === "add" && /<activeVersionIdentifier>[^<]/.test(proposed)) {
-    warnings.push(
-      `activeVersionIdentifier on a NET-NEW template \u2014 this token is org-generated and cannot be authored from scratch. Omit it (the org mints one on deploy), or retrieve-first if this template already exists under another name.`
-    );
-  }
-  if (type === "GenAiPlugin" && change === "modify") {
-    warnings.push(
-      `AGENT MUST BE DEACTIVATED FIRST \u2014 deploying ${type} changes for an ACTIVE agent version fails. Deactivate first (agent_activation_propose/execute, or Agent Builder), deploy, then reactivate \u2014 each flip its own approval; verify with BotVersion.Status.`
-    );
-  }
-  if (type === "ExternalCredential" && change === "add") {
-    warnings.push(
-      `NEW EXTERNAL CREDENTIAL carries no secrets and grants nobody access \u2014 a human enters each principal's credential values in Setup (External Credentials) after the deploy, and callouts fail until a permission set grants externalCredentialPrincipalAccesses for its principals.`
-    );
-  }
-  return warnings;
-}
-function auraBundleReferenced(db, conn, components, c) {
-  const refRe = new RegExp(`c:${c.api_name}\\b`);
-  return components.some((o) => o !== c && refRe.test(o.content)) || db.edgesTo(conn.id, "AuraDefinitionBundle", c.api_name).length > 0;
-}
-function analyzeChanges(db, store, conn, components, deletions) {
-  const changes = [];
-  for (const c of components) {
-    if (c.type === "FlowDefinition" && /<activeVersionNumber>\s*0\s*<\/activeVersionNumber>/.test(c.content)) {
-      changes.push({
-        type: c.type,
-        api_name: c.api_name,
-        change: "modify",
-        warnings: [`DEACTIVATES flow ${c.api_name} \u2014 turns off its active version.`],
-        ...sourceOf(c)
-      });
-      continue;
-    }
-    const envSpec = FILE_TYPES[c.type];
-    if (envSpec?.envelope) {
-      const { files: proposed, main: mainFile } = parseBundleEnvelope(
-        c.type,
-        c.api_name,
-        c.content,
-        envSpec
-      );
-      const existingBundle = db.getArtifact(conn.id, c.type, c.api_name);
-      const warnings2 = [];
-      let change2;
-      const old = existingBundle ? readBundleFiles(store, conn, envSpec.dir, c.api_name) : {};
-      if (!existingBundle) {
-        change2 = "add";
-      } else {
-        const added = Object.keys(proposed).filter((k) => !(k in old));
-        const removed = Object.keys(old).filter((k) => !(k in proposed));
-        const changed = Object.keys(proposed).filter(
-          (k) => k in old && old[k].trim() !== proposed[k].trim()
-        );
-        change2 = added.length + removed.length + changed.length === 0 ? "unchanged_content" : "modify";
-      }
-      warnings2.push(
-        ...changeDependentWarnings({
-          type: c.type,
-          api_name: c.api_name,
-          change: change2,
-          proposed: c.content,
-          before: null,
-          bundleFiles: { proposed, main: mainFile, before: old },
-          referenced: () => auraBundleReferenced(db, conn, components, c)
-        })
-      );
-      if (c.type === "AiAuthoringBundle") {
-        warnings2.push(
-          `DRAFT STAGE ONLY \u2014 this deploy stages Agent Script as a draft in Agentforce Studio. Nothing is compiled and the RUNNING AGENT IS UNCHANGED: topics, actions, and behavior go live only when a human publishes the draft (Agentforce Studio, or Salesforce's Agentforce DX publish command). A green deploy here is a staged draft, not a shipped agent.`
-        );
-        const target = proposed[`${c.api_name}.bundle-meta.xml`]?.match(
-          /<target>\s*([^<]+?)\s*<\/target>/
-        )?.[1];
-        if (target) {
-          warnings2.push(
-            `TARGET LINK, NOT A COMPILE \u2014 <target> pins this bundle to runtime version "${target}"; the deploy FAILS unless that Bot/BotVersion already exists in the org or ships in this same package. Linking never compiles or publishes anything.`
-          );
-        }
-        if (/_\d+$/.test(c.api_name)) {
-          warnings2.push(
-            `PUBLISHED-SNAPSHOT NAME \u2014 "${c.api_name}" is a version-suffixed published snapshot; the platform owns those. The editable draft is the NAKED bundle name \u2014 deploy a suffixed name only when promoting retrieved bytes.`
-          );
-        }
-      }
-      if (c.type === "AuraDefinitionBundle") {
-        const kind = mainFile.slice(c.api_name.length);
-        const oldMain = [".cmp", ".app", ".evt", ".intf", ".tokens"].map((s) => `${c.api_name}${s}`).find((f) => f in old);
-        if (oldMain && oldMain.slice(c.api_name.length) !== kind) {
-          throw new ContrailError(
-            `AuraDefinitionBundle ${c.api_name}: the SNAPSHOT's copy of this bundle is ${oldMain.slice(c.api_name.length)} and this envelope is ${kind} \u2014 changing a bundle's kind under the same name is untested platform behavior. Delete the old bundle first (its own destructive approval) or use a new name; if the org-side bundle already changed since the last refresh, run refresh_snapshot types:["AuraDefinitionBundle"] and validate again.`,
-            "bad_component"
-          );
-        }
-        const mainBody = proposed[mainFile] ?? "";
-        const controller = mainBody.match(/\bcontroller="([A-Za-z][A-Za-z0-9_]*)"/)?.[1];
-        if (controller) {
-          const containerText = components.filter((p) => p.type === "PermissionSet" || p.type === "Profile").map((p) => p.content).join("\n");
-          const granted = permissionBlocks(containerText, "classAccesses").some(
-            (b) => new RegExp(`<apexClass>\\s*${controller}\\s*</apexClass>`, "i").test(b) && /<enabled>\s*true\s*<\/enabled>/i.test(b)
-          );
-          if (!granted) {
-            warnings2.push(
-              `server-side controller "${controller}" \u2014 users need Apex class access (classAccesses) for it, and no permission set in this package grants it (it may already be granted org-side; not checkable from here).`
-            );
-          }
-        }
-      }
-      changes.push({ type: c.type, api_name: c.api_name, change: change2, warnings: warnings2, ...sourceOf(c) });
-      continue;
-    }
-    const existing = db.getArtifact(conn.id, c.type, c.api_name);
-    const warnings = [];
-    let change;
-    let oldContent = null;
-    if (!existing) {
-      change = "add";
-    } else {
-      oldContent = existing.filePath ? readOldContent(store, conn, c.type, c.api_name, existing.filePath) : null;
-      change = oldContent !== null && oldContent.trim() === c.content.trim() ? "unchanged_content" : "modify";
-    }
-    warnings.push(
-      ...changeDependentWarnings({
-        type: c.type,
-        api_name: c.api_name,
-        change,
-        proposed: c.content,
-        before: oldContent
-      })
-    );
-    if (c.type === "AiTestingDefinition") {
-      warnings.push(
-        `BETA SUITE, RUNS NOTHING \u2014 this deploy stores an Agentforce Studio test suite; it executes no test. Runs happen through run_agent_eval (on the org probed a deployed suite appeared in the Studio Tests tab only after its first run, never in Testing Center); Salesforce marks both the type and its runner Beta (grammar and runner can change). Contrail does not validate scorer names; per Salesforce's library the org refuses an unknown name at deploy \u2014 not yet live-confirmed, so a green deploy never proves a scorer ran.`
-      );
-      const cases = c.content.match(/<testCase>[\s\S]*?<\/testCase>/g) ?? [];
-      const multi = cases.filter((t) => /<conversationHistory>/.test(t)).length;
-      const single = cases.length - multi;
-      if (multi > 0 && single > 0) {
-        warnings.push(
-          `MIXED SINGLE- AND MULTI-TURN CASES \u2014 ${multi} case(s) carry <conversationHistory> and ${single} do not. Salesforce's guidance keeps them in separate suites (a mixed suite has been reported to stall, and the Studio runner has no cancel endpoint). Split the suite unless a mixed one has completed on this org.`
-        );
-      }
-    }
-    if (c.type === "AiAgentScorerDefinition" && /^std_/.test(c.api_name)) {
-      warnings.push(
-        `SYSTEM-PROVISIONED SCORER \u2014 Salesforce creates std_* scorers for each agent (last modified by Automated Process); an edit may be overwritten or refused org-side. Author your own scorer name for custom logic.`
-      );
-    }
-    if (c.type === "PermissionSetGroup") {
-      warnings.push(
-        `PERMISSION SET GROUP RECALCULATES ASYNCHRONOUSLY \u2014 after this deploy the org rebuilds the group's aggregated permissions (Status: Updating \u2192 Updated). Verify with soql_query (SELECT Status FROM PermissionSetGroup WHERE DeveloperName = '${c.api_name}') before relying on the grants.`
-      );
-    }
-    {
-      const secretTags = c.type === "NamedCredential" ? ["password", "awsAccessSecret", "oauthToken", "oauthRefreshToken"] : c.type === "AuthProvider" ? ["consumerSecret"] : [];
-      for (const tag of secretTags) {
-        if (new RegExp(`<${tag}>[^<]`).test(c.content)) {
-          warnings.push(
-            `LITERAL SECRET IN DEPLOY CONTENT (<${tag}>) \u2014 this value becomes part of the local snapshot, the audit trail, and this approval page, and a retrieve returns only a placeholder (it will not round-trip). Prefer External Credentials, where secrets are entered in Setup and never touch metadata.`
-          );
-        }
-      }
-    }
-    changes.push({ type: c.type, api_name: c.api_name, change, warnings, ...sourceOf(c) });
-  }
-  {
-    const packagedBundles = new Set(
-      components.filter(
-        (x) => x.type === "AuraDefinitionBundle" || x.type === "LightningComponentBundle"
-      ).map((x) => x.api_name)
-    );
-    const refHosts = /* @__PURE__ */ new Set(["FlexiPage", "QuickAction", "Flow", "CustomTab"]);
-    for (const entry of changes) {
-      if (!refHosts.has(entry.type)) continue;
-      const comp = components.find(
-        (x) => x.type === entry.type && x.api_name === entry.api_name
-      );
-      if (!comp) continue;
-      const missing = /* @__PURE__ */ new Set();
-      for (const m of comp.content.matchAll(/\bc:([A-Za-z][A-Za-z0-9_]*)/g)) {
-        const name = m[1];
-        if (packagedBundles.has(name)) continue;
-        if (db.getArtifact(conn.id, "AuraDefinitionBundle", name) || db.getArtifact(conn.id, "LightningComponentBundle", name)) {
-          continue;
-        }
-        missing.add(name);
-      }
-      if (missing.size > 0) {
-        const list = [...missing].slice(0, 5).join(", ");
-        entry.warnings.push(
-          `references ${list} (c: namespace) \u2014 in neither this package nor the snapshot index. If the org lacks the bundle too, this deploy fails or leaves a broken reference; ship the bundle first or in this same package.`
-        );
-      }
-    }
-  }
-  const destructive = deletions.map((d) => {
-    const warnings = ["DELETION \u2014 cannot be undone by rollback"];
-    const existing = db.getArtifact(conn.id, d.type, d.api_name);
-    if (!existing) {
-      warnings.push("not present in the local snapshot \u2014 verify the name before approving");
-    }
-    if (!isRegisteredType(d.type)) {
-      warnings.push(
-        `UNREGISTERED TYPE DELETE \u2014 Contrail cannot read ${d.type} or list its dependents; the component name and the org's own refusal rules are the only checks this delete gets.`
-      );
-    }
-    if (d.type === "AuraDefinitionBundle") {
-      const usedBy = db.edgesTo(conn.id, d.type, d.api_name).slice(0, 8);
-      warnings.push(
-        `deletes the ENTIRE bundle (every file \u2014 there is no per-file delete)` + (usedBy.length > 0 ? `; the org will REFUSE while it is referenced \u2014 known dependents: ` + usedBy.map((e) => `${e.fromType}:${e.fromName}`).join(", ") : `; the org refuses the delete if a FlexiPage, Flow, QuickAction, or action override still references it`)
-      );
-    }
-    return { type: d.type, api_name: d.api_name, change: "delete", warnings };
-  });
-  return { changes, destructive };
-}
-function sourceOf(c) {
-  return c.source_path ? { source_path: c.source_path, source_sha256: c.source_sha256 } : {};
-}
-function externalCredentialPrincipals(xml) {
-  const names = [];
-  for (const block of xml.match(/<externalCredentialParameters>[\s\S]*?<\/externalCredentialParameters>/g) ?? []) {
-    const type = block.match(/<parameterType>\s*([^<]+?)\s*<\/parameterType>/)?.[1] ?? "";
-    if (!/^(NamedPrincipal|PerUserPrincipal)$/i.test(type)) continue;
-    const name = block.match(/<parameterName>\s*([^<]+?)\s*<\/parameterName>/)?.[1];
-    if (name) names.push(name);
-  }
-  return names;
-}
-function scorerVersionStatuses(xml) {
-  const out = /* @__PURE__ */ new Map();
-  for (const block of xml.match(/<scorerVersion>[\s\S]*?<\/scorerVersion>/g) ?? []) {
-    const n = block.match(/<versionNumber>\s*(\d+)\s*<\/versionNumber>/)?.[1];
-    const s = block.match(/<status>\s*([A-Za-z]+)\s*<\/status>/)?.[1];
-    if (n) out.set(n, s ?? "");
-  }
-  return out;
-}
-function isCustomEntity(name) {
-  return /__(c|b|e|x)$/i.test(name);
-}
-function inlineFieldNames(objectXml) {
-  const names = [];
-  for (const block of objectXml.match(/<fields>[\s\S]*?<\/fields>/g) ?? []) {
-    const m = block.match(/<fullName>([^<]+)<\/fullName>/);
-    if (m?.[1]) names.push(m[1].trim());
-  }
-  return names;
-}
-function permissionBlocks(text2, tag) {
-  return text2.match(new RegExp(`<${tag}>[\\s\\S]*?</${tag}>`, "g")) ?? [];
-}
-function isGranted(containerText, need) {
-  const named = (block, tag, name) => new RegExp(`<${tag}>\\s*${escapeRegex2(name)}\\s*</${tag}>`, "i").test(block);
-  const flagOn = (block, flag) => new RegExp(`<${flag}>\\s*true\\s*</${flag}>`, "i").test(block);
-  switch (need.kind) {
-    case "field":
-      return permissionBlocks(containerText, "fieldPermissions").some(
-        (b) => named(b, "field", need.api_name) && flagOn(b, "readable")
-      );
-    case "object":
-      return permissionBlocks(containerText, "objectPermissions").some(
-        (b) => named(b, "object", need.api_name) && flagOn(b, "allowRead")
-      );
-    case "class":
-      return permissionBlocks(containerText, "classAccesses").some(
-        (b) => named(b, "apexClass", need.api_name) && flagOn(b, "enabled")
-      );
-    case "page":
-      return permissionBlocks(containerText, "pageAccesses").some(
-        (b) => named(b, "apexPage", need.api_name) && flagOn(b, "enabled")
-      );
-    case "application":
-      return permissionBlocks(containerText, "applicationVisibilities").some(
-        (b) => named(b, "application", need.api_name) && flagOn(b, "visible")
-      );
-    case "agent":
-      return permissionBlocks(containerText, "agentAccesses").some(
-        (b) => named(b, "agentName", need.api_name) && flagOn(b, "enabled")
-      );
-    case "credentialPrincipal":
-      return permissionBlocks(containerText, "externalCredentialPrincipalAccesses").some(
-        (b) => named(b, "externalCredentialPrincipal", need.api_name) && flagOn(b, "enabled")
-      );
-    case "customPermission":
-      return permissionBlocks(containerText, "customPermissions").some(
-        (b) => named(b, "name", need.api_name) && flagOn(b, "enabled")
-      );
-    case "tab": {
-      const blocks = [
-        ...permissionBlocks(containerText, "tabVisibilities"),
-        ...permissionBlocks(containerText, "tabSettings")
-      ];
-      return blocks.some((b) => {
-        if (!named(b, "tab", need.api_name)) return false;
-        const vis = b.match(/<visibility>\s*([^<]+?)\s*<\/visibility>/i)?.[1] ?? "";
-        return !/^(hidden|none)$/i.test(vis);
-      });
-    }
-  }
-}
-function analyzePermissionCoverage(components) {
-  const containers = components.filter((c) => c.type === "PermissionSet" || c.type === "Profile");
-  const hasContainer = containers.length > 0;
-  const containerText = containers.map((c) => c.content).join("\n");
-  const needs = [];
-  for (const c of components) {
-    if (c.type === "CustomField") {
-      if (!/__mdt\./i.test(c.api_name)) {
-        needs.push({ type: "CustomField", api_name: c.api_name, permission: "field-level security (FLS)", kind: "field" });
-      }
-    } else if (c.type === "ApexClass") {
-      needs.push({ type: "ApexClass", api_name: c.api_name, permission: "Apex class access", kind: "class" });
-    } else if (c.type === "CustomTab") {
-      needs.push({ type: "CustomTab", api_name: c.api_name, permission: "tab visibility", kind: "tab" });
-    } else if (c.type === "ApexPage") {
-      needs.push({ type: "ApexPage", api_name: c.api_name, permission: "Visualforce page access", kind: "page" });
-    } else if (c.type === "CustomApplication") {
-      needs.push({ type: "CustomApplication", api_name: c.api_name, permission: "app visibility", kind: "application" });
-    } else if (c.type === "Bot") {
-      needs.push({ type: "Bot", api_name: c.api_name, permission: "agent access (agentAccesses)", kind: "agent" });
-    } else if (c.type === "CustomPermission") {
-      needs.push({
-        type: "CustomPermission",
-        api_name: c.api_name,
-        permission: "custom permission access (customPermissions)",
-        kind: "customPermission"
-      });
-    } else if (c.type === "ExternalCredential") {
-      for (const principal of externalCredentialPrincipals(c.content)) {
-        needs.push({
-          type: "ExternalCredential",
-          api_name: `${c.api_name}-${principal}`,
-          permission: "external credential principal access (externalCredentialPrincipalAccesses)",
-          kind: "credentialPrincipal"
-        });
-      }
-    } else if (c.type === "CustomObject") {
-      if (isCustomEntity(c.api_name)) {
-        needs.push({ type: "CustomObject", api_name: c.api_name, permission: "object permissions", kind: "object" });
-      }
-      if (/__mdt$/i.test(c.api_name)) continue;
-      for (const field of inlineFieldNames(c.content)) {
-        needs.push({
-          type: "CustomField",
-          api_name: `${c.api_name}.${field}`,
-          permission: "field-level security (FLS)",
-          kind: "field"
-        });
-      }
-    }
-  }
-  const uncovered = needs.filter((n) => !isGranted(containerText, n)).map((n) => ({ type: n.type, api_name: n.api_name, permission: n.permission }));
-  let warning = null;
-  if (uncovered.length > 0) {
-    const list = uncovered.map((u) => `${u.type}:${u.api_name} (${u.permission})`).join("; ");
-    warning = hasContainer ? `These new components are not granted by the permission set/profile in this package and will be invisible or inaccessible to users until permissions are set: ${list}.` : `This package adds ${uncovered.length} component(s) that need permissions but includes no permission set or profile to grant them \u2014 they will deploy but stay invisible or inaccessible until you set permissions (deploy a permission set alongside, or grant FLS/access afterward): ${list}.`;
-  }
-  return { uncovered, has_permission_container: hasContainer, warning };
-}
-function escapeRegex2(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-function readBundleFiles(store, conn, dir, apiName) {
-  const prefix = `${dir}/${fileSafeSegment(apiName)}/`;
-  const out = {};
-  for (const rel of store.listCurrentFiles(conn.id, prefix)) {
-    const body = store.readCurrentFile(conn.id, rel);
-    if (body !== null) out[rel.slice(prefix.length)] = body;
-  }
-  return out;
-}
-function readOldContent(store, conn, type, apiName, filePath) {
-  const file = store.readCurrentFile(conn.id, filePath);
-  if (file === null) return null;
-  const child = CHILD_TYPES2[type];
-  if (!child) return file;
-  const childName = type === "CustomLabel" ? apiName : apiName.split(".").slice(1).join(".");
-  const re = new RegExp(`<${child.tag}>[\\s\\S]*?</${child.tag}>`, "g");
-  for (const block of file.match(re) ?? []) {
-    const m = block.match(/<fullName>([^<]+)<\/fullName>/);
-    if (m?.[1]?.toLowerCase() === childName.toLowerCase()) return block;
-  }
-  return null;
-}
-var FILE_TYPES, XMLNS_META, CHILD_TYPES2, NAME_RE, FOLDER_SEGMENT_RE, BUNDLE_REL_SEGMENT_RE, BUNDLE_MAX_FILES, BUNDLE_MAX_DEPTH, AURA_SECONDARIES, AURA_MAX_FILE_BYTES, AURA_DEFTYPE_FILES, XMLNS, MANIFEST_TYPE_AFTER, SCORER_STATUS_RANK;
-var init_package = __esm({
-  "src/deploy/package.ts"() {
-    "use strict";
-    init_esm2();
-    init_xml();
-    init_errors4();
-    FILE_TYPES = {
-      ApexClass: { dir: "classes", ext: ".cls", metaRoot: "ApexClass" },
-      ApexTrigger: { dir: "triggers", ext: ".trigger", metaRoot: "ApexTrigger" },
-      Flow: { dir: "flows", ext: ".flow" },
-      CustomObject: { dir: "objects", ext: ".object" },
-      PermissionSet: { dir: "permissionsets", ext: ".permissionset" },
-      Profile: { dir: "profiles", ext: ".profile" },
-      CustomTab: { dir: "tabs", ext: ".tab" },
-      FlowDefinition: { dir: "flowDefinitions", ext: ".flowDefinition" },
-      // S17: declarative UI / reporting types.
-      FlexiPage: { dir: "flexipages", ext: ".flexipage" },
-      CustomApplication: { dir: "applications", ext: ".app" },
-      ReportType: { dir: "reportTypes", ext: ".reportType" },
-      GlobalValueSet: { dir: "globalValueSets", ext: ".globalValueSet" },
-      ApexPage: {
-        dir: "pages",
-        ext: ".page",
-        metaRoot: "ApexPage",
-        // ApexPage meta requires a <label> and has no <status>.
-        metaXml: (v, name) => `<?xml version="1.0" encoding="UTF-8"?>
-<ApexPage xmlns="${XMLNS}">
-    <apiVersion>${escapeXml(v)}</apiVersion>
-    <label>${escapeXml(name)}</label>
-</ApexPage>
-`
-      },
-      // S17: integration / eventing types (deployable + indexable; not in the
-      // default snapshot manifest — retrieve explicitly via refresh_snapshot types).
-      ConnectedApp: { dir: "connectedApps", ext: ".connectedApp" },
-      NamedCredential: { dir: "namedCredentials", ext: ".namedCredential" },
-      ExternalCredential: { dir: "externalCredentials", ext: ".externalCredential" },
-      // S33: lowercase dir AND extension — unusual but live-confirmed (a dev org
-      // retrieve 2026-09-24), matching the metadata catalog.
-      AuthProvider: { dir: "authproviders", ext: ".authprovider" },
-      PlatformEventChannel: { dir: "platformEventChannels", ext: ".platformEventChannel" },
-      PlatformEventChannelMember: {
-        dir: "platformEventChannelMembers",
-        ext: ".platformEventChannelMember"
-      },
-      ManagedEventSubscription: {
-        dir: "managedEventSubscriptions",
-        ext: ".managedEventSubscription"
-      },
-      // S19: legacy page layouts. fullName is "Object-Layout Name" — spaces,
-      // parens, apostrophes are all normal ("Account-Account (Marketing) Layout").
-      // Retrieve zips percent-encode such characters in FILE names (the indexer
-      // decodes); deploy zips mirror that via fileSafeName, with the literal
-      // fullName in package.xml members.
-      Layout: { dir: "layouts", ext: ".layout" },
-      // S19: custom metadata RECORDS (the record's TYPE is a CustomObject named
-      // X__mdt and deploys through the CustomObject path — one package may carry
-      // the type and its records together). fullName is dotted "Type.Record"
-      // with the type name WITHOUT the __mdt suffix; metadata format uses the
-      // bare .md extension.
-      CustomMetadata: { dir: "customMetadata", ext: ".md" },
-      // S31: lead-conversion field mappings. A SINGLETON — exactly one component
-      // per org, fullName literally 'LeadConvertSettings'. The naming is the
-      // platform's own quirk (live-confirmed): CAPITALIZED directory and a
-      // singular '.LeadConvertSetting' extension. The component does not exist
-      // until an org saves custom lead mappings (a wildcard retrieve then
-      // returns nothing — harmless).
-      LeadConvertSettings: { dir: "LeadConvertSettings", ext: ".LeadConvertSetting" },
-      // S29: analytics types (folder-based). EXPLICIT-REFRESH-ONLY — absent from
-      // the default snapshot manifest (S17 precedent; big orgs carry thousands of
-      // reports). api_name is 'FolderDevName/Name' ('unfiled$public/Name' for
-      // unfiled reports). Folders deploy as members of the CONTENT type in
-      // package.xml (manifestType), their file being the -meta.xml itself; a
-      // report deployed into a NEW folder needs that folder in the same package.
-      Report: { dir: "reports", ext: ".report", foldered: true },
-      Dashboard: { dir: "dashboards", ext: ".dashboard", foldered: true },
-      ReportFolder: { dir: "reports", ext: "", metaOnly: true, manifestType: "Report" },
-      DashboardFolder: { dir: "dashboards", ext: "", metaOnly: true, manifestType: "Dashboard" },
-      // S30: Agentforce types (v66+ — see the config apiVersion note). The Bot
-      // document carries its versions INLINE (<botVersions>) in metadata format
-      // — BotVersion deploys as a dotted-name child (see CHILD_TYPES). The
-      // deployable bundle types carry a Contrail bundle ENVELOPE as content
-      // (see FileSpec.envelope).
-      Bot: { dir: "bots", ext: ".bot" },
-      GenAiFunction: {
-        dir: "genAiFunctions",
-        ext: ".genAiFunction",
-        envelope: true,
-        envelopeMainSuffix: ".genAiFunction-meta.xml"
-      },
-      GenAiPlannerBundle: {
-        dir: "genAiPlannerBundles",
-        ext: ".genAiPlannerBundle",
-        envelope: true,
-        envelopeMainSuffix: ".genAiPlannerBundle"
-      },
-      GenAiPlugin: { dir: "genAiPlugins", ext: ".genAiPlugin" },
-      GenAiPromptTemplate: { dir: "genAiPromptTemplates", ext: ".genAiPromptTemplate" },
-      GenAiPromptTemplateActv: {
-        dir: "genAiPromptTemplateActivations",
-        ext: ".genAiPromptTemplateActivation"
-      },
-      AiEvaluationDefinition: { dir: "aiEvaluationDefinitions", ext: ".aiEvaluationDefinition" },
-      // S44: the Agentforce Studio Tests-tab suite and its companion custom-
-      // scorer type. AiTestingDefinition is BETA per Salesforce (the type AND
-      // its runner); AiAgentScorerDefinition is documented (Agentforce dev
-      // guide). Both dir/suffix pairs live-confirmed via describeMetadata
-      // 2026-11-08 at v66 and v68: neither inFolder, neither metaFile, no
-      // children — plain single-file documents, no meta sidecar, no
-      // permission-set block (analyzePermissionCoverage says so). Scorer
-      // VERSIONS are documented append-only org-side — the analyzeChanges arm
-      // carries that honesty — and when a GenAiPromptTemplate a scorer engines
-      // on ships in the same package, MANIFEST_TYPE_AFTER lists the template's
-      // <types> block first (the one documented order-sensitive pair).
-      AiTestingDefinition: { dir: "aiTestingDefinitions", ext: ".aiTestingDefinition" },
-      AiAgentScorerDefinition: {
-        dir: "aiAgentScorerDefinitions",
-        ext: ".aiAgentScorerDefinition"
-      },
-      BotTemplate: { dir: "botTemplates", ext: ".botTemplate" },
-      BotBlock: { dir: "botBlocks", ext: ".botBlock" },
-      // S34: Agent Script deploys as a DRAFT STAGE (reversing S30's read-only
-      // stance, which guarded against a real lie — pretending a deploy compiles.
-      // It never does, at any API version: a no-<target> deploy lands the script
-      // as a DRAFT in Agentforce Studio, documented and runtime-inert, and the
-      // D1 warning in analyzeChanges says exactly that on every approval page.
-      // Compiling/publishing stays human — Studio or Salesforce's Agentforce DX
-      // publish command; the undocumented publish endpoints are a permanent
-      // non-goal). Exactly two files, live-confirmed: <Name>.agent (PLAINTEXT
-      // Agent Script) + <Name>.bundle-meta.xml.
-      AiAuthoringBundle: {
-        dir: "aiAuthoringBundles",
-        ext: ".agent",
-        envelope: true,
-        envelopeMainSuffix: ".agent",
-        requiredSuffixes: [".bundle-meta.xml"]
-      },
-      // S36: permissions & UI-action types. CustomPermission pairs with a
-      // permission set's customPermissions block (coverage arm below).
-      CustomPermission: { dir: "customPermissions", ext: ".customPermission" },
-      // S36: permission set groups recalculate ASYNCHRONOUSLY after deploy
-      // (Status Updating → Updated — retrieves carry <status>, live-confirmed);
-      // the analyzeChanges arms say so on every approval page. Dir casing
-      // live-confirmed all-lowercase (S33 authproviders precedent held).
-      PermissionSetGroup: { dir: "permissionsetgroups", ext: ".permissionsetgroup" },
-      MutingPermissionSet: { dir: "mutingpermissionsets", ext: ".mutingpermissionset" },
-      // S36: quick actions. Object-scoped actions have DOTTED fullNames
-      // ("Account.New_X") that are NOT parent.child fragments — QuickAction is a
-      // plain top-level type (CustomMetadata precedent): NAME_RE admits the dot,
-      // fileSafeName keeps it literal, and the retrieve file is the literal
-      // "quickActions/Account.New_X.quickAction" (live-confirmed). Global
-      // actions are undotted. '*' retrieves BOTH shapes (live-confirmed).
-      QuickAction: { dir: "quickActions", ext: ".quickAction" },
-      // S36: Lightning web components. A bundle: <n>.js (main) + <n>.js-meta.xml
-      // (required — carries isExposed/targets) + optional .html/.css/.svg and
-      // subdirectories (secondary templates like templates/x.html are real,
-      // live-confirmed). JS-only service components are normal (no .html).
-      LightningComponentBundle: {
-        dir: "lwc",
-        ext: ".js",
-        envelope: true,
-        envelopeMainSuffix: ".js",
-        requiredSuffixes: [".js-meta.xml"]
-      },
-      // S41: Aura component bundles. FLAT directories (live-confirmed on a
-      // real partial-org retrieve, 2026-11-04: every file `<N>`-prefixed, no
-      // subfolders); exactly ONE primary per bundle (.cmp component, .app
-      // application, .evt event, .intf interface, .tokens tokens); the primary's
-      // own -meta.xml is required on deploy (pins apiVersion — Developer Console
-      // creates bundles at the org's CURRENT version otherwise) and tolerated
-      // absent on retrieve. Deploy names are namespace-free developer names; the
-      // index/read path also serves ns__Name bundles (read-only). The deploy
-      // REPLACES the whole bundle: a file the org has that the envelope omits is
-      // deleted (SDR supportsPartialDelete; the BUNDLE REPLACE arm says so).
-      AuraDefinitionBundle: {
-        dir: "aura",
-        ext: ".cmp",
-        envelope: true,
-        envelopeMainSuffix: [".cmp", ".app", ".evt", ".intf", ".tokens"],
-        requireMainMeta: true,
-        flat: true
-      }
-    };
-    XMLNS_META = "http://soap.sforce.com/2006/04/metadata";
-    CHILD_TYPES2 = {
-      CustomField: {
-        containerRoot: "CustomObject",
-        dir: "objects",
-        ext: ".object",
-        tag: "fields",
-        parentFromName: (n) => n.split(".")[0] ?? ""
-      },
-      ValidationRule: {
-        containerRoot: "CustomObject",
-        dir: "objects",
-        ext: ".object",
-        tag: "validationRules",
-        parentFromName: (n) => n.split(".")[0] ?? ""
-      },
-      CustomLabel: {
-        containerRoot: "CustomLabels",
-        dir: "labels",
-        ext: ".labels",
-        tag: "labels",
-        parentFromName: () => "CustomLabels"
-      },
-      ListView: {
-        containerRoot: "CustomObject",
-        dir: "objects",
-        ext: ".object",
-        tag: "listViews",
-        parentFromName: (n) => n.split(".")[0] ?? ""
-      },
-      RecordType: {
-        containerRoot: "CustomObject",
-        dir: "objects",
-        ext: ".object",
-        tag: "recordTypes",
-        parentFromName: (n) => n.split(".")[0] ?? ""
-      },
-      // S30: bot versions are children of the Bot document (dotted MyBot.v1 —
-      // the same fullName shape the Metadata API uses for standalone BotVersion
-      // deploys).
-      BotVersion: {
-        containerRoot: "Bot",
-        dir: "bots",
-        ext: ".bot",
-        tag: "botVersions",
-        parentFromName: (n) => n.split(".")[0] ?? ""
-      }
-    };
-    NAME_RE = /^[A-Za-z0-9_.\- ()'&]+$/;
-    FOLDER_SEGMENT_RE = /^[A-Za-z0-9_$]+$/;
-    BUNDLE_REL_SEGMENT_RE = /^[A-Za-z0-9_$][A-Za-z0-9_$.\-]*$/;
-    BUNDLE_MAX_FILES = 100;
-    BUNDLE_MAX_DEPTH = 8;
-    AURA_SECONDARIES = {
-      ".cmp": ["Controller.js", "Helper.js", "Renderer.js", ".css", ".design", ".svg", ".auradoc"],
-      ".app": ["Controller.js", "Helper.js", "Renderer.js", ".css", ".svg", ".auradoc"],
-      ".evt": [".auradoc"],
-      ".intf": [".auradoc"],
-      ".tokens": []
-    };
-    AURA_MAX_FILE_BYTES = 1e6;
-    AURA_DEFTYPE_FILES = {
-      APPLICATION: ".app",
-      COMPONENT: ".cmp",
-      EVENT: ".evt",
-      INTERFACE: ".intf",
-      TOKENS: ".tokens",
-      CONTROLLER: "Controller.js",
-      HELPER: "Helper.js",
-      RENDERER: "Renderer.js",
-      STYLE: ".css",
-      DESIGN: ".design",
-      SVG: ".svg",
-      DOCUMENTATION: ".auradoc"
-    };
-    XMLNS = "http://soap.sforce.com/2006/04/metadata";
-    MANIFEST_TYPE_AFTER = {
-      AiAgentScorerDefinition: ["GenAiPromptTemplate"]
-    };
-    SCORER_STATUS_RANK = { Draft: 0, Available: 1, Archived: 2 };
-  }
-});
-
-// src/deploy/preimage.ts
-import crypto3 from "node:crypto";
-import fs10 from "node:fs";
-import path5 from "node:path";
-function preImageKey(type, apiName) {
-  return `${type}:${apiName}`;
-}
-function buildPreImageRetrieveMembers(members) {
-  const out = {};
-  for (const m of members) {
-    const target = retrieveMemberFor(m.type, m.api_name);
-    if (!target) continue;
-    const list = out[target.type] ?? [];
-    if (!list.includes(target.member)) list.push(target.member);
-    out[target.type] = list;
-  }
-  return out;
-}
-function preImageListQueryFor(member) {
-  const slash = member.api_name.indexOf("/");
-  if (FOLDERED_TYPES[member.type]) {
-    if (slash <= 0) return null;
-    return { type: member.type, folder: member.api_name.slice(0, slash) };
-  }
-  if (slash >= 0) return null;
-  return { type: member.type };
-}
-function buildPreImageListQueries(members) {
-  const types = [];
-  const folderQueries = [];
-  const seenFolders = /* @__PURE__ */ new Set();
-  for (const m of members) {
-    const q = preImageListQueryFor(m);
-    if (!q) continue;
-    if (q.folder !== void 0) {
-      const key2 = `${q.type}\0${q.folder}`;
-      if (seenFolders.has(key2)) continue;
-      seenFolders.add(key2);
-      folderQueries.push(q);
-    } else if (!types.includes(q.type)) {
-      types.push(q.type);
-    }
-  }
-  return { types, folderQueries };
-}
-function listedPropFor(props, type, apiName) {
-  const want = apiName.toLowerCase();
-  return props.find((p) => p.type === type && p.fullName.toLowerCase() === want);
-}
-function summarizePreImage(image) {
-  const out = {
-    present: image.present,
-    source: image.source,
-    last_modified_date: image.last_modified_date,
-    last_modified_by: image.last_modified_by,
-    comparable: image.comparable,
-    restorable: image.restorable
-  };
-  if (image.sha256 !== void 0) out.sha256 = image.sha256;
-  return out;
-}
-function bundleEnvelopeJson(files) {
-  const sorted = {};
-  for (const rel of [...files.keys()].sort()) sorted[rel] = files.get(rel);
-  return JSON.stringify({ contrail_bundle: 1, files: sorted }, null, 2);
-}
-async function retrievePreImages(soap, members, opts) {
-  const started_at = opts.startedAt;
-  const manifest = buildPreImageRetrieveMembers(members);
-  const listingP = listDates(soap, members);
-  const retrieveP = Object.keys(manifest).length === 0 ? Promise.resolve({ ok: true, files: /* @__PURE__ */ new Map() }) : runRetrieve(soap, manifest, opts);
-  const [retrieved, listing] = await Promise.all([retrieveP, listingP]);
-  const at = (/* @__PURE__ */ new Date()).toISOString();
-  if (!retrieved.ok) return { status: "unavailable", started_at, at, reason: retrieved.reason };
-  const zipEntries = [...retrieved.files.keys()];
-  const images = /* @__PURE__ */ new Map();
-  for (const m of members) {
-    const key2 = preImageKey(m.type, m.api_name);
-    if (images.has(key2)) continue;
-    images.set(key2, resolveMember(m, retrieved.files, zipEntries, listing));
-  }
-  const result = {
-    status: "ok",
-    started_at,
-    at,
-    images,
-    dates_unavailable_types: [...listing.unsupported].sort()
-  };
-  if (listing.failure !== void 0) result.dates_unavailable = listing.failure;
-  return result;
-}
-async function runRetrieve(soap, manifest, opts) {
-  if (opts.signal?.aborted) return { ok: false, reason: "cancelled" };
-  try {
-    const retrieveId = await soap.retrieve(manifest);
-    const deadline = Date.now() + opts.timeoutMs;
-    let poll = 0;
-    for (; ; ) {
-      if (opts.signal?.aborted) return { ok: false, reason: "cancelled" };
-      const status = await soap.checkRetrieveStatus(retrieveId, true);
-      if (status.done) {
-        if (!status.success || !status.zipFile) {
-          return { ok: false, reason: `retrieve_failed:${status.errorMessage ?? status.status}` };
-        }
-        return { ok: true, files: opts.extractZip(status.zipFile) };
-      }
-      if (Date.now() > deadline) return { ok: false, reason: "timeout" };
-      poll += 1;
-      opts.onProgress?.(`retrieving live pre-images (poll ${poll}, status ${status.status})`);
-      if (opts.signal?.aborted) return { ok: false, reason: "cancelled" };
-      await delay3(opts.pollIntervalMs, opts.signal);
-    }
-  } catch (err2) {
-    return { ok: false, reason: `retrieve_failed:${errorMessage(err2)}` };
-  }
-}
-async function listDates(soap, members) {
-  const { types, folderQueries } = buildPreImageListQueries(members);
-  const unsupported = /* @__PURE__ */ new Set();
-  try {
-    const none = { props: [], unsupportedTypes: [] };
-    const [flat, foldered] = await Promise.all([
-      types.length > 0 ? soap.listMetadataDetailed(types) : Promise.resolve(none),
-      folderQueries.length > 0 ? soap.listMetadataQueries(folderQueries) : Promise.resolve(none)
-    ]);
-    for (const t of [...flat.unsupportedTypes, ...foldered.unsupportedTypes]) unsupported.add(t);
-    return { props: [...flat.props, ...foldered.props], unsupported };
-  } catch (err2) {
-    return { props: null, unsupported, failure: errorMessage(err2) };
-  }
-}
-function resolveMember(m, files, zipEntries, listing) {
-  const listed = listing.props ? listedPropFor(listing.props, m.type, m.api_name) : void 0;
-  const enumerable = listing.props !== null && !listing.unsupported.has(m.type) && preImageListQueryFor(m) !== null;
-  const dates = {
-    last_modified_date: listed?.lastModifiedDate ? listed.lastModifiedDate : null,
-    last_modified_by: listed?.lastModifiedByName ? listed.lastModifiedByName : null
-  };
-  const entry = retrieveMemberFor(m.type, m.api_name) === null ? null : deployZipEntryPath(m.type, m.api_name, { zipEntries });
-  if (!entry) {
-    return {
-      present: enumerable ? listed !== void 0 : null,
-      source: "list",
-      ...dates,
-      comparable: false,
-      restorable: false
-    };
-  }
-  const captured = captureFromZip(entry, files);
-  const present = captured !== null || listed !== void 0;
-  if (captured === null) {
-    return { present, source: "retrieve", ...dates, comparable: false, restorable: false };
-  }
-  const usable = m.type !== "Profile";
-  return {
-    present: true,
-    source: "retrieve",
-    ...captured,
-    ...dates,
-    comparable: usable,
-    restorable: usable
-  };
-}
-function captureFromZip(entry, files) {
-  if (entry.child) {
-    const parent = files.get(entry.path);
-    if (!parent) return null;
-    const block = findChildBlock(text(parent), entry.childTag, entry.childName);
-    if (block === null) return null;
-    return { content: block, sha256: sha2562(block) };
-  }
-  if (entry.bundleDir) {
-    const bundle = /* @__PURE__ */ new Map();
-    for (const [name, bytes] of files) {
-      if (name.startsWith(entry.bundleDir) && name.length > entry.bundleDir.length) {
-        bundle.set(name.slice(entry.bundleDir.length), text(bytes));
-      }
-    }
-    if (bundle.size === 0) return null;
-    return { files: bundle, sha256: sha2562(bundleEnvelopeJson(bundle)) };
-  }
-  const main2 = files.get(entry.path);
-  if (!main2) return null;
-  const content = text(main2);
-  const out = { content, sha256: sha2562(content) };
-  const meta = files.get(`${entry.path}-meta.xml`);
-  if (meta) out.files = /* @__PURE__ */ new Map([[`${entry.path}-meta.xml`, text(meta)]]);
-  return out;
-}
-function text(bytes) {
-  return Buffer.from(bytes).toString("utf8");
-}
-function sha2562(content) {
-  return crypto3.createHash("sha256").update(content, "utf8").digest("hex");
-}
-function errorMessage(err2) {
-  return String(err2 instanceof Error ? err2.message : err2);
-}
-function delay3(ms, signal) {
-  return new Promise((resolve) => {
-    const done = () => {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", done);
-      resolve();
-    };
-    const timer = setTimeout(done, ms);
-    timer.unref?.();
-    signal?.addEventListener("abort", done, { once: true });
-  });
-}
-function revertDirFor(stagingDir2, requestId) {
-  if (!/^[A-Za-z0-9-]+$/.test(requestId)) {
-    throw new ContrailError(`invalid request id "${requestId}"`, "bad_request_id");
-  }
-  return path5.join(stagingDir2, "_reverts", requestId);
-}
-function writeRevertPreImages(dir, entries) {
-  const result = {
-    components: [],
-    not_restorable: [],
-    absent: [],
-    covered: []
-  };
-  const root = path5.resolve(dir);
-  fs10.mkdirSync(root, { recursive: true });
-  const rootReal = fs10.realpathSync(root);
-  const written = /* @__PURE__ */ new Set();
-  const unsafe = (rel) => new ContrailError(`unsafe revert path: ${rel}`, "unsafe_zip_entry");
-  const write = (rel, body) => {
-    const target = path5.resolve(root, rel);
-    if (target !== root && !target.startsWith(root + path5.sep)) throw unsafe(rel);
-    if (written.has(target)) return target;
-    let cur = root;
-    for (const seg of path5.relative(root, path5.dirname(target)).split(path5.sep)) {
-      if (!seg) continue;
-      cur = path5.join(cur, seg);
-      try {
-        fs10.mkdirSync(cur);
-      } catch (err2) {
-        if (err2.code !== "EEXIST") throw err2;
-        const stat = fs10.lstatSync(cur);
-        if (stat.isSymbolicLink() || !stat.isDirectory()) throw unsafe(rel);
-      }
-    }
-    const parentReal = fs10.realpathSync(path5.dirname(target));
-    if (parentReal !== rootReal && !parentReal.startsWith(rootReal + path5.sep)) {
-      throw unsafe(rel);
-    }
-    fs10.writeFileSync(target, body, { encoding: "utf8", flag: "wx" });
-    written.add(target);
-    return target;
-  };
-  const seen = /* @__PURE__ */ new Set();
-  const unique = entries.filter((e) => {
-    const key2 = preImageKey(e.type, e.api_name);
-    if (seen.has(key2)) return false;
-    seen.add(key2);
-    return true;
-  });
-  const wholeDocuments = /* @__PURE__ */ new Map();
-  for (const { type, api_name, image } of unique) {
-    if (image.present !== true || !image.restorable) continue;
-    const entry = deployZipEntryPath(type, api_name);
-    if (!entry || entry.child || entry.bundleDir) continue;
-    const target = retrieveMemberFor(type, api_name);
-    if (target) wholeDocuments.set(`${target.type}:${target.member}`, { type, api_name });
-  }
-  for (const { type, api_name, image } of unique) {
-    const member = { type, api_name };
-    if (image.present === false) {
-      result.absent.push(member);
-      continue;
-    }
-    if (image.present === null) {
-      result.not_restorable.push({ ...member, reason: NOT_RESTORABLE_UNENUMERABLE });
-      continue;
-    }
-    if (!image.restorable) {
-      const reason = type === "Profile" ? NOT_RESTORABLE_PROFILE : image.source === "list" ? NOT_RESTORABLE_LIST_ONLY : NOT_RESTORABLE_NO_BYTES;
-      result.not_restorable.push({ ...member, reason });
-      continue;
-    }
-    const entry = deployZipEntryPath(type, api_name);
-    if (!entry) {
-      result.not_restorable.push({ ...member, reason: NOT_RESTORABLE_LIST_ONLY });
-      continue;
-    }
-    let contentFile;
-    if (entry.child) {
-      const target = retrieveMemberFor(type, api_name);
-      const container = target ? wholeDocuments.get(`${target.type}:${target.member}`) : void 0;
-      if (container) {
-        result.covered.push({ ...member, container });
-        continue;
-      }
-      contentFile = write(`children/${type}/${api_name}.xml`, image.content ?? "");
-    } else if (entry.bundleDir && image.files) {
-      contentFile = write(
-        `bundles/${type}/${fileSafePathSegment(api_name)}.contrail-bundle.json`,
-        bundleEnvelopeJson(image.files)
-      );
-    } else {
-      contentFile = write(entry.path, image.content ?? "");
-      for (const [rel, body] of image.files ?? []) write(rel, body);
-    }
-    result.components.push({ ...member, content_file: contentFile });
-  }
-  return result;
-}
-function fileSafePathSegment(name) {
-  return name.replace(
-    /[^A-Za-z0-9 _.\-$]/g,
-    (ch) => Array.from(new TextEncoder().encode(ch)).map((b) => "%" + b.toString(16).toUpperCase().padStart(2, "0")).join("")
-  );
-}
-function finalizeRevertPackage(dir, plan) {
-  fs10.mkdirSync(dir, { recursive: true });
-  const plan_path = path5.join(dir, "revert-plan.json");
-  const readme_path = path5.join(dir, "README.txt");
-  const readme = revertReadmeText(plan);
-  fs10.writeFileSync(plan_path, JSON.stringify(plan, null, 2) + "\n", {
-    encoding: "utf8",
-    flag: "wx"
-  });
-  try {
-    fs10.writeFileSync(readme_path, readme + "\n", { encoding: "utf8", flag: "wx" });
-  } catch (err2) {
-    try {
-      fs10.rmSync(plan_path, { force: true });
-    } catch {
-    }
-    throw err2;
-  }
-  return { plan_path, readme_path, readme };
-}
-function reasonList(items) {
-  return items.map((i) => `${i.type} ${i.api_name} \u2014 ${i.reason}`).join(", ");
-}
-function revertReadmeText(plan) {
-  const check2 = plan.target_check;
-  const passed = check2 !== null && check2.status === "ok" && check2.checked.length > 0 ? check2 : null;
-  const considered = passed ? passed.checked.length + passed.unchecked.length : 0;
-  const when = plan.executed_at === null ? "Before submitting this deploy (whose outcome Contrail lost track of \u2014 see the note in revert-plan.json)" : `Before executing at ${plan.executed_at}`;
-  const compared = passed ? `${when}, Contrail compared the org's last-modified stamps against that retrieve for ${passed.checked.length} of ${considered} members and found them unchanged; it did not re-read their contents, and a matching stamp is evidence, not a byte comparison.` : check2 !== null && check2.status === "unavailable" ? `${when}, Contrail could not re-read the org to compare last-modified stamps (${check2.reason}); the deploy was submitted unverified, and these files describe the org as of the validate-time retrieve only.` : `${when}, Contrail did not re-check the org's last-modified stamps; these files describe the org as of the validate-time retrieve only.`;
-  let text2 = `A revert re-deploys what Contrail retrieved from "${plan.connection}" at ${plan.retrieved_at}, when this deploy was validated. ${compared} It does not undo data changes, automation that ran, permission effects, or changes made since to components outside this package. For the components it restores it is a wholesale replace: re-deploying these files OVERWRITES anything changed in them since that retrieve, another user's edits included \u2014 the revert's own validate_deploy page diffs it against the org as it is then (or against the local snapshot when the org cannot be re-read). Re-deploying a Flow whose latest version is active creates a NEW version; an inactive latest version is overwritten in place. Deleting the components this deploy added is destructive; revert-plan.json lists them under "destructive". Contrail never deploys a revert on its own: pass each component's content_file (and the destructive list) to validate_deploy, and a human approves it like any deploy. DML is out of scope \u2014 the persisted before-values and created_ids make a manual revert possible.`;
-  if (passed && passed.unchecked.length > 0) {
-    text2 += ` ${passed.unchecked.length} member(s) could not be re-checked (${reasonList(passed.unchecked)}); their pre-image is as of ${plan.retrieved_at} only.`;
-  }
-  if (plan.not_restorable.length > 0) {
-    text2 += ` ${plan.not_restorable.length} member(s) cannot be restored from this package (${reasonList(plan.not_restorable)}) \u2014 if this deploy changed or deleted them, reverting that needs another source.`;
-  }
-  const covered = plan.covered ?? [];
-  if (covered.length > 0) {
-    const children = covered.map((c) => `${c.type} ${c.api_name}`).join(", ");
-    const containers = [
-      ...new Set(covered.map((c) => `${c.container.type} ${c.container.api_name}`))
-    ].join(", ");
-    text2 += ` ${covered.length} child member(s) (${children}) are restored by their container's document (${containers}), whose retrieved bytes include them; they have no file of their own because validate_deploy refuses a container document and its own children in one package.`;
-  }
-  if (plan.outcome === "unknown" && plan.note) text2 += `
-
-${plan.note}`;
-  return text2;
-}
-function hhmm(iso) {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-function targetMovedRefusalText(kind, details) {
-  const head = "TARGET MOVED \u2014 not executed, and this code is now void. ";
-  if (kind === "deploy") {
-    const d = details;
-    const clauses = d.moved.map((m) => deployMovedClause(m, d.degrade));
-    const degrade = d.degrade;
-    const inMargin = degrade !== void 0 && d.moved.some((m) => withinMargin(m, degrade));
-    return head + `listMetadata (${d.at}) reports members changed in "${d.alias}" since` + (inMargin ? ", or within 5 seconds before," : "") + ` this package was validated: ${clauses.join("; ")}. The approved diff no longer describes what this deploy would overwrite. Re-run validate_deploy to see the current state and get a fresh code. This check is best-effort: Contrail re-reads the org immediately before claiming the code and compares last-modified stamps, not bytes; a change landing after that read \u2014 while the deploy is submitted and processed by the org \u2014 is not caught.`;
-  }
-  if (kind === "dml") {
-    const d = details;
-    const clauses = d.changed.map(
-      (c) => `${c.object} ${c.id} ${c.field} is now ${c.now} (the approval showed ${c.before})`
-    );
-    d.missing.forEach((m, i) => {
-      let clause = `${m.object} ${m.id} was returned by the preview query at propose but not at ${d.at}`;
-      if (i === d.missing.length - 1) {
-        clause += (d.missing.length > 1 ? " \u2014 each" : " \u2014 it") + ` was deleted, or is no longer visible to this connection's user (a converted Lead also drops out); those cases look identical from here`;
-      }
-      clauses.push(clause);
-    });
-    return head + `Re-running the preview query at ${d.at} shows the records you approved have changed since dml_propose: ${clauses.join("; ")}. Re-run dml_propose to see the current values and get a fresh code.`;
-  }
-  const a = details;
-  return head + `SELECT Status at ${a.at} reports BotVersion ${a.version} of ${a.agent} is ${a.now}; the approval was for a change from ${a.from}. Re-run agent_activation_propose.`;
-}
-function deployMovedClause(m, degrade) {
-  const who = m.last_modified_by ?? "an unknown user";
-  const when = m.last_modified_date ?? "an unknown time";
-  const name = `${m.type} ${m.api_name}`;
-  const baseline = m.frozen_date !== null ? `the approval was based on the version last modified at ${m.frozen_date}` : "the approval was based on the version then in the org";
-  switch (m.state ?? "changed") {
-    case "gone":
-      return `${name} \u2014 listMetadata no longer reports it (${baseline})`;
-    case "created":
-      return `${name} \u2014 listMetadata now reports it, last modified by ${who} at ${when} (the approval was based on the org reporting no such member)`;
-    default:
-      if (degrade && !withinMargin(m, degrade)) {
-        return `${name} \u2014 last modified by ${who} at ${when}, after this package was validated at ${degrade.org_clock_created_date} (no live baseline was captured at validate: ${degrade.live_check_reason}; Contrail compared against the org-side validation time, minus a 5-second ordering margin)`;
-      }
-      if (degrade) {
-        return `${name} \u2014 last modified by ${who} at ${when}, within 5 seconds before this package's org-side validation started at ${degrade.org_clock_created_date}, too close to rule out that the approved diff missed it (no live baseline was captured at validate: ${degrade.live_check_reason}; Contrail compared against the org-side validation time, minus a 5-second ordering margin)`;
-      }
-      return `${name} \u2014 last modified by ${who} at ${when} (${baseline})`;
-  }
-}
-function withinMargin(m, degrade) {
-  if ((m.state ?? "changed") !== "changed") return false;
-  const stamp = Date.parse(m.last_modified_date ?? "");
-  const created = Date.parse(degrade.org_clock_created_date);
-  return Number.isNaN(stamp) || Number.isNaN(created) || stamp < created;
-}
-var NOT_RESTORABLE_PROFILE, NOT_RESTORABLE_LIST_ONLY, NOT_RESTORABLE_UNENUMERABLE, NOT_RESTORABLE_NO_BYTES;
-var init_preimage = __esm({
-  "src/deploy/preimage.ts"() {
-    "use strict";
-    init_errors4();
-    init_metadataSoap();
-    init_indexer();
-    init_package();
-    NOT_RESTORABLE_PROFILE = "Profile \u2014 a single-member retrieve is package-relative, so the captured bytes are not a restorable image";
-    NOT_RESTORABLE_LIST_ONLY = "not a type Contrail can read or author \u2014 only the org listing was consulted, no bytes were captured";
-    NOT_RESTORABLE_UNENUMERABLE = "the org could not enumerate this type, so Contrail cannot say whether the member existed";
-    NOT_RESTORABLE_NO_BYTES = "the org listing names it, but the retrieve returned no bytes for it";
-  }
-});
-
 // src/core/notify.ts
 function describePhoneOutcome(outcome, opts) {
   if (outcome.status === "off") return { status: "off" };
-  const settings = opts.includeCode ? "via open_settings" : "in the app's Settings \u2192 Notifications";
+  const surface = opts.surface ?? (opts.includeCode ? "page" : "native");
+  const settings = surface === "page" ? "via open_settings" : "in the app's Settings \u2192 Notifications";
+  if (opts.freeze === true) return describeFrozenPhoneOutcome(outcome, surface, settings);
   if (outcome.status === "skipped") {
     return {
       status: "skipped",
@@ -32975,9 +37174,16 @@ function describePhoneOutcome(outcome, opts) {
   if (outcome.status === "sent") {
     return {
       status: "sent",
-      note: opts.includeCode ? "The approval summary and code were also pushed to the human's phone. The code still only counts when the human types it into this chat." : "A code-free summary was pushed to the human's phone; they approve in the app's Deploy Review screen as usual."
+      note: opts.includeCode ? "The approval summary and code were also pushed to the human's phone. The code still counts only when the human gives it to you as their approval." : "A code-free summary was pushed to the human's phone; they approve in the app's Deploy Review screen as usual."
     };
   }
+  return {
+    status: "failed",
+    reason: outcome.reason,
+    note: `Phone notification failed (${failureHint(outcome.reason, settings)}). ` + (opts.includeCode ? "The code is only on the approval page in the human's browser." : "The proposal is still waiting in the app's Deploy Review screen.")
+  };
+}
+function failureHint(reason, settings) {
   const hint = {
     not_configured: `phone notifications are switched on but the Pushover keys are missing \u2014 the human can set them ${settings}`,
     store_unavailable: "the OS keychain could not be read on this machine, so the stored Pushover keys are unreachable",
@@ -32987,10 +37193,27 @@ function describePhoneOutcome(outcome, opts) {
     network: "Pushover was unreachable from this machine",
     circuit_open: `notifications are paused after a recent rejection \u2014 the human can fix the keys ${settings}`
   };
+  return hint[reason];
+}
+function describeFrozenPhoneOutcome(outcome, surface, settings) {
+  const where = surface === "page" ? "on the approval page" : "in Deploy Review";
+  if (outcome.status === "sent") {
+    return {
+      status: "sent",
+      note: "A code-free summary was pushed to the human's phone: a change freeze is in effect, and while it lasts they can only approve at their desk, after typing an emergency reason there."
+    };
+  }
+  if (outcome.status === "skipped") {
+    return {
+      status: "skipped",
+      reason: outcome.reason,
+      note: outcome.reason === "remote_control_off" ? `Phone notification skipped: Remote Control was not connected when this was proposed (phone delivery is set to "only while Remote Control is on"). A change freeze is in effect, so a push would have carried no code; while it lasts the human approves at their desk, after typing an emergency reason ${where}.` : `Phone notification skipped: phone delivery is set to "only while Remote Control is on", but Contrail's Remote Control hook did not report for this call \u2014 it is not installed, or this is not a Claude Code session. A change freeze is in effect: while it lasts the request cannot be approved until the human types an emergency reason ${where}. If the human expected a push, they can install the hook or switch delivery to Always ${settings}.`
+    };
+  }
   return {
     status: "failed",
     reason: outcome.reason,
-    note: `Phone notification failed (${hint[outcome.reason]}). ` + (opts.includeCode ? "The code is only on the approval page in the human's browser." : "The proposal is still waiting in the app's Deploy Review screen.")
+    note: `Phone notification failed (${failureHint(outcome.reason, settings)}). A change freeze is in effect, so the human approves at their desk either way.`
   };
 }
 function approvalKindNoun(kind) {
@@ -33021,6 +37244,12 @@ function phoneLabel(kind, label) {
   const colon = flat.indexOf(":");
   return colon === -1 ? flat : flat.slice(0, colon).trim();
 }
+function wallClock3(iso) {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return null;
+  const d = new Date(t);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
 function composePushover(view, opts) {
   const title = truncate2(
     `Contrail: approve ${approvalKindNoun(view.kind)} \u2192 ${view.org.alias} (${view.org.orgType})`,
@@ -33028,13 +37257,20 @@ function composePushover(view, opts) {
   );
   const rowWarnings = [...view.destructive, ...view.changes].flatMap((r) => r.warnings);
   const warningCount = (view.warnings ?? []).length + rowWarnings.length;
-  const head = [
+  const fixed = [
     [
       plural(view.changes.length, "change"),
       plural(view.destructive.length, "deletion"),
       plural(warningCount, "warning")
     ].join(" \xB7 ")
   ];
+  const changedAt = opts.policyChangedAt ? wallClock3(opts.policyChangedAt) : null;
+  if (changedAt !== null) {
+    fixed.push(
+      `Contrail noticed a policies change in config.json at ${changedAt} \u2014 read the approval page or Deploy Review before approving.`
+    );
+  }
+  const head = [];
   if (view.org.orgType === "production") head.push("PRODUCTION org.");
   if (view.destructive.length > 0) head.push("Includes DELETIONS.");
   if (opts.summary === "full") {
@@ -33046,13 +37282,16 @@ function composePushover(view, opts) {
   }
   const clock = expiryClock(view.expiresAt);
   const expiry = clock === "soon" ? "it expires soon" : `it expires at ${clock}`;
-  const tail = opts.includeCode ? [
+  const tail = opts.freeze ? [FREEZE_TAIL] : opts.includeCode ? [
     `Type the code below into your Contrail session to approve \u2014 ${expiry}. Full details are on the approval page on your desktop.`,
     "",
     view.code
   ] : ["Waiting in Deploy Review \u2014 open the Contrail desktop app to approve."];
   const tailText = tail.join("\n");
-  const headText = truncate2(head.join("\n"), Math.max(0, MESSAGE_MAX - tailText.length - 1));
+  const fixedText = fixed.join("\n");
+  const rest = head.join("\n");
+  const headText = rest ? `${fixedText}
+${truncate2(rest, Math.max(0, MESSAGE_MAX - tailText.length - fixedText.length - 2))}` : fixedText;
   return {
     title,
     message: `${headText}
@@ -33067,7 +37306,7 @@ function sanitizeErrors(json2) {
     (e) => e.replace(/[\u0000-\u001f]/g, " ").replace(/[A-Za-z0-9]{30,}/g, "[redacted]").slice(0, 160)
   );
 }
-var NOTIFY_ACCOUNTS, PUSHOVER_KEY_RE, PUSHOVER_MESSAGES_URL, PUSHOVER_VALIDATE_URL, TIMEOUT_MS, REJECTED_PAUSE_MS, QUOTA_PAUSE_MS, MESSAGE_MAX, TITLE_MAX, FULL_LABELS_MAX, FULL_WARNINGS_MAX, PushoverNotifier, NullNotifier;
+var NOTIFY_ACCOUNTS, PUSHOVER_KEY_RE, PUSHOVER_MESSAGES_URL, PUSHOVER_VALIDATE_URL, TIMEOUT_MS, REJECTED_PAUSE_MS, QUOTA_PAUSE_MS, MESSAGE_MAX, TITLE_MAX, FULL_LABELS_MAX, FULL_WARNINGS_MAX, FREEZE_TAIL, PushoverNotifier, NullNotifier;
 var init_notify = __esm({
   "src/core/notify.ts"() {
     "use strict";
@@ -33086,6 +37325,7 @@ var init_notify = __esm({
     TITLE_MAX = 250;
     FULL_LABELS_MAX = 10;
     FULL_WARNINGS_MAX = 3;
+    FREEZE_TAIL = "CHANGE FREEZE in effect \u2014 this message carries no code. While the freeze lasts, this can only be approved at your desk, after you type an emergency reason there (the approval page in your browser, or Deploy Review in the Contrail desktop app).";
     PushoverNotifier = class {
       /**
        * @param syncFromDisk the plugin and the desktop app share config.json but
@@ -33155,7 +37395,9 @@ var init_notify = __esm({
         if (Date.now() < this.pausedUntil) return { status: "failed", reason: "circuit_open" };
         const msg = composePushover(view, {
           includeCode: opts.includeCode,
-          summary: this.config.notifications.summary
+          summary: this.config.notifications.summary,
+          ...opts.freeze === true ? { freeze: true } : {},
+          ...opts.policyChangedAt ? { policyChangedAt: opts.policyChangedAt } : {}
         });
         const result = await this.call(PUSHOVER_MESSAGES_URL, {
           token: creds.token,
@@ -33297,21 +37539,72 @@ var init_notify = __esm({
 });
 
 // src/deploy/engine.ts
-import crypto4 from "node:crypto";
-import fs11 from "node:fs";
-import path6 from "node:path";
+import crypto6 from "node:crypto";
+import fs12 from "node:fs";
+import path7 from "node:path";
 function isDmlPlan(input) {
   return input.plan === true;
 }
 function stepReferenceId(step, index) {
   return step.ref ?? `step_${index + 1}`;
 }
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const obj = value;
+    return `{${Object.keys(obj).filter((k) => obj[k] !== void 0).sort().map((k) => `${JSON.stringify(k)}:${canonicalJson(obj[k])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+function policyFingerprint(load) {
+  const basis = !load.ok ? `unreadable:${load.problem}` : load.source === "default" ? "default" : canonicalJson(load.policies);
+  return crypto6.createHash("sha256").update(basis).digest("hex");
+}
+function policiesStatusOf(load, conns) {
+  if (!load.ok) {
+    return {
+      status: "unreadable",
+      problem: load.problem,
+      note: "Every write proposal is refused until the human fixes config.json."
+    };
+  }
+  return {
+    status: "ok",
+    source: load.source,
+    unmatched_rules: unmatchedRules(
+      load.policies,
+      conns.map((c) => ({ alias: c.alias, orgId: c.orgId }))
+    )
+  };
+}
+function dryRunPolicyCheck(pre) {
+  if (!pre.ok) {
+    return {
+      status: "unreadable",
+      problem: pre.problem,
+      rules: [],
+      would_refuse: [],
+      freeze: null,
+      note: dryRunPolicyNote("unreadable", pre.problem)
+    };
+  }
+  const wouldRefuse = pre.verdict.violations.map((v) => v.text);
+  const status = wouldRefuse.length > 0 ? "would_refuse" : "ok";
+  const f = pre.verdict.freeze;
+  return {
+    status,
+    rules: pre.verdict.rules,
+    would_refuse: wouldRefuse,
+    freeze: f ? { rule: f.rule, window: f.window, until: f.until, time_zone: f.timeZone } : null,
+    note: dryRunPolicyNote(status)
+  };
+}
 function nothingComparedReason(checked, unchecked) {
   if (checked.length > 0 || unchecked.length === 0) return null;
   if (unchecked.some((u) => EXISTENCE_CHECKED_REASONS.has(u.reason))) return null;
   return unchecked.every((u) => NO_BASELINE_REASONS.has(u.reason)) ? "no_baseline" : "nothing_compared";
 }
-function targetCheckOf(checkedAt, checked, unchecked, noBaselineNote) {
+function targetCheckOf2(checkedAt, checked, unchecked, noBaselineNote) {
   const nothing = nothingComparedReason(checked, unchecked);
   if (nothing === null) return { status: "ok", checked_at: checkedAt, checked, unchecked };
   return {
@@ -33323,18 +37616,20 @@ function targetCheckOf(checkedAt, checked, unchecked, noBaselineNote) {
   };
 }
 function validateJobId(input) {
-  const h = crypto4.createHash("sha256");
+  const h = crypto6.createHash("sha256");
   h.update(
     `${JSON.stringify([
       input.dryRun === true,
       input.testLevel ?? null,
       input.runTests ?? null,
-      input.allowUnregisteredDelete === true
+      input.allowUnregisteredDelete === true,
+      input.ticket ?? null,
+      input.justification ?? null
     ])}
 `
   );
   for (const c of input.components) {
-    const contentSha = crypto4.createHash("sha256").update(c.content).digest("hex");
+    const contentSha = crypto6.createHash("sha256").update(c.content).digest("hex");
     h.update(`${JSON.stringify(["C", c.type, c.api_name, contentSha])}
 `);
   }
@@ -33361,10 +37656,12 @@ function changedInTargetText(at, snapshotFrom, comparable) {
   return comparable ? `CHANGED IN TARGET SINCE YOUR SNAPSHOT \u2014 the diff below is against the LIVE version (retrieved ${at}); your snapshot is from ${snapshotFrom}.` : `CHANGED IN TARGET SINCE YOUR SNAPSHOT \u2014 the org's copy (retrieved ${at}) was modified after your snapshot from ${snapshotFrom}; this type's retrieved bytes cannot be compared, so any diff below is against your snapshot.`;
 }
 function liveBytesDifferText(at, cause) {
-  return `live bytes differ from your snapshot (retrieved ${at}) \u2014 ` + (cause === "no_dates" ? `last-modified stamps were unavailable for this type, so Contrail cannot say who or when.` : `this member's last-modified stamp is within a minute of when your snapshot was taken, too close to tell apart from clock differences between this computer and the org, so Contrail cannot say who or when.`);
+  return `live bytes differ from your snapshot (retrieved ${at}) \u2014 ` + // 'no_dates' fires when EITHER side has no parseable stamp (the org's, or
+  // the snapshot row's), so the sentence never says which one was missing.
+  (cause === "no_dates" ? `a last-modified stamp was missing for this member \u2014 the org's or your snapshot's \u2014 so Contrail cannot say who or when.` : `this member's last-modified stamp is within a minute of when your snapshot was taken, too close to tell apart from clock differences between this computer and the org, so Contrail cannot say who or when.`);
 }
-function destructiveAbsentText(at) {
-  return `not present in the target (retrieved ${at}) \u2014 listMetadata reports no such member; the org decides whether this delete fails or no-ops`;
+function destructiveAbsentText(at, evidence) {
+  return `not present in the target (retrieved ${at}) \u2014 ${evidence}; the org decides whether this delete fails or no-ops`;
 }
 function changedSummaryText(n, alias, at) {
   return `${n} component(s) changed in "${alias}" since your snapshot \u2014 rows marked CHANGED IN TARGET show when (and, in their detail, who); every diff on this page is against the live version retrieved at ${at}, except rows labelled "diff vs your snapshot".`;
@@ -33372,8 +37669,21 @@ function changedSummaryText(n, alias, at) {
 function liveUnavailableText(reason, snapshotFrom) {
   return `LIVE COMPARISON UNAVAILABLE (${reason}) \u2014 compared against your snapshot ` + (snapshotFrom !== null ? `from ${snapshotFrom}` : "(which holds none of these members)") + `; the org was not re-read. Classifications (ADD/MODIFY) and diffs below come from the local snapshot only.`;
 }
-function datesUnavailableText(at, types, reason) {
-  return `Live diff is against the org (retrieved ${at}); last-modified stamps were unavailable for ${types.join(", ")} (${reason}), so CHANGED-IN-TARGET detection for those members relies on content only and the execute-time check will report them as unchecked.`;
+function datesUnavailableText(at, groups) {
+  return `Live diff is against the org (retrieved ${at}); last-modified stamps were unavailable for ${groups.join("; ")}, so CHANGED-IN-TARGET detection for those members relies on content only and the execute-time check will report them as unchecked.`;
+}
+function groupByReason(failures) {
+  const out = /* @__PURE__ */ new Map();
+  for (const [type, reason] of Object.entries(failures)) {
+    const types = out.get(reason);
+    if (types) types.push(type);
+    else out.set(reason, [type]);
+  }
+  return out;
+}
+function memberNames(members) {
+  const shown = members.slice(0, 10).map((m) => `${m.type} ${m.api_name}`);
+  return shown.join(", ") + (members.length > shown.length ? ` and ${members.length - 10} more` : "");
 }
 function lastModifiedDetail(image) {
   if (!image.last_modified_date) return null;
@@ -33393,7 +37703,10 @@ function entryFor(entries, index, member) {
 function isFlowDeactivation(c) {
   return c.type === "FlowDefinition" && /<activeVersionNumber>\s*0\s*<\/activeVersionNumber>/.test(c.content);
 }
-function listingCovers(live, member) {
+function absenceEstablished(live, member) {
+  if (stampSourceFor(member.type) !== "listMetadata") {
+    return !live.dates_unavailable_types.includes(member.type) && isProbeable(member) && !live.probe_unmatched.includes(preImageKey(member.type, member.api_name));
+  }
   return live.dates_unavailable === void 0 && !live.dates_unavailable_types.includes(member.type) && preImageListQueryFor(member) !== null;
 }
 function bundleRootOf(type, apiName) {
@@ -33524,10 +37837,10 @@ function samePath(a, b) {
   return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
 }
 function revertsRootReal() {
-  const reverts = path6.join(stagingDir(), "_reverts");
-  const stat = fs11.lstatSync(reverts);
-  const real = fs11.realpathSync(reverts);
-  if (!stat.isDirectory() || stat.isSymbolicLink() || !samePath(real, path6.join(fs11.realpathSync(stagingDir()), "_reverts"))) {
+  const reverts = path7.join(stagingDir(), "_reverts");
+  const stat = fs12.lstatSync(reverts);
+  const real = fs12.realpathSync(reverts);
+  if (!stat.isDirectory() || stat.isSymbolicLink() || !samePath(real, path7.join(fs12.realpathSync(stagingDir()), "_reverts"))) {
     throw new ContrailError(
       `${reverts} is not a real directory directly under Contrail's staging directory \u2014 revert files are never written or removed through it`,
       "unsafe_path"
@@ -33536,25 +37849,85 @@ function revertsRootReal() {
   return real;
 }
 function assertRealRevertDir(root, name) {
-  const dir = path6.join(stagingDir(), "_reverts", name);
-  const stat = fs11.lstatSync(dir);
-  if (!stat.isDirectory() || stat.isSymbolicLink() || !samePath(fs11.realpathSync(dir), path6.join(root, name))) {
+  const dir = path7.join(stagingDir(), "_reverts", name);
+  const stat = fs12.lstatSync(dir);
+  if (!stat.isDirectory() || stat.isSymbolicLink() || !samePath(fs12.realpathSync(dir), path7.join(root, name))) {
     throw new ContrailError(
       `revert directory ${dir} is not a real directory directly under ${root}`,
       "unsafe_path"
     );
   }
 }
-function approvalForAgent(kind, approval) {
+function approvalForAgent(kind, approval, frozen) {
   if (approval.opened) return { opened: true };
   log(
     "warn",
-    `approval page could not auto-open \u2014 open it yourself to read the ${kind} confirmation code`,
+    frozen ? `approval page could not auto-open \u2014 open it yourself; a change freeze is in effect, so it shows the ${kind} confirmation code only after you record an emergency reason there` : `approval page could not auto-open \u2014 open it yourself to read the ${kind} confirmation code`,
     { url: approval.url }
   );
   return {
     opened: false,
-    note: "The approval page could not be opened automatically. Its URL was written to the Contrail server log (stderr) for the human to open \u2014 it is deliberately NOT provided to you. Ask the human to open the Contrail log, visit the page, and read the code back."
+    note: frozen ? freezePageNotOpenedText() : "The approval page could not be opened automatically. Its URL was written to the Contrail server log (stderr) for the human to open \u2014 it is deliberately NOT provided to you. Ask the human to open the Contrail log, visit the page, and read the code back."
+  };
+}
+function jsonObject(text2) {
+  if (!text2) return {};
+  try {
+    const value = JSON.parse(text2);
+    return isPlainObject4(value) ? value : {};
+  } catch {
+    return {};
+  }
+}
+function isPlainObject4(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function stillPending(row) {
+  return row.status === "validated" && new Date(row.expiresAt).getTime() >= Date.now();
+}
+function snapshotMembersOf(lists) {
+  const out = [];
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+    for (const entry of list) {
+      if (isPlainObject4(entry) && typeof entry.type === "string" && typeof entry.api_name === "string") {
+        out.push({ type: entry.type, api_name: entry.api_name });
+      }
+    }
+  }
+  return out;
+}
+function storedGovernanceOf(summary) {
+  const g = summary.governance;
+  return isPlainObject4(g) ? g : null;
+}
+function rowPolicyInputs(request, summary) {
+  const payload = jsonObject(request.payloadJson);
+  const anyDelete = (steps) => Array.isArray(steps) && steps.some((s) => isPlainObject4(s) && s.operation === "delete");
+  if (request.kind === "deploy") {
+    const level = payload.testLevel;
+    return {
+      destructive: Array.isArray(summary.destructive) && summary.destructive.length > 0,
+      testLevel: typeof level === "string" && TEST_LEVEL_ORDER.includes(level) ? level : null
+    };
+  }
+  if (request.kind === "dml") {
+    return {
+      destructive: payload.plan === true ? anyDelete(payload.steps) : payload.operation === "delete",
+      testLevel: null
+    };
+  }
+  if (request.kind === "bulk") return { destructive: anyDelete(payload.steps), testLevel: null };
+  return { destructive: false, testLevel: null };
+}
+function governanceAuditDetail(minted) {
+  const j = minted.stored.justification;
+  return {
+    ticket: minted.stored.ticket,
+    justification_source: j ? j.source : null,
+    justification_chars: j ? j.text.length : 0,
+    rules: minted.stored.policy.rules,
+    frozen: minted.frozen
   };
 }
 function proposeToolFor(kind) {
@@ -33599,7 +37972,7 @@ function kindNoun(kind) {
 }
 function safeUnlink(filePath) {
   try {
-    fs11.rmSync(filePath, { recursive: true, force: true });
+    fs12.rmSync(filePath, { recursive: true, force: true });
   } catch (err2) {
     log("warn", "could not delete deploy payload", { filePath, err: String(err2) });
   }
@@ -33624,10 +37997,13 @@ function summarizeOps(steps) {
 function delay4(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms).unref?.());
 }
-var REF_TOKEN_RE, STALE_JOB_MS2, TARGET_CHECK_DEADLINE_MS, ORG_CLOCK_MARGIN_MS, CHILD_STAMP_MARGIN_MS, TARGET_CHECK_NOT_APPLICABLE, TARGET_CHECK_NOT_APPLICABLE_BULK, NO_BASELINE_REASONS, EXISTENCE_CHECKED_REASONS, NOTHING_COMPARED_NOTE, DeployEngine, AUTOMATION_CARD_MAX_OBJECTS, PAGE_DIFF_LIMITS, PAGE_DIFF_BUDGET_CHARS, PAGE_DIFF_BUDGET_NOTE, REQUEST_ID_RE, TargetCheckDeadline;
+var REF_TOKEN_RE, POLICY_CHANGE_NOTICE_MS, POLICY_REFUSAL_CODES, STALE_JOB_MS2, TARGET_CHECK_DEADLINE_MS, ORG_CLOCK_MARGIN_MS, CHILD_STAMP_MARGIN_MS, TARGET_CHECK_NOT_APPLICABLE, TARGET_CHECK_NOT_APPLICABLE_BULK, NO_BASELINE_REASONS, EXISTENCE_CHECKED_REASONS, NOTHING_COMPARED_NOTE, DeployEngine, AUTOMATION_CARD_MAX_OBJECTS, PAGE_DIFF_LIMITS, PAGE_DIFF_BUDGET_CHARS, PAGE_DIFF_BUDGET_NOTE, REQUEST_ID_RE, TargetCheckDeadline;
 var init_engine2 = __esm({
   "src/deploy/engine.ts"() {
     "use strict";
+    init_policy();
+    init_indexer();
+    init_members();
     init_metadataSoap();
     init_rest();
     init_bulk();
@@ -33639,12 +38015,20 @@ var init_engine2 = __esm({
     init_codes();
     init_approval();
     init_pages();
+    init_evidence();
     init_semantic();
     init_preimage();
+    init_stampprobe();
     init_notify();
     init_package();
     init_log();
     REF_TOKEN_RE = /^@\{([A-Za-z][A-Za-z0-9_]*)\.id\}$/;
+    POLICY_CHANGE_NOTICE_MS = 24 * 60 * 6e4;
+    POLICY_REFUSAL_CODES = /* @__PURE__ */ new Set([
+      "policy_freeze",
+      "policy_refused",
+      "policy_unreadable"
+    ]);
     STALE_JOB_MS2 = 30 * 6e4;
     TARGET_CHECK_DEADLINE_MS = 15e3;
     ORG_CLOCK_MARGIN_MS = 5e3;
@@ -33676,7 +38060,33 @@ var init_engine2 = __esm({
       }
       jobs = /* @__PURE__ */ new Map();
       executionObserver = null;
+      rebaseliner = null;
       notifier = new NullNotifier();
+      /**
+       * S46 (B): where every policy check reads the policies from. By default
+       * the injected config's own section, so a test that hands the engine a
+       * config stays hermetic (the PushoverNotifier.syncFromDisk precedent);
+       * a wired engine is handed loadPolicies, which re-reads config.json on
+       * every call, so an edit applies without a restart.
+       */
+      policySource = () => {
+        const parsed = parsePolicies(this.config.policies);
+        if (parsed.ok) return { ok: true, policies: parsed.policies, source: "config" };
+        return {
+          ok: false,
+          problem: parsed.problem.startsWith("rules") ? `policies.${parsed.problem}` : `policies: ${parsed.problem}`
+        };
+      };
+      /**
+       * S46 (B): the last policies fingerprints this engine has seen, and when
+       * it last saw them change. null until the first check, which primes it
+       * from the newest policy.config_seen audit rows.
+       */
+      policyObserver = null;
+      /** S46 (B): the server wires loadPolicies here unless a test injected the config. */
+      setPolicySource(source) {
+        this.policySource = source;
+      }
       /**
        * S42: register the approval notifier (the phone push of a freshly minted
        * code). A setter for the same reason as setExecutionObserver: the real
@@ -33692,11 +38102,21 @@ var init_engine2 = __esm({
        * the proposal. Audit rows carry outcome categories only — never the code,
        * never a key. `mode: 'native'` (the desktop's in-app review) sends the
        * summary WITHOUT the code: there is nowhere to type it.
+       * S46 (B): `frozen` is the mint's one freeze evaluation (mintGovernance). A
+       * frozen request's push carries no code — the view handed over has none —
+       * and says the human approves at their desk; a policies change Contrail
+       * noticed within the last day rides the push as one head line.
        */
-      async notifyApproval(view, requestId, connectionId, mode) {
+      async notifyApproval(view, requestId, connectionId, mode, frozen) {
+        const includeCode = mode === "page" && !frozen;
+        const changed = this.policyChangeNotice(Date.now());
         let outcome;
         try {
-          outcome = await this.notifier.notify(view, { includeCode: mode === "page" });
+          outcome = await this.notifier.notify(includeCode ? view : { ...view, code: "" }, {
+            includeCode,
+            ...frozen ? { freeze: true } : {},
+            ...changed ? { policyChangedAt: changed.at } : {}
+          });
         } catch (err2) {
           log("warn", "approval notifier threw; treating as not delivered", {
             err: err2 instanceof Error ? err2.name : typeof err2
@@ -33707,7 +38127,13 @@ var init_engine2 = __esm({
           this.audit.record("approval.notified", {
             connectionId,
             tool: proposeToolFor(view.kind),
-            detail: { requestId, kind: view.kind, method: "pushover", codeIncluded: mode === "page" }
+            detail: {
+              requestId,
+              kind: view.kind,
+              method: "pushover",
+              codeIncluded: includeCode,
+              ...frozen ? { freeze: true } : {}
+            }
           });
         } else if (outcome.status === "failed") {
           this.audit.record("approval.notify_failed", {
@@ -33723,7 +38149,7 @@ var init_engine2 = __esm({
             detail: { requestId, kind: view.kind, reason: outcome.reason }
           });
         }
-        return describePhoneOutcome(outcome, { includeCode: mode === "page" });
+        return describePhoneOutcome(outcome, { includeCode, freeze: frozen, surface: mode });
       }
       /**
        * Register the (single) execution observer. A setter rather than a ctor
@@ -33732,6 +38158,14 @@ var init_engine2 = __esm({
        */
       setExecutionObserver(obs) {
         this.executionObserver = obs;
+      }
+      /**
+       * S46 (C): register the post-deploy snapshot re-baseline. A setter for the
+       * same reason as setExecutionObserver: the snapshot engine is a sibling,
+       * wired by every host where both exist. Unset = feature off.
+       */
+      setSnapshotRebaseliner(fn) {
+        this.rebaseliner = fn;
       }
       /** Best-effort observer dispatch — never allowed to touch the outcome. */
       notifyExecuted(request, payload) {
@@ -33747,10 +38181,796 @@ var init_engine2 = __esm({
           });
         }
       }
+      // ── policies (S46, B) ──────────────────────────────────────────────────
+      /**
+       * One read of the policies, fingerprinted and observed. A source that
+       * throws counts as unreadable — every check then fails closed.
+       */
+      loadPoliciesObserved() {
+        let load;
+        try {
+          load = this.policySource();
+        } catch (err2) {
+          load = {
+            ok: false,
+            problem: `config.json could not be read (${err2 instanceof Error ? err2.message : String(err2)})`
+          };
+        }
+        const sha2563 = policyFingerprint(load);
+        this.observePolicies(load, sha2563);
+        return { load, sha256: sha2563 };
+      }
+      /**
+       * The change trail. A fingerprint this engine has not seen is recorded as
+       * policy.config_seen — unless the newest such row already carries it
+       * (another engine on this database, the other surface or a second plugin
+       * process, recorded it first), in which case that row is adopted and
+       * nothing is written. `changed` is true only for readable policies that
+       * differ from the last readable ones seen: the first observation is not a
+       * change, and neither is an unreadable interlude that ends with the same
+       * policies. The observer never blocks a check.
+       */
+      observePolicies(load, sha2563) {
+        try {
+          if (this.policyObserver === null) this.policyObserver = this.primePolicyObserver();
+          const o = this.policyObserver;
+          if (sha2563 === o.lastSeen) return;
+          const newest2 = this.audit.query({ eventType: "policy.config_seen", limit: 1 })[0];
+          if (newest2 && newest2.detail?.sha256 === sha2563) {
+            o.lastSeen = sha2563;
+            if (load.ok) o.lastReadable = sha2563;
+            if (newest2.detail?.changed === true) o.lastChange = { at: newest2.ts };
+            return;
+          }
+          const changed = load.ok && o.lastReadable !== null && sha2563 !== o.lastReadable;
+          this.audit.record("policy.config_seen", {
+            detail: {
+              sha256: sha2563,
+              previous_sha256: o.lastSeen,
+              source: load.ok ? load.source : null,
+              rules: load.ok ? load.policies.rules.map((r) => r.name) : [],
+              status: load.ok ? "ok" : "unreadable",
+              changed
+            }
+          });
+          o.lastSeen = sha2563;
+          if (load.ok) o.lastReadable = sha2563;
+          if (changed) o.lastChange = { at: (/* @__PURE__ */ new Date()).toISOString() };
+        } catch (err2) {
+          log("warn", "policies change trail could not be updated", {
+            err: err2 instanceof Error ? err2.message : String(err2)
+          });
+        }
+      }
+      /** The observer's state on first use: the newest policy.config_seen rows on this database. */
+      primePolicyObserver() {
+        const rows = this.audit.query({ eventType: "policy.config_seen", limit: 1e3 });
+        const shaOf = (row) => {
+          const sha = row?.detail?.sha256;
+          return typeof sha === "string" ? sha : null;
+        };
+        const change = rows.find((r) => r.detail?.changed === true);
+        return {
+          lastSeen: shaOf(rows[0]),
+          lastReadable: shaOf(rows.find((r) => r.detail?.status === "ok")),
+          lastChange: change ? { at: change.ts } : null
+        };
+      }
+      /**
+       * The policies-changed cue of the human's surfaces (design B §3.1): when
+       * this engine — or another on the same database, whose policy.config_seen
+       * row it adopted — last saw the readable policies change, while that was
+       * less than 24 hours before `now` and the policies are readable now. null
+       * otherwise: the first policies ever seen are not a change, and neither is
+       * an unreadable interlude that ends with the same policies. It reads the
+       * observer's state; it loads the policies only when nothing has yet.
+       */
+      policyChangeNotice(now) {
+        if (this.policyObserver === null) this.loadPoliciesObserved();
+        const o = this.policyObserver;
+        if (!o || !o.lastChange || o.lastSeen === null || o.lastSeen !== o.lastReadable) return null;
+        const at = Date.parse(o.lastChange.at);
+        if (Number.isNaN(at) || now - at >= POLICY_CHANGE_NOTICE_MS) return null;
+        return { at: o.lastChange.at };
+      }
+      /**
+       * The labels a `connections` matcher is tested against: this connection's
+       * own, then those of every other stored connection to the same org (org ids
+       * equal on their first 15 characters) — a label rule covers the org,
+       * however a second connection to it was labelled. `all` is the stored
+       * connections when the caller has already listed them.
+       */
+      orgAliasesOf(conn, all) {
+        const key2 = conn.orgId.slice(0, 15);
+        const siblings = key2 === "" ? [] : (all ?? this.db.listConnections()).filter((o) => o.id !== conn.id && o.orgId.slice(0, 15) === key2).map((o) => o.alias);
+        return [conn.alias, ...siblings];
+      }
+      policyGate(conn, kind, tool, opts) {
+        const t = normalizeTicket(opts.ticket);
+        if (!t.ok) throw new ContrailError(t.problem, "bad_governance_input");
+        const j = normalizeJustification(opts.justification);
+        if (!j.ok) throw new ContrailError(j.problem, "bad_governance_input");
+        const ticket = t.value;
+        const justification = j.value;
+        const textPhase = opts.phase === "mint" ? "after_validation" : opts.phase === "attach" ? "attach" : "propose";
+        const phase = opts.phase === "mint" ? "mint" : "propose";
+        const { load, sha256: sha2563 } = this.loadPoliciesObserved();
+        if (!load.ok) {
+          if (opts.dryRun === true) {
+            return { ok: false, problem: load.problem, sha256: sha2563, ticket, justification };
+          }
+          this.audit.record("policy.refused", {
+            connectionId: conn.id,
+            tool,
+            outcome: "refused",
+            detail: { phase, kind, reason: "config_unreadable" }
+          });
+          throw new ContrailError(policyUnreadableText(load.problem, textPhase), "policy_unreadable");
+        }
+        const verdict = evaluatePolicies(load.policies, {
+          orgType: conn.orgType,
+          alias: conn.alias,
+          orgAliases: this.orgAliasesOf(conn),
+          orgId: conn.orgId,
+          kind,
+          destructive: opts.destructive,
+          testLevel: opts.testLevel,
+          ticket,
+          justification,
+          now: Date.now(),
+          hostTimeZone: hostTimeZone()
+        });
+        if (verdict.violations.length > 0 && opts.dryRun !== true) {
+          this.audit.record("policy.refused", {
+            connectionId: conn.id,
+            tool,
+            outcome: "refused",
+            detail: {
+              phase,
+              kind,
+              reason: "violations",
+              rules: [...new Set(verdict.violations.map((v) => v.rule))],
+              violations: verdict.violations.map((v) => v.code),
+              ticket_given: ticket !== null,
+              justification_given: justification !== null
+            }
+          });
+          throw new ContrailError(
+            policyRefusalText(conn.alias, conn.orgType, verdict.violations, textPhase, load.source),
+            "policy_refused"
+          );
+        }
+        return {
+          ok: true,
+          policies: load.policies,
+          source: load.source,
+          sha256: sha2563,
+          verdict,
+          ticket,
+          justification
+        };
+      }
+      /**
+       * list_connections' policy fields from ONE read of the policies: each
+       * listed connection's `policy` (null for every one when the policies
+       * cannot be read) and `policies_status`. `conns` is the listing itself —
+       * the stored connections, read once by the caller — and is also what the
+       * sibling labels and the unmatched rules are read from, so a config.json
+       * change during the call cannot put a policy beside status 'unreadable'.
+       */
+      policyListing(conns) {
+        const { load } = this.loadPoliciesObserved();
+        return {
+          reports: conns.map((c) => load.ok ? this.policyReportOf(load.policies, c, conns) : null),
+          status: policiesStatusOf(load, conns)
+        };
+      }
+      /**
+       * list_connections' `policy` for one connection: the rules that apply to
+       * it right now and what they require. null when the policies cannot be
+       * read — policiesStatus() says why.
+       */
+      policyReportFor(conn) {
+        const { load } = this.loadPoliciesObserved();
+        return load.ok ? this.policyReportOf(load.policies, conn, this.db.listConnections()) : null;
+      }
+      /**
+       * list_connections' `policies_status`: whether the policies could be read
+       * and where they came from, plus the rules whose label or org id matches no
+       * stored connection (a re-created connection may have left one behind).
+       */
+      policiesStatus() {
+        const { load } = this.loadPoliciesObserved();
+        return policiesStatusOf(load, this.db.listConnections());
+      }
+      /** One connection's report from policies already read; `all` is the stored connections. */
+      policyReportOf(policies, conn, all) {
+        const p = policyInEffect(policies, {
+          orgType: conn.orgType,
+          alias: conn.alias,
+          orgAliases: this.orgAliasesOf(conn, all),
+          orgId: conn.orgId,
+          now: Date.now(),
+          hostTimeZone: hostTimeZone()
+        });
+        const r = p.requirements;
+        const denies = [];
+        if (r.denyDestructiveMetadata) denies.push("destructive_metadata");
+        if (r.denyDataDeletes) denies.push("data_deletes");
+        if (r.denyAnonymousApex) denies.push("anonymous_apex");
+        return {
+          rules: p.rules,
+          requires_justification: r.justification,
+          requires_ticket: r.ticket,
+          ticket_patterns: r.ticketPatterns,
+          denies,
+          min_test_level: r.minTestLevel,
+          freeze_windows: p.windows.map((w) => ({
+            rule: w.rule,
+            name: w.name,
+            when: w.when,
+            time_zone: w.timeZone
+          })),
+          freeze_now: p.freeze ? { rule: p.freeze.rule, window: p.freeze.window, until: p.freeze.until } : null
+        };
+      }
+      /**
+       * The change record of a request about to be minted, from the policy check
+       * that allowed it (no second disk read). The freeze is evaluated ONCE,
+       * here, with one clock reading: that single result is the stored
+       * governance.freeze, the agent's governance.freeze and `frozen`, so the
+       * three cannot disagree. `target` records the connection as it is now.
+       * `surface` is where the human approves — always 'page' in the plugin.
+       */
+      mintGovernance(conn, kind, gate, inputs, surface) {
+        const now = Date.now();
+        const p = policyInEffect(gate.policies, {
+          orgType: conn.orgType,
+          alias: conn.alias,
+          orgAliases: this.orgAliasesOf(conn),
+          orgId: conn.orgId,
+          now,
+          hostTimeZone: hostTimeZone()
+        });
+        const f = p.freeze;
+        const stored = {
+          v: 1,
+          surface,
+          target: {
+            alias: conn.alias,
+            org_id: conn.orgId,
+            org_name: conn.orgName,
+            org_type: conn.orgType,
+            username: conn.username
+          },
+          ticket: gate.ticket,
+          justification: gate.justification === null ? null : { text: gate.justification, source: "agent" },
+          inputs: { destructive: inputs.destructive, test_level: inputs.testLevel },
+          policy: {
+            evaluated_at: new Date(now).toISOString(),
+            source: gate.source,
+            sha256: gate.sha256,
+            rules: p.rules,
+            requirements: p.requirements,
+            lines: p.lines
+          },
+          freeze: f ? { rule: f.rule, window: f.window, until: f.until, time_zone: f.timeZone } : null,
+          freeze_override: null,
+          execute_check: null
+        };
+        return {
+          stored,
+          frozen: f !== null,
+          forAgent: {
+            ticket: gate.ticket,
+            justification: gate.justification === null ? null : { text: gate.justification, source: "agent" },
+            policy: { rules: p.rules, lines: p.lines },
+            freeze: f ? {
+              active: true,
+              rule: f.rule,
+              window: f.window,
+              until: f.until,
+              note: freezeProposeNote(conn.alias, f, surface)
+            } : null
+          }
+        };
+      }
+      /**
+       * Present a freshly minted request. Its code-free page view is stored
+       * first — through patchDeployRequestSummary, while the row is still
+       * 'validated' and before the page exists, so it merges into whatever the
+       * mint wrote. The first render — the string present() receives — is built
+       * from the mint's own record and freeze evaluation, so it cannot disagree
+       * with what was stored or with the agent's result, and it carries no forms
+       * (no session exists yet). Every later GET re-renders through approvalLive.
+       * The view handed in carries the code; codeFreePageView never reads it.
+       */
+      async presentMinted(conn, request, view, gate, minted) {
+        this.db.patchDeployRequestSummary(request.id, (s) => ({
+          ...s,
+          page_view: codeFreePageView(view)
+        }));
+        const first = this.pageOptionsFor(request.id, conn, view, {
+          sessionId: void 0,
+          notice: null,
+          mintState: minted.frozen ? "frozen" : "open",
+          mintPolicies: gate.policies
+        });
+        return this.approvals.present(
+          renderApprovalPage(first),
+          this.requestStatusCheck(request.id, conn),
+          this.config.deploy.codeTtlMs + 6e4,
+          this.approvalLive(request.id, conn, view)
+        );
+      }
+      // ── the live approval page (S46, B) ────────────────────────────────────
+      /**
+       * The hooks of one request's live approval page. The page server calls
+       * them on the human's GET or POST; no tool reaches them. The session id is
+       * the page server's own and reaches render only, so the forms can carry it.
+       */
+      approvalLive(requestId, conn, view) {
+        return {
+          render: (ctx) => renderApprovalPage(this.pageOptionsFor(requestId, conn, view, ctx)),
+          saveJustification: (text2) => this.saveJustification(requestId, text2, "approval_page"),
+          recordFreezeOverride: (reason) => this.recordFreezeOverride(requestId, reason, "approval_page"),
+          refused: (reason, route) => {
+            this.audit.record("local_request.refused", {
+              connectionId: conn.id,
+              tool: "approval_page",
+              outcome: "refused",
+              detail: { reason, route }
+            });
+          }
+        };
+      }
+      /**
+       * One render of a request's approval page: the view, with its Change
+       * record as the request stands now. The code is shown only while the row
+       * is still 'validated' and not past its expiry (stillPending), and its gate
+       * is open or overridden — never while a
+       * change freeze holds it with no emergency reason recorded, and never
+       * while a policy blocks it (unreadable policies, or a rule the request no
+       * longer satisfies). A notice that is no longer true is dropped: the
+       * justification notices once the request has left 'validated', and
+       * override_recorded unless the request is overridden and its code shown.
+       */
+      pageOptionsFor(requestId, conn, view, ctx) {
+        const row = this.db.getDeployRequest(requestId);
+        if (!row) return { ...view, code: "" };
+        const g = this.governanceStateOf(
+          row,
+          conn,
+          ctx.mintState ? { state: ctx.mintState, policies: ctx.mintPolicies ?? null } : void 0
+        );
+        const validated = stillPending(row);
+        const code = validated && (g.gate === "open" || g.gate === "overridden") ? view.code : "";
+        let notice = ctx.notice;
+        if (notice === "override_recorded" && !(g.gate === "overridden" && code !== "")) notice = null;
+        if (!validated && (notice === "justification_saved" || notice === "justification_cleared" || notice === "justification_unchanged")) {
+          notice = null;
+        }
+        const governance = {
+          gate: g.gate,
+          ...ctx.sessionId ? { sessionId: ctx.sessionId } : {},
+          ticket: g.ticket,
+          justification: {
+            text: g.justification?.text ?? "",
+            provenance: g.provenance,
+            required: g.required
+          },
+          policySource: g.policySource,
+          policyLines: g.policyLines,
+          unmatchedRules: g.unmatchedRules,
+          ...g.policyChangedAt ? { policyChangedAt: g.policyChangedAt } : {},
+          ...g.freezeLine ? { freezeLine: g.freezeLine } : {},
+          frozenAtMint: g.frozenAtMint,
+          ...g.override ? { override: g.override } : {},
+          ...g.blockedBy ? { blockedBy: g.blockedBy, blockedLines: g.blockedLines } : {},
+          ...notice ? { notice: APPROVAL_NOTICES[notice] } : {},
+          rev: g.rev,
+          limits: {
+            justificationMax: POLICY_LIMITS.justificationMax,
+            reasonMin: POLICY_LIMITS.freezeReasonMin,
+            reasonMax: POLICY_LIMITS.freezeReasonMax
+          }
+        };
+        return { ...view, code, governance };
+      }
+      /**
+       * A request's policy state now (design B §4.4). The row's own record is
+       * evaluated — its ticket, justification and inputs — or, with `candidate`,
+       * that justification in place of the stored one; nothing is written. A
+       * request minted before S46 has no record: it is evaluated with no ticket,
+       * no justification and the inputs its row shows.
+       */
+      liveGate(conn, request, now, candidate) {
+        const summary = jsonObject(request.summaryJson);
+        const stored = storedGovernanceOf(summary);
+        const override = stored?.freeze_override ?? null;
+        const { load } = this.loadPoliciesObserved();
+        if (!load.ok) {
+          return {
+            state: "blocked",
+            blockedBy: "unreadable",
+            lines: [load.problem],
+            codes: [],
+            freeze: null,
+            override,
+            source: null,
+            verdict: null,
+            policies: null
+          };
+        }
+        const inputs = stored?.inputs ? { destructive: stored.inputs.destructive, testLevel: stored.inputs.test_level } : rowPolicyInputs(request, summary);
+        const storedText = stored?.justification?.text ?? "";
+        const verdict = evaluatePolicies(load.policies, {
+          orgType: conn.orgType,
+          alias: conn.alias,
+          orgAliases: this.orgAliasesOf(conn),
+          orgId: conn.orgId,
+          kind: request.kind,
+          destructive: inputs.destructive,
+          testLevel: inputs.testLevel,
+          ticket: stored?.ticket ?? null,
+          justification: candidate ? candidate.justification : storedText === "" ? null : storedText,
+          now,
+          hostTimeZone: hostTimeZone()
+        });
+        const base = {
+          freeze: verdict.freeze,
+          override,
+          source: load.source,
+          verdict,
+          policies: load.policies
+        };
+        if (verdict.violations.length > 0) {
+          return {
+            ...base,
+            state: "blocked",
+            blockedBy: "violations",
+            lines: verdict.violations.map((v) => v.text),
+            codes: verdict.violations.map((v) => v.code)
+          };
+        }
+        const state = override ? "overridden" : verdict.freeze ? "frozen" : "open";
+        return { ...base, state, blockedBy: null, lines: [], codes: [] };
+      }
+      /**
+       * The code-free state of one request, for a human surface (design B §5.2).
+       * A 'validated' row is evaluated against the policies now (liveGate); the
+       * first render passes `mint`, the mint's own freeze evaluation, so no
+       * second policy load happens there; any other row reports what was
+       * recorded, with no policy load.
+       */
+      governanceStateOf(row, fallbackConn, mint) {
+        const stored = storedGovernanceOf(jsonObject(row.summaryJson));
+        const conn = this.db.getConnection(row.connectionId) ?? fallbackConn;
+        const override = stored?.freeze_override ?? null;
+        const storedFreeze = stored?.freeze ? {
+          rule: stored.freeze.rule,
+          window: stored.freeze.window,
+          until: stored.freeze.until,
+          timeZone: stored.freeze.time_zone
+        } : null;
+        let gate;
+        if (mint) {
+          gate = {
+            state: mint.state,
+            blockedBy: null,
+            lines: [],
+            codes: [],
+            freeze: mint.state === "frozen" ? storedFreeze : null,
+            override,
+            source: stored?.policy?.source ?? null,
+            verdict: null,
+            policies: mint.policies
+          };
+        } else if (row.status === "validated" && conn) {
+          gate = this.liveGate(conn, row, Date.now());
+        } else {
+          gate = {
+            state: override ? "overridden" : "open",
+            blockedBy: null,
+            lines: [],
+            codes: [],
+            freeze: null,
+            override,
+            source: stored?.policy?.source ?? null,
+            verdict: null,
+            policies: null
+          };
+        }
+        const justification = stored?.justification ?? null;
+        const f = gate.freeze ?? (gate.state === "frozen" || gate.state === "overridden" ? storedFreeze : null);
+        const alias = conn?.alias ?? stored?.target?.alias ?? "";
+        const policyChangedAt = row.status === "validated" && gate.blockedBy !== "unreadable" ? this.policyChangeNotice(Date.now())?.at ?? null : null;
+        return {
+          requestId: row.id,
+          kind: row.kind,
+          status: row.status,
+          ticket: stored?.ticket ?? null,
+          justification,
+          provenance: justificationProvenance(justification),
+          required: gate.verdict ? gate.verdict.requirements.justification : stored?.policy?.requirements.justification ?? false,
+          policySource: gate.source ?? stored?.policy?.source ?? "config",
+          policyLines: gate.verdict ? gate.verdict.lines : gate.blockedBy === "unreadable" ? [] : stored?.policy?.lines ?? [],
+          gate: gate.state,
+          blockedBy: gate.blockedBy,
+          violationCodes: gate.codes,
+          blockedLines: gate.lines,
+          freeze: f ? { rule: f.rule, window: f.window, until: f.until, time_zone: f.timeZone } : null,
+          freezeLine: f ? freezeBannerText(alias, f) : null,
+          frozenAtMint: storedFreeze !== null,
+          override: override ? { reason: override.reason, at: override.at } : null,
+          policyChangedAt,
+          unmatchedRules: gate.policies ? unmatchedRules(
+            gate.policies,
+            this.db.listConnections().map((c) => ({ alias: c.alias, orgId: c.orgId }))
+          ) : [],
+          // The named freeze rides the rev too, so an open page reloads within
+          // one poll when one active window ends and another keeps the request
+          // frozen (its banner then names the new window and its end).
+          rev: `${gate.state}:${justification?.edited_at ?? ""}:${override?.at ?? ""}:${policyChangedAt ?? ""}` + (f ? `:${JSON.stringify([f.rule, f.window])}` : "")
+        };
+      }
+      /**
+       * The code-free change record and policy state of one request, for a human
+       * surface (Deploy Review reads it; the approval page renders from the same
+       * state). null when no such request exists. Human surfaces only — no tool
+       * reaches it.
+       */
+      governanceState(requestId) {
+        const row = this.db.getDeployRequest(requestId);
+        return row ? this.governanceStateOf(row, null) : null;
+      }
+      /**
+       * The human saves a justification on their approval surface (design B
+       * §5.2). Line breaks are folded first, so an untouched multi-line draft
+       * submitted by a browser compares equal and changes nothing. An empty text
+       * clears it — unless the policies require one. The text is recorded with
+       * the request (source 'page', where and when, the agent's draft kept
+       * beside it); the audit row carries its length, never the text. Saving
+       * approves nothing and leaves the code as it is. A request that is no
+       * longer pending — executed, replaced, or past its expiry though not yet
+       * swept — takes none (request_closed). Human surfaces only — no tool
+       * reaches it.
+       */
+      saveJustification(requestId, text2, surface) {
+        const row = this.db.getDeployRequest(requestId);
+        if (!row || !stillPending(row)) return "request_closed";
+        const normalized = normalizeJustification(text2);
+        if (!normalized.ok) {
+          const folded = typeof text2 === "string" ? text2.replace(/\r\n?/g, "\n").trim() : "";
+          return folded.length > POLICY_LIMITS.justificationMax ? "justification_too_long" : "invalid_text";
+        }
+        const next = normalized.value ?? "";
+        const state = this.governanceStateOf(row, null);
+        if (next === "" && state.required) return "justification_required";
+        const prev = state.justification;
+        if (next === (prev?.text ?? "")) return "justification_unchanged";
+        const draft = prev ? prev.source === "agent" ? prev.text : prev.agent_draft : void 0;
+        const justification = {
+          text: next,
+          source: "page",
+          surface,
+          edited_at: (/* @__PURE__ */ new Date()).toISOString(),
+          ...draft ? { agent_draft: draft } : {}
+        };
+        const recorded = this.db.patchDeployRequestSummary(requestId, (s) => ({
+          ...s,
+          governance: { ...isPlainObject4(s.governance) ? s.governance : { v: 1 }, justification }
+        }));
+        if (!recorded) return "request_closed";
+        this.audit.record("approval.justification_edited", {
+          connectionId: row.connectionId,
+          tool: surface,
+          detail: {
+            requestId,
+            kind: row.kind,
+            surface,
+            chars: next.length,
+            had_agent_draft: Boolean(draft)
+          }
+        });
+        return next === "" ? "justification_cleared" : "justification_saved";
+      }
+      /**
+       * The human records an emergency reason during a change freeze (design B
+       * §5.2), checked in this order: the request must still be pending
+       * ('validated' and not past its expiry, so a reason is never recorded for a
+       * code that can no longer execute), the policies readable, no reason recorded yet, nothing else blocking it, and
+       * a freeze actually in effect — so "no freeze is in effect" is never the
+       * answer under a freeze or a block. The reason (15–1,000 characters after
+       * line breaks are folded) is recorded with the request and in the audit
+       * log; it releases this request only, and the freeze stays configured.
+       * Human surfaces only — no tool reaches it.
+       */
+      recordFreezeOverride(requestId, reason, surface) {
+        const row = this.db.getDeployRequest(requestId);
+        if (!row || !stillPending(row)) return "request_closed";
+        const conn = this.db.getConnection(row.connectionId);
+        if (!conn) return "request_closed";
+        const gate = this.liveGate(conn, row, Date.now());
+        if (gate.blockedBy === "unreadable") return "policies_unreadable";
+        if (gate.override) return "override_already_recorded";
+        if (gate.state === "blocked") return "override_blocked";
+        if (gate.state !== "frozen" || !gate.freeze) return "override_not_needed";
+        const r = normalizeFreezeReason(reason);
+        if (!r.ok) return r.code;
+        const f = gate.freeze;
+        const freezeOverride = {
+          reason: r.value,
+          at: (/* @__PURE__ */ new Date()).toISOString(),
+          surface,
+          rule: f.rule,
+          window: f.window
+        };
+        const recorded = this.db.patchDeployRequestSummary(requestId, (s) => ({
+          ...s,
+          governance: {
+            ...isPlainObject4(s.governance) ? s.governance : { v: 1 },
+            freeze_override: freezeOverride
+          }
+        }));
+        if (!recorded) return "request_closed";
+        this.audit.record("policy.freeze_overridden", {
+          connectionId: row.connectionId,
+          tool: surface,
+          detail: {
+            requestId,
+            kind: row.kind,
+            rule: f.rule,
+            window: f.window,
+            until: f.until,
+            surface,
+            reason: r.value
+          }
+        });
+        return "override_recorded";
+      }
+      /**
+       * The policy check of an execute (design B §4.6). The request is evaluated
+       * against the policies as they stand now, with its own ticket,
+       * justification and inputs: unreadable policies or a rule it no longer
+       * satisfies → a policy.refused row and the refusal; a change freeze with no
+       * emergency reason recorded → the same, with the freeze text for the
+       * surface the request was proposed on. It is synchronous, reads nothing
+       * from the org, never counts an attempt and never voids: the code matched
+       * and stays usable. When it passes it returns the execute_check the claim
+       * records — the rules, the freeze, and the connection as it is now.
+       */
+      assertPolicyAtExecute(conn, request, tool) {
+        const now = Date.now();
+        const gate = this.liveGate(conn, request, now);
+        const stored = storedGovernanceOf(jsonObject(request.summaryJson));
+        if (gate.state === "blocked") {
+          if (gate.blockedBy === "unreadable") {
+            this.audit.record("policy.refused", {
+              connectionId: conn.id,
+              tool,
+              outcome: "refused",
+              detail: {
+                phase: "execute",
+                requestId: request.id,
+                kind: request.kind,
+                reason: "config_unreadable"
+              }
+            });
+            throw new ContrailError(
+              policyUnreadableText(gate.lines[0] ?? "unknown problem", "execute"),
+              "policy_unreadable"
+            );
+          }
+          const violations = gate.verdict?.violations ?? [];
+          this.audit.record("policy.refused", {
+            connectionId: conn.id,
+            tool,
+            outcome: "refused",
+            detail: {
+              phase: "execute",
+              requestId: request.id,
+              kind: request.kind,
+              reason: "violations",
+              rules: [...new Set(violations.map((v) => v.rule))],
+              violations: violations.map((v) => v.code),
+              ticket_given: (stored?.ticket ?? null) !== null,
+              justification_given: (stored?.justification?.text ?? "") !== ""
+            }
+          });
+          throw new ContrailError(
+            policyRefusalText(conn.alias, conn.orgType, violations, "execute", gate.source ?? "config"),
+            "policy_refused"
+          );
+        }
+        if (gate.state === "frozen" && gate.freeze) {
+          const f = gate.freeze;
+          this.audit.record("policy.refused", {
+            connectionId: conn.id,
+            tool,
+            outcome: "refused",
+            detail: {
+              phase: "execute",
+              requestId: request.id,
+              kind: request.kind,
+              reason: "freeze",
+              rule: f.rule,
+              window: f.window
+            }
+          });
+          const surface = stored?.surface === "native" ? "native" : "page";
+          throw new ContrailError(freezeExecuteRefusalText(conn.alias, f, surface), "policy_freeze");
+        }
+        return {
+          at: new Date(now).toISOString(),
+          rules: gate.verdict?.rules ?? [],
+          freeze_active: gate.freeze !== null,
+          overridden: gate.state === "overridden",
+          org_id: conn.orgId,
+          username: conn.username
+        };
+      }
+      /**
+       * Starting an agent test run (run_agent_eval) — the one write with no
+       * approval page: the agent under test executes its real actions on the
+       * strength of the data_write grant alone. So a start is refused while a
+       * change freeze applies to the connection, and while the policies cannot
+       * be read; no other rule applies to a run, and there is no override (a run
+       * has no page on which the human could record a reason). A poll of an
+       * existing run never comes here.
+       */
+      assertPolicyForStart(conn, tool) {
+        const { load } = this.loadPoliciesObserved();
+        if (!load.ok) {
+          this.audit.record("policy.refused", {
+            connectionId: conn.id,
+            tool,
+            outcome: "refused",
+            detail: { phase: "start", kind: "agent_eval", reason: "config_unreadable" }
+          });
+          throw new ContrailError(policyUnreadableText(load.problem, "propose"), "policy_unreadable");
+        }
+        const p = policyInEffect(load.policies, {
+          orgType: conn.orgType,
+          alias: conn.alias,
+          orgAliases: this.orgAliasesOf(conn),
+          orgId: conn.orgId,
+          now: Date.now(),
+          hostTimeZone: hostTimeZone()
+        });
+        if (p.freeze) {
+          this.audit.record("policy.refused", {
+            connectionId: conn.id,
+            tool,
+            outcome: "refused",
+            detail: {
+              phase: "start",
+              kind: "agent_eval",
+              reason: "freeze",
+              rule: p.freeze.rule,
+              window: p.freeze.window
+            }
+          });
+          throw new ContrailError(freezeStartRefusalText(conn.alias, p.freeze), "policy_freeze");
+        }
+      }
       // ── deploys ────────────────────────────────────────────────────────────
       async validateDeploy(conn, input) {
         const jobId = validateJobId(input);
-        const outcome = await this.runJob(`${conn.id}:${jobId}`, () => this.doValidate(conn, input));
+        const jobKey = `${conn.id}:${jobId}`;
+        const running = this.jobs.get(jobKey);
+        const pre = this.policyGate(conn, "deploy", input.viaTool ?? "validate_deploy", {
+          destructive: input.destructive.length > 0,
+          testLevel: input.testLevel ?? null,
+          ticket: input.ticket,
+          justification: input.justification,
+          dryRun: input.dryRun === true,
+          phase: running !== void 0 && !running.done ? "attach" : "propose"
+        });
+        const outcome = await this.runJob(
+          jobKey,
+          (job) => this.doValidate(conn, input, job, pre)
+        );
         return { ...outcome, job_id: jobId };
       }
       /**
@@ -33764,6 +38984,19 @@ var init_engine2 = __esm({
         if (!existing) return null;
         const outcome = await this.runJob(key2, () => existing.promise);
         return { ...outcome, job_id: jobId };
+      }
+      /** S46 D1: the stamp-query executor handed to deploy/stampprobe.ts at validate AND at execute. */
+      stampQueryFor(conn) {
+        const rest = new RestClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
+        return async (api, soql, signal) => {
+          const init = signal ? { signal } : void 0;
+          const res = api === "tooling" ? await rest.toolingQueryWithCount(
+            soql,
+            STAMP_QUERY_MAX_ROWS,
+            init
+          ) : await rest.queryWithCount(soql, STAMP_QUERY_MAX_ROWS, init);
+          return res.records;
+        };
       }
       /**
        * S41: live org checks for Aura bundles — the two lies the local snapshot
@@ -33967,8 +39200,8 @@ var init_engine2 = __esm({
           const image = live.images.get(preImageKey(d.type, d.api_name));
           if (!entry || !image) return;
           entry.pre_image = summarizePreImage(image);
-          if (image.present === false && listingCovers(live, d)) {
-            entry.warnings.push(destructiveAbsentText(at));
+          if (image.present === false && absenceEstablished(live, d)) {
+            entry.warnings.push(destructiveAbsentText(at, stampAbsenceEvidence(image.stamp_source)));
           }
         });
         return { attributions, changedInTarget };
@@ -34147,9 +39380,36 @@ var init_engine2 = __esm({
         return old === null ? null : documentRowDiff(old, c.content, label, false);
       }
       /**
+       * S46 D3: what the live check knows about one permission-needing
+       * component — true = it found it in the org, false = it found it absent,
+       * null = it cannot place it. A member of the package answers from its own
+       * pre-image. A field authored inline in a CustomObject document has no
+       * pre-image of its own, so it answers from that object's: absent with the
+       * object, else by whether the object's live document holds its block.
+       */
+      livePresence(live, type, apiName) {
+        const image = live.images.get(preImageKey(type, apiName));
+        if (image) return image.present;
+        if (type === "CustomField") {
+          const dot = apiName.indexOf(".");
+          const obj = dot > 0 ? live.images.get(preImageKey("CustomObject", apiName.slice(0, dot))) : void 0;
+          if (obj?.present === false) return false;
+          if (obj?.present === true && obj.content !== void 0) {
+            return findChildBlock(obj.content, "fields", apiName.slice(dot + 1)) !== null;
+          }
+        }
+        return null;
+      }
+      /**
        * S45 hook 6: the page-top live-check lines — the UNAVAILABLE banner when
        * the retrieve failed (the only case where "the org was not re-read" is
        * true), else the CHANGED-IN-TARGET summary and the dates-unavailable line.
+       * S46 D1: still ONE dates-unavailable line at most. Every reason a member
+       * has no stamp — a listing that threw or could not enumerate a type, a
+       * failed stamp query, a member a stamp query named but gave no usable
+       * stamp, a member no stamp query names — is a group inside that one
+       * sentence, so the page-top list stays at three lines and a stamp
+       * disclosure never pushes a row warning out of the phone push.
        */
       liveCheckWarnings(conn, input, live, changedInTarget) {
         if (live.status === "unavailable") {
@@ -34167,20 +39427,38 @@ var init_engine2 = __esm({
         const at = hhmm(live.at);
         const out = [];
         if (changedInTarget > 0) out.push(changedSummaryText(changedInTarget, conn.alias, at));
+        const members = [...input.components, ...input.destructive];
+        const probeFailed = (type) => Object.hasOwn(live.probe_failures, type);
+        const groups = [];
+        const listedTypes = [
+          ...new Set(
+            members.filter((m) => stampSourceFor(m.type) === "listMetadata").map((m) => m.type)
+          )
+        ];
         if (live.dates_unavailable !== void 0) {
-          const types = [
-            ...new Set([...input.components, ...input.destructive].map((m) => m.type))
-          ];
-          out.push(datesUnavailableText(at, types, live.dates_unavailable.slice(0, 160)));
-        } else if (live.dates_unavailable_types.length > 0) {
-          out.push(
-            datesUnavailableText(
-              at,
-              live.dates_unavailable_types,
-              "listMetadata reported INVALID_TYPE"
-            )
-          );
+          if (listedTypes.length > 0) {
+            groups.push(`${listedTypes.join(", ")} (${live.dates_unavailable.slice(0, 160)})`);
+          }
+        } else {
+          const invalid = live.dates_unavailable_types.filter((t) => !probeFailed(t));
+          if (invalid.length > 0) {
+            groups.push(`${invalid.join(", ")} (listMetadata reported INVALID_TYPE)`);
+          }
         }
+        for (const [reason, types] of groupByReason(live.probe_failures)) {
+          groups.push(`${types.join(", ")} (${stampQueryFailedReason(reason)})`);
+        }
+        const undated = members.filter((m) => {
+          const img = live.images.get(preImageKey(m.type, m.api_name));
+          return img !== void 0 && img.stamp_source !== "listMetadata" && img.present === true && img.last_modified_date === null;
+        });
+        const notQueried = undated.filter((m) => !isProbeable(m));
+        const noStamp = undated.filter((m) => isProbeable(m) && !probeFailed(m.type));
+        if (notQueried.length > 0) {
+          groups.push(`${memberNames(notQueried)} (${STAMP_NOT_QUERIED_REASON})`);
+        }
+        if (noStamp.length > 0) groups.push(`${memberNames(noStamp)} (${STAMP_NO_ROW_REASON})`);
+        if (groups.length > 0) out.push(datesUnavailableText(at, groups));
         return out;
       }
       /**
@@ -34211,17 +39489,17 @@ var init_engine2 = __esm({
         let dir = null;
         let contained = false;
         try {
-          fs11.mkdirSync(path6.join(stagingDir(), "_reverts"), { recursive: true });
+          fs12.mkdirSync(path7.join(stagingDir(), "_reverts"), { recursive: true });
           const root = revertsRootReal();
           dir = revertDirFor(stagingDir(), requestId);
-          fs11.mkdirSync(dir);
+          fs12.mkdirSync(dir);
           assertRealRevertDir(root, requestId);
           contained = true;
           return { dir, ...writeRevertPreImages(dir, entries) };
         } catch (err2) {
           const error2 = String(err2 instanceof Error ? err2.message : err2).slice(0, 300);
           log("warn", "could not write revert pre-images", { requestId, error: error2 });
-          if (contained && dir) fs11.rmSync(dir, { recursive: true, force: true });
+          if (contained && dir) fs12.rmSync(dir, { recursive: true, force: true });
           return { dir, error: error2 };
         }
       }
@@ -34236,9 +39514,9 @@ var init_engine2 = __esm({
       removeRevertDir(requestId) {
         try {
           const dir = revertDirFor(stagingDir(), requestId);
-          if (!fs11.lstatSync(dir, { throwIfNoEntry: false })) return;
+          if (!fs12.lstatSync(dir, { throwIfNoEntry: false })) return;
           assertRealRevertDir(revertsRootReal(), requestId);
-          fs11.rmSync(dir, { recursive: true, force: true });
+          fs12.rmSync(dir, { recursive: true, force: true });
         } catch (err2) {
           log("warn", "could not remove revert package", {
             requestId,
@@ -34280,9 +39558,9 @@ var init_engine2 = __esm({
         let root;
         let entries;
         try {
-          if (!fs11.lstatSync(path6.join(stagingDir(), "_reverts"), { throwIfNoEntry: false })) return;
+          if (!fs12.lstatSync(path7.join(stagingDir(), "_reverts"), { throwIfNoEntry: false })) return;
           root = revertsRootReal();
-          entries = fs11.readdirSync(root, { withFileTypes: true });
+          entries = fs12.readdirSync(root, { withFileTypes: true });
         } catch (err2) {
           log("warn", "could not sweep revert packages", { err: String(err2) });
           return;
@@ -34296,17 +39574,17 @@ var init_engine2 = __esm({
             skippedNames += 1;
             continue;
           }
-          const dir = path6.join(stagingDir(), "_reverts", d.name);
+          const dir = path7.join(stagingDir(), "_reverts", d.name);
           try {
             const status = this.db.getDeployRequestStatus(d.name);
-            const planFile = path6.join(dir, "revert-plan.json");
+            const planFile = path7.join(dir, "revert-plan.json");
             let reason = null;
             if (status === null || status === "superseded" || status === "expired" || status === "locked") {
               reason = status ?? "no_request";
-            } else if (status === "execution_failed" && !fs11.existsSync(planFile)) {
+            } else if (status === "execution_failed" && !fs12.existsSync(planFile)) {
               reason = "execution_failed";
             } else if ((status === "executed" || status === "execution_failed") && cutoff !== null) {
-              const age = fs11.statSync(fs11.existsSync(planFile) ? planFile : dir).mtimeMs;
+              const age = fs12.statSync(fs12.existsSync(planFile) ? planFile : dir).mtimeMs;
               if (age < cutoff) reason = "retention";
             }
             if (reason === null) continue;
@@ -34320,7 +39598,7 @@ var init_engine2 = __esm({
               });
               return;
             }
-            fs11.rmSync(dir, { recursive: true, force: true });
+            fs12.rmSync(dir, { recursive: true, force: true });
             this.audit.record("deploy.revert_swept", {
               tool: "validate_deploy",
               detail: { requestId: d.name, reason }
@@ -34369,7 +39647,7 @@ var init_engine2 = __esm({
         let dir = null;
         try {
           dir = revertDirFor(stagingDir(), request.id);
-          const stat = fs11.lstatSync(dir, { throwIfNoEntry: false });
+          const stat = fs12.lstatSync(dir, { throwIfNoEntry: false });
           if (!stat || !stat.isDirectory()) {
             return {
               revert_package: null,
@@ -34378,13 +39656,13 @@ var init_engine2 = __esm({
           }
           assertRealRevertDir(revertsRootReal(), request.id);
           for (const name of ["revert-plan.json", "README.txt"]) {
-            const target = path6.join(dir, name);
-            const st = fs11.lstatSync(target, { throwIfNoEntry: false });
+            const target = path7.join(dir, name);
+            const st = fs12.lstatSync(target, { throwIfNoEntry: false });
             if (!st) continue;
             if (st.isDirectory() && !st.isSymbolicLink()) {
               throw new ContrailError(`${target} is a directory, not a revert file`, "unsafe_path");
             }
-            fs11.unlinkSync(target);
+            fs12.unlinkSync(target);
           }
           const unknown2 = opts.unknown;
           const plan = {
@@ -34399,7 +39677,9 @@ var init_engine2 = __esm({
             not_restorable: pre.not_restorable,
             // Requests validated before covered existed carry none.
             covered: pre.covered ?? [],
-            note: unknown2 ? `Contrail lost track of this deploy (${unknown2.error.slice(0, 300)}); check Setup \u2192 Deployment Status. If it committed, these files are what the org held when this package was validated.` : "Pre-images retrieved when this deploy was validated; README.txt says what a revert does and does not undo. Contrail never deploys a revert on its own.",
+            // A package with no pre-image files never refers to "these files":
+            // its README already hedges what it can revert ("if it committed").
+            note: unknown2 ? `Contrail lost track of this deploy (${unknown2.error.slice(0, 300)}); check Setup \u2192 Deployment Status.` + (pre.components.length > 0 ? ` If it committed, these files are what the org held when this package was validated.` : "") : "Pre-images retrieved when this deploy was validated; README.txt says what a revert does and does not undo. Contrail never deploys a revert on its own.",
             ...unknown2 ? {
               outcome: "unknown",
               ...unknown2.deployId ? { deploy_id: unknown2.deployId } : {}
@@ -34436,7 +39716,7 @@ var init_engine2 = __esm({
           let planOnDisk = null;
           if (dir) {
             try {
-              planOnDisk = fs11.lstatSync(path6.join(dir, "revert-plan.json"), {
+              planOnDisk = fs12.lstatSync(path7.join(dir, "revert-plan.json"), {
                 throwIfNoEntry: false
               }) ? "present" : "absent";
             } catch {
@@ -34449,7 +39729,7 @@ var init_engine2 = __esm({
           };
         }
       }
-      async doValidate(conn, input, job) {
+      async doValidate(conn, input, job, prePolicy) {
         const versionNumber = this.config.salesforce.apiVersion.replace(/^v/, "");
         const translationTypes = /* @__PURE__ */ new Set([
           "Translations",
@@ -34484,7 +39764,6 @@ var init_engine2 = __esm({
           input.components,
           input.destructive
         );
-        const permCoverage = analyzePermissionCoverage(input.components);
         let aura = {
           flipped: /* @__PURE__ */ new Set(),
           toolingFailed: /* @__PURE__ */ new Map()
@@ -34522,7 +39801,8 @@ var init_engine2 = __esm({
             signal: ctl.signal,
             onProgress: (p) => {
               if (job && awaitingPreImages) job.progress = p;
-            }
+            },
+            queryStamps: this.stampQueryFor(conn)
           });
         }
         if (job) {
@@ -34569,7 +39849,10 @@ var init_engine2 = __esm({
               tests_run: result.numberTestsTotal,
               test_failures: result.numberTestErrors,
               test_failure_detail: this.gateTestDetail(conn, result),
-              note
+              note,
+              // S46 (B): a failed dry run reports the policies too — mid-build
+              // dry runs are the ones that fail. Never approvable either way.
+              ...input.dryRun && prePolicy ? { policy_check: dryRunPolicyCheck(prePolicy) } : {}
             },
             approval: null
           };
@@ -34602,9 +39885,13 @@ var init_engine2 = __esm({
             test_failure_detail: this.gateTestDetail(conn, result),
             code_coverage_warnings: result.codeCoverageWarnings.slice(0, 10),
             blast_radius: blast,
-            permission_warning: permCoverage.warning,
+            // S46 D3: a dry run never re-reads the org, so every component is
+            // "not confirmed" — the warning never says the package adds it.
+            permission_warning: analyzePermissionCoverage(input.components).warning,
             expires_at: null,
-            live_check: null
+            live_check: null,
+            // S46 (B): what a real validation would be refused for — reported, not enforced.
+            ...prePolicy ? { policy_check: dryRunPolicyCheck(prePolicy) } : {}
           };
           return { summary: drySummary, validation_passed: true, approval: null };
         }
@@ -34614,6 +39901,7 @@ var init_engine2 = __esm({
           at: (/* @__PURE__ */ new Date()).toISOString(),
           reason: "retrieve_failed:not started"
         };
+        const retrieveNote = retrieveMessagesNote(live.retrieve_messages ?? []);
         const liveCheck = {
           status: live.status,
           ...live.status === "unavailable" ? { reason: live.reason } : {},
@@ -34627,16 +39915,36 @@ var init_engine2 = __esm({
           } : {},
           dates_unavailable_types: live.status === "ok" ? live.dates_unavailable_types : [],
           ...live.status === "ok" && live.dates_unavailable !== void 0 ? { dates_unavailable: live.dates_unavailable } : {},
+          // S46 D1: on EVERY real validation, the unavailable one included — with
+          // no pre-image to carry a stamp_source, this marker is what tells the
+          // execute-time guard the request was validated under the stamp queries.
+          stamp_scheme: STAMP_SCHEME,
+          ...live.status === "ok" && Object.keys(live.probe_failures).length > 0 ? { probe_failures: live.probe_failures } : {},
+          ...live.status === "ok" && live.probe_unmatched.length > 0 ? { probe_unmatched: live.probe_unmatched } : {},
+          // S46 D1f: what the org's retrieve said, on the result only — never on
+          // the page, where "cannot be found" beside an ADD would read as a verdict.
+          ...retrieveNote !== void 0 ? { retrieve_note: retrieveNote } : {},
           members: input.components.length + input.destructive.length
         };
         const review = this.applyLivePreImages(conn, input, changes, destructive, live, aura);
+        const permCoverage = analyzePermissionCoverage(
+          input.components,
+          live.status === "ok" ? (type, name) => this.livePresence(live, type, name) : void 0
+        );
+        const gate = this.policyGate(conn, "deploy", input.viaTool ?? "validate_deploy", {
+          destructive: input.destructive.length > 0,
+          testLevel: input.testLevel ?? null,
+          ticket: input.ticket,
+          justification: input.justification,
+          phase: "mint"
+        });
         this.sweepRevertDirs();
         {
           const superseded = this.db.supersedePendingRequests(conn.id, "deploy");
           if (superseded > 0) {
             for (const p of this.db.takeSupersededPayloadPaths(conn.id, "deploy")) {
               safeUnlink(p);
-              this.removeRevertDir(path6.basename(p, ".zip"));
+              this.removeRevertDir(path7.basename(p, ".zip"));
             }
             this.audit.record("deploy.superseded", {
               connectionId: conn.id,
@@ -34645,6 +39953,20 @@ var init_engine2 = __esm({
             });
           }
         }
+        const minted = this.mintGovernance(
+          conn,
+          "deploy",
+          gate,
+          { destructive: input.destructive.length > 0, testLevel: input.testLevel ?? null },
+          "page"
+        );
+        const summaryObj = {
+          changes,
+          destructive,
+          blast,
+          live_check: liveCheck,
+          governance: minted.stored
+        };
         const code = generateConfirmationCode();
         const expiresAt = new Date(Date.now() + this.config.deploy.codeTtlMs).toISOString();
         const request = this.db.insertDeployRequest({
@@ -34653,24 +39975,15 @@ var init_engine2 = __esm({
           confirmationCode: code,
           expiresAt,
           payloadJson: JSON.stringify({ testLevel: input.testLevel, runTests: input.runTests }),
-          summaryJson: JSON.stringify({ changes, destructive, blast, live_check: liveCheck }),
+          summaryJson: JSON.stringify(summaryObj),
           validationId
         });
-        const zipPath = path6.join(deploysDir(), `${request.id}.zip`);
-        fs11.writeFileSync(zipPath, built.zip);
+        const zipPath = path7.join(deploysDir(), `${request.id}.zip`);
+        fs12.writeFileSync(zipPath, built.zip);
         this.db.setDeployRequestPayloadPath(request.id, zipPath);
         if (live.status === "ok") {
-          const revert = this.writeRevertFiles(request.id, input, live);
-          this.db.setDeployRequestSummaryJson(
-            request.id,
-            JSON.stringify({
-              changes,
-              destructive,
-              blast,
-              live_check: liveCheck,
-              revert_preimages: revert
-            })
-          );
+          summaryObj.revert_preimages = this.writeRevertFiles(request.id, input, live);
+          this.db.setDeployRequestSummaryJson(request.id, JSON.stringify(summaryObj));
         }
         const summary = {
           connection: conn.alias,
@@ -34689,7 +40002,8 @@ var init_engine2 = __esm({
           blast_radius: blast,
           permission_warning: permCoverage.warning,
           expires_at: expiresAt,
-          live_check: liveCheck
+          live_check: liveCheck,
+          governance: minted.forAgent
         };
         const diffs = this.rowDiffs(conn, input, changes, live);
         const view = {
@@ -34736,12 +40050,8 @@ var init_engine2 = __esm({
             ...this.liveCheckWarnings(conn, input, live, review.changedInTarget)
           ]
         };
-        const approval = await this.approvals.present(
-          renderApprovalPage(view),
-          this.requestStatusCheck(request.id),
-          this.config.deploy.codeTtlMs + 6e4
-        );
-        const phone = await this.notifyApproval(view, request.id, conn.id, "page");
+        const approval = await this.presentMinted(conn, request, view, gate, minted);
+        const phone = await this.notifyApproval(view, request.id, conn.id, "page", minted.frozen);
         this.audit.record("deploy.validated", {
           connectionId: conn.id,
           tool: "validate_deploy",
@@ -34751,22 +40061,35 @@ var init_engine2 = __esm({
             components: input.components.length,
             deletions: input.destructive.length,
             testLevel: input.testLevel,
-            ...sourceProvenance(input.components)
+            ...sourceProvenance(input.components),
+            governance: governanceAuditDetail(minted)
           }
         });
         return {
           summary,
           validation_passed: true,
-          approval: { ...approvalForAgent("deploy", approval), phone_notification: phone }
+          approval: {
+            ...approvalForAgent("deploy", approval, minted.frozen),
+            phone_notification: phone
+          }
         };
       }
       async executeDeploy(conn, code) {
         const peek = this.db.findRequestByCode(conn.id, "deploy", code);
         if (!peek || peek.status !== "validated" || new Date(peek.expiresAt).getTime() < Date.now()) {
-          if (peek && peek.status === "superseded" && this.jobs.has(`deploy-exec:${peek.id}`)) {
-            return this.runDeployExecJob(`deploy-exec:${peek.id}`, peek, async () => ({
-              kind: "running"
-            }));
+          if (peek && peek.status === "superseded") {
+            const voidedKey = `deploy-exec:${peek.id}`;
+            this.dropPolicyRefusedExecJob(voidedKey);
+            if (this.jobs.has(voidedKey)) {
+              return this.runDeployExecJob(voidedKey, peek, async () => ({ kind: "running" }));
+            }
+          }
+          if (peek && peek.status === "executed") {
+            const execKey2 = `deploy-exec:${peek.id}`;
+            const running = this.jobs.get(execKey2);
+            if (running && !running.done) {
+              return this.runDeployExecJob(execKey2, peek, async () => ({ kind: "running" }));
+            }
           }
           const claim = this.claimCode(conn, "deploy", code, "execute_deploy");
           if (claim.kind === "terminal") {
@@ -34786,7 +40109,10 @@ var init_engine2 = __esm({
           }));
         }
         const request = peek;
-        return this.runDeployExecJob(`deploy-exec:${request.id}`, request, async (job) => {
+        this.assertPolicyAtExecute(conn, request, "execute_deploy");
+        const execKey = `deploy-exec:${request.id}`;
+        this.dropPolicyRefusedExecJob(execKey);
+        return this.runDeployExecJob(execKey, request, async (job) => {
           job.progress = "re-checking the target org before claiming the code";
           const guard = await this.preflightTargetMoved(conn, "deploy", request, "execute_deploy", {
             deadlineMs: TARGET_CHECK_DEADLINE_MS
@@ -34807,6 +40133,17 @@ var init_engine2 = __esm({
             result: await this.doExecute(conn, claim.request, job, targetCheck)
           };
         });
+      }
+      /**
+       * S46 (B): forget a FINISHED deploy-exec job whose claim was refused for
+       * policy (POLICY_REFUSAL_CODES). Its refusal describes a moment that has
+       * passed; the caller decides afresh instead of handing it back.
+       */
+      dropPolicyRefusedExecJob(execKey) {
+        const prior = this.jobs.get(execKey);
+        if (prior?.done && prior.result?.kind === "refused" && POLICY_REFUSAL_CODES.has(prior.result.error.code)) {
+          this.jobs.delete(execKey);
+        }
       }
       /**
        * S45 F2: run (or re-attach to) the deploy-exec job and map its step to
@@ -34832,7 +40169,7 @@ var init_engine2 = __esm({
         const summary = JSON.parse(request.summaryJson);
         const checkField = targetCheck ? { target_check: targetCheck } : {};
         const soap = new MetadataSoapClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
-        if (!request.payloadPath || !fs11.existsSync(request.payloadPath)) {
+        if (!request.payloadPath || !fs12.existsSync(request.payloadPath)) {
           this.audit.record("deploy.execution_failed", {
             connectionId: conn.id,
             tool: "execute_deploy",
@@ -34847,7 +40184,7 @@ var init_engine2 = __esm({
             note: "Re-validate to produce a fresh package and code."
           });
         }
-        const zip = fs11.readFileSync(request.payloadPath);
+        const zip = fs12.readFileSync(request.payloadPath);
         const options = JSON.parse(request.payloadJson ?? "{}");
         if (job) job.progress = "deploying (checkOnly=false)";
         const quickEligible = typeof request.validationId === "string" && request.validationId.length > 0 && (options.testLevel !== void 0 ? options.testLevel !== "NoTestRun" : conn.orgType === "production");
@@ -34932,23 +40269,137 @@ var init_engine2 = __esm({
             status: result.status
           }
         });
+        const rebaseline = result.success && this.rebaseliner ? {
+          members: snapshotMembersOf([summary.changes, summary.destructive]),
+          deleted: snapshotMembersOf([summary.destructive]),
+          enabled: this.config.snapshot.rebaselineAfterDeploy
+        } : null;
         if (result.success) {
           Object.assign(payload, this.finalizeRevert(conn, request, summary, { targetCheck }));
+          if (rebaseline) {
+            Object.assign(
+              payload,
+              executeSnapshotResult(
+                rebaseline.enabled ? { status: "pending" } : { status: "disabled" },
+                rebaseline.members,
+                this.config.snapshot.rebaselineTimeoutMs
+              )
+            );
+          }
         } else {
           this.removeRevertDir(request.id);
         }
-        return this.finishExecution(
+        const finished = this.finishExecution(
           conn,
           request,
           result.success ? "executed" : "execution_failed",
           payload
         );
+        if (rebaseline?.enabled) {
+          await this.rebaselineAfterExecute(
+            conn,
+            request,
+            rebaseline.members,
+            rebaseline.deleted,
+            finished,
+            job
+          );
+        }
+        return finished;
       }
-      /** Status probe for the approval page: active only while the code is still executable. */
-      requestStatusCheck(requestId) {
+      /**
+       * S46 (C): re-read a successful deploy's components into the local
+       * snapshot. Runs strictly after finishExecution: the row is stored
+       * 'executed' with snapshot.status "pending", the execution observer has
+       * read the pre-deploy snapshot, the payload is unlinked. The job's
+       * progress stays REBASELINE_PROGRESS for the whole hook (the tool keys its
+       * message on it, and a poll re-attaches while it runs). The connection and
+       * its metadata_read grant are re-read here — the member run checks them
+       * once more at its commit point. The outcome is merged into `payload` (the
+       * result this call returns) and amended onto the stored row; an outcome
+       * that did not run is audited. Never throws: the deploy has committed
+       * whatever happens here, and the result says what the snapshot holds.
+       */
+      async rebaselineAfterExecute(conn, request, members, deleted, payload, job) {
+        const rebaseliner = this.rebaseliner;
+        if (!rebaseliner) return;
+        const timeoutMs = this.config.snapshot.rebaselineTimeoutMs;
+        if (job) job.progress = REBASELINE_PROGRESS;
+        let outcome;
+        let called = false;
+        try {
+          const live = this.db.getConnection(conn.id);
+          if (!live) {
+            outcome = { status: "unavailable", reason: "connection_removed" };
+          } else if (!live.grants.metadata_read) {
+            outcome = { status: "unavailable", reason: "no_metadata_read" };
+          } else {
+            called = true;
+            outcome = await rebaseliner({
+              conn: live,
+              requestId: request.id,
+              members,
+              deleted,
+              timeoutMs
+            });
+          }
+        } catch (err2) {
+          const detail = (err2 instanceof Error ? err2.message : String(err2)).slice(0, 200);
+          outcome = called ? { status: "unavailable", reason: "failed_after_write", detail } : { status: "unavailable", reason: "failed", detail };
+        }
+        try {
+          Object.assign(payload, executeSnapshotResult(outcome, members, timeoutMs));
+          if (!this.db.amendDeployRequestResult(request.id, JSON.stringify(payload))) {
+            log("warn", "the re-baseline outcome was not stored: the request is no longer executed", {
+              requestId: request.id
+            });
+          }
+        } catch (err2) {
+          log("warn", "the re-baseline outcome could not be stored", {
+            requestId: request.id,
+            err: err2 instanceof Error ? err2.name : typeof err2
+          });
+        }
+        if (outcome.status === "unavailable") {
+          this.audit.record("deploy.snapshot_rebaseline_unavailable", {
+            connectionId: conn.id,
+            tool: "execute_deploy",
+            outcome: "error",
+            detail: {
+              requestId: request.id,
+              reason: outcome.reason,
+              ...outcome.detail !== void 0 ? { detail: outcome.detail } : {}
+            }
+          });
+        }
+      }
+      /**
+       * Status probe for the approval page: active only while the code is still
+       * executable — a 'validated' row past its expiry that no sweep has marked
+       * yet reports 'expired'. S46 (B): while the row is pending it also carries
+       * `rev`, the request's policy state as a render would draw it now (liveGate), so
+       * the page reloads within one poll when a freeze begins or ends, a reason
+       * or justification is recorded, or the policies change. `conn` is the
+       * connection the page was presented for — the same fallback the render
+       * takes (approvalLive) once disconnect_org has removed the connection row,
+       * so the two never compute the rev against different connections (a page
+       * that would otherwise reload on every poll).
+       */
+      requestStatusCheck(requestId, conn) {
         return () => {
-          const status = this.db.getDeployRequestStatus(requestId) ?? "gone";
-          return { active: status === "validated", status };
+          const row = this.db.getDeployRequest(requestId);
+          const status = row?.status ?? "gone";
+          if (!row || status !== "validated") return { active: false, status };
+          if (!stillPending(row)) return { active: false, status: "expired" };
+          let rev2;
+          try {
+            rev2 = this.governanceStateOf(row, conn).rev;
+          } catch (err2) {
+            log("warn", "approval page state could not be computed", {
+              err: err2 instanceof Error ? err2.name : typeof err2
+            });
+          }
+          return rev2 === void 0 ? { active: true, status } : { active: true, status, rev: rev2 };
         };
       }
       /** Persist the terminal outcome, clean up the zip, and return the payload. */
@@ -34959,7 +40410,14 @@ var init_engine2 = __esm({
         return payload;
       }
       // ── dml ────────────────────────────────────────────────────────────────
-      async proposeDml(conn, input) {
+      async proposeDml(conn, input, gov = {}) {
+        const deletes = isDmlPlan(input) ? input.steps.some((s) => s.operation === "delete") : input.operation === "delete";
+        const gate = this.policyGate(conn, "dml", "dml_propose", {
+          destructive: deletes,
+          testLevel: null,
+          ticket: gov.ticket,
+          justification: gov.justification
+        });
         const superseded = this.db.supersedePendingRequests(conn.id, "dml");
         if (superseded > 0) {
           this.audit.record("dml.superseded", {
@@ -34970,6 +40428,13 @@ var init_engine2 = __esm({
         }
         const rest = new RestClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
         const preview = isDmlPlan(input) ? await this.buildDmlPlanPreview(rest, input) : await this.buildDmlPreview(rest, input);
+        const minted = this.mintGovernance(
+          conn,
+          "dml",
+          gate,
+          { destructive: deletes, testLevel: null },
+          "page"
+        );
         const code = generateConfirmationCode();
         const expiresAt = new Date(Date.now() + this.config.deploy.codeTtlMs).toISOString();
         const request = this.db.insertDeployRequest({
@@ -34978,7 +40443,7 @@ var init_engine2 = __esm({
           confirmationCode: code,
           expiresAt,
           payloadJson: JSON.stringify(input),
-          summaryJson: JSON.stringify(preview)
+          summaryJson: JSON.stringify({ ...preview, governance: minted.stored })
         });
         const allRows = preview.rows;
         const rowLabels = allRows.slice(0, 50);
@@ -35027,12 +40492,8 @@ var init_engine2 = __esm({
             ]
           } : {}
         };
-        const approval = await this.approvals.present(
-          renderApprovalPage(view),
-          this.requestStatusCheck(request.id),
-          this.config.deploy.codeTtlMs + 6e4
-        );
-        const phone = await this.notifyApproval(view, request.id, conn.id, "page");
+        const approval = await this.presentMinted(conn, request, view, gate, minted);
+        const phone = await this.notifyApproval(view, request.id, conn.id, "page", minted.frozen);
         this.audit.record("dml.proposed", {
           connectionId: conn.id,
           tool: "dml_propose",
@@ -35041,12 +40502,14 @@ var init_engine2 = __esm({
             plan: true,
             steps: input.steps.length,
             operations: summarizeOps(input.steps),
-            all_or_none: input.all_or_none
+            all_or_none: input.all_or_none,
+            governance: governanceAuditDetail(minted)
           } : {
             requestId: request.id,
             operation: input.operation,
             object: input.object,
-            rows: preview.row_count
+            rows: preview.row_count,
+            governance: governanceAuditDetail(minted)
           }
         });
         const { before, found, precheck, ...shown } = preview;
@@ -35056,13 +40519,18 @@ var init_engine2 = __esm({
           request_id: request.id,
           ...shown,
           expires_at: expiresAt,
-          approval_page: { ...approvalForAgent("dml", approval), phone_notification: phone }
+          governance: minted.forAgent,
+          approval_page: {
+            ...approvalForAgent("dml", approval, minted.frozen),
+            phone_notification: phone
+          }
         };
       }
       async executeDml(conn, code) {
         let targetCheck;
         const peek = this.db.findRequestByCode(conn.id, "dml", code);
         if (peek && peek.status === "validated" && new Date(peek.expiresAt).getTime() >= Date.now()) {
+          this.assertPolicyAtExecute(conn, peek, "dml_execute");
           const guard = await this.preflightTargetMoved(conn, "dml", peek, "dml_execute", {
             deadlineMs: TARGET_CHECK_DEADLINE_MS
           });
@@ -35275,7 +40743,16 @@ var init_engine2 = __esm({
        * page carries the script verbatim plus the sharpest warning in the product,
        * and a compile error at execute spends the code exactly like a failed DML.
        */
-      async proposeApex(conn, script) {
+      async proposeApex(conn, script, gov = {}) {
+        const gate = this.policyGate(conn, "apex", "apex_propose", {
+          destructive: false,
+          testLevel: null,
+          ticket: gov.ticket,
+          justification: gov.justification
+        });
+        const deletesRule = gate.verdict.requirements.denyDataDeletes && !gate.verdict.requirements.denyAnonymousApex ? gate.policies.rules.find(
+          (r) => r.denyDataDeletes === true && gate.verdict.rules.includes(r.name)
+        )?.name : void 0;
         const superseded = this.db.supersedePendingRequests(conn.id, "apex");
         if (superseded > 0) {
           this.audit.record("apex.superseded", {
@@ -35285,6 +40762,13 @@ var init_engine2 = __esm({
           });
         }
         const lines = script.split(/\r?\n/).length;
+        const minted = this.mintGovernance(
+          conn,
+          "apex",
+          gate,
+          { destructive: false, testLevel: null },
+          "page"
+        );
         const code = generateConfirmationCode();
         const expiresAt = new Date(Date.now() + this.config.deploy.codeTtlMs).toISOString();
         const request = this.db.insertDeployRequest({
@@ -35293,7 +40777,7 @@ var init_engine2 = __esm({
           confirmationCode: code,
           expiresAt,
           payloadJson: JSON.stringify({ apex: true, code: script }),
-          summaryJson: JSON.stringify({ lines, chars: script.length })
+          summaryJson: JSON.stringify({ lines, chars: script.length, governance: minted.stored })
         });
         const apexObjects = this.apexScriptObjects(conn, script);
         const view = {
@@ -35329,19 +40813,21 @@ var init_engine2 = __esm({
           ],
           blast: [],
           warnings: [
-            "ANONYMOUS APEX \u2014 this script runs with YOUR permissions and can read or write anything your user can. DML it performs COMMITS on success (nothing rolls back unless the script throws). Read every line below before approving."
+            "ANONYMOUS APEX \u2014 this script runs with YOUR permissions and can read or write anything your user can. DML it performs COMMITS on success (nothing rolls back unless the script throws). Read every line below before approving.",
+            ...deletesRule !== void 0 ? [apexDeletesNote(deletesRule)] : []
           ]
         };
-        const approval = await this.approvals.present(
-          renderApprovalPage(view),
-          this.requestStatusCheck(request.id),
-          this.config.deploy.codeTtlMs + 6e4
-        );
-        const phone = await this.notifyApproval(view, request.id, conn.id, "page");
+        const approval = await this.presentMinted(conn, request, view, gate, minted);
+        const phone = await this.notifyApproval(view, request.id, conn.id, "page", minted.frozen);
         this.audit.record("apex.proposed", {
           connectionId: conn.id,
           tool: "apex_propose",
-          detail: { requestId: request.id, lines, chars: script.length }
+          detail: {
+            requestId: request.id,
+            lines,
+            chars: script.length,
+            governance: governanceAuditDetail(minted)
+          }
         });
         return {
           connection: conn.alias,
@@ -35350,7 +40836,11 @@ var init_engine2 = __esm({
           lines,
           chars: script.length,
           expires_at: expiresAt,
-          approval_page: { ...approvalForAgent("apex", approval), phone_notification: phone }
+          governance: minted.forAgent,
+          approval_page: {
+            ...approvalForAgent("apex", approval, minted.frozen),
+            phone_notification: phone
+          }
         };
       }
       async executeApex(conn, code) {
@@ -35476,7 +40966,13 @@ var init_engine2 = __esm({
        * flips existing published versions only, and the org's own messages[]
        * explain refusals (e.g. an unpublished version) verbatim.
        */
-      async proposeActivation(conn, input) {
+      async proposeActivation(conn, input, gov = {}) {
+        const gate = this.policyGate(conn, "activation", "agent_activation_propose", {
+          destructive: false,
+          testLevel: null,
+          ticket: gov.ticket,
+          justification: gov.justification
+        });
         const rest = new RestClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
         const esc3 = (s) => s.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
         const rows = await rest.query(
@@ -35513,6 +41009,13 @@ var init_engine2 = __esm({
             detail: { count: superseded }
           });
         }
+        const minted = this.mintGovernance(
+          conn,
+          "activation",
+          gate,
+          { destructive: false, testLevel: null },
+          "page"
+        );
         const code = generateConfirmationCode();
         const expiresAt = new Date(Date.now() + this.config.deploy.codeTtlMs).toISOString();
         const verb = input.status === "Active" ? "ACTIVATE" : "DEACTIVATE";
@@ -35531,7 +41034,7 @@ var init_engine2 = __esm({
             from_status: version2.Status,
             to_status: input.status
           }),
-          summaryJson: JSON.stringify({ rows: [{ label, warnings: [] }] })
+          summaryJson: JSON.stringify({ rows: [{ label, warnings: [] }], governance: minted.stored })
         });
         const view = {
           kind: "activation",
@@ -35564,12 +41067,8 @@ POST /connect/bot-versions/${version2.Id}/activation`
             "LIVE AGENT BEHAVIOR \u2014 this changes what users experience IMMEDIATELY. Deactivating takes the agent version offline on every channel it serves; activating puts this version in front of users. This is not a metadata deploy: there is no draft in between."
           ]
         };
-        const approval = await this.approvals.present(
-          renderApprovalPage(view),
-          this.requestStatusCheck(request.id),
-          this.config.deploy.codeTtlMs + 6e4
-        );
-        const phone = await this.notifyApproval(view, request.id, conn.id, "page");
+        const approval = await this.presentMinted(conn, request, view, gate, minted);
+        const phone = await this.notifyApproval(view, request.id, conn.id, "page", minted.frozen);
         this.audit.record("activation.proposed", {
           connectionId: conn.id,
           tool: "agent_activation_propose",
@@ -35578,7 +41077,8 @@ POST /connect/bot-versions/${version2.Id}/activation`
             agent: input.agent,
             version: input.version,
             from: version2.Status,
-            to: input.status
+            to: input.status,
+            governance: governanceAuditDetail(minted)
           }
         });
         return {
@@ -35592,13 +41092,18 @@ POST /connect/bot-versions/${version2.Id}/activation`
           requested_status: input.status,
           proposed: true,
           expires_at: expiresAt,
-          approval_page: { ...approvalForAgent("activation", approval), phone_notification: phone }
+          governance: minted.forAgent,
+          approval_page: {
+            ...approvalForAgent("activation", approval, minted.frozen),
+            phone_notification: phone
+          }
         };
       }
       async executeActivation(conn, code) {
         let targetCheck;
         const peek = this.db.findRequestByCode(conn.id, "activation", code);
         if (peek && peek.status === "validated" && new Date(peek.expiresAt).getTime() >= Date.now()) {
+          this.assertPolicyAtExecute(conn, peek, "agent_activation_execute");
           const guard = await this.preflightTargetMoved(
             conn,
             "activation",
@@ -35716,13 +41221,13 @@ POST /connect/bot-versions/${version2.Id}/activation`
         if (!days || days <= 0) return;
         const cutoff = Date.now() - days * 24 * 60 * 60 * 1e3;
         try {
-          for (const name of fs11.readdirSync(deploysDir())) {
+          for (const name of fs12.readdirSync(deploysDir())) {
             if (!name.endsWith("-results")) continue;
-            const full = path6.join(deploysDir(), name);
+            const full = path7.join(deploysDir(), name);
             try {
-              const stat = fs11.statSync(full);
+              const stat = fs12.statSync(full);
               if (stat.isDirectory() && stat.mtimeMs < cutoff) {
-                fs11.rmSync(full, { recursive: true, force: true });
+                fs12.rmSync(full, { recursive: true, force: true });
                 this.audit.record("bulk.results_swept", {
                   detail: { dir: name, ageDays: Math.round((Date.now() - stat.mtimeMs) / 864e5) }
                 });
@@ -35741,7 +41246,7 @@ POST /connect/bot-versions/${version2.Id}/activation`
        * file after approval changes nothing: execute reads only the frozen copies
        * and re-verifies their hashes.
        */
-      async proposeBulkLoad(conn, input) {
+      async proposeBulkLoad(conn, input, gov = {}) {
         const maxSteps = this.config.bulkLoad.maxFilesPerPlan;
         if (input.steps.length === 0) {
           throw new ContrailError("a bulk plan needs at least one step", "bad_bulk_plan");
@@ -35774,6 +41279,12 @@ POST /connect/bot-versions/${version2.Id}/activation`
             throw new ContrailError(`${where}: invalid external_id_field`, "bad_bulk_plan");
           }
         }
+        const gate = this.policyGate(conn, "bulk", "bulk_load_propose", {
+          destructive: input.steps.some((s) => s.operation === "delete"),
+          testLevel: null,
+          ticket: gov.ticket,
+          justification: gov.justification
+        });
         this.sweepBulkResultDirs();
         const superseded = this.db.supersedePendingRequests(conn.id, "bulk");
         if (superseded > 0) {
@@ -35784,8 +41295,8 @@ POST /connect/bot-versions/${version2.Id}/activation`
             detail: { count: superseded }
           });
         }
-        const stageDir = path6.join(deploysDir(), `bulk-stage-${crypto4.randomUUID()}`);
-        fs11.mkdirSync(stageDir, { recursive: true });
+        const stageDir = path7.join(deploysDir(), `bulk-stage-${crypto6.randomUUID()}`);
+        fs12.mkdirSync(stageDir, { recursive: true });
         const manifest = {
           bulk: true,
           version: 1,
@@ -35800,7 +41311,7 @@ POST /connect/bot-versions/${version2.Id}/activation`
             const label = `step ${n} (${s.displayName})`;
             let stat;
             try {
-              stat = fs11.statSync(s.sourcePath);
+              stat = fs12.statSync(s.sourcePath);
             } catch {
               throw new ContrailError(`${label}: the file does not exist`, "source_not_found");
             }
@@ -35813,7 +41324,7 @@ POST /connect/bot-versions/${version2.Id}/activation`
                 "source_too_large"
               );
             }
-            const bytes = fs11.readFileSync(s.sourcePath);
+            const bytes = fs12.readFileSync(s.sourcePath);
             const isTsv = s.sourcePath.toLowerCase().endsWith(".tsv");
             let scan;
             try {
@@ -35843,7 +41354,7 @@ POST /connect/bot-versions/${version2.Id}/activation`
             }
             const frozen = scan.hadBom ? bytes.subarray(UTF8_BOM.length) : bytes;
             const file = `step-${n}.${isTsv ? "tsv" : "csv"}`;
-            fs11.writeFileSync(path6.join(stageDir, file), frozen);
+            fs12.writeFileSync(path7.join(stageDir, file), frozen);
             manifest.steps.push({
               n,
               object: s.object,
@@ -35851,7 +41362,7 @@ POST /connect/bot-versions/${version2.Id}/activation`
               external_id_field: s.externalIdField ?? null,
               file,
               display_name: s.displayName,
-              sha256: crypto4.createHash("sha256").update(frozen).digest("hex"),
+              sha256: crypto6.createHash("sha256").update(frozen).digest("hex"),
               row_count: scan.rowCount,
               headers: scan.headers,
               line_ending: scan.lineEnding,
@@ -35861,7 +41372,7 @@ POST /connect/bot-versions/${version2.Id}/activation`
             scanWarnings.push(scan.warnings);
           }
         } catch (err2) {
-          fs11.rmSync(stageDir, { recursive: true, force: true });
+          fs12.rmSync(stageDir, { recursive: true, force: true });
           throw err2;
         }
         const totalRows = manifest.steps.reduce((sum, s) => sum + s.row_count, 0);
@@ -35893,6 +41404,13 @@ columns: ${columnsLabel(m.headers)}`,
           stop_on_failure: input.stopOnFailure,
           rows
         };
+        const minted = this.mintGovernance(
+          conn,
+          "bulk",
+          gate,
+          { destructive: manifest.steps.some((s) => s.operation === "delete"), testLevel: null },
+          "page"
+        );
         let request;
         try {
           request = this.db.insertDeployRequest({
@@ -35901,13 +41419,13 @@ columns: ${columnsLabel(m.headers)}`,
             confirmationCode: code,
             expiresAt,
             payloadJson: JSON.stringify(manifest),
-            summaryJson: JSON.stringify(preview)
+            summaryJson: JSON.stringify({ ...preview, governance: minted.stored })
           });
-          const payloadDir = path6.join(deploysDir(), request.id);
-          fs11.renameSync(stageDir, payloadDir);
+          const payloadDir = path7.join(deploysDir(), request.id);
+          fs12.renameSync(stageDir, payloadDir);
           this.db.setDeployRequestPayloadPath(request.id, payloadDir);
         } catch (err2) {
-          fs11.rmSync(stageDir, { recursive: true, force: true });
+          fs12.rmSync(stageDir, { recursive: true, force: true });
           throw err2;
         }
         const view = {
@@ -35944,12 +41462,8 @@ columns: ${columnsLabel(m.headers)}`,
             "Bulk loads are NOT atomic. Each step is its own org-side job; rows loaded by completed steps remain in the org even if a later step fails."
           ]
         };
-        const approval = await this.approvals.present(
-          renderApprovalPage(view),
-          this.requestStatusCheck(request.id),
-          this.config.deploy.codeTtlMs + 6e4
-        );
-        const phone = await this.notifyApproval(view, request.id, conn.id, "page");
+        const approval = await this.presentMinted(conn, request, view, gate, minted);
+        const phone = await this.notifyApproval(view, request.id, conn.id, "page", minted.frozen);
         this.audit.record("bulk.proposed", {
           connectionId: conn.id,
           tool: "bulk_load_propose",
@@ -35958,7 +41472,8 @@ columns: ${columnsLabel(m.headers)}`,
             steps: manifest.steps.length,
             operations: summarizeOps(manifest.steps),
             totalRows,
-            stopOnFailure: input.stopOnFailure
+            stopOnFailure: input.stopOnFailure,
+            governance: governanceAuditDetail(minted)
           }
         });
         return {
@@ -35978,7 +41493,11 @@ columns: ${columnsLabel(m.headers)}`,
           total_rows: totalRows,
           stop_on_failure: input.stopOnFailure,
           expires_at: expiresAt,
-          approval_page: { ...approvalForAgent("bulk", approval), phone_notification: phone }
+          governance: minted.forAgent,
+          approval_page: {
+            ...approvalForAgent("bulk", approval, minted.frozen),
+            phone_notification: phone
+          }
         };
       }
       async executeBulkLoad(conn, code) {
@@ -36002,7 +41521,7 @@ columns: ${columnsLabel(m.headers)}`,
       }
       async doExecuteBulk(conn, request, job) {
         const manifest = JSON.parse(request.payloadJson ?? "{}");
-        if (manifest.bulk !== true || !Array.isArray(manifest.steps) || manifest.steps.length === 0 || !request.payloadPath || !fs11.existsSync(request.payloadPath)) {
+        if (manifest.bulk !== true || !Array.isArray(manifest.steps) || manifest.steps.length === 0 || !request.payloadPath || !fs12.existsSync(request.payloadPath)) {
           this.audit.record("bulk.execution_failed", {
             connectionId: conn.id,
             tool: "bulk_load_execute",
@@ -36020,16 +41539,16 @@ columns: ${columnsLabel(m.headers)}`,
         }
         const version2 = this.config.salesforce.apiVersion;
         const rest = new RestClient(this.tokenMgr, conn, version2);
-        const resultsDir = path6.join(deploysDir(), `${request.id}-results`);
+        const resultsDir = path7.join(deploysDir(), `${request.id}-results`);
         let resultsDirMade = false;
         const writeResultCsv = (name, csv) => {
           if (csv.trim().split("\n").length < 2) return null;
           if (!resultsDirMade) {
-            fs11.mkdirSync(resultsDir, { recursive: true });
+            fs12.mkdirSync(resultsDir, { recursive: true });
             resultsDirMade = true;
           }
-          const p = path6.join(resultsDir, name);
-          fs11.writeFileSync(p, csv);
+          const p = path7.join(resultsDir, name);
+          fs12.writeFileSync(p, csv);
           return p;
         };
         const steps = manifest.steps;
@@ -36043,16 +41562,16 @@ columns: ${columnsLabel(m.headers)}`,
         for (const m of steps) {
           const stepLabel = `step ${m.n}/${total}: ${m.operation.toUpperCase()} ${m.object}`;
           if (job) job.progress = `${stepLabel} \u2014 verifying frozen file`;
-          const frozenPath = path6.join(request.payloadPath, m.file);
+          const frozenPath = path7.join(request.payloadPath, m.file);
           let failedHard = null;
           let info = null;
           let jobId = null;
           let frozen = null;
-          if (!fs11.existsSync(frozenPath)) {
+          if (!fs12.existsSync(frozenPath)) {
             failedHard = "the frozen CSV for this step is missing from the payload directory";
           } else {
-            frozen = fs11.readFileSync(frozenPath);
-            const sha = crypto4.createHash("sha256").update(frozen).digest("hex");
+            frozen = fs12.readFileSync(frozenPath);
+            const sha = crypto6.createHash("sha256").update(frozen).digest("hex");
             if (sha !== m.sha256) {
               failedHard = "the frozen CSV no longer matches the hash the human approved (frozen_payload_tampered) \u2014 refusing to send it";
               frozen = null;
@@ -36230,7 +41749,7 @@ columns: ${columnsLabel(m.headers)}`,
         try {
           probe = await withDeadline(
             opts.deadlineMs,
-            (signal) => kind === "deploy" ? this.probeDeployTarget(conn, request) : kind === "dml" ? this.probeDmlTarget(conn, request, signal) : this.probeActivationTarget(conn, request, signal)
+            (signal) => kind === "deploy" ? this.probeDeployTarget(conn, request, signal) : kind === "dml" ? this.probeDmlTarget(conn, request, signal) : this.probeActivationTarget(conn, request, signal)
           );
         } catch (err2) {
           const reason = err2 instanceof TargetCheckDeadline ? `the org did not answer within ${Math.round(opts.deadlineMs / 1e3)} s` : String(err2 instanceof Error ? err2.message : err2).slice(0, 300);
@@ -36278,18 +41797,40 @@ columns: ${columnsLabel(m.headers)}`,
         return { verdict: "moved", result: probe.moved };
       }
       /**
-       * S45 F2, deploy: re-list every member with the SAME listMetadataDetailed /
-       * listMetadataQueries calls the validate-time live check made (children by
-       * their own type, foldered members scoped to their folder), so baseline and
-       * probe share one source, and compare stamps as epoch ms. A member whose
-       * type cannot be enumerated (at validate or now), or whose frozen stamp is
-       * missing, is reported `unchecked` — NEVER a void. With no live baseline
-       * (the retrieve was unavailable at validate) the ORG clock anchors the
-       * check: a stamp at or after the checkOnly DeployResult's createdDate
-       * minus 5 s counts as moved (fail-closed in that margin); no org clock →
-       * every member unchecked — never a host-clock comparison.
+       * S45 F2, deploy: re-read every member's last-modified stamp from the
+       * source its frozen pre-image names, so baseline and probe share one
+       * source, and compare stamps as epoch ms. A listing-sourced member is
+       * re-listed with the SAME listMetadataDetailed / listMetadataQueries calls
+       * the validate-time live check made (foldered members scoped to their
+       * folder). S46 D1: a CustomField, ValidationRule, CustomLabel or ListView
+       * whose pre-image names a stamp query is re-read by that query — the same
+       * readMemberStamps (deploy/stampprobe.ts) validate called, naming only the
+       * package's own members. A request with no pre-image (the live check was
+       * unavailable) follows live_check.stamp_scheme; one with neither marker was
+       * validated by 0.39 and is re-listed for every type, those four included.
+       *
+       * A member whose type cannot be enumerated (at validate or now), whose
+       * frozen stamp is missing, whose stamp query fails now, or that no stamp
+       * query can name is reported `unchecked` — NEVER a void. So is a member
+       * with no row of its own whose name a stamp query returned — now, or at
+       * validate — under a namespace the package did not name: never gone,
+       * created or checked on that query's word. A SOAP fault still throws out
+       * of the probe (the whole check is unavailable); a failed stamp query does
+       * not. With no live baseline (the retrieve was unavailable at validate) the
+       * ORG clock anchors the check: a stamp at or after the checkOnly
+       * DeployResult's createdDate minus 5 s counts as moved (fail-closed in that
+       * margin); no org clock → every member unchecked — never a host-clock
+       * comparison.
+       *
+       * S46 D4: a `checked` entry carries `absent: true` when the execute-time
+       * read returned nothing for a member the approval assumed absent — the
+       * validate-time check found it absent, or, with no live baseline (where
+       * nothing read the org at validate), the package proposes it as an add.
+       * For a stamp-query member that is "the query returned no row carrying its
+       * name": what Contrail read, not proof of what the org holds — where the
+       * query cannot see a member, one created after validate is not detected.
        */
-      async probeDeployTarget(conn, request) {
+      async probeDeployTarget(conn, request, signal) {
         const summary = JSON.parse(request.summaryJson);
         const live = summary.live_check ?? null;
         const members = [];
@@ -36304,21 +41845,36 @@ columns: ${columnsLabel(m.headers)}`,
         const unchecked = [];
         const moved = [];
         const uncheck = (m, reason) => unchecked.push({ type: m.type, api_name: m.api_name, reason });
-        const toProbe = [];
+        const scheme2 = live?.stamp_scheme === STAMP_SCHEME;
+        const sourceOf2 = (m) => m.pre_image?.stamp_source ?? (scheme2 ? stampSourceFor(m.type) : "listMetadata");
+        const viaListing = [];
+        const viaQuery = [];
+        const route = (m) => {
+          const src = sourceOf2(m);
+          if (src === "listMetadata") {
+            if (preImageListQueryFor(m) === null) uncheck(m, "type_not_enumerable");
+            else viaListing.push(m);
+          } else if (stampSourceFor(m.type) !== src) uncheck(m, UNCHECKED_STAMP_SOURCE_MISMATCH);
+          else if (!isProbeable(m)) uncheck(m, UNCHECKED_STAMP_NOT_PROBEABLE);
+          else viaQuery.push(m);
+        };
         let threshold = null;
         let degrade;
         let note;
         if (live?.status === "ok") {
-          const datesCovered = (type) => live.dates_unavailable === void 0 && !live.dates_unavailable_types.includes(type);
+          const datesCovered = (m) => sourceOf2(m) === "listMetadata" ? live.dates_unavailable === void 0 && !live.dates_unavailable_types.includes(m.type) : !live.dates_unavailable_types.includes(m.type);
           for (const m of members) {
             const pre = m.pre_image;
-            if (!pre || pre.present === null) uncheck(m, "type_not_enumerable");
-            else if (pre.present === true && Number.isNaN(Date.parse(pre.last_modified_date ?? ""))) {
+            if (!pre || pre.present === null) {
+              uncheck(
+                m,
+                pre?.stamp_source !== void 0 && pre.stamp_source !== "listMetadata" ? UNCHECKED_STAMP_NOT_PROBEABLE : "type_not_enumerable"
+              );
+            } else if (pre.present === true && Number.isNaN(Date.parse(pre.last_modified_date ?? ""))) {
               uncheck(m, "dates_unavailable_at_validate");
-            } else if (pre.present === false && !datesCovered(m.type)) {
+            } else if (pre.present === false && !datesCovered(m)) {
               uncheck(m, "dates_unavailable_at_validate");
-            } else if (preImageListQueryFor(m) === null) uncheck(m, "type_not_enumerable");
-            else toProbe.push(m);
+            } else route(m);
           }
         } else {
           const created = live?.org_clock?.created_date;
@@ -36330,44 +41886,84 @@ columns: ${columnsLabel(m.headers)}`,
           } else {
             threshold = createdMs - ORG_CLOCK_MARGIN_MS;
             degrade = { org_clock_created_date: created, live_check_reason: liveReason };
-            for (const m of members) {
-              if (preImageListQueryFor(m) === null) uncheck(m, "type_not_enumerable");
-              else toProbe.push(m);
-            }
+            for (const m of members) route(m);
           }
         }
         let checkedAt = (/* @__PURE__ */ new Date()).toISOString();
-        if (toProbe.length > 0) {
+        if (viaListing.length > 0 || viaQuery.length > 0) {
           const soap = new MetadataSoapClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
-          const { types, folderQueries } = buildPreImageListQueries(toProbe);
+          const { types, folderQueries } = buildPreImageListQueries(viaListing);
           const none = { props: [], unsupportedTypes: [] };
-          const [flat, foldered] = await Promise.all([
+          const noStamps = {
+            rows: /* @__PURE__ */ new Map(),
+            failed: /* @__PURE__ */ new Map(),
+            unprobed: /* @__PURE__ */ new Map(),
+            unmatched: /* @__PURE__ */ new Set()
+          };
+          const [flat, foldered, stamps] = await Promise.all([
             types.length > 0 ? soap.listMetadataDetailed(types) : Promise.resolve(none),
-            folderQueries.length > 0 ? soap.listMetadataQueries(folderQueries) : Promise.resolve(none)
+            folderQueries.length > 0 ? soap.listMetadataQueries(folderQueries) : Promise.resolve(none),
+            viaQuery.length > 0 ? readMemberStamps(this.stampQueryFor(conn), viaQuery, { signal }) : Promise.resolve(noStamps)
           ]);
           checkedAt = (/* @__PURE__ */ new Date()).toISOString();
           const props = [...flat.props, ...foldered.props];
           const unsupported = /* @__PURE__ */ new Set([...flat.unsupportedTypes, ...foldered.unsupportedTypes]);
-          for (const m of toProbe) {
-            if (unsupported.has(m.type)) {
-              uncheck(m, "type_not_enumerable");
+          const listed = new Set(viaListing);
+          const queried = new Set(viaQuery);
+          const unmatchedAtValidate = new Set(
+            live?.status === "ok" ? live.probe_unmatched ?? [] : []
+          );
+          for (const m of members) {
+            const src = sourceOf2(m);
+            let row;
+            if (listed.has(m)) {
+              if (unsupported.has(m.type)) {
+                uncheck(m, "type_not_enumerable");
+                continue;
+              }
+              const prop = listedPropFor(props, m.type, m.api_name);
+              if (prop) {
+                row = {
+                  last_modified_by: prop.lastModifiedByName ? prop.lastModifiedByName : null,
+                  last_modified_date: prop.lastModifiedDate ? prop.lastModifiedDate : null
+                };
+              }
+            } else if (queried.has(m)) {
+              const key2 = stampKey(m.type, m.api_name);
+              if (stamps.failed.has(m.type)) {
+                uncheck(m, UNCHECKED_STAMP_QUERY_FAILED);
+                continue;
+              }
+              if (stamps.unprobed.has(key2)) {
+                uncheck(m, UNCHECKED_STAMP_NOT_PROBEABLE);
+                continue;
+              }
+              const stamp = stamps.rows.get(key2);
+              if (!stamp && (stamps.unmatched.has(key2) || unmatchedAtValidate.has(key2))) {
+                uncheck(m, UNCHECKED_STAMP_ROW_UNMATCHED);
+                continue;
+              }
+              if (stamp) {
+                row = {
+                  last_modified_by: stamp.last_modified_by,
+                  last_modified_date: stamp.last_modified_date
+                };
+              }
+            } else {
               continue;
             }
-            const row = listedPropFor(props, m.type, m.api_name);
-            const stamps = {
-              last_modified_by: row?.lastModifiedByName ? row.lastModifiedByName : null,
-              last_modified_date: row?.lastModifiedDate ? row.lastModifiedDate : null
-            };
             const name = { type: m.type, api_name: m.api_name };
-            const undated = row !== void 0 && Number.isNaN(Date.parse(row.lastModifiedDate));
+            const via = src === "listMetadata" ? {} : { source: src };
+            const nowMs = Date.parse(row?.last_modified_date ?? "");
+            const undated = row !== void 0 && Number.isNaN(nowMs);
             if (threshold !== null) {
               if (!row) {
-                if (m.change === "add") checked.push(name);
+                if (m.change === "add") checked.push({ ...name, absent: true });
                 else uncheck(m, "absent_no_baseline");
               } else if (undated) {
                 uncheck(m, "dates_unavailable_at_execute");
-              } else if (Date.parse(row.lastModifiedDate) >= threshold) {
-                moved.push({ ...name, ...stamps, frozen_date: null, state: "changed" });
+              } else if (nowMs >= threshold) {
+                moved.push({ ...name, ...row, frozen_date: null, state: "changed", ...via });
               } else {
                 checked.push(name);
               }
@@ -36380,20 +41976,29 @@ columns: ${columnsLabel(m.headers)}`,
                 last_modified_by: null,
                 last_modified_date: null,
                 frozen_date: pre.last_modified_date,
-                state: "gone"
+                state: "gone",
+                ...via
               });
             } else if (pre.present === false && row) {
-              moved.push({ ...name, ...stamps, frozen_date: null, state: "created" });
+              moved.push({ ...name, ...row, frozen_date: null, state: "created", ...via });
             } else if (undated) {
               uncheck(m, "dates_unavailable_at_execute");
-            } else if (row && Date.parse(row.lastModifiedDate) !== Date.parse(pre.last_modified_date ?? "")) {
-              moved.push({ ...name, ...stamps, frozen_date: pre.last_modified_date, state: "changed" });
+            } else if (row && nowMs !== Date.parse(pre.last_modified_date ?? "")) {
+              moved.push({
+                ...name,
+                ...row,
+                frozen_date: pre.last_modified_date,
+                state: "changed",
+                ...via
+              });
+            } else if (!row) {
+              checked.push({ ...name, absent: true });
             } else {
               checked.push(name);
             }
           }
         }
-        const targetCheck = targetCheckOf(checkedAt, checked, unchecked, note ?? "");
+        const targetCheck = targetCheckOf2(checkedAt, checked, unchecked, note ?? "");
         if (moved.length === 0) return { moved: null, targetCheck, audit: {} };
         const refusal = targetMovedRefusalText("deploy", {
           at: hhmm(checkedAt),
@@ -36553,7 +42158,7 @@ columns: ${columnsLabel(m.headers)}`,
           }
         }
         const checkedAt = (/* @__PURE__ */ new Date()).toISOString();
-        const targetCheck = targetCheckOf(
+        const targetCheck = targetCheckOf2(
           checkedAt,
           checked,
           unchecked,
@@ -36594,7 +42199,7 @@ columns: ${columnsLabel(m.headers)}`,
         if (!payload.bot_version_id || !payload.from_status) {
           return {
             moved: null,
-            targetCheck: targetCheckOf(
+            targetCheck: targetCheckOf2(
               (/* @__PURE__ */ new Date()).toISOString(),
               [],
               [{ ...member, reason: "no_baseline_recorded" }],
@@ -36615,7 +42220,7 @@ columns: ${columnsLabel(m.headers)}`,
         if (row && row.Status === payload.from_status) {
           return {
             moved: null,
-            targetCheck: targetCheckOf(checkedAt, [member], [], ""),
+            targetCheck: targetCheckOf2(checkedAt, [member], [], ""),
             audit: {}
           };
         }
@@ -36671,7 +42276,10 @@ columns: ${columnsLabel(m.headers)}`,
             detail: {
               reason: attempt.locked ? "too_many_attempts" : "no_matching_code",
               attempts_remaining: attempt.pendingExisted ? attempt.attemptsRemaining : null,
-              locked: attempt.locked
+              locked: attempt.locked,
+              // S46 (B): the request the attempt was counted against — its id,
+              // never a code — so lockout attempts join that request's trail.
+              ...attempt.pendingExisted && attempt.requestId ? { requestId: attempt.requestId } : {}
             }
           });
           if (attempt.locked) {
@@ -36755,10 +42363,19 @@ columns: ${columnsLabel(m.headers)}`,
             "code_expired"
           );
         }
+        const executeCheck = this.assertPolicyAtExecute(conn, request, tool);
+        const recorded = this.db.patchDeployRequestSummary(request.id, (s) => ({
+          ...s,
+          governance: {
+            ...isPlainObject4(s.governance) ? s.governance : { v: 1 },
+            execute_check: executeCheck
+          }
+        }));
+        if (!recorded) return { kind: "running", request };
         if (!this.db.claimRequestForExecution(request.id)) {
           return { kind: "running", request };
         }
-        return { kind: "claimed", request };
+        return { kind: "claimed", request: this.db.getDeployRequest(request.id) ?? request };
       }
       /**
        * Preview for a multi-step plan: one honest row per step, prefixed with its
@@ -37135,6 +42752,67 @@ columns: ${columnsLabel(m.headers)}`,
   }
 });
 
+// src/skillpack/instructions.ts
+function skillsParagraph(provenance) {
+  return `Contrail's skills ship inside this install. read_skill returns one by name; list_skills returns every skill's full description. ${provenance} If your client lists a skill as contrail:<name> (the Claude Code plugin does), loading it that way is fine. Any other copy of the same name - for example one uploaded to a Claude account - may be older than this engine: prefer read_skill.`;
+}
+function fromOverride(pack) {
+  return pack.source === "override" || pack.source === "override_missing";
+}
+function buildServerInstructions(pack, engineVersion) {
+  if (pack.skills.length === 0) {
+    return [OPENING, fromOverride(pack) ? OVERRIDE_MISSING : ABSENT].join("\n\n");
+  }
+  const names = pack.skills.map((s) => s.name);
+  const provenance = fromOverride(pack) ? `They are read from the folder named by CONTRAIL_SKILLS_DIR, which may not match this engine (${engineVersion}).` : `These are the copies that came with this engine (${engineVersion}).`;
+  const head = [
+    OPENING,
+    ...names.includes(HOUSE_RULES) ? [LOAD_HOUSE_RULES] : [],
+    skillsParagraph(provenance),
+    RENDER_FLOW
+  ];
+  const withIndex = (index) => [...head, `${INDEX_LEAD}
+${index}`].join("\n\n");
+  const fits = (text2) => Buffer.byteLength(text2, "utf8") <= INSTRUCTIONS_MAX_BYTES;
+  const lines = withIndex(names.map((n) => `- ${n}`).join("\n"));
+  if (fits(lines)) return lines;
+  const oneLine = withIndex(`Skills: ${names.join(", ")}.`);
+  if (fits(oneLine)) return oneLine;
+  const cutAt = (kept) => withIndex(
+    `Skills:${kept > 0 ? ` ${names.slice(0, kept).join(", ")}` : ""} ... and ${names.length - kept} more - call list_skills for the full list.`
+  );
+  for (let kept = names.length - 1; kept > 0; kept--) {
+    const cut = cutAt(kept);
+    if (fits(cut)) return cut;
+  }
+  return cutAt(0);
+}
+function skillsAnnouncement(pack) {
+  if (pack.skills.length > 0) {
+    const where = fromOverride(pack) ? "The skills Contrail serves are read from the folder named by CONTRAIL_SKILLS_DIR, which may not match this engine." : "Contrail's skills ship inside this install.";
+    const next = pack.skills.some((s) => s.name === HOUSE_RULES) ? ' If the house rules are not loaded in this session yet, call read_skill with name "salesforce-house-rules" now; list_skills lists the rest.' : " list_skills lists them; read_skill loads one by name.";
+    return { bundled: pack.skills.length, note: where + next };
+  }
+  return {
+    bundled: 0,
+    note: fromOverride(pack) ? "CONTRAIL_SKILLS_DIR names a folder with no skills in it; read_skill and list_skills have nothing to serve." : "This install has no bundled skills folder; read_skill and list_skills have nothing to serve."
+  };
+}
+var INSTRUCTIONS_MAX_BYTES, HOUSE_RULES, OPENING, LOAD_HOUSE_RULES, RENDER_FLOW, INDEX_LEAD, ABSENT, OVERRIDE_MISSING;
+var init_instructions = __esm({
+  "src/skillpack/instructions.ts"() {
+    "use strict";
+    INSTRUCTIONS_MAX_BYTES = 2e3;
+    HOUSE_RULES = "salesforce-house-rules";
+    OPENING = "Contrail gives Claude governed access to Salesforce orgs: metadata reads, search, diffs, queries, and deploys and data writes that a human approves with a code.";
+    LOAD_HOUSE_RULES = `Before your first Contrail tool call in a session, load the house rules: call read_skill with name "salesforce-house-rules". Skip this only if you already loaded contrail:salesforce-house-rules through your client's own Skill tool.`;
+    RENDER_FLOW = "To show a flow as a diagram, or to compare two flows or two versions of a flow side by side, call render_flow. Do not hand-build a flow page.";
+    INDEX_LEAD = "Load the matching skill before you author or diagnose (the house rules say which fits what):";
+    ABSENT = "This install has no bundled skills folder, so read_skill and list_skills have nothing to serve and render_flow cannot build a page. Every other Contrail tool works normally. Tell the human once that reinstalling Contrail from its release restores the skills.";
+    OVERRIDE_MISSING = "CONTRAIL_SKILLS_DIR is set, but the folder it names is missing or holds no valid skill, so read_skill and list_skills have nothing to serve and render_flow cannot build a page. Every other Contrail tool works normally. Tell the human once to correct or unset CONTRAIL_SKILLS_DIR.";
+  }
+});
+
 // src/core/updateCheck.ts
 var updateCheck_exports = {};
 __export(updateCheck_exports, {
@@ -37143,14 +42821,14 @@ __export(updateCheck_exports, {
   pendingUpdateRefresh: () => pendingUpdateRefresh,
   refreshUpdateCache: () => refreshUpdateCache
 });
-import fs12 from "node:fs";
-import path7 from "node:path";
+import fs13 from "node:fs";
+import path8 from "node:path";
 function cachePath() {
-  return path7.join(dataDir(), CACHE_FILE);
+  return path8.join(dataDir(), CACHE_FILE);
 }
 function readCache(repo) {
   try {
-    const all = JSON.parse(fs12.readFileSync(cachePath(), "utf8"));
+    const all = JSON.parse(fs13.readFileSync(cachePath(), "utf8"));
     const entry = all[repo];
     return entry && typeof entry.checkedAt === "string" ? entry : null;
   } catch {
@@ -37160,14 +42838,14 @@ function readCache(repo) {
 function writeCache(repo, latestVersion) {
   let all = {};
   try {
-    const parsed = JSON.parse(fs12.readFileSync(cachePath(), "utf8"));
+    const parsed = JSON.parse(fs13.readFileSync(cachePath(), "utf8"));
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       all = parsed;
     }
   } catch {
   }
   all[repo] = { checkedAt: (/* @__PURE__ */ new Date()).toISOString(), latestVersion };
-  fs12.writeFileSync(cachePath(), JSON.stringify(all, null, 2) + "\n", "utf8");
+  fs13.writeFileSync(cachePath(), JSON.stringify(all, null, 2) + "\n", "utf8");
 }
 function isNewerVersion(a, b) {
   const pa = a.split(".").map(Number);
@@ -37264,14 +42942,14 @@ function ok(payload, prefix) {
   return { content: [{ type: "text", text: prefix ? `${prefix}
 ${json2}` : json2 }] };
 }
-function fail(message2) {
+function fail2(message2) {
   return { content: [{ type: "text", text: message2 }], isError: true };
 }
 function guarded(handler) {
   return Promise.resolve().then(handler).catch((err2) => {
-    if (err2 instanceof ContrailError) return fail(err2.message);
+    if (err2 instanceof ContrailError) return fail2(err2.message);
     log("error", "tool handler failed", { err: String(err2) });
-    return fail(`Unexpected engine error: ${String(err2)}`);
+    return fail2(`Unexpected engine error: ${String(err2)}`);
   });
 }
 function registerTools(server, deps) {
@@ -37303,7 +42981,7 @@ function registerTools(server, deps) {
         case "timeout":
         case "superseded":
         case "error":
-          return fail(outcome.message);
+          return fail2(outcome.message);
       }
     })
   );
@@ -37331,7 +43009,7 @@ function registerTools(server, deps) {
     "manage_connection",
     {
       title: "Open the connection management page",
-      description: "Open the localhost page where the human can change a connection's grants. Grants are only ever set there. The page opens directly in the human's browser; its URL is returned only if the browser could not be opened automatically. After the human saves, call get_permissions to see the updated grants.",
+      description: "Open the localhost page where the human can change a connection's grants. Grants are only ever set there. The page opens directly in the human's browser; its URL is never returned to you \u2014 if the browser cannot be opened, the URL goes to Contrail's server log for the human. After the human saves, call get_permissions to see the updated grants.",
       inputSchema: {
         connection: external_exports.string().describe("Connection alias (or id) to manage.")
       }
@@ -37344,9 +43022,18 @@ function registerTools(server, deps) {
           "Management page opened in the human's browser. They set grants there; call get_permissions afterwards to see the result."
         );
       }
+      log(
+        "warn",
+        "connection management page could not auto-open \u2014 open it yourself to change grants",
+        { url }
+      );
       return ok(
-        { connection: connection.alias, page_opened_in_browser: false, management_url: url },
-        "The browser could not be opened automatically. Give the human this URL to open themselves \u2014 do not fetch it. Call get_permissions after they save."
+        {
+          connection: connection.alias,
+          page_opened_in_browser: false,
+          note: "The management page could not be opened automatically. Its URL was written to the Contrail server log (stderr) for the human to open \u2014 it is deliberately NOT provided to you, because the page saves grants. Ask the human to open the page from the Contrail log, and call get_permissions after they save."
+        },
+        "The browser could not be opened automatically; the human can find the page URL in the Contrail server log."
       );
     })
   );
@@ -37354,14 +43041,19 @@ function registerTools(server, deps) {
     "list_connections",
     {
       title: "List connected orgs",
-      description: "List every connected org with its alias, org identity, type, and grants. Zero-cost local read \u2014 call this instead of guessing which orgs exist. Also returns staging_dir: the directory to author content_file/csv_file sources into, and approval_notifications: whether approval codes are also pushed to the human's phone (configured by the human via open_settings; never by you), including when \u2014 by default only while this Claude Code session has Remote Control connected \u2014 and the last Remote Control state Contrail's hook reported (remote_control.user_hook covers Claude Code's user settings.json only: not_installed is normal for plugin installs, whose hook ships bundled \u2014 judge by state).",
+      description: "List every connected org with its alias, org identity, type, and grants. Zero-cost local read \u2014 call this instead of guessing which orgs exist. Also returns staging_dir: the directory to author content_file/csv_file sources into, and approval_notifications: whether approval codes are also pushed to the human's phone (configured by the human via open_settings; never by you), including when \u2014 by default only while this Claude Code session has Remote Control connected \u2014 and the last Remote Control state Contrail's hook reported (remote_control.user_hook covers Claude Code's user settings.json only: not_installed is normal for plugin installs, whose hook ships bundled \u2014 judge by state). Also reports, per connection, policy: the rules that apply to it \u2014 from the human's config.json, or Contrail's built-in default when that file has no policies section (policies_status.source says which) \u2014 whether a justification or ticket is required (and the ticket pattern), what is denied, the minimum test_level, its freeze windows and whether one is in effect right now \u2014 so a proposal can comply the first time; policies_status.unmatched_rules names rules whose label or org id matches no connection on this machine \u2014 tell the human, a re-created connection may have left a rule behind; policies_status also says whether the rules could be read, and when they could not, every write proposal is refused until the human fixes the file. Also returns skills: how many skills this install bundles and the read_skill call that loads the house rules.",
       inputSchema: {}
     },
     async (_args, extra) => deps.remoteControl.run(
       extra,
       "list_connections",
       () => guarded(() => {
-        const list = db.listConnections().map(connectionSummary);
+        const conns = db.listConnections();
+        const policy = deps.deploys.policyListing(conns);
+        const list = conns.map((rec, i) => ({
+          ...connectionSummary(rec),
+          policy: policy.reports[i] ?? null
+        }));
         const update = getUpdateNotice(
           ENGINE_VERSION,
           UPDATE_REPO,
@@ -37382,6 +43074,13 @@ function registerTools(server, deps) {
             ...deps.notifier.status(),
             remote_control: deps.remoteControl.status()
           },
+          // S46 (B): whether the policies could be read, where they came
+          // from, and any rule that matches no connection on this machine.
+          policies_status: policy.status,
+          // S46: the second announcement of the skill pack. It is not verified
+          // that every client shows MCP server instructions to the model, so
+          // the session-start tool repeats the pointer.
+          skills: skillsAnnouncement(deps.skills.pack),
           ...update ? {
             update_available: update,
             update_note: `Contrail ${update.latest} is available (you are on ${update.installed}). Tell the human: download it at ${update.download_url} \u2014 a Claude Desktop extension updates by installing the new .mcpb over the old one.`
@@ -37403,7 +43102,7 @@ function registerTools(server, deps) {
       if (args.connection) {
         const rec = db.resolveConnection(args.connection);
         if (!rec) {
-          return fail(
+          return fail2(
             `No connection matches "${args.connection}". Call list_connections to see what exists.`
           );
         }
@@ -37419,10 +43118,18 @@ function registerTools(server, deps) {
     "get_audit_log",
     {
       title: "Read the local audit log",
-      description: "Query the local audit log: connection lifecycle, OAuth flows, grant refusals, and (from later milestones) every deploy and DML decision. Local and exportable.",
+      description: "Query the local audit log: connection lifecycle, OAuth flows, grant and policy refusals, freeze overrides, and every deploy, data, Apex, bulk and agent-activation decision. Local; export_change_evidence writes a per-request dossier from it.",
       inputSchema: {
         connection: external_exports.string().optional().describe("Filter to one connection by alias (or id)."),
         since: external_exports.string().optional().describe("ISO 8601 timestamp; only events at or after this instant."),
+        // S46 (B): the rows that name one request, one event type or family, and an end bound.
+        request_id: external_exports.string().optional().describe(
+          "Only events that name this request id (the request_id a validate or propose result returned) \u2014 among them its proposal, phone push, refusals (an execute refused by a policy included), freeze override, justification edits, execution, and the sweep that expired it. Supersession by a newer validation is recorded per connection and is not included; a policy check that passes is recorded on the request, not in the log."
+        ),
+        event_type: external_exports.string().optional().describe(
+          "Only this event type (for example policy.refused), or every type under a prefix ending in a dot (for example policy.)."
+        ),
+        until: external_exports.string().optional().describe("ISO 8601 timestamp; only events at or before this instant."),
         limit: external_exports.number().int().min(1).max(1e3).optional().describe("Max events (default 100).")
       }
     },
@@ -37431,13 +43138,20 @@ function registerTools(server, deps) {
       if (args.connection) {
         const rec = db.resolveConnection(args.connection);
         if (!rec) {
-          return fail(
+          return fail2(
             `No connection matches "${args.connection}". Call list_connections to see what exists.`
           );
         }
         connectionId = rec.id;
       }
-      const events = audit.query({ connectionId, since: args.since, limit: args.limit });
+      const events = audit.query({
+        connectionId,
+        since: args.since,
+        until: args.until,
+        requestId: args.request_id,
+        eventType: args.event_type,
+        limit: args.limit
+      });
       return ok({
         events: events.map((e) => ({
           id: e.id,
@@ -37458,6 +43172,7 @@ var init_register = __esm({
   "src/tools/register.ts"() {
     "use strict";
     init_zod();
+    init_instructions();
     init_errors4();
     init_grants();
     init_updateCheck();
@@ -37540,7 +43255,14 @@ var init_flowversion = __esm({
 });
 
 // src/tools/metadata.ts
-import fs13 from "node:fs";
+import fs14 from "node:fs";
+function memberCompleteMessage(summary) {
+  const { refreshed, removed, skipped } = summary.counts;
+  return `Member refresh complete: ${refreshed} refreshed, ${removed} removed, ${skipped} skipped.`;
+}
+function memberRunningMessage(jobId) {
+  return `Member refresh is still running \u2014 poll with {connection, job_id: "${jobId}"}, or re-send the same members (which attaches to this same job).`;
+}
 function registerMetadataTools(server, deps) {
   const { db, audit, config: config2, engine, store, tokenMgr } = deps;
   function requireConnection(ref, tool) {
@@ -37562,9 +43284,9 @@ function registerMetadataTools(server, deps) {
     },
     async (args) => guarded(async () => {
       const conn = requireConnection(args.connection, "list_metadata");
-      if (args.type && !TYPE_RE.test(args.type)) return fail("invalid metadata type");
+      if (args.type && !TYPE_RE.test(args.type)) return fail2("invalid metadata type");
       if (args.live) {
-        if (!args.type) return fail("live=true requires a metadata type.");
+        if (!args.type) return fail2("live=true requires a metadata type.");
         const soap = new MetadataSoapClient(tokenMgr, conn, config2.salesforce.apiVersion);
         const props = await soap.listMetadata([args.type]);
         const items2 = new Map(
@@ -37662,10 +43384,10 @@ function registerMetadataTools(server, deps) {
     },
     async (args) => guarded(async () => {
       const conn = requireConnection(args.connection, "retrieve_metadata");
-      if (!TYPE_RE.test(args.type)) return fail("invalid metadata type");
+      if (!TYPE_RE.test(args.type)) return fail2("invalid metadata type");
       if (args.flow_version !== void 0) {
-        if (args.type !== "Flow") return fail("flow_version applies only to type Flow.");
-        if (args.names.length !== 1) return fail("flow_version takes exactly one name.");
+        if (args.type !== "Flow") return fail2("flow_version applies only to type Flow.");
+        if (args.names.length !== 1) return fail2("flow_version takes exactly one name.");
       }
       const includeDeps = args.include_dependencies !== false;
       const perArtifact = Math.min(args.max_bytes ?? DEFAULT_CONTENT_BYTES, MAX_CONTENT_BYTES);
@@ -37729,7 +43451,7 @@ function registerMetadataTools(server, deps) {
     },
     async (args) => guarded(async () => {
       const conn = requireConnection(args.connection, "describe_schema");
-      if (!/^[A-Za-z0-9_]+$/.test(args.object)) return fail("invalid object API name");
+      if (!/^[A-Za-z0-9_]+$/.test(args.object)) return fail2("invalid object API name");
       const rest = new RestClient(tokenMgr, conn, config2.salesforce.apiVersion);
       const d = await rest.describeSObject(args.object);
       const fields = (d.fields ?? []).slice(0, 300).map((f) => {
@@ -37804,7 +43526,7 @@ function registerMetadataTools(server, deps) {
       const conn = requireConnection(args.connection, "get_dependencies");
       const known = db.getArtifact(conn.id, args.type, args.name) !== null || db.edgesFrom(conn.id, args.type, args.name).length > 0 || db.edgesTo(conn.id, args.type, args.name).length > 0;
       if (!known) {
-        return fail(
+        return fail2(
           `No artifact or edges found for ${args.type}:${args.name} in the local graph. Check the name with search_metadata or list_metadata, or run refresh_snapshot.`
         );
       }
@@ -37823,22 +43545,47 @@ function registerMetadataTools(server, deps) {
     "refresh_snapshot",
     {
       title: "Refresh the metadata snapshot",
-      description: "Manifest-driven re-retrieve of the org's metadata into the local snapshot + index + dependency graph. Long-running on big orgs: an in-progress result means call refresh_snapshot again to check on it. check_only=true just reports staleness.",
+      description: "Manifest-driven re-retrieve of the org's metadata into the local snapshot + index + dependency graph. Long-running on big orgs: an in-progress result means call refresh_snapshot again to check on it. check_only=true just reports staleness. members re-reads only the named components (a child such as a CustomField re-reads its whole parent object; a bundle is replaced whole) into an EXISTING snapshot \u2014 use it for what an execute_deploy result reports as not re-baselined, or to pick up one change made in the org. A member whose type this snapshot does not cover is skipped, unless the org's listing shows no unpackaged component of that type other than the named ones (never for foldered types). A member-scoped refresh never re-queries the org-computed dependency data and does not see anything else that changed in the org.",
       inputSchema: {
         connection: external_exports.string().describe("Connection alias (or id)."),
         types: external_exports.array(external_exports.string()).optional().describe("Metadata types to refresh (default: the configured manifest)."),
         check_only: external_exports.boolean().optional().describe("Only compare org lastModifiedDate against the index; retrieve nothing."),
         job_id: external_exports.string().optional().describe(
-          "Poll a RUNNING refresh by the job_id an earlier call returned \u2014 pass {connection, job_id} ALONE. Jobs are keyed by their requested type set, so a poll only ever returns the refresh it names (re-sending the same types attaches to the same job too)."
+          "Poll a RUNNING refresh by the job_id an earlier call returned \u2014 pass {connection, job_id} ALONE. Jobs are keyed by their requested type set (or member set), so a poll only ever returns the refresh it names (re-sending the same types or members attaches to the same job too)."
+        ),
+        // S46 Part C: a member-scoped re-read into an existing snapshot.
+        members: external_exports.array(external_exports.object({ type: external_exports.string(), api_name: external_exports.string() })).min(1).max(100).optional().describe(
+          "Re-read ONLY these components \u2014 [{type, api_name}], at most 100, passed ALONE with connection (not with types, check_only or job_id). Children are dotted (Account.My_Field__c) and re-read their parent document; a FlowDefinition name re-reads the Flow. Each member comes back refreshed, removed (no longer in what the org returned for it) or skipped with the reason."
         )
       }
     },
     async (args) => guarded(async () => {
       const conn = requireConnection(args.connection, "refresh_snapshot");
-      if (args.job_id !== void 0 && (args.types !== void 0 || args.check_only)) {
-        return fail("Pass job_id ALONE to poll a running refresh.");
+      if (args.members !== void 0) {
+        if (args.types !== void 0 || args.check_only !== void 0 || args.job_id !== void 0) {
+          return fail2("Pass members ALONE with connection \u2014 not with types, check_only or job_id.");
+        }
+        const bad = args.members.find((m) => !TYPE_RE.test(m.type) || !nameOk(m.api_name));
+        if (bad) {
+          return fail2(
+            `invalid member "${bad.type}:${bad.api_name}" \u2014 expected a metadata type name and a full API name (children dotted, foldered names "Folder/Name").`
+          );
+        }
+        const members = args.members.map((m) => ({ type: m.type, api_name: m.api_name }));
+        const run = await engine.refreshMembers(conn, members);
+        switch (run.status) {
+          case "complete":
+            return ok({ job_id: run.job_id, ...run.summary }, memberCompleteMessage(run.summary));
+          case "failed":
+            return fail2(`Member refresh failed (job ${run.job_id}): ${run.error}`);
+          case "in_progress":
+            return ok(run.state, memberRunningMessage(run.job_id));
+        }
       }
-      if (args.types?.some((t) => !TYPE_RE.test(t))) return fail("invalid metadata type");
+      if (args.job_id !== void 0 && (args.types !== void 0 || args.check_only)) {
+        return fail2("Pass job_id ALONE to poll a running refresh.");
+      }
+      if (args.types?.some((t) => !TYPE_RE.test(t))) return fail2("invalid metadata type");
       if (args.check_only) {
         const report = await engine.checkStaleness(conn, args.types);
         return ok({ connection: conn.alias, ...report });
@@ -37846,14 +43593,19 @@ function registerMetadataTools(server, deps) {
       const outcome = await engine.refresh(conn, args.types, args.job_id);
       switch (outcome.status) {
         case "unknown_job":
-          return fail(
-            `No running or uncollected refresh job "${outcome.job_id}" on "${conn.alias}" \u2014 its result may already have been collected. Re-send types to start a new refresh.`
+          return fail2(
+            `No running or uncollected refresh job "${outcome.job_id}" on "${conn.alias}" \u2014 its result may already have been collected. ` + (outcome.job_id.startsWith("members-") ? "Re-send the same members to start a new member refresh." : "Re-send types to start a new refresh.")
           );
         case "complete":
-          return ok({ job_id: outcome.job_id, ...outcome.summary }, "Snapshot refreshed.");
+          return outcome.kind === "members" ? ok({ job_id: outcome.job_id, ...outcome.summary }, memberCompleteMessage(outcome.summary)) : ok({ job_id: outcome.job_id, ...outcome.summary }, "Snapshot refreshed.");
         case "failed":
-          return fail(`Snapshot refresh failed (job ${outcome.job_id}): ${outcome.error}`);
+          return fail2(
+            `${outcome.job_id.startsWith("members-") ? "Member" : "Snapshot"} refresh failed (job ${outcome.job_id}): ${outcome.error}`
+          );
         case "in_progress":
+          if (outcome.state.members !== void 0) {
+            return ok(outcome.state, memberRunningMessage(outcome.job_id));
+          }
           return ok(
             outcome.state,
             // carries job_id and the requested types
@@ -37880,19 +43632,19 @@ function registerMetadataTools(server, deps) {
       let sinceMs = null;
       if (args.since !== void 0) {
         sinceMs = Date.parse(args.since);
-        if (Number.isNaN(sinceMs)) return fail("since must be an ISO date or datetime.");
+        if (Number.isNaN(sinceMs)) return fail2("since must be an ISO date or datetime.");
       }
-      if (args.types?.some((t) => !TYPE_RE.test(t))) return fail("invalid metadata type");
+      if (args.types?.some((t) => !TYPE_RE.test(t))) return fail2("invalid metadata type");
       const counts = db.countArtifactsByType(conn.id);
       const indexedTopLevel = Object.keys(counts).filter((t) => !ORG_CHANGES_CHILD_TYPES.has(t));
       if (indexedTopLevel.length === 0) {
-        return fail("No snapshot index for this connection \u2014 run refresh_snapshot first.");
+        return fail2("No snapshot index for this connection \u2014 run refresh_snapshot first.");
       }
       const requested = args.types ?? indexedTopLevel;
       const types = requested.filter((t) => indexedTopLevel.includes(t));
       const skipped = requested.filter((t) => !indexedTopLevel.includes(t));
       if (types.length === 0) {
-        return fail(
+        return fail2(
           `None of the requested types are indexed for "${conn.alias}" \u2014 indexed types: ${indexedTopLevel.join(", ")}. Run refresh_snapshot to widen coverage.`
         );
       }
@@ -38110,8 +43862,47 @@ async function fetchFlowVersionContent(deps, conn, name, version2) {
   return {
     body: flowMetadataJsonToXml(record2.Metadata),
     source: `tooling (version ${version2}, ${record2.Status ?? "status unknown"})`,
-    note: "Converted from the Tooling API's JSON. Faithful for reading and diffing \u2014 two converted versions diff cleanly against each other \u2014 but element order is alphabetical, so comparing against a Metadata API retrieve may show ordering-only noise, and the output is NOT guaranteed deploy-ready."
+    note: "Converted from the Tooling API's JSON. Faithful for reading and diffing \u2014 two converted versions diff cleanly against each other \u2014 but element order is alphabetical, so comparing against a Metadata API retrieve may show ordering-only noise, and the output is NOT guaranteed deploy-ready.",
+    version_status: record2.Status ?? null
   };
+}
+async function readFlowLive(deps, conn, name) {
+  const { tokenMgr, config: config2 } = deps;
+  const rest = new RestClient(tokenMgr, conn, config2.salesforce.apiVersion);
+  const { ns, short } = splitNamespace(name);
+  const escaped = short.replaceAll("'", "\\'");
+  const defs = pickAllByNamespace(
+    await rest.toolingQuery(
+      `SELECT Id, ActiveVersionId, LatestVersionId, NamespacePrefix FROM FlowDefinition WHERE DeveloperName = '${escaped}'`,
+      10
+    ),
+    ns
+  );
+  const versionId = defs[0]?.ActiveVersionId ?? defs[0]?.LatestVersionId;
+  if (versionId) {
+    const versions = await rest.toolingQuery(
+      `SELECT Metadata FROM Flow WHERE Id = '${versionId.replaceAll("'", "\\'")}'`,
+      1
+    );
+    if (versions[0]?.Metadata) {
+      return {
+        kind: "tooling",
+        metadata: versions[0].Metadata,
+        which: defs[0]?.ActiveVersionId ? "active" : "latest"
+      };
+    }
+  }
+  const views = pickAllByNamespace(
+    await rest.query(
+      `SELECT ApiName, Label, ProcessType, TriggerType, IsActive, NamespacePrefix, Description, ActiveVersionId FROM FlowDefinitionView WHERE ApiName = '${escaped}'`,
+      10
+    ),
+    ns
+  );
+  if (views[0]) {
+    return { kind: "descriptor", view: stripAttributes(views[0]) };
+  }
+  return { kind: "absent" };
 }
 async function fetchArtifactContent(deps, conn, type, name) {
   const { db, store, tokenMgr, config: config2 } = deps;
@@ -38138,7 +43929,7 @@ async function fetchArtifactContent(deps, conn, type, name) {
       const abs = store.currentFilePath(conn.id, rel);
       let bytes = 0;
       try {
-        bytes = abs ? fs13.statSync(abs).size : 0;
+        bytes = abs ? fs14.statSync(abs).size : 0;
       } catch {
       }
       return { path: rel, bytes, snapshot_path: abs };
@@ -38182,40 +43973,17 @@ async function fetchArtifactContent(deps, conn, type, name) {
   if (type === "Flow") {
     const body2 = readSnapshotArtifact(deps, conn, type, name);
     if (body2) return { body: body2, source: "snapshot" };
-    const rest = new RestClient(tokenMgr, conn, config2.salesforce.apiVersion);
-    const { ns, short } = splitNamespace(name);
-    const escaped = short.replaceAll("'", "\\'");
-    const defs = pickAllByNamespace(
-      await rest.toolingQuery(
-        `SELECT Id, ActiveVersionId, LatestVersionId, NamespacePrefix FROM FlowDefinition WHERE DeveloperName = '${escaped}'`,
-        10
-      ),
-      ns
-    );
-    const versionId = defs[0]?.ActiveVersionId ?? defs[0]?.LatestVersionId;
-    if (versionId) {
-      const versions = await rest.toolingQuery(
-        `SELECT Metadata FROM Flow WHERE Id = '${versionId.replaceAll("'", "\\'")}'`,
-        1
-      );
-      if (versions[0]?.Metadata) {
-        return {
-          body: JSON.stringify(versions[0].Metadata, null, 2),
-          source: "tooling_api_live",
-          note: `This flow is not visible to the Metadata API. This is the Tooling API JSON representation of the ${defs[0]?.ActiveVersionId ? "active" : "latest"} version.`
-        };
-      }
-    }
-    const views = pickAllByNamespace(
-      await rest.query(
-        `SELECT ApiName, Label, ProcessType, TriggerType, IsActive, NamespacePrefix, Description, ActiveVersionId FROM FlowDefinitionView WHERE ApiName = '${escaped}'`,
-        10
-      ),
-      ns
-    );
-    if (views[0]) {
+    const live = await readFlowLive(deps, conn, name);
+    if (live.kind === "tooling") {
       return {
-        body: JSON.stringify(stripAttributes(views[0]), null, 2),
+        body: JSON.stringify(live.metadata, null, 2),
+        source: "tooling_api_live",
+        note: `This flow is not visible to the Metadata API. This is the Tooling API JSON representation of the ${live.which} version.`
+      };
+    }
+    if (live.kind === "descriptor") {
+      return {
+        body: JSON.stringify(live.view, null, 2),
         source: "flow_definition_view",
         note: "This flow is platform/feature-delivered: Salesforce does not expose its definition content through the Metadata or Tooling APIs. This descriptor (identity, type, active status) is everything the platform makes available."
       };
@@ -38393,7 +44161,7 @@ function registerDiffTools(server, deps) {
       }
     },
     async (args) => guarded(() => {
-      if (args.types?.some((t) => !TYPE_RE2.test(t))) return fail("invalid metadata type");
+      if (args.types?.some((t) => !TYPE_RE2.test(t))) return fail2("invalid metadata type");
       const [a, b] = requireBoth(args.connection_a, args.connection_b, "diff_orgs");
       const aArtifacts = db.listArtifacts(a.id);
       const bArtifacts = db.listArtifacts(b.id);
@@ -38402,7 +44170,7 @@ function registerDiffTools(server, deps) {
         [b, bArtifacts]
       ]) {
         if (list.length === 0) {
-          return fail(
+          return fail2(
             `Connection "${conn.alias}" has no metadata snapshot. Run refresh_snapshot on it first.`
           );
         }
@@ -38437,14 +44205,19 @@ function registerDiffTools(server, deps) {
           onlyB.push(`${bArt.type}:${bArt.apiName}`);
         }
       }
-      const newest2 = (list) => list.reduce(
-        (acc, x) => acc && acc > x.retrievedAt ? acc : x.retrievedAt,
-        null
-      );
+      const ages = (rows) => {
+        let oldest2 = null;
+        let newest2 = null;
+        for (const { retrievedAt } of rows) {
+          if (oldest2 === null || retrievedAt < oldest2) oldest2 = retrievedAt;
+          if (newest2 === null || retrievedAt > newest2) newest2 = retrievedAt;
+        }
+        return { oldest: oldest2, newest: newest2 };
+      };
       return ok({
         from: a.alias,
         to: b.alias,
-        snapshot_taken: { [a.alias]: newest2(aArtifacts), [b.alias]: newest2(bArtifacts) },
+        snapshot_taken: { [a.alias]: ages(aMap.values()), [b.alias]: ages(bMap.values()) },
         counts_by_type: counts,
         changed: changed.slice(0, BUCKET_LIST_CAP),
         changed_truncated: changed.length > BUCKET_LIST_CAP,
@@ -38452,7 +44225,7 @@ function registerDiffTools(server, deps) {
         only_in_a_truncated: onlyA.length > BUCKET_LIST_CAP,
         only_in_b: onlyB.slice(0, BUCKET_LIST_CAP),
         only_in_b_truncated: onlyB.length > BUCKET_LIST_CAP,
-        note: "Buckets compare snapshot content hashes. Use diff_artifact for the semantic detail of any changed artifact. Consider refresh_snapshot on both sides if the snapshot timestamps are stale."
+        note: "Buckets compare snapshot content hashes. Use diff_artifact for the semantic detail of any changed artifact. Rows in one snapshot can have different ages (a refresh of some types, or a re-baseline after a deploy, updates only what it touched) \u2014 a side is only as fresh as its oldest row."
       });
     })
   );
@@ -38469,14 +44242,14 @@ function registerDiffTools(server, deps) {
       }
     },
     async (args) => guarded(() => {
-      if (!TYPE_RE2.test(args.type)) return fail("invalid metadata type");
-      if (!nameOk2(args.name)) return fail("invalid artifact name");
+      if (!TYPE_RE2.test(args.type)) return fail2("invalid metadata type");
+      if (!nameOk2(args.name)) return fail2("invalid artifact name");
       const [a, b] = requireBoth(args.connection_a, args.connection_b, "diff_artifact");
       const aContent = readArtifactFromSnapshot(deps, a, args.type, args.name);
       const bContent = readArtifactFromSnapshot(deps, b, args.type, args.name);
       const base = { from: a.alias, to: b.alias, type: args.type, name: args.name };
       if (aContent === null && bContent === null) {
-        return fail(
+        return fail2(
           `${args.type} ${args.name} is in neither snapshot. Check the name with search_metadata, or run refresh_snapshot on both connections. (Standard/feature-delivered flows never enter snapshots \u2014 retrieve_metadata each side individually for those.)`
         );
       }
@@ -38543,7 +44316,7 @@ function registerDataTools(server, deps) {
     async (args) => guarded(async () => {
       const conn = requireConnection(args.connection, "soql_query");
       const soql = args.query.trim();
-      if (!/^select\s/i.test(soql)) return fail("Only SELECT queries are accepted.");
+      if (!/^select\s/i.test(soql)) return fail2("Only SELECT queries are accepted.");
       if (args.tooling && !conn.grants.metadata_read) {
         audit.record("grant.refused", {
           connectionId: conn.id,
@@ -38551,13 +44324,13 @@ function registerDataTools(server, deps) {
           outcome: "refused",
           detail: { required: "metadata_read", reason: "tooling_query" }
         });
-        return fail(
+        return fail2(
           `Tooling API queries read metadata-class content, so tooling=true requires the "metadata_read" grant on "${conn.alias}" in addition to data_read. Grants are set on the connection management page (manage_connection).`
         );
       }
       const structural = stripSoqlLiterals(soql);
       if (/\bfor\s+update\b/i.test(structural)) {
-        return fail("FOR UPDATE locks rows \u2014 not available through soql_query.");
+        return fail2("FOR UPDATE locks rows \u2014 not available through soql_query.");
       }
       for (const m of structural.matchAll(/\bFROM\s+([A-Za-z0-9_]+)/gi)) {
         const required2 = GRANT_GATED_SOBJECTS[m[1].toLowerCase()];
@@ -38568,7 +44341,7 @@ function registerDataTools(server, deps) {
             outcome: "refused",
             detail: { required: required2, sobject: m[1] }
           });
-          return fail(
+          return fail2(
             `${m[1]} carries ${required2 === "metadata_read" ? "metadata" : "diagnostics"} content, so querying it requires the "${required2}" grant on "${conn.alias}" in addition to data_read. Grants are set on the connection management page (manage_connection).`
           );
         }
@@ -38604,13 +44377,13 @@ function registerDataTools(server, deps) {
     },
     async (args) => guarded(async () => {
       const conn = requireConnection(args.connection, "get_record");
-      if (!/^[A-Za-z0-9_]+$/.test(args.object)) return fail("invalid object API name");
-      if (!/^[a-zA-Z0-9]{15}([a-zA-Z0-9]{3})?$/.test(args.id)) return fail("invalid record id");
+      if (!/^[A-Za-z0-9_]+$/.test(args.object)) return fail2("invalid object API name");
+      if (!/^[a-zA-Z0-9]{15}([a-zA-Z0-9]{3})?$/.test(args.id)) return fail2("invalid record id");
       if (args.fields?.some((f) => !/^[A-Za-z0-9_.]+$/.test(f))) {
-        return fail("invalid field name");
+        return fail2("invalid field name");
       }
-      const path14 = `/services/data/${config2.salesforce.apiVersion}/sobjects/${encodeURIComponent(args.object)}/${encodeURIComponent(args.id)}` + (args.fields?.length ? `?fields=${encodeURIComponent(args.fields.join(","))}` : "");
-      const res = await rest(conn).request(path14);
+      const path17 = `/services/data/${config2.salesforce.apiVersion}/sobjects/${encodeURIComponent(args.object)}/${encodeURIComponent(args.id)}` + (args.fields?.length ? `?fields=${encodeURIComponent(args.fields.join(","))}` : "");
+      const res = await rest(conn).request(path17);
       const record2 = truncateDeep(stripAttributes(await res.json()));
       return ok({ connection: conn.alias, object: args.object, record: record2 });
     })
@@ -38629,11 +44402,11 @@ function registerDataTools(server, deps) {
     },
     async (args) => guarded(async () => {
       const conn = requireConnection(args.connection, "explain_access");
-      if (!/^[A-Za-z0-9_]+$/.test(args.object)) return fail("invalid object API name");
+      if (!/^[A-Za-z0-9_]+$/.test(args.object)) return fail2("invalid object API name");
       let fieldName = null;
       if (args.field !== void 0) {
         const raw = args.field.includes(".") ? args.field.split(".").slice(-1)[0] : args.field;
-        if (!/^[A-Za-z0-9_]+$/.test(raw)) return fail("invalid field API name");
+        if (!/^[A-Za-z0-9_]+$/.test(raw)) return fail2("invalid field API name");
         fieldName = raw;
       }
       const client = rest(conn);
@@ -38652,10 +44425,10 @@ function registerDataTools(server, deps) {
         5
       );
       if (users.length === 0) {
-        return fail(`No user matches "${uref}" on ${conn.alias} (tried ${userWhere.split(" ")[0]}).`);
+        return fail2(`No user matches "${uref}" on ${conn.alias} (tried ${userWhere.split(" ")[0]}).`);
       }
       if (users.length > 1) {
-        return fail(
+        return fail2(
           `${users.length} users match "${uref}" \u2014 use the username or id: ` + users.map((u) => `${u.Name} <${u.Username}>`).join(", ")
         );
       }
@@ -38766,13 +44539,13 @@ function registerDataTools(server, deps) {
         const slash = ref.lastIndexOf("/");
         const folderToken = slash >= 0 ? ref.slice(0, slash) : null;
         const leaf = slash >= 0 ? ref.slice(slash + 1) : ref;
-        if (!/^[A-Za-z0-9_]+$/.test(leaf)) return fail("invalid report DeveloperName");
+        if (!/^[A-Za-z0-9_]+$/.test(leaf)) return fail2("invalid report DeveloperName");
         const rows = await client.query(
           `SELECT Id, Name, DeveloperName, FolderName FROM Report WHERE DeveloperName = '${esc3(leaf)}' LIMIT 5`,
           5
         );
         if (rows.length === 0) {
-          return fail(
+          return fail2(
             `No report "${leaf}" is visible on ${conn.alias}. Either it does not exist or its folder is not shared with the connected user \u2014 Analytics visibility is folder sharing, so those two cases look identical from here.`
           );
         }
@@ -38785,7 +44558,7 @@ function registerDataTools(server, deps) {
           if (filtered.length === 1) candidates = filtered;
         }
         if (candidates.length > 1) {
-          return fail(
+          return fail2(
             `${candidates.length} reports share the DeveloperName "${leaf}" \u2014 pass the report id instead: ` + candidates.map((r) => `${r.Name} [${r.FolderName ?? "no folder"}] = ${r.Id}`).join(", ")
           );
         }
@@ -38802,11 +44575,11 @@ function registerDataTools(server, deps) {
         const msg = err2 instanceof Error ? err2.message : String(err2);
         if (!/Salesforce API error/.test(msg)) throw err2;
         if (/error 404 /.test(msg) || /NOT_FOUND/i.test(msg)) {
-          return fail(
+          return fail2(
             `The org has no runnable report ${reportId} for the connected user \u2014 it may have been deleted, or its folder is not shared with them. (${msg})`
           );
         }
-        return fail(
+        return fail2(
           `The report could not run synchronously: ${msg} Joined-format and very large/long-running reports are not supported by the synchronous Analytics API.`
         );
       }
@@ -38829,7 +44602,7 @@ function registerDataTools(server, deps) {
       const client = rest(conn);
       if (args.log_id) {
         if (!/^[a-zA-Z0-9]{15}([a-zA-Z0-9]{3})?$/.test(args.log_id)) {
-          return fail("invalid log id");
+          return fail2("invalid log id");
         }
         const res = await client.request(
           `/services/data/${config2.salesforce.apiVersion}/tooling/sobjects/ApexLog/${encodeURIComponent(args.log_id)}/Body`
@@ -38881,7 +44654,7 @@ function registerDataTools(server, deps) {
         (v) => v !== void 0
       );
       if (modes.length !== 1) {
-        return fail("Pass exactly one of class_names, tests, or test_run_id.");
+        return fail2("Pass exactly one of class_names, tests, or test_run_id.");
       }
       if (args.test_run_id !== void 0) {
         return pollApexTestRun(client, conn.alias, args.test_run_id);
@@ -38889,11 +44662,11 @@ function registerDataTools(server, deps) {
       const APEX_NAME = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)?$/;
       const METHOD_NAME = /^[A-Za-z][A-Za-z0-9_]*$/;
       for (const name of args.class_names ?? args.tests.map((t) => t.class_name)) {
-        if (!APEX_NAME.test(name)) return fail(`invalid Apex class name "${name}"`);
+        if (!APEX_NAME.test(name)) return fail2(`invalid Apex class name "${name}"`);
       }
       for (const t of args.tests ?? []) {
         for (const m of t.methods ?? []) {
-          if (!METHOD_NAME.test(m)) return fail(`invalid test method name "${m}"`);
+          if (!METHOD_NAME.test(m)) return fail2(`invalid test method name "${m}"`);
         }
       }
       const body = args.class_names ? { classNames: args.class_names.join(",") } : {
@@ -38908,7 +44681,7 @@ function registerDataTools(server, deps) {
       );
       const runId = await res.json();
       if (typeof runId !== "string" || !SF_ID_RE.test(runId)) {
-        return fail(
+        return fail2(
           `unexpected response from the test runner: ${JSON.stringify(runId).slice(0, 200)}`
         );
       }
@@ -38924,7 +44697,7 @@ function registerDataTools(server, deps) {
     "run_agent_eval",
     {
       title: "Run an Agentforce agent test (Testing Center or Studio)",
-      description: "Start and poll an Agentforce agent test run for a definition already deployed to the org, on either runner: Testing Center (AiEvaluationDefinition \u2014 the documented Connect API) or the Agentforce Studio Tests tab (AiTestingDefinition \u2014 BETA: Salesforce labels the type and its runner Beta, the runner is absent from the Connect REST reference, and its result schema may change). Two-step like run_apex_tests: submit with eval (the definition DeveloperName) for a run_id; call again with run_id to poll and, once complete, read per-case results \u2014 Testing Center: routed topic, executed action sequence and each expectation outcome; Studio: the agent's response (subject_response) and each scorer's outcome, with an explanation only when the scorer response carries one. Runner selection: a run_id picks its runner by prefix (4KB = Testing Center, 3A2 = Studio \u2014 both live-confirmed; anything else is refused); a bare eval is looked up live via listMetadata across both types, which needs the metadata_read grant \u2014 one match picks the runner (and the org's exact-case name is what gets submitted), a name held by both is refused as ambiguous, a name held by neither is refused (check the name or refresh_snapshot), and a failed lookup is refused too \u2014 nothing is ever submitted to a guessed runner. Pass runner to skip detection (no metadata_read needed then). Side effects, honestly, on BOTH runners: the agent under test executes its REAL actions during the run \u2014 records they create or change are NOT rolled back (unlike Apex test runs), so prefer sandboxes for agents whose actions write. Runs take MINUTES (poll sparingly); orgs allow ~10 concurrent runs. Polling and results need diagnostics_read; STARTING a run additionally requires data_write, because it triggers real agent-action execution \u2014 the definition itself was approved through the deploy ritual, which is why no further confirmation code is needed here. Testing Center requires an ACTIVE agent version; whether a Studio suite's subjectVersion can target a non-active version is unverified \u2014 expect a run-level FAILED with error_message if not. Studio pass/fail is DERIVED from each scorer's JSON response and is null when no explicit verdict exists \u2014 read the raw scorer rows when it matters.",
+      description: "Start and poll an Agentforce agent test run for a definition already deployed to the org, on either runner: Testing Center (AiEvaluationDefinition \u2014 the documented Connect API) or the Agentforce Studio Tests tab (AiTestingDefinition \u2014 BETA: Salesforce labels the type and its runner Beta, the runner is absent from the Connect REST reference, and its result schema may change). Two-step: submit with eval (the definition DeveloperName) for a run_id; call again with run_id to poll and read per-case results \u2014 Testing Center: routed topic, action sequence and each expectation outcome; Studio: the agent's response and each scorer's outcome, with an explanation only when the scorer response carries one. Runner selection: a run_id picks its runner by prefix (any unrecognised prefix is refused); a bare eval is looked up live via listMetadata across both types, which needs the metadata_read grant \u2014 one match picks the runner, a name held by both is refused as ambiguous, a name held by neither is refused, and a failed lookup is refused too \u2014 nothing is ever submitted to a guessed runner. Pass runner to skip detection. Side effects, honestly, on BOTH runners: the agent under test executes its REAL actions during the run \u2014 records they create or change are NOT rolled back, so prefer sandboxes for agents whose actions write. Runs take MINUTES (poll sparingly). Polling and results need diagnostics_read; STARTING a run additionally requires data_write, because it triggers real agent-action execution \u2014 the definition itself was approved through the deploy ritual, which is why no further confirmation code is needed here. Testing Center requires an ACTIVE agent version; whether a Studio suite's subjectVersion can target a non-active version is unverified \u2014 expect a run-level FAILED with error_message if not. Studio pass/fail is DERIVED from each scorer's JSON response and is null when no explicit verdict exists \u2014 read the raw scorer rows when it matters.",
       inputSchema: {
         connection: external_exports.string().describe("Connection alias (or id)."),
         eval: external_exports.string().regex(/^[A-Za-z][A-Za-z0-9_]*$/).optional().describe(
@@ -38943,13 +44716,13 @@ function registerDataTools(server, deps) {
       const conn = requireConnection(args.connection, "run_agent_eval");
       const client = rest(conn);
       const modes = [args.eval, args.run_id].filter((v) => v !== void 0);
-      if (modes.length !== 1) return fail("Pass exactly one of eval or run_id.");
+      if (modes.length !== 1) return fail2("Pass exactly one of eval or run_id.");
       const details = args.include_details === true;
       const apiVersion = config2.salesforce.apiVersion;
       if (args.run_id !== void 0) {
         const runner2 = args.runner ?? RUNNER_BY_RUN_ID_PREFIX[args.run_id.slice(0, 3)];
         if (!runner2) {
-          return fail(
+          return fail2(
             `Cannot tell which runner issued run_id "${args.run_id}": Testing Center run ids start with 4KB and Agentforce Studio run ids with 3A2 (both live-confirmed). If it came from one of them anyway, pass runner explicitly.`
           );
         }
@@ -38962,10 +44735,11 @@ function registerDataTools(server, deps) {
           outcome: "refused",
           detail: { required: "data_write", reason: "agent_eval_start" }
         });
-        return fail(
+        return fail2(
           `Starting an evaluation run executes the agent's REAL actions, so it requires the "data_write" grant on "${conn.alias}" in addition to diagnostics_read (polling an existing run_id needs only diagnostics_read). Grants are set on the connection management page (manage_connection).`
         );
       }
+      deps.deploys.assertPolicyForStart(conn, "run_agent_eval");
       let runner;
       let definition;
       let detection;
@@ -38981,25 +44755,25 @@ function registerDataTools(server, deps) {
             outcome: "refused",
             detail: { required: "metadata_read", reason: "agent_eval_runner_detection" }
           });
-          return fail(
+          return fail2(
             `Runner detection reads the org's metadata inventory and needs the "metadata_read" grant on "${conn.alias}" \u2014 pass runner: testing_center or agentforce_studio to say which runner holds "${args.eval}" (no lookup is made then). Nothing was started.`
           );
         }
         const soap = new MetadataSoapClient(tokenMgr, conn, apiVersion);
         const found = await detectAgentTestRunner(soap, args.eval);
         if (found.kind === "lookup_failed") {
-          return fail(
+          return fail2(
             `runner detection failed: ${found.error}. Nothing was started; pass runner explicitly (testing_center or agentforce_studio) or retry.`
           );
         }
         if (found.kind === "both") {
-          return fail(
+          return fail2(
             `Both an AiEvaluationDefinition (Testing Center) and an AiTestingDefinition (Agentforce Studio) named "${args.eval}" exist on "${conn.alias}". Pass runner: "testing_center" or "agentforce_studio" to say which to run.`
           );
         }
         if (found.kind === "none") {
           const gap = found.unsupported.length ? ` (this org/API version does not know: ${found.unsupported.join(", ")})` : "";
-          return fail(
+          return fail2(
             `No deployed test definition named "${args.eval}" of either type on "${conn.alias}"${gap}. Check the name (list_metadata live=true with type AiEvaluationDefinition or AiTestingDefinition, or refresh_snapshot), or deploy it first. Nothing was started.`
           );
         }
@@ -39016,12 +44790,12 @@ function registerDataTools(server, deps) {
       });
       const submitted = await res.json();
       if (studio && submitted.runId === void 0) {
-        return fail(
+        return fail2(
           `The Agentforce Studio runner accepted the request but returned no run id \u2014 Salesforce's own client reads this as "a run of ${definition} is already in progress". Nothing new was started; poll the in-flight run_id if you have it, or resubmit once it finishes. Raw response: ${JSON.stringify(submitted).slice(0, 200)}`
         );
       }
       if (typeof submitted.runId !== "string" || !SF_ID_RE.test(submitted.runId)) {
-        return fail(
+        return fail2(
           `unexpected response from the ${studio ? "Studio test" : "evaluation"} runner: ${JSON.stringify(submitted).slice(0, 200)}`
         );
       }
@@ -39070,7 +44844,7 @@ function registerDataTools(server, deps) {
       let tracedUser;
       const requested = args.user?.trim();
       if (args.user !== void 0 && !requested) {
-        return fail(
+        return fail2(
           "user was blank \u2014 pass a User Id, Username, or Name, or omit it entirely to trace the connected user."
         );
       }
@@ -39096,19 +44870,19 @@ function registerDataTools(server, deps) {
           }
         }
         if (rows.length === 0) {
-          return fail(
+          return fail2(
             byId ? `No user on "${conn.alias}" has Id "${requested}". Find the right one with soql_query (SELECT Id, Username, Name FROM User WHERE \u2026).` : `No user on "${conn.alias}" matches "${requested}" \u2014 tried the exact Username and Name, then a Name search. Find the right one with soql_query (SELECT Id, Username, Name FROM User WHERE \u2026).`
           );
         }
         if (rows.length > 1) {
           const list = rows.slice(0, 6).map((r) => `${r.Name} <${r.Username}>${r.IsActive ? "" : " (INACTIVE)"}`).join("; ");
-          return fail(
+          return fail2(
             `"${requested}" matches ${fuzzyCapped ? "at least 7" : rows.length} users on "${conn.alias}" \u2014 name one exactly (Username or Id): ${list}.`
           );
         }
         const row = rows[0];
         if (!row.IsActive) {
-          return fail(
+          return fail2(
             `User ${row.Name} <${row.Username}> is INACTIVE on "${conn.alias}" \u2014 an inactive user runs nothing, so a trace flag on them would capture nothing. Trace the active user actually executing the automation.`
           );
         }
@@ -39124,7 +44898,7 @@ function registerDataTools(server, deps) {
           userId = users[0]?.Id ?? null;
         }
         if (!userId) {
-          return fail(
+          return fail2(
             `Cannot determine which user to trace on "${conn.alias}" \u2014 the stored connection has no user id or username. Re-connect the org (connect_org) to refresh it.`
           );
         }
@@ -39237,9 +45011,9 @@ function flattenGroupings(nodes, prefix) {
   const map = /* @__PURE__ */ new Map();
   for (const n of nodes ?? []) {
     if (typeof n.key !== "string") continue;
-    const path14 = [...prefix, n.label ?? ""];
-    map.set(n.key, path14);
-    for (const [k, v] of flattenGroupings(n.groupings, path14)) map.set(k, v);
+    const path17 = [...prefix, n.label ?? ""];
+    map.set(n.key, path17);
+    for (const [k, v] of flattenGroupings(n.groupings, path17)) map.set(k, v);
   }
   return map;
 }
@@ -39349,10 +45123,10 @@ function truncateDeep(value) {
   return value;
 }
 async function pollApexTestRun(client, alias, runId) {
-  if (!SF_ID_RE.test(runId)) return fail("invalid test_run_id");
+  if (!SF_ID_RE.test(runId)) return fail2("invalid test_run_id");
   const queue = await client.toolingQuery(`SELECT Status, ApexClassId FROM ApexTestQueueItem WHERE ParentJobId = '${runId}'`);
   if (queue.length === 0) {
-    return fail(
+    return fail2(
       `No test run found for id ${runId} \u2014 it may predate what the org retains, or belong to another org.`
     );
   }
@@ -39795,30 +45569,30 @@ var init_data = __esm({
 });
 
 // src/deploy/sources.ts
-import crypto5 from "node:crypto";
-import fs14 from "node:fs";
-import path8 from "node:path";
+import crypto7 from "node:crypto";
+import fs15 from "node:fs";
+import path9 from "node:path";
 function allowedSourceRoots(configured = []) {
   const roots = [stagingDir(), snapshotsDir(), ...configured];
   const real = [];
   for (const root of roots) {
-    if (!path8.isAbsolute(root)) continue;
+    if (!path9.isAbsolute(root)) continue;
     try {
-      real.push(fs14.realpathSync(root));
+      real.push(fs15.realpathSync(root));
     } catch {
     }
   }
   return real;
 }
 function isInside(target, root) {
-  return target === root || target.startsWith(root + path8.sep);
+  return target === root || target.startsWith(root + path9.sep);
 }
 function resolveSourcePath(rawPath, configuredRoots = [], opts = {}) {
   const noun = opts.noun ?? "content_file";
   const maxBytes = opts.maxBytes ?? MAX_SOURCE_FILE_BYTES;
   const given = rawPath.trim();
   if (!given) throw new ContrailError(`${noun} was empty.`, "bad_source_path");
-  if (!path8.isAbsolute(given)) {
+  if (!path9.isAbsolute(given)) {
     throw new ContrailError(
       `${noun} must be an absolute path (got "${given}"). Write the file under ${stagingDir()} and pass that full path.`,
       "bad_source_path"
@@ -39826,11 +45600,11 @@ function resolveSourcePath(rawPath, configuredRoots = [], opts = {}) {
   }
   let real;
   try {
-    real = fs14.realpathSync(given);
+    real = fs15.realpathSync(given);
   } catch {
     throw new ContrailError(`${noun} does not exist: ${given}`, "source_not_found");
   }
-  const stat = fs14.statSync(real);
+  const stat = fs15.statSync(real);
   if (!stat.isFile()) {
     throw new ContrailError(`${noun} is not a regular file: ${given}`, "bad_source_path");
   }
@@ -39844,7 +45618,7 @@ function resolveSourcePath(rawPath, configuredRoots = [], opts = {}) {
   if (!roots.some((root) => isInside(real, root))) {
     const psq = (s) => `'${s.replace(/'/g, "''")}'`;
     const shq = (s) => `'${s.replace(/'/g, `'\\''`)}'`;
-    const copyCmd = process.platform === "win32" ? `Copy-Item -LiteralPath ${psq(given)} -Destination ${psq(stagingDir() + path8.sep)}` : `cp ${shq(given)} ${shq(stagingDir() + "/")}`;
+    const copyCmd = process.platform === "win32" ? `Copy-Item -LiteralPath ${psq(given)} -Destination ${psq(stagingDir() + path9.sep)}` : `cp ${shq(given)} ${shq(stagingDir() + "/")}`;
     throw new ContrailError(
       `${noun} is outside every allowed deploy source root, so Contrail will not deploy it. Allowed: ${roots.join(", ")}. The fix is yours, not the human's: copy the file into staging \u2014 e.g. ${copyCmd} \u2014 and retry with the staged path. Never ask the human to add a folder to deploy.allowedSourceRoots for a one-off; that config.json list is for standing folders the human volunteers unprompted, and only they can edit it.`,
       "source_outside_roots"
@@ -39854,11 +45628,11 @@ function resolveSourcePath(rawPath, configuredRoots = [], opts = {}) {
 }
 function resolveSourceFile(rawPath, configuredRoots = []) {
   const { absPath } = resolveSourcePath(rawPath, configuredRoots);
-  const bytes = fs14.readFileSync(absPath);
+  const bytes = fs15.readFileSync(absPath);
   return {
     content: bytes.toString("utf8"),
     sourcePath: absPath,
-    sourceSha256: crypto5.createHash("sha256").update(bytes).digest("hex")
+    sourceSha256: crypto7.createHash("sha256").update(bytes).digest("hex")
   };
 }
 var MAX_SOURCE_FILE_BYTES;
@@ -39872,6 +45646,22 @@ var init_sources = __esm({
 });
 
 // src/tools/deploy.ts
+function testLevelRefusal(args, conn) {
+  if (args.test_level === "RunSpecifiedTests" && !args.run_tests?.length) {
+    return "RunSpecifiedTests requires run_tests.";
+  }
+  if (args.test_level === "NoTestRun" && conn.orgType === "production") {
+    return `test_level NoTestRun is refused locally on "${conn.alias}" (production): the org rejects it org-side anyway. OMIT test_level \u2014 production then runs local tests for Apex packages and no tests otherwise.`;
+  }
+  return null;
+}
+function closingInstructions(result) {
+  const freeze = result?.governance?.freeze;
+  return freeze && typeof freeze.note === "string" ? freeze.note : APPROVAL_INSTRUCTIONS;
+}
+function governanceOf(args) {
+  return { ticket: args.ticket, justification: args.justification };
+}
 function validateDmlPlan(args) {
   if (args.operation || args.object || args.records || args.ids) {
     return "Send either steps (a plan) or the flat operation/object fields \u2014 not both.";
@@ -39939,7 +45729,7 @@ function registerDeployTools(server, deps) {
     "validate_deploy",
     {
       title: "Validate a metadata deploy (checkOnly)",
-      description: "Build a deploy package and validate it against the org with checkOnly=true \u2014 nothing is committed. Returns the change summary (destructive changes flagged), validation/test results, and blast radius; puts a confirmation code on the human-only approval page. Checking work-in-progress mid-build? Pass dry_run: true \u2014 same validation, NO approval request or code is created (save the human from pages that were never meant to be approved). Normally OMIT test_level \u2014 the org then applies its own default (production runs local tests for Apex packages automatically and refuses an explicit NoTestRun). An in-progress result means call validate_deploy again to check on it. For anything large \u2014 flows especially \u2014 write the source to a file and pass content_file instead of content: retyping tens of KB of XML risks a silent one-character corruption, and a file is read byte-exactly. Live diff (real validations only, never dry_run): alongside the checkOnly deploy, Contrail retrieves the org's CURRENT version of every component and deletion, and the approval page diffs each changed component against that live version, per file for bundles \u2014 the diff baseline is the org at validate time. A component the org has but your snapshot lacks is flagged EXISTS IN TARGET (this deploy overwrites it, so it classifies as MODIFY), one your snapshot has but the org lacks NOT IN TARGET, and one whose last-modified stamp in the org differs from your snapshot's CHANGED IN TARGET. When that retrieve fails or times out (deploy.preImageTimeoutMs), the page says the org was not re-read and falls back to your local snapshot; types whose retrieved bytes cannot be compared (such as Profile) are diffed against the snapshot and labelled so. The pre-images and their last-modified stamps are frozen on the request: execute_deploy re-checks the stamps before running, and the restorable bytes become its revert package.",
+      description: "Build a deploy package and validate it against the org with checkOnly=true \u2014 nothing is committed. Returns the change summary (destructive changes flagged), validation/test results, and blast radius; puts a confirmation code on the human-only approval page. Mid-build check? Pass dry_run: true \u2014 same validation, NO approval request or code is created. Normally OMIT test_level: the org applies its own default. An in-progress result means call validate_deploy again to check on it. Large sources (flows especially)? Pass content_file: a file is read byte-exactly. Live diff (real validations only, never dry_run): Contrail retrieves the org's CURRENT version of every component and deletion, and the approval page diffs each changed component against that live version, per file for bundles \u2014 the diff baseline is the org at validate time. A component the org has but your snapshot lacks is flagged EXISTS IN TARGET (this deploy overwrites it: MODIFY), one your snapshot has but the org lacks NOT IN TARGET, and one whose last-modified stamp in the org differs from your snapshot's CHANGED IN TARGET. When that retrieve fails or times out, the page says the org was not re-read and falls back to your local snapshot; types whose bytes cannot be compared (such as Profile) are diffed against the snapshot and labelled so. The pre-images and their last-modified stamps are frozen on the request: execute_deploy re-checks the stamps before running, and the restorable bytes become its revert package. Policies: the human's config.json can set rules (list_connections reports them). A real validation that breaks one is refused, naming the rule, and replaces no pending code: relay it to the human and never try another route. During a freeze the request is created, but while it lasts the human must type an emergency reason on their approval surface to release it. dry_run reports what a real validation would be refused for (policy_check) without refusing.",
       inputSchema: {
         connection: external_exports.string().describe("Target connection alias (or id) \u2014 name it unmissably to the human."),
         components: external_exports.array(
@@ -39952,7 +45742,7 @@ function registerDeployTools(server, deps) {
               "Full source for file types; for child types, the XML block exactly as retrieve_metadata returns it (e.g. <fields>\u2026</fields>). Exactly one of content or content_file is required."
             ),
             content_file: external_exports.string().optional().describe(
-              `Absolute path to a file holding the source, read byte-exactly instead of content. PREFER THIS for large components, and author the file under Contrail's staging directory FROM THE START \u2014 ${stagingDir()} \u2014 because the session working folder is NOT a deploy source root. Also accepted: under Contrail's snapshots directory, or under a directory the human already listed in deploy.allowedSourceRoots. Anywhere else is refused \u2014 copy the file into staging and retry; never ask the human to change config for a one-off. Read at validation time and frozen into the approved package, so editing the file afterwards cannot change what gets deployed.`
+              `Absolute path to a file holding the source, read byte-exactly instead of content. PREFER THIS for large components (flows especially): retyping tens of KB of XML risks a silent one-character corruption. Author the file under Contrail's staging directory FROM THE START \u2014 ${stagingDir()} \u2014 because the session working folder is NOT a deploy source root. Also accepted: under Contrail's snapshots directory, or under a directory the human already listed in deploy.allowedSourceRoots. Anywhere else is refused \u2014 copy the file into staging and retry; never ask the human to change config for a one-off. Read at validation time and frozen into the approved package, so editing the file afterwards cannot change what gets deployed.`
             )
           })
         ).max(50).optional().describe("Components to create or update."),
@@ -39969,7 +45759,9 @@ function registerDeployTools(server, deps) {
         ),
         job_id: external_exports.string().optional().describe(
           "Poll a RUNNING validation by the job_id an earlier call returned \u2014 pass {connection, job_id} ALONE; nothing is re-sent and no content_file is re-read. Jobs are keyed by their input, so a poll only ever returns the result of the exact validation it names (re-sending identical full arguments attaches to the same job too)."
-        )
+        ),
+        ticket: external_exports.string().max(120).optional().describe(TICKET_PARAM),
+        justification: external_exports.string().max(1e3).optional().describe(JUSTIFICATION_PARAM)
       }
     },
     async (args, extra) => (
@@ -39978,14 +45770,14 @@ function registerDeployTools(server, deps) {
       remoteControl.run(extra, "validate_deploy", () => guarded(async () => {
         const conn = requireConnection(args.connection, "validate_deploy");
         if (args.job_id !== void 0) {
-          if (args.components?.length || args.destructive?.length || args.test_level !== void 0 || args.run_tests !== void 0 || args.dry_run !== void 0 || args.allow_unregistered_delete !== void 0) {
-            return fail(
+          if (args.components?.length || args.destructive?.length || args.test_level !== void 0 || args.run_tests !== void 0 || args.dry_run !== void 0 || args.allow_unregistered_delete !== void 0 || args.ticket !== void 0 || args.justification !== void 0) {
+            return fail2(
               "Pass job_id ALONE to poll a running validation \u2014 or the full arguments (without job_id) to start one. A poll cannot change the job's options: they are part of its identity."
             );
           }
           const polled = await deploys.pollValidate(conn, args.job_id);
           if (!polled) {
-            return fail(
+            return fail2(
               `No running or uncollected validation job "${args.job_id}" on "${conn.alias}" \u2014 its result may already have been collected. Re-send the full arguments to validate again.`
             );
           }
@@ -40017,16 +45809,10 @@ function registerDeployTools(server, deps) {
         });
         const destructive = args.destructive ?? [];
         if (components.length + destructive.length === 0) {
-          return fail("Provide at least one component or destructive entry.");
+          return fail2("Provide at least one component or destructive entry.");
         }
-        if (args.test_level === "RunSpecifiedTests" && !args.run_tests?.length) {
-          return fail("RunSpecifiedTests requires run_tests.");
-        }
-        if (args.test_level === "NoTestRun" && conn.orgType === "production") {
-          return fail(
-            `test_level NoTestRun is refused locally on "${conn.alias}" (production): the org rejects it org-side anyway. OMIT test_level \u2014 production then runs local tests for Apex packages and no tests otherwise.`
-          );
-        }
+        const badLevel = testLevelRefusal(args, conn);
+        if (badLevel) return fail2(badLevel);
         const outcome = await deploys.validateDeploy(conn, {
           components,
           destructive,
@@ -40036,7 +45822,9 @@ function registerDeployTools(server, deps) {
           testLevel: args.test_level,
           runTests: args.run_tests ?? [],
           dryRun: args.dry_run === true,
-          allowUnregisteredDelete: args.allow_unregistered_delete === true
+          allowUnregisteredDelete: args.allow_unregistered_delete === true,
+          ...governanceOf(args),
+          viaTool: "validate_deploy"
         });
         return renderValidateOutcome(outcome, conn);
       }))
@@ -40048,10 +45836,11 @@ function registerDeployTools(server, deps) {
       case "in_progress":
         return ok(
           { job_id: outcome.job_id, progress: outcome.progress, started_at: outcome.started_at },
-          `Validation is still running \u2014 poll with {connection, job_id: "${outcome.job_id}"} (or re-send the same full arguments, which attaches to this same job).`
+          `Validation is still running \u2014 poll with {connection, job_id: "${outcome.job_id}"} (or re-send the same full arguments, which attaches to this same job). ticket and justification are part of that identity \u2014 a reworded justification starts a second validation, and any code it issues replaces this one's; poll with job_id.`
         );
       case "failed":
-        return fail(`Validation errored (job ${outcome.job_id}): ${outcome.error}`);
+        if (outcome.error.startsWith("POLICY ")) return fail2(outcome.error);
+        return fail2(`Validation errored (job ${outcome.job_id}): ${outcome.error}`);
       case "complete": {
         const r = outcome.result;
         if (!r.validation_passed) {
@@ -40068,7 +45857,7 @@ function registerDeployTools(server, deps) {
         }
         return ok(
           { ...r.summary, job_id: outcome.job_id, approval_page: r.approval },
-          `Validation passed. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`
+          `Validation passed. TARGET: ${conn.alias} (${conn.orgType}). ${closingInstructions(r.summary)}`
         );
       }
     }
@@ -40077,43 +45866,56 @@ function registerDeployTools(server, deps) {
     "deactivate_flow",
     {
       title: "Deactivate a flow",
-      description: 'Deactivate a flow (turn off its active version) \u2014 to switch off automation, or as the first step before trying to delete a flow. Routes through the same two-step approval as any write: this validates the change and opens the approval page; the human reads the code back to execute_deploy. Note: deleting a flow via the Metadata API is unreliable even after deactivation ("insufficient access rights on cross-reference id"); if a destructive delete fails, delete the flow in Setup \u2192 Flows.',
+      description: 'Deactivate a flow (turn off its active version) \u2014 to switch off automation, or as the first step before trying to delete a flow. Routes through the same two-step approval as any write: this validates the change and opens the approval page; the human reads the code back to execute_deploy. Note: deleting a flow via the Metadata API is unreliable even after deactivation ("insufficient access rights on cross-reference id"); if a destructive delete fails, delete the flow in Setup \u2192 Flows. ' + POLICY_NOTE,
       inputSchema: {
         connection: external_exports.string().describe("Target connection alias (or id)."),
-        flow: external_exports.string().describe("Flow API name (DeveloperName).")
+        flow: external_exports.string().describe("Flow API name (DeveloperName)."),
+        test_level: external_exports.enum(["NoTestRun", "RunLocalTests", "RunSpecifiedTests", "RunAllTestsInOrg"]).optional().describe(
+          "Only when a policy on this connection sets a minimum test level (list_connections reports it): pass that level or a stricter one. Otherwise OMIT it \u2014 the org then applies its own default. RunSpecifiedTests needs run_tests."
+        ),
+        run_tests: external_exports.array(external_exports.string()).max(50).optional().describe("Test classes for RunSpecifiedTests."),
+        ticket: external_exports.string().max(120).optional().describe(TICKET_PARAM),
+        justification: external_exports.string().max(1e3).optional().describe(JUSTIFICATION_PARAM)
       }
     },
     async (args, extra) => (
       // S43: deactivate_flow mints a code through validateDeploy — same gate.
       remoteControl.run(extra, "deactivate_flow", () => guarded(async () => {
         const conn = requireConnection(args.connection, "deactivate_flow");
-        if (!/^[A-Za-z0-9_]+$/.test(args.flow)) return fail("invalid flow API name");
+        if (!/^[A-Za-z0-9_]+$/.test(args.flow)) return fail2("invalid flow API name");
+        const badLevel = testLevelRefusal(args, conn);
+        if (badLevel) return fail2(badLevel);
         const outcome = await deploys.validateDeploy(conn, {
           components: [
             { type: "FlowDefinition", api_name: args.flow, content: flowDeactivationXml() }
           ],
           destructive: [],
-          // No test level: an explicit NoTestRun would make production refuse
-          // to deactivate a flow at all; omitted, the org waves a no-Apex
-          // package through everywhere.
-          runTests: []
+          // Omitted unless a policy asks for one: an explicit NoTestRun would
+          // make production refuse to deactivate a flow at all; omitted, the
+          // org waves a no-Apex package through everywhere.
+          testLevel: args.test_level,
+          runTests: args.run_tests ?? [],
+          ...governanceOf(args),
+          viaTool: "deactivate_flow"
         });
         switch (outcome.status) {
           case "in_progress":
             return ok(
               { job_id: outcome.job_id, progress: outcome.progress, started_at: outcome.started_at },
-              "Still validating \u2014 call deactivate_flow again with the same flow to check on it."
+              `Still validating (job ${outcome.job_id}) \u2014 check on it with validate_deploy {connection, job_id: "${outcome.job_id}"}, or call deactivate_flow again with EXACTLY the same arguments. ticket, justification and test_level are part of the job's identity: a call that changes any of them, a reworded justification included, starts a second validation, and any code it issues replaces this one's.`
             );
           case "failed":
-            return fail(`Deactivation validation errored: ${outcome.error}`);
+            if (outcome.error.startsWith("POLICY ")) return fail2(outcome.error);
+            return fail2(`Deactivation validation errored: ${outcome.error}`);
           case "complete": {
             const r = outcome.result;
             if (!r.validation_passed) {
               return ok(r.failure ?? {}, "Validation FAILED \u2014 no confirmation code was issued.");
             }
+            const closing = closingInstructions(r.summary);
             return ok(
               { ...r.summary, approval_page: r.approval },
-              `Deactivation of flow "${args.flow}" validated. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS} Execute it with execute_deploy.`
+              `Deactivation of flow "${args.flow}" validated. TARGET: ${conn.alias} (${conn.orgType}). ${closing}` + (closing === APPROVAL_INSTRUCTIONS ? " Execute it with execute_deploy." : "")
             );
           }
         }
@@ -40124,7 +45926,7 @@ function registerDeployTools(server, deps) {
     "execute_deploy",
     {
       title: "Execute a validated deploy",
-      description: "Execute the deploy that the given confirmation code approves. The code exists only on the human's approval page: never guess, never fabricate, never reuse one \u2014 only pass a code the human just gave you. Codes are single-use, expire in ~1h, and are invalidated by any new REAL validation on the same connection (a dry_run check leaves them untouched). Target check: before claiming the code, Contrail re-lists the package's members in the org and compares their last-modified stamps \u2014 not bytes \u2014 with the validate-time retrieve (or, when no live baseline was captured at validate, with the org-side validation time); if a member changed, appeared or disappeared, nothing is deployed, the code is voided, and the call reports TARGET MOVED naming what moved \u2014 re-validate for a fresh code. The check covers changes up to the moment the code is claimed, not changes landing while the org processes the deploy; a member it cannot compare (its type cannot be enumerated, no baseline stamp was captured at validate, the org gives it no stamp, or \u2014 with no live baseline \u2014 it is missing from the listing) is reported as unchecked on the result's target_check, never refused; and when the org cannot be re-read at all, the deploy still runs and target_check says the check did not happen. Revert package: on success the result's revert_package points at the pre-images Contrail retrieved when this deploy was VALIDATED (not immediately before executing), under staging/_reverts/<request id>/ with revert-plan.json and README.txt; it is kept, marked outcome unknown, when Contrail loses track of a deploy that may have committed, and is null with a revert_note saying why when there is no live pre-image to restore from. Contrail never deploys a revert on its own \u2014 a revert is its own validate_deploy.",
+      description: "Execute the deploy that the given confirmation code approves. Contrail gives the code only to the human (their approval page, and their phone if they set that up): never guess, never fabricate, never reuse one \u2014 only pass a code the human just gave you. Codes are single-use, expire in ~1h, and are invalidated by any new REAL validation on the same connection (a dry_run check leaves them untouched). Target check: before claiming the code, Contrail re-reads the last-modified stamps of the package's members and compares them \u2014 not bytes \u2014 with the validate-time baseline; if a member changed, appeared or disappeared, nothing is deployed, the code is voided, and the call reports TARGET MOVED naming what moved \u2014 re-validate for a fresh code. The check covers changes up to the moment the code is claimed only; a member it cannot compare is reported as unchecked on the result's target_check, never refused; and when the org cannot be re-read at all, the deploy still runs and target_check says the check did not happen. Revert package: on success the result's revert_package points at the pre-images Contrail retrieved when this deploy was VALIDATED (not just before executing); it is kept, marked outcome unknown, when Contrail loses track of a deploy that may have committed, and is null with a revert_note saying why when there is no live pre-image to restore from. Contrail never deploys a revert on its own \u2014 a revert is its own validate_deploy. Snapshot re-baseline: after a successful deploy Contrail re-reads the deployed components into the local snapshot and reports it on the result's snapshot block \u2014 status complete, partial, none, unavailable, disabled or pending, with each skipped component's reason \u2014 so refresh_snapshot is needed only for what that block says was not updated. Best-effort and bounded: it never fails the deploy, covers only the deploy's own components, and does not re-query the org-computed dependency data.",
       inputSchema: {
         connection: external_exports.string().describe("Target connection alias (or id)."),
         confirmation_code: external_exports.string().describe("The code the human read from the approval page (format XXXX-XXXX).")
@@ -40135,12 +45937,18 @@ function registerDeployTools(server, deps) {
       const outcome = await deploys.executeDeploy(conn, args.confirmation_code);
       switch (outcome.status) {
         case "in_progress":
+          if (outcome.progress === REBASELINE_PROGRESS) {
+            return ok(
+              { progress: outcome.progress, started_at: outcome.started_at },
+              "The deploy has completed in the org; Contrail is still re-reading the deployed components into the local snapshot. Call execute_deploy again with the same connection and code to collect the result."
+            );
+          }
           return ok(
             { progress: outcome.progress, started_at: outcome.started_at },
             "Deploy is still running \u2014 call execute_deploy again with the same connection and code to check on it."
           );
         case "failed":
-          return fail(`Deploy errored: ${outcome.error}`);
+          return fail2(`Deploy errored: ${outcome.error}`);
         case "complete":
           return ok(outcome.result);
       }
@@ -40150,7 +45958,7 @@ function registerDeployTools(server, deps) {
     "dml_propose",
     {
       title: "Propose a data change (two-step)",
-      description: `Stage a data change with a before/after preview. Nothing touches the org until the human reads the confirmation code from the approval page and you pass it to dml_execute. TWO SHAPES: (a) flat \u2014 one operation on one object, max 200 rows, all-or-none; (b) a PLAN \u2014 2\u201325 ordered steps, one record each, where a later step references an earlier INSERT step's created id with the whole-value token "@{ref.id}" (in field values, or as the id of an update/delete). Use a plan to seed linked test data in ONE approval: e.g. insert Account (ref "acct") \u2192 insert Contact {AccountId: "@{acct.id}"} \u2192 \u2026 \u2192 update "@{opp.id}". The org resolves the tokens server-side. all_or_none (default true) rolls the whole plan back on any failure; false keeps successful steps and fails only dependents \u2014 the approval page states which mode the human is approving.`,
+      description: `Stage a data change with a before/after preview. Nothing touches the org until the human reads the confirmation code from the approval page and you pass it to dml_execute. TWO SHAPES: (a) flat \u2014 one operation on one object, max 200 rows, all-or-none; (b) a PLAN \u2014 2\u201325 ordered steps, one record each, where a later step references an earlier INSERT step's created id with the whole-value token "@{ref.id}" (in field values, or as the id of an update/delete). Use a plan to seed linked test data in ONE approval: e.g. insert Account (ref "acct") \u2192 insert Contact {AccountId: "@{acct.id}"} \u2192 \u2026 \u2192 update "@{opp.id}". The org resolves the tokens server-side. all_or_none (default true) rolls the whole plan back on any failure; false keeps successful steps and fails only dependents \u2014 the approval page states which mode the human is approving. ` + POLICY_NOTE,
       inputSchema: {
         connection: external_exports.string().describe("Target connection alias (or id)."),
         operation: external_exports.enum(["insert", "update", "delete"]).optional().describe("Flat shape only. Omit when sending steps."),
@@ -40166,65 +45974,75 @@ function registerDeployTools(server, deps) {
             id: external_exports.string().optional().describe('update/delete: a literal record id or "@{ref.id}".')
           })
         ).min(2).max(25).optional().describe("Plan shape: ordered steps, one record each. Mutually exclusive with operation/object."),
-        all_or_none: external_exports.boolean().optional().describe("Plan shape: default true (atomic). false = keep successes, fail dependents.")
+        all_or_none: external_exports.boolean().optional().describe("Plan shape: default true (atomic). false = keep successes, fail dependents."),
+        ticket: external_exports.string().max(120).optional().describe(TICKET_PARAM),
+        justification: external_exports.string().max(1e3).optional().describe(JUSTIFICATION_PARAM)
       }
     },
     async (args, extra) => remoteControl.run(extra, "dml_propose", () => guarded(async () => {
       const conn = requireConnection(args.connection, "dml_propose");
       if (args.steps) {
         const bad = validateDmlPlan(args);
-        if (bad) return fail(bad);
-        const preview2 = await deploys.proposeDml(conn, {
-          plan: true,
-          version: 2,
-          all_or_none: args.all_or_none ?? true,
-          steps: args.steps
-        });
+        if (bad) return fail2(bad);
+        const preview2 = await deploys.proposeDml(
+          conn,
+          {
+            plan: true,
+            version: 2,
+            all_or_none: args.all_or_none ?? true,
+            steps: args.steps
+          },
+          governanceOf(args)
+        );
         return ok(
           preview2,
-          `Proposed \u2014 nothing executed. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`
+          `Proposed \u2014 nothing executed. TARGET: ${conn.alias} (${conn.orgType}). ${closingInstructions(preview2)}`
         );
       }
       if (args.all_or_none !== void 0) {
-        return fail("all_or_none applies only to plans (steps) \u2014 the flat shape is always all-or-none.");
+        return fail2("all_or_none applies only to plans (steps) \u2014 the flat shape is always all-or-none.");
       }
       if (!args.operation || !args.object) {
-        return fail("Provide either steps (a plan) or operation + object (flat).");
+        return fail2("Provide either steps (a plan) or operation + object (flat).");
       }
-      if (!/^[A-Za-z0-9_]+$/.test(args.object)) return fail("invalid object API name");
+      if (!/^[A-Za-z0-9_]+$/.test(args.object)) return fail2("invalid object API name");
       if (/__mdt$/i.test(args.object)) {
-        return fail(
+        return fail2(
           `${args.object} is a custom metadata type \u2014 its records are METADATA, not data, and the REST API cannot write them. Deploy the record instead: validate_deploy with type CustomMetadata, api_name "<Type>.<Record>" (type name without __mdt).`
         );
       }
       if (args.operation === "delete") {
-        if (!args.ids?.length) return fail("delete requires ids.");
-        if (args.ids.some((i) => !ID_RE.test(i))) return fail("invalid record id in ids.");
+        if (!args.ids?.length) return fail2("delete requires ids.");
+        if (args.ids.some((i) => !ID_RE.test(i))) return fail2("invalid record id in ids.");
       } else {
-        if (!args.records?.length) return fail(`${args.operation} requires records.`);
+        if (!args.records?.length) return fail2(`${args.operation} requires records.`);
         for (const r of args.records) {
           for (const key2 of Object.keys(r)) {
-            if (!/^[A-Za-z0-9_]+$/.test(key2)) return fail(`invalid field name "${key2}"`);
+            if (!/^[A-Za-z0-9_]+$/.test(key2)) return fail2(`invalid field name "${key2}"`);
           }
           for (const v of Object.values(r)) {
             if (typeof v === "string" && /@\{/.test(v)) {
-              return fail('reference tokens ("@{ref.id}") are only valid inside a plan (steps).');
+              return fail2('reference tokens ("@{ref.id}") are only valid inside a plan (steps).');
             }
           }
           if (args.operation === "update" && !ID_RE.test(String(r.Id ?? r.id ?? ""))) {
-            return fail("every update record needs a valid Id.");
+            return fail2("every update record needs a valid Id.");
           }
         }
       }
-      const preview = await deploys.proposeDml(conn, {
-        operation: args.operation,
-        object: args.object,
-        records: args.records,
-        ids: args.ids
-      });
+      const preview = await deploys.proposeDml(
+        conn,
+        {
+          operation: args.operation,
+          object: args.object,
+          records: args.records,
+          ids: args.ids
+        },
+        governanceOf(args)
+      );
       return ok(
         preview,
-        `Proposed \u2014 nothing executed. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`
+        `Proposed \u2014 nothing executed. TARGET: ${conn.alias} (${conn.orgType}). ${closingInstructions(preview)}`
       );
     }))
   );
@@ -40232,7 +46050,7 @@ function registerDeployTools(server, deps) {
     "dml_execute",
     {
       title: "Execute a proposed data change",
-      description: "Execute the DML that the given confirmation code approves. The code exists only on the human's approval page \u2014 only pass a code the human just gave you. Single-use, ~1h expiry, invalidated by a new proposal on the same connection. Target check: before claiming the code, Contrail re-runs the preview query and compares what it returns with what the approval showed \u2014 each updated field's before-value, and that each approved record still comes back; if a value changed or a record is no longer returned, nothing is written, the code is voided, and the call reports TARGET MOVED naming the records \u2014 re-run dml_propose for a fresh code. The check covers changes up to the moment the code is claimed, not changes landing while the org processes the write, and a value changed and changed back is invisible to it; a record the preview did not return or whose pre-check failed is reported as unchecked on the result's target_check, never refused; one for which the approval showed no before-value is also reported as unchecked, but its existence is still re-checked, so a record no longer returned is TARGET MOVED; an insert has nothing to re-check; when the org cannot be re-read at all, the write still runs and target_check says the check did not happen.",
+      description: "Execute the DML that the given confirmation code approves. Contrail gives the code only to the human (their approval page, and their phone if they set that up) \u2014 only pass a code the human just gave you. Single-use, ~1h expiry, invalidated by a new proposal on the same connection. Target check: before claiming the code, Contrail re-runs the preview query and compares what it returns with what the approval showed \u2014 each updated field's before-value, and that each approved record still comes back; if a value changed or a record is no longer returned, nothing is written, the code is voided, and the call reports TARGET MOVED naming the records \u2014 re-run dml_propose for a fresh code. The check covers changes up to the moment the code is claimed, not changes landing while the org processes the write, and a value changed and changed back is invisible to it; a record the preview did not return or whose pre-check failed is reported as unchecked on the result's target_check, never refused; one for which the approval showed no before-value is also reported as unchecked, but its existence is still re-checked, so a record no longer returned is TARGET MOVED; an insert has nothing to re-check; when the org cannot be re-read at all, the write still runs and target_check says the check did not happen.",
       inputSchema: {
         connection: external_exports.string().describe("Target connection alias (or id)."),
         confirmation_code: external_exports.string().describe("The code the human read from the approval page (format XXXX-XXXX).")
@@ -40248,19 +46066,21 @@ function registerDeployTools(server, deps) {
     "apex_propose",
     {
       title: "Propose an anonymous Apex script (two-step)",
-      description: "Stage an anonymous Apex script for human approval. This is the ONLY path to executeAnonymous: nothing runs until the human reads the confirmation code from the approval page (which shows the script verbatim) and you pass it to apex_execute. The script runs with the HUMAN's permissions and can touch anything their user can; DML it performs COMMITS on success, and an uncaught exception rolls the whole script back. There is no dry-run \u2014 the org compiles and executes in one shot at execute, and a compile error spends the code like any failed write. Max 32,000 chars (executeAnonymous is a URL-encoded GET); split longer work into multiple proposals. The script returns no output \u2014 write System.debug and set a trace flag first (set_trace_flag) if you need to see the log.",
+      description: "Stage an anonymous Apex script for human approval. This is the ONLY path to executeAnonymous: nothing runs until the human reads the confirmation code from the approval page (which shows the script verbatim) and you pass it to apex_execute. The script runs with the HUMAN's permissions and can touch anything their user can; DML it performs COMMITS on success, and an uncaught exception rolls the whole script back. There is no dry-run \u2014 the org compiles and executes in one shot at execute, and a compile error spends the code like any failed write. Max 32,000 chars (executeAnonymous is a URL-encoded GET); split longer work into multiple proposals. The script returns no output \u2014 write System.debug and set a trace flag first (set_trace_flag) if you need to see the log. " + POLICY_NOTE,
       inputSchema: {
         connection: external_exports.string().describe("Target connection alias (or id) \u2014 name it unmissably to the human."),
-        code: external_exports.string().min(1).max(32e3).describe("The anonymous Apex source, verbatim (this is the script, NOT a confirmation code).")
+        code: external_exports.string().min(1).max(32e3).describe("The anonymous Apex source, verbatim (this is the script, NOT a confirmation code)."),
+        ticket: external_exports.string().max(120).optional().describe(TICKET_PARAM),
+        justification: external_exports.string().max(1e3).optional().describe(JUSTIFICATION_PARAM)
       }
     },
     async (args, extra) => remoteControl.run(extra, "apex_propose", () => guarded(async () => {
       const conn = requireConnection(args.connection, "apex_propose");
-      if (args.code.trim().length === 0) return fail("The script is empty.");
-      const preview = await deploys.proposeApex(conn, args.code);
+      if (args.code.trim().length === 0) return fail2("The script is empty.");
+      const preview = await deploys.proposeApex(conn, args.code, governanceOf(args));
       return ok(
         preview,
-        `Proposed \u2014 nothing executed. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`
+        `Proposed \u2014 nothing executed. TARGET: ${conn.alias} (${conn.orgType}). ${closingInstructions(preview)}`
       );
     }))
   );
@@ -40268,7 +46088,7 @@ function registerDeployTools(server, deps) {
     "apex_execute",
     {
       title: "Execute a proposed anonymous Apex script",
-      description: "Execute the anonymous Apex that the given confirmation code approves. The code exists only on the human's approval page \u2014 only pass a code the human just gave you. Single-use, ~1h expiry, invalidated by a new apex_propose on the same connection. On success the script's DML is committed; compile and runtime errors are returned honestly and spend the code.",
+      description: "Execute the anonymous Apex that the given confirmation code approves. Contrail gives the code only to the human (their approval page, and their phone if they set that up) \u2014 only pass a code the human just gave you. Single-use, ~1h expiry, invalidated by a new apex_propose on the same connection. On success the script's DML is committed; compile and runtime errors are returned honestly and spend the code.",
       inputSchema: {
         connection: external_exports.string().describe("Target connection alias (or id)."),
         confirmation_code: external_exports.string().describe("The code the human read from the approval page (format XXXX-XXXX).")
@@ -40284,25 +46104,31 @@ function registerDeployTools(server, deps) {
     "agent_activation_propose",
     {
       title: "Propose an agent activation change (two-step)",
-      description: "Stage activating or deactivating a PUBLISHED Agentforce agent version behind the approval ritual. This changes LIVE behavior immediately on execute \u2014 no draft in between \u2014 so nothing happens until the human reads the confirmation code from the approval page and you pass it to agent_activation_execute. The BotVersion is resolved and its current status frozen at propose; a version already in the requested state is refused without burning an approval. Only published versions can flip (the org refuses drafts, verbatim in messages[]). Publishing/compiling Agent Script is NOT this tool \u2014 that stays human.",
+      description: "Stage activating or deactivating a PUBLISHED Agentforce agent version behind the approval ritual. This changes LIVE behavior immediately on execute \u2014 no draft in between \u2014 so nothing happens until the human reads the confirmation code from the approval page and you pass it to agent_activation_execute. The BotVersion is resolved and its current status frozen at propose; a version already in the requested state is refused without burning an approval. Only published versions can flip (the org refuses drafts, verbatim in messages[]). Publishing/compiling Agent Script is NOT this tool \u2014 that stays human. " + POLICY_NOTE,
       inputSchema: {
         connection: external_exports.string().describe("Target connection alias (or id) \u2014 name it unmissably to the human."),
         agent: external_exports.string().describe("The agent's Bot DeveloperName (soql_query BotDefinition to enumerate)."),
         version: external_exports.string().describe("The BotVersion DeveloperName, e.g. 'v2'."),
-        status: external_exports.enum(["Active", "Inactive"]).describe("The state to put the version in.")
+        status: external_exports.enum(["Active", "Inactive"]).describe("The state to put the version in."),
+        ticket: external_exports.string().max(120).optional().describe(TICKET_PARAM),
+        justification: external_exports.string().max(1e3).optional().describe(JUSTIFICATION_PARAM)
       }
     },
     async (args, extra) => remoteControl.run(extra, "agent_activation_propose", () => guarded(async () => {
       const conn = requireConnection(args.connection, "agent_activation_propose");
-      const preview = await deploys.proposeActivation(conn, {
-        agent: args.agent,
-        version: args.version,
-        status: args.status
-      });
+      const preview = await deploys.proposeActivation(
+        conn,
+        {
+          agent: args.agent,
+          version: args.version,
+          status: args.status
+        },
+        governanceOf(args)
+      );
       if (preview.proposed !== true) return ok(preview);
       return ok(
         preview,
-        `Proposed \u2014 nothing changed yet. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`
+        `Proposed \u2014 nothing changed yet. TARGET: ${conn.alias} (${conn.orgType}). ${closingInstructions(preview)}`
       );
     }))
   );
@@ -40310,7 +46136,7 @@ function registerDeployTools(server, deps) {
     "agent_activation_execute",
     {
       title: "Execute a proposed agent activation change",
-      description: "Apply the agent activation change the given confirmation code approves \u2014 one documented Connect REST call, then a re-read so the result reports what the org CONFIRMS. The code exists only on the human's approval page \u2014 only pass a code the human just gave you. Single-use, ~1h expiry, invalidated by a new agent_activation_propose on the same connection. Changes live agent behavior immediately on success. Target check: before claiming the code, Contrail re-reads the agent version's Status and compares it with the status the approval was for; if it changed or the version is no longer returned, nothing is applied, the code is voided, and the call reports TARGET MOVED \u2014 re-run agent_activation_propose for a fresh code. The check covers changes up to the moment the code is claimed, not changes landing while the org processes the call; a request with no recorded starting status is reported as unchecked on the result's target_check, never refused; and when the org cannot be re-read at all, the change still runs and target_check says the check did not happen.",
+      description: "Apply the agent activation change the given confirmation code approves \u2014 one documented Connect REST call, then a re-read so the result reports what the org CONFIRMS. Contrail gives the code only to the human (their approval page, and their phone if they set that up) \u2014 only pass a code the human just gave you. Single-use, ~1h expiry, invalidated by a new agent_activation_propose on the same connection. Changes live agent behavior immediately on success. Target check: before claiming the code, Contrail re-reads the agent version's Status and compares it with the status the approval was for; if it changed or the version is no longer returned, nothing is applied, the code is voided, and the call reports TARGET MOVED \u2014 re-run agent_activation_propose for a fresh code. The check covers changes up to the moment the code is claimed, not changes landing while the org processes the call; a request with no recorded starting status is reported as unchecked on the result's target_check, never refused; and when the org cannot be re-read at all, the change still runs and target_check says the check did not happen.",
       inputSchema: {
         connection: external_exports.string().describe("Target connection alias (or id)."),
         confirmation_code: external_exports.string().describe("The code the human read from the approval page (format XXXX-XXXX).")
@@ -40326,7 +46152,7 @@ function registerDeployTools(server, deps) {
     "bulk_load_propose",
     {
       title: "Propose a bulk data load from CSV files (two-step)",
-      description: `Stage a multi-file Bulk API 2.0 data load behind the approval ritual. Rows go FILE \u2192 ORG and never through this conversation: prepare UTF-8, comma-delimited CSVs under Contrail's staging directory (API-name headers; cross-object references as relationship-by-external-ID columns like "Account.External_Id__c", resolved org-side), then name one file per step. Steps execute SEQUENTIALLY in the order given \u2014 parents before children. Each file is scanned (headers, row count) and FROZEN at propose; the approval page shows every step with counts and hashes, and nothing touches the org until the human reads the confirmation code to bulk_load_execute. Bulk steps are separate org-side jobs with NO cross-job rollback; delete steps are SOFT deletes (Recycle Bin) and their CSV is a single Id column. For small test-data seeding (\u2264200 rows) prefer dml_propose.`,
+      description: `Stage a multi-file Bulk API 2.0 data load behind the approval ritual. Rows go FILE \u2192 ORG and never through this conversation: prepare UTF-8, comma-delimited CSVs under Contrail's staging directory (API-name headers; cross-object references as relationship-by-external-ID columns like "Account.External_Id__c", resolved org-side), then name one file per step. Steps execute SEQUENTIALLY in the order given \u2014 parents before children. Each file is scanned (headers, row count) and FROZEN at propose; the approval page shows every step with counts and hashes, and nothing touches the org until the human reads the confirmation code to bulk_load_execute. Bulk steps are separate org-side jobs with NO cross-job rollback; delete steps are SOFT deletes (Recycle Bin) and their CSV is a single Id column. For small test-data seeding (\u2264200 rows) prefer dml_propose. ` + POLICY_NOTE,
       inputSchema: {
         connection: external_exports.string().describe("Target connection alias (or id) \u2014 name it unmissably to the human."),
         steps: external_exports.array(
@@ -40343,7 +46169,9 @@ function registerDeployTools(server, deps) {
         ).min(1).max(config2.bulkLoad.maxFilesPerPlan).describe("Ordered steps \u2014 one CSV each, executed sequentially."),
         stop_on_failure: external_exports.boolean().optional().describe(
           "Default true: a step with failed rows halts the remaining steps (rows already loaded STAY \u2014 bulk has no cross-job rollback). false runs every step."
-        )
+        ),
+        ticket: external_exports.string().max(120).optional().describe(TICKET_PARAM),
+        justification: external_exports.string().max(1e3).optional().describe(JUSTIFICATION_PARAM)
       }
     },
     async (args, extra) => remoteControl.run(extra, "bulk_load_propose", () => guarded(async () => {
@@ -40361,13 +46189,17 @@ function registerDeployTools(server, deps) {
           ...s.external_id_field ? { externalIdField: s.external_id_field } : {}
         };
       });
-      const preview = await deploys.proposeBulkLoad(conn, {
-        stopOnFailure: args.stop_on_failure ?? true,
-        steps
-      });
+      const preview = await deploys.proposeBulkLoad(
+        conn,
+        {
+          stopOnFailure: args.stop_on_failure ?? true,
+          steps
+        },
+        governanceOf(args)
+      );
       return ok(
         preview,
-        `Proposed \u2014 nothing loaded. TARGET: ${conn.alias} (${conn.orgType}). ${APPROVAL_INSTRUCTIONS}`
+        `Proposed \u2014 nothing loaded. TARGET: ${conn.alias} (${conn.orgType}). ${closingInstructions(preview)}`
       );
     }))
   );
@@ -40375,7 +46207,7 @@ function registerDeployTools(server, deps) {
     "bulk_load_execute",
     {
       title: "Execute a proposed bulk data load",
-      description: "Run the bulk load plan that the given confirmation code approves: sequential Bulk API 2.0 ingest jobs from the CSVs frozen at propose. The code exists only on the human's approval page \u2014 only pass a code the human just gave you (single-use, ~1h expiry, invalidated by a new bulk_load_propose on the same connection). Large jobs take minutes: an in-progress result means call bulk_load_execute again with the SAME code to check on it. Successful, failed, and unprocessed rows come back as file paths (never row data) \u2014 step-N-success carries the created/updated/deleted record ids; rows loaded by completed steps are never rolled back.",
+      description: "Run the bulk load plan that the given confirmation code approves: sequential Bulk API 2.0 ingest jobs from the CSVs frozen at propose. Contrail gives the code only to the human (their approval page, and their phone if they set that up) \u2014 only pass a code the human just gave you (single-use, ~1h expiry, invalidated by a new bulk_load_propose on the same connection). Large jobs take minutes: an in-progress result means call bulk_load_execute again with the SAME code to check on it. Successful, failed, and unprocessed rows come back as file paths (never row data) \u2014 step-N-success carries the created/updated/deleted record ids; rows loaded by completed steps are never rolled back.",
       inputSchema: {
         connection: external_exports.string().describe("Target connection alias (or id)."),
         confirmation_code: external_exports.string().describe("The code the human read from the approval page (format XXXX-XXXX).")
@@ -40391,14 +46223,14 @@ function registerDeployTools(server, deps) {
             "The bulk load is still running \u2014 call bulk_load_execute again with the same connection and code to check on it."
           );
         case "failed":
-          return fail(`Bulk load errored: ${outcome.error}`);
+          return fail2(`Bulk load errored: ${outcome.error}`);
         case "complete":
           return ok(outcome.result);
       }
     })
   );
 }
-var ID_RE, APPROVAL_INSTRUCTIONS, REF_RE, REF_TOKEN_RE2;
+var ID_RE, APPROVAL_INSTRUCTIONS, TICKET_PARAM, JUSTIFICATION_PARAM, POLICY_NOTE, REF_RE, REF_TOKEN_RE2;
 var init_deploy = __esm({
   "src/tools/deploy.ts"() {
     "use strict";
@@ -40409,8 +46241,12 @@ var init_deploy = __esm({
     init_sources();
     init_paths();
     init_package();
+    init_members();
     ID_RE = /^[a-zA-Z0-9]{15}([a-zA-Z0-9]{3})?$/;
-    APPROVAL_INSTRUCTIONS = `The confirmation code is displayed ONLY on the approval page in the human's browser \u2014 it is not available to you anywhere. Present this summary (destructive changes first), then ask the human to review the page and read the code back if they approve. (If approval_page.phone_notification says "sent", the same summary and code also reached the human's phone; the code still only counts when the human types it into this chat. "skipped" with reason remote_control_off is normal \u2014 no Remote Control, so no push \u2014 and needs no remark.)`;
+    APPROVAL_INSTRUCTIONS = `Contrail gives the confirmation code only to the human (their approval page, and their phone if they set that up) \u2014 never to you, in any tool result. Present this summary (destructive changes first), then ask the human to review the page and read the code back if they approve. (If approval_page.phone_notification says "sent", the same summary and code also reached the human's phone; the code still counts only when the human gives it to you as their approval \u2014 the salesforce-house-rules skill covers a code you see in a screenshot. "skipped" with reason remote_control_off is normal \u2014 no Remote Control, so no push \u2014 and needs no remark.)`;
+    TICKET_PARAM = "The change ticket or reference for this write (the tracker key or change number the human named), one line, max 120 characters. Pass it ONLY when the human gave you one in this conversation or in the task they handed you \u2014 never invent, guess or reuse one. It is shown on the human's approval surface and recorded with the request. If list_connections reports that this connection's policy requires a ticket and you have none, ask the human for it before proposing.";
+    JUSTIFICATION_PARAM = "One or two sentences on WHY this change is being made now, max 1000 characters. DRAFT it yourself from what the human asked for in this conversation, in their terms \u2014 the reason, not a description of the mechanics; do not pad it and do not state anything the human did not say. It is shown on the human's approval surface in an editable field, marked as drafted by the agent, where they can overwrite it \u2014 a human who approves from the phone notification alone does not see it. Required when the connection's policy says so \u2014 by default on production orgs and on orgs whose type Contrail could not determine \u2014 and welcome everywhere else.";
+    POLICY_NOTE = "Policies in the human's config.json (list_connections reports them) can require a justification or ticket, or freeze the connection. A proposal that breaks one is refused, naming the rule, and leaves any pending approval untouched: relay it, and never route around it. During a freeze the request is created, but while it lasts the human must type an emergency reason on their approval surface before it can be released.";
     REF_RE = /^[A-Za-z][A-Za-z0-9_]*$/;
     REF_TOKEN_RE2 = /^@\{([A-Za-z][A-Za-z0-9_]*)\.id\}$/;
   }
@@ -40453,7 +46289,7 @@ function registerLocalDiagTools(server, deps) {
       }
     },
     async (args) => guarded(async () => {
-      if (args.code.trim().length === 0) return fail("The source is empty.");
+      if (args.code.trim().length === 0) return fail2("The source is empty.");
       const result = await deps.localDiag.checkApex(args.code, args.type ?? "class");
       return renderResult(result, "apex");
     })
@@ -40468,7 +46304,7 @@ function registerLocalDiagTools(server, deps) {
       }
     },
     async (args) => guarded(async () => {
-      if (args.query.trim().length === 0) return fail("The query is empty.");
+      if (args.query.trim().length === 0) return fail2("The query is empty.");
       const result = await deps.localDiag.checkSoql(args.query);
       return renderResult(result, "soql");
     })
@@ -40519,6 +46355,1297 @@ var init_settings = __esm({
     "use strict";
     init_register();
     init_log();
+  }
+});
+
+// src/tools/evidence.ts
+function identityOf2(rec) {
+  return {
+    alias: rec.alias,
+    org_id: rec.orgId,
+    org_name: rec.orgName,
+    org_type: rec.orgType,
+    username: rec.username
+  };
+}
+function registerEvidenceTools(server, deps) {
+  const { db, audit } = deps;
+  server.registerTool(
+    "export_change_evidence",
+    {
+      title: "Export change evidence",
+      description: "Write a change-evidence dossier \u2014 evidence.md and evidence.json \u2014 for the writes Contrail validated, proposed and executed, into a new folder under Contrail's data directory (evidence/, never staging), and return only the folder path and counts. Per request: kind, connection and org, ticket, the justification and who wrote it (the agent's draft, or the human at approval), the policy rules that applied and any freeze override with its emergency reason, the acting Salesforce user, when it was proposed and executed, what the approval summary showed (never the confirmation code), deploy pre-image fingerprints and last-modified stamps, the execute-time target check, the org's result, the revert package location, and the request's audit events. Record field values are left out: data-change rows are reduced to operation, object and record id, scripts and CSV files to fingerprints. It reports what Contrail recorded on this machine \u2014 not the org's current state, and not changes made outside Contrail. Name at least one of connection, ticket, request_id or since.",
+      inputSchema: {
+        connection: external_exports.string().optional().describe("Connection alias (or id) whose requests to include."),
+        ticket: external_exports.string().max(120).optional().describe("Only requests recorded with exactly this ticket (case-insensitive)."),
+        request_id: external_exports.string().max(100).optional().describe("One request, by the request_id a validate or propose result returned."),
+        since: external_exports.string().max(100).optional().describe("ISO 8601 timestamp bounding when the request was proposed."),
+        until: external_exports.string().max(100).optional().describe("ISO 8601 timestamp bounding when the request was proposed.")
+      }
+    },
+    async (args) => guarded(() => {
+      let conn;
+      if (args.connection) {
+        const rec = db.resolveConnection(args.connection);
+        if (!rec) {
+          return fail2(
+            `No connection matches "${args.connection}". Call list_connections to see what exists.`
+          );
+        }
+        conn = rec;
+      }
+      const io = {
+        // Mapped by name: the row's confirmation code is never read.
+        queryRequests: (f) => db.queryDeployRequests(f).map((rec) => evidenceRequestOf(rec)),
+        getConnection: (id) => {
+          const rec = db.getConnection(id);
+          return rec ? identityOf2(rec) : null;
+        },
+        queryAudit: (f) => audit.query(f).map((e) => ({
+          ts: e.ts,
+          event_type: e.eventType,
+          connection_id: e.connectionId,
+          tool: e.tool,
+          outcome: e.outcome,
+          detail: e.detail
+        })),
+        policyStatus: () => {
+          const s = deps.deploys.policiesStatus();
+          return s.status === "ok" ? { status: "ok", source: s.source } : { status: "unreadable" };
+        },
+        evidenceDir,
+        now: () => Date.now(),
+        engineVersion: ENGINE_VERSION,
+        surface: "plugin"
+      };
+      const outcome = exportChangeEvidence(io, {
+        ...conn ? { connection: { id: conn.id, alias: conn.alias } } : {},
+        ticket: args.ticket,
+        request_id: args.request_id,
+        since: args.since,
+        until: args.until
+      });
+      switch (outcome.status) {
+        case "refused":
+          if (outcome.refusal === "no_filter") return fail2(NO_FILTER);
+          if (outcome.refusal === "request_not_found") {
+            const on = outcome.connection !== null ? ` on "${outcome.connection}"` : "";
+            const win = args.since || args.until ? " proposed within the given since/until" : "";
+            return fail2(`No request matches request_id "${outcome.request_id}"${on}${win}.`);
+          }
+          return fail2(
+            `${outcome.field} must be an ISO 8601 timestamp (for example 2026-11-17T09:00:00Z), got "${outcome.value}".`
+          );
+        case "empty":
+          return ok(
+            { path: null, requests: 0, policy_refusals: 0 },
+            "Nothing matched those filters \u2014 no dossier was written."
+          );
+        case "written":
+          audit.record("evidence.exported", {
+            connectionId: conn?.id ?? null,
+            tool: "export_change_evidence",
+            outcome: "success",
+            detail: {
+              requests: outcome.requests,
+              policy_refusals: outcome.policy_refusals,
+              // The folder's name only — never the path on this machine.
+              folder: outcome.folder,
+              filters: {
+                connection: conn?.alias ?? null,
+                ticket: args.ticket ?? null,
+                request_id: args.request_id ?? null,
+                since: args.since ?? null,
+                until: args.until ?? null
+              }
+            }
+          });
+          return ok(
+            {
+              path: outcome.path,
+              files: outcome.files,
+              requests: outcome.requests,
+              by_status: outcome.by_status,
+              audit_events: outcome.audit_events,
+              policy_refusals: outcome.policy_refusals,
+              truncated: outcome.truncated
+            },
+            "Change evidence written to the folder below, on the human's machine and outside staging. Give them the path; the files contain no confirmation codes and no record field values."
+          );
+      }
+    })
+  );
+}
+var NO_FILTER;
+var init_evidence2 = __esm({
+  "src/tools/evidence.ts"() {
+    "use strict";
+    init_zod();
+    init_register();
+    init_paths();
+    init_version();
+    init_evidence();
+    NO_FILTER = "Name at least one of connection, ticket, request_id or since. An unfiltered dossier would mix every connection's changes in one folder.";
+  }
+});
+
+// src/skillpack/pack.ts
+import fs16 from "node:fs";
+import path10 from "node:path";
+function parseSkillFrontmatter(md) {
+  const fence = md.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!fence) return null;
+  const body = fence[1] ?? "";
+  const scalar = (key2) => {
+    const line = body.match(new RegExp(`^${key2}:[ \\t]*(.*)$`, "m"));
+    if (!line) return null;
+    let v = (line[1] ?? "").trim();
+    if (v.startsWith('"')) {
+      if (!v.endsWith('"') || v.length < 2) return null;
+      v = v.slice(1, -1).replaceAll('\\"', '"');
+    } else if (v.startsWith("'")) {
+      if (!v.endsWith("'") || v.length < 2) return null;
+      v = v.slice(1, -1);
+    }
+    return v.length > 0 ? v : null;
+  };
+  const name = scalar("name");
+  const description = scalar("description");
+  return name && description ? { name, description } : null;
+}
+function byCodePoint(a, b) {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+function readFrontmatter(mdPath) {
+  let st;
+  try {
+    st = fs16.lstatSync(mdPath);
+  } catch (err2) {
+    const code = err2.code;
+    if (code === "ENOENT" || code === "ENOTDIR") return null;
+    throw err2;
+  }
+  if (!st.isFile() || st.size > READ_SKILL_MAX_FILE_BYTES) return null;
+  return parseSkillFrontmatter(fs16.readFileSync(mdPath, "utf8"));
+}
+function listSkillFiles(skillDir) {
+  const files = [];
+  let truncated = false;
+  const walk = (abs, rel) => {
+    const entries = fs16.readdirSync(abs, { withFileTypes: true }).sort((a, b) => byCodePoint(a.name, b.name));
+    for (const entry of entries) {
+      if (truncated) return;
+      if (!FILE_SEGMENT.test(entry.name)) continue;
+      const relPath = rel ? `${rel}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        walk(path10.join(abs, entry.name), relPath);
+      } else if (entry.isFile()) {
+        const lower = entry.name.toLowerCase();
+        if (lower === OVERLAY_PATCH) continue;
+        if (rel === "" && lower === "skill.md") continue;
+        if (files.length >= SKILL_FILES_CAP) {
+          truncated = true;
+          return;
+        }
+        files.push(relPath);
+      }
+    }
+  };
+  walk(skillDir, "");
+  files.sort(byCodePoint);
+  return { files, truncated };
+}
+function loadSkillPack(res) {
+  const overridden = res.source === "override" || res.source === "override_missing";
+  const empty = (skipped = []) => ({
+    root: null,
+    source: overridden ? "override_missing" : "absent",
+    looked: res.looked,
+    skills: [],
+    skipped
+  });
+  if (!res.dir) return empty();
+  try {
+    const root = fs16.realpathSync(res.dir);
+    const skills = [];
+    const skipped = [];
+    for (const entry of fs16.readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !SKILL_DIR_NAME.test(entry.name)) continue;
+      const dir = path10.join(root, entry.name);
+      const fm = readFrontmatter(path10.join(dir, "SKILL.md"));
+      if (!fm) {
+        skipped.push({ dir, reason: "no_frontmatter" });
+        continue;
+      }
+      if (fm.name !== entry.name) {
+        skipped.push({ dir, reason: "name_mismatch" });
+        continue;
+      }
+      const listing = listSkillFiles(dir);
+      skills.push({
+        name: fm.name,
+        description: fm.description,
+        dir,
+        files: listing.files,
+        ...listing.truncated ? { filesTruncated: true } : {}
+      });
+    }
+    skipped.sort((a, b) => byCodePoint(a.dir, b.dir));
+    if (skills.length === 0) return empty(skipped);
+    skills.sort((a, b) => byCodePoint(a.name, b.name));
+    return {
+      root,
+      source: overridden ? "override" : "bundled",
+      looked: res.looked,
+      skills,
+      skipped
+    };
+  } catch {
+    return empty();
+  }
+}
+function findSkill(pack, rawName) {
+  const wanted = rawName.trim().replace(NAMESPACE_PREFIX, "").toLowerCase();
+  return pack.skills.find((s) => s.name === wanted) ?? null;
+}
+function isInside2(child, parent) {
+  const rel = path10.relative(parent, child);
+  return rel !== "" && rel !== ".." && !rel.startsWith(`..${path10.sep}`) && !path10.isAbsolute(rel);
+}
+function readSkillFile(pack, name, file, offset) {
+  const given = file ?? null;
+  const refuse = (refusal, message2, skill2 = null) => ({ ok: false, refusal, message: message2, skill: skill2, file: given });
+  if (pack.skills.length === 0) {
+    return refuse(
+      "no_pack",
+      pack.source === "override_missing" ? SKILLS_OVERRIDE_MISSING_NOTE : SKILLS_ABSENT_NOTE
+    );
+  }
+  const skill = findSkill(pack, name);
+  if (!skill) {
+    return refuse(
+      "unknown_skill",
+      `No bundled skill named "${name}". Bundled skills: ${pack.skills.map((s) => s.name).join(", ")}.`
+    );
+  }
+  const rel = file ?? "SKILL.md";
+  const segments = rel.split("/");
+  if (rel.includes("\\") || rel.includes("\0") || rel.includes(":") || path10.posix.isAbsolute(rel) || path10.win32.isAbsolute(rel) || segments.some((s) => s === "" || s === "." || s === ".." || !FILE_SEGMENT.test(s))) {
+    return refuse(
+      "bad_path",
+      `file must be a relative path inside the skill's folder, with forward slashes and no ".." (got "${rel}").`,
+      skill.name
+    );
+  }
+  if ((segments[segments.length - 1] ?? "").toLowerCase() === OVERLAY_PATCH) {
+    return refuse(
+      "overlay_patch",
+      "SKILL.overlay.patch is repository bookkeeping, not part of the skill; read_skill does not serve it.",
+      skill.name
+    );
+  }
+  const noSuchFile = () => refuse(
+    "no_such_file",
+    `Skill "${skill.name}" has no file "${rel}". Its files: ${["SKILL.md", ...skill.files].join(", ")}.` + (skill.filesTruncated ? " Only the first 200 files of this skill are listed and served." : ""),
+    skill.name
+  );
+  if (rel !== "SKILL.md" && !skill.files.includes(rel)) return noSuchFile();
+  const linkOrEscape = () => refuse(
+    "link_or_escape",
+    `"${rel}" in skill "${skill.name}" is a link or resolves outside the skill's folder; read_skill does not follow links.`,
+    skill.name
+  );
+  let target = skill.dir;
+  let st = null;
+  for (const segment of segments) {
+    target = path10.join(target, segment);
+    try {
+      st = fs16.lstatSync(target);
+    } catch {
+      return noSuchFile();
+    }
+    if (st.isSymbolicLink()) return linkOrEscape();
+  }
+  try {
+    const realSkill = fs16.realpathSync(skill.dir);
+    const realTarget = fs16.realpathSync(target);
+    if (pack.root === null || !isInside2(realSkill, pack.root) || !(realTarget === realSkill || isInside2(realTarget, realSkill))) {
+      return linkOrEscape();
+    }
+  } catch (err2) {
+    const code = err2.code;
+    return code === "ENOENT" || code === "ENOTDIR" ? noSuchFile() : linkOrEscape();
+  }
+  const notText = (bytes) => refuse(
+    "not_text",
+    `"${rel}" in skill "${skill.name}" is not a text file read_skill can serve (${bytes} bytes). It is on disk at ${target}, as this server sees that path.`,
+    skill.name
+  );
+  if (!st || !st.isFile() || st.size > READ_SKILL_MAX_FILE_BYTES) return notText(st ? st.size : 0);
+  let buf;
+  try {
+    buf = fs16.readFileSync(target);
+  } catch {
+    return noSuchFile();
+  }
+  if (buf.length > READ_SKILL_MAX_FILE_BYTES || buf.subarray(0, 8192).includes(0)) {
+    return notText(buf.length);
+  }
+  let whole;
+  try {
+    whole = new TextDecoder("utf-8", { fatal: true }).decode(buf);
+  } catch {
+    return notText(buf.length);
+  }
+  const from = offset === void 0 ? 0 : Math.max(0, Math.trunc(offset));
+  if (from > whole.length) {
+    return refuse(
+      "offset_past_end",
+      `offset ${offset} is past the end of "${rel}" (${whole.length} characters).`,
+      skill.name
+    );
+  }
+  let to = Math.min(from + READ_SKILL_MAX_CHARS, whole.length);
+  if (to < whole.length && to > from) {
+    const last = whole.charCodeAt(to - 1);
+    const next = whole.charCodeAt(to);
+    if (last >= 55296 && last <= 56319 && next >= 56320 && next <= 57343) to -= 1;
+  }
+  const content = whole.slice(from, to);
+  const truncated = to < whole.length;
+  const parts = [
+    `[Contrail skill "${skill.name}" - ${rel} - ${buf.length} bytes - engine ${ENGINE_VERSION} - folder ${skill.dir}]`,
+    content
+  ];
+  if (truncated) {
+    parts.push(
+      `[truncated: characters ${from}-${to} of ${whole.length} shown. Continue with read_skill ${JSON.stringify({ name: skill.name, file: rel, offset: to })}. The whole file is on disk at ${target}, as this server sees that path.]`
+    );
+  }
+  if (rel === "SKILL.md" && skill.files.length > 0) {
+    parts.push(
+      `[Other files in this skill - read one with read_skill {"name":${JSON.stringify(skill.name)},"file":"<path>"}: ${skill.files.join(", ")}]`
+    );
+  }
+  return {
+    ok: true,
+    skill: skill.name,
+    file: rel,
+    path: target,
+    bytes: buf.length,
+    total: whole.length,
+    from,
+    to,
+    truncated,
+    nextOffset: truncated ? to : null,
+    content,
+    text: parts.join("\n\n")
+  };
+}
+var READ_SKILL_MAX_CHARS, READ_SKILL_MAX_FILE_BYTES, SKILL_FILES_CAP, SKILLS_ABSENT_NOTE, SKILLS_OVERRIDE_MISSING_NOTE, SKILL_DIR_NAME, FILE_SEGMENT, NAMESPACE_PREFIX, OVERLAY_PATCH;
+var init_pack = __esm({
+  "src/skillpack/pack.ts"() {
+    "use strict";
+    init_version();
+    READ_SKILL_MAX_CHARS = 4e4;
+    READ_SKILL_MAX_FILE_BYTES = 5e6;
+    SKILL_FILES_CAP = 200;
+    SKILLS_ABSENT_NOTE = "This Contrail install has no bundled skills folder. Contrail's other tools work normally. Reinstalling Contrail from its release restores the skills; CONTRAIL_SKILLS_DIR can point at a skills folder explicitly.";
+    SKILLS_OVERRIDE_MISSING_NOTE = "CONTRAIL_SKILLS_DIR is set, but the folder it names is missing or holds no valid skill, so there are no skills to serve. Contrail's other tools work normally. Correct or unset CONTRAIL_SKILLS_DIR.";
+    SKILL_DIR_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
+    FILE_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+    NAMESPACE_PREFIX = /^[a-z0-9][a-z0-9._-]*:/i;
+    OVERLAY_PATCH = "skill.overlay.patch";
+  }
+});
+
+// src/tools/skills.ts
+function skillsListing(pack) {
+  if (pack.skills.length === 0) {
+    return {
+      engine_version: ENGINE_VERSION,
+      source: pack.source,
+      skills_dir: null,
+      count: 0,
+      skills: [],
+      // What a folder held that could not be loaded as a skill — with an
+      // override this is usually the whole explanation.
+      skipped: pack.skipped,
+      looked: pack.looked,
+      note: pack.source === "override_missing" ? SKILLS_OVERRIDE_MISSING_NOTE : SKILLS_ABSENT_NOTE
+    };
+  }
+  return {
+    engine_version: ENGINE_VERSION,
+    source: pack.source,
+    skills_dir: pack.root,
+    count: pack.skills.length,
+    skills: pack.skills.map((s) => ({
+      name: s.name,
+      description: s.description,
+      files: s.files,
+      // Only the first 200 files of a skill are listed and served; say so
+      // rather than let a cut listing read as the whole folder.
+      ...s.filesTruncated ? { files_truncated: true } : {}
+    })),
+    skipped: pack.skipped,
+    note: LIST_NOTE
+  };
+}
+function registerSkillTools(server, deps) {
+  server.registerTool(
+    "list_skills",
+    {
+      title: "List the skills bundled with Contrail",
+      description: "List the skills bundled with this Contrail install: each skill's name, its full trigger description, and the extra files it carries (templates, references, examples), plus the folder they live in. Zero-cost local read - no org, no grant. Skills are Contrail's own instructions for doing Salesforce work well through these tools: the house rules, metadata authoring, Apex, permission sets, flows, reports, Agentforce, data loads. Load one with read_skill before working in its domain.",
+      inputSchema: {}
+    },
+    async () => guarded(() => ok(skillsListing(deps.skills.pack)))
+  );
+  server.registerTool(
+    "read_skill",
+    {
+      title: "Read a bundled Contrail skill",
+      description: `Load one of Contrail's bundled skills by name and follow it. Returns the skill's SKILL.md (its instructions), or - with file - one of its other text files (a template, reference or example it tells you to use). The copy served is read from this Contrail install's own skills folder (or, when CONTRAIL_SKILLS_DIR is set, the folder it names), so prefer it over a same-named skill installed any other way (for example uploaded to a Claude account), which may be older than this engine. Load "salesforce-house-rules" before your first Contrail tool call in a session. Zero-cost local read - no org, no grant. A long file comes back in parts: the result says exactly which characters it holds and the offset to continue from.`,
+      inputSchema: {
+        name: external_exports.string().min(1).max(200).describe(
+          'Skill name as listed in the server instructions or by list_skills (case-insensitive; a leading namespace prefix such as "contrail:" is ignored).'
+        ),
+        file: external_exports.string().max(300).optional().describe(
+          `A file inside the skill's folder, as a relative path with forward slashes (for example "assets/flow-diff-template.html"). Omit for SKILL.md. Text files only.`
+        ),
+        offset: external_exports.number().int().min(0).optional().describe("Character offset to continue a truncated read from.")
+      }
+    },
+    async (args) => guarded(() => {
+      const read = readSkillFile(deps.skills.pack, args.name, args.file, args.offset);
+      if (read.ok) return { content: [{ type: "text", text: read.text }] };
+      if (read.refusal === "bad_path" || read.refusal === "link_or_escape") {
+        deps.audit.record("skill.read_refused", {
+          tool: "read_skill",
+          outcome: "refused",
+          detail: { skill: read.skill, file: read.file ?? "SKILL.md", reason: read.refusal }
+        });
+      }
+      return fail2(read.message);
+    })
+  );
+}
+var LIST_NOTE;
+var init_skills = __esm({
+  "src/tools/skills.ts"() {
+    "use strict";
+    init_zod();
+    init_register();
+    init_version();
+    init_pack();
+    LIST_NOTE = "Load a skill with read_skill {name}. Read one of its files with read_skill {name, file}.";
+  }
+});
+
+// src/skillpack/flowpage.ts
+function jsLiteral(value) {
+  const json2 = JSON.stringify(value) ?? "null";
+  return json2.replace(JS_LITERAL_UNSAFE, (c) => JS_LITERAL_ESCAPES[c] ?? c);
+}
+function escHtml(s) {
+  return s.replace(/[&<>"']/g, (c) => HTML_ESCAPES[c] ?? c);
+}
+function stripBom(xml) {
+  return xml.charCodeAt(0) === 65279 ? xml.slice(1) : xml;
+}
+function checkFlowXml(xml) {
+  const text2 = stripBom(xml);
+  if (/<!(?:DOCTYPE|ENTITY)/i.test(text2)) return { ok: false, reason: "doctype" };
+  let at = 0;
+  const skipSpace = () => {
+    while (at < text2.length && /\s/.test(text2[at] ?? "")) at += 1;
+  };
+  skipSpace();
+  if (text2.startsWith("<?xml", at)) {
+    const end = text2.indexOf("?>", at);
+    if (end === -1) return { ok: false, reason: "not_flow" };
+    at = end + 2;
+  }
+  for (; ; ) {
+    skipSpace();
+    if (!text2.startsWith("<!--", at)) break;
+    const end = text2.indexOf("-->", at + 4);
+    if (end === -1) return { ok: false, reason: "not_flow" };
+    at = end + 3;
+  }
+  if (!text2.startsWith("<Flow", at) || !/[\s/>]/.test(text2[at + 5] ?? "")) {
+    return { ok: false, reason: "not_flow" };
+  }
+  const verdict = import_fast_xml_parser2.XMLValidator.validate(text2);
+  if (verdict !== true) {
+    return { ok: false, reason: "malformed", code: verdict.err.code, line: verdict.err.line };
+  }
+  const fault = bodyFault(text2);
+  if (fault) {
+    return { ok: false, reason: "malformed", code: fault.code, line: lineAt(text2, fault.at) };
+  }
+  return { ok: true };
+}
+function lineAt(text2, index) {
+  let line = 1;
+  for (let nl = text2.indexOf("\n"); nl !== -1 && nl < index; nl = text2.indexOf("\n", nl + 1)) {
+    line += 1;
+  }
+  return line;
+}
+function bodyFault(text2) {
+  const invalid = (at) => ({ code: "InvalidXml", at });
+  const undefinedEntity = /&(?!(?:lt|gt|amp|quot|apos|#[0-9]+|#x[0-9A-Fa-f]+);)/g;
+  let entityAt = -2;
+  const entityIn = (start, end) => {
+    if (entityAt !== -1 && entityAt < start) {
+      undefinedEntity.lastIndex = start;
+      entityAt = undefinedEntity.exec(text2)?.index ?? -1;
+    }
+    return entityAt !== -1 && entityAt < end ? entityAt : -1;
+  };
+  let depth = 0;
+  let roots = 0;
+  let from = 0;
+  for (; ; ) {
+    const lt = text2.indexOf("<", from);
+    const textEnd = lt === -1 ? text2.length : lt;
+    if (depth === 0) {
+      for (let i = from; i < textEnd; i += 1) {
+        const c = text2.charCodeAt(i);
+        if (c !== 32 && c !== 9 && c !== 10 && c !== 13) return invalid(i);
+      }
+    } else {
+      const entity = entityIn(from, textEnd);
+      if (entity !== -1) return { code: "UndefinedEntity", at: entity };
+    }
+    if (lt === -1) return null;
+    const comment = text2.startsWith("<!--", lt);
+    const cdata = text2.startsWith("<![CDATA[", lt);
+    const skip = comment ? ["-->", 4] : cdata ? ["]]>", 9] : text2.startsWith("<?", lt) ? ["?>", 2] : null;
+    if (skip) {
+      const end2 = text2.indexOf(skip[0], lt + skip[1]);
+      if (end2 === -1 || cdata && depth === 0) return invalid(lt);
+      if (comment) {
+        const dashes = text2.indexOf("--", lt + 4);
+        if (dashes !== end2) return invalid(dashes);
+      }
+      from = end2 + skip[0].length;
+      continue;
+    }
+    if (text2[lt + 1] === "!") return invalid(lt);
+    let end = lt + 1;
+    let quote = "";
+    for (; end < text2.length; end += 1) {
+      const c = text2[end];
+      if (c === "<") return invalid(end);
+      if (quote !== "") {
+        if (c === quote) quote = "";
+      } else if (c === '"' || c === "'") {
+        quote = c;
+      } else if (c === ">") {
+        break;
+      }
+    }
+    if (end >= text2.length) return invalid(lt);
+    if (text2[lt + 1] === "/") {
+      depth -= 1;
+    } else {
+      if (depth === 0) {
+        roots += 1;
+        if (roots === 2) return invalid(lt);
+      }
+      const entity = entityIn(lt, end);
+      if (entity !== -1) return { code: "UndefinedEntity", at: entity };
+      if (text2[end - 1] !== "/") depth += 1;
+    }
+    from = end + 1;
+  }
+}
+function countFlowElements(xml) {
+  let parsed;
+  try {
+    parsed = parseXml(xml);
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== "object" || !Object.hasOwn(parsed, "Flow")) return null;
+  const flow = parsed.Flow;
+  if (flow === null || typeof flow !== "object") return 1;
+  const children = flow;
+  let count = 1;
+  for (const tag of FLOW_NODE_TAGS) count += asArray(children[tag]).length;
+  return count;
+}
+function occurrences(haystack, needle) {
+  return haystack.split(needle).length - 1;
+}
+function buildFlowPage(template, input) {
+  for (const token of PAGE_TOKENS) {
+    const n = occurrences(template, token);
+    if (n !== 1) {
+      throw new ContrailError(
+        `The flow page template does not carry ${token} exactly once (found ${n}).`,
+        "template_invalid"
+      );
+    }
+  }
+  const values = {
+    [TITLE_TOKEN]: `<title>${escHtml(input.title)}</title>`,
+    [FLOW_A_TOKEN]: jsLiteral(input.xmlA),
+    [FLOW_B_TOKEN]: input.xmlB === null ? "null" : jsLiteral(input.xmlB),
+    [META_TOKEN]: jsLiteral(input.meta)
+  };
+  return template.replace(
+    /<title>Flow Diff Viewer<\/title>|__FLOW_A__|__FLOW_B__|__META__/g,
+    (m) => values[m] ?? m
+  );
+}
+var import_fast_xml_parser2, FLOW_NODE_TAGS, FLOW_DIAGRAM_MAX_NODES, RENDER_MAX_FLOW_BYTES, TITLE_TOKEN, FLOW_A_TOKEN, FLOW_B_TOKEN, META_TOKEN, PAGE_TOKENS, LINE_SEPARATOR, PARAGRAPH_SEPARATOR, JS_LITERAL_ESCAPES, JS_LITERAL_UNSAFE, HTML_ESCAPES;
+var init_flowpage = __esm({
+  "src/skillpack/flowpage.ts"() {
+    "use strict";
+    import_fast_xml_parser2 = __toESM(require_fxp(), 1);
+    init_errors4();
+    init_xml();
+    FLOW_NODE_TAGS = [
+      "assignments",
+      "decisions",
+      "recordLookups",
+      "recordCreates",
+      "recordUpdates",
+      "recordDeletes",
+      "screens",
+      "loops",
+      "subflows",
+      "actionCalls",
+      "apexPluginCalls",
+      "waits",
+      "transforms",
+      "collectionProcessors",
+      "customErrors",
+      "recordRollbacks",
+      "orchestratedStages"
+    ];
+    FLOW_DIAGRAM_MAX_NODES = 250;
+    RENDER_MAX_FLOW_BYTES = 5e6;
+    TITLE_TOKEN = "<title>Flow Diff Viewer</title>";
+    FLOW_A_TOKEN = "__FLOW_A__";
+    FLOW_B_TOKEN = "__FLOW_B__";
+    META_TOKEN = "__META__";
+    PAGE_TOKENS = [TITLE_TOKEN, FLOW_A_TOKEN, FLOW_B_TOKEN, META_TOKEN];
+    LINE_SEPARATOR = String.fromCharCode(8232);
+    PARAGRAPH_SEPARATOR = String.fromCharCode(8233);
+    JS_LITERAL_ESCAPES = {
+      "<": "\\u003c",
+      ">": "\\u003e",
+      "&": "\\u0026",
+      [LINE_SEPARATOR]: "\\u2028",
+      [PARAGRAPH_SEPARATOR]: "\\u2029"
+    };
+    JS_LITERAL_UNSAFE = new RegExp(`[<>&${LINE_SEPARATOR}${PARAGRAPH_SEPARATOR}]`, "g");
+    HTML_ESCAPES = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;"
+    };
+  }
+});
+
+// src/tools/flowrender.ts
+import crypto8 from "node:crypto";
+import fs17 from "node:fs";
+import path11 from "node:path";
+import { pathToFileURL } from "node:url";
+function fold(p) {
+  return process.platform === "win32" ? p.toLowerCase() : p;
+}
+function isInside3(child, parent) {
+  const rel = path11.relative(fold(parent), fold(child));
+  return rel !== "" && rel !== ".." && !rel.startsWith(`..${path11.sep}`) && !path11.isAbsolute(rel);
+}
+function isInsideOrSame(child, parent) {
+  return fold(path11.resolve(child)) === fold(path11.resolve(parent)) || isInside3(child, parent);
+}
+function folder(dir) {
+  const given = path11.resolve(dir);
+  let real = null;
+  try {
+    real = fs17.realpathSync(given);
+  } catch {
+  }
+  return { given, real };
+}
+function canonicalPath(p) {
+  try {
+    const native = fs17.realpathSync.native;
+    return typeof native === "function" ? native(p) : p;
+  } catch {
+    return p;
+  }
+}
+function utcMinute(iso) {
+  if (!iso) return "unknown date";
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return iso;
+  return new Date(t).toISOString().slice(0, 16).replace("T", " ");
+}
+function describeSource(source) {
+  if (source.kind === "file") return `file ${path11.basename(source.given)}`;
+  const alias = `"${source.conn.alias}"`;
+  if (source.version === void 0) return `${alias} snapshot`;
+  if (typeof source.version === "number") return `${alias} version ${source.version}`;
+  return `${alias} ${source.version} version`;
+}
+function sideNote(side, heading) {
+  const alias = side.conn?.alias ?? "";
+  switch (side.origin) {
+    case "snapshot": {
+      const status = side.status ?? null;
+      const tail = status === "Active" ? "." : ' - an older version may still be the active one. Pass version: "active" to draw the version that runs.';
+      return `${heading}: snapshot of "${alias}" retrieved ${utcMinute(side.retrievedAt)} UTC; the org may have changed since. The snapshot holds the flow's latest version (${status === null ? "its XML carries no status" : `its status reads ${status}`})${tail}`;
+    }
+    case "tooling_version":
+      return `${heading}: version ${side.version} (${side.status ?? "status unknown"}) of ${side.flow} on "${alias}", converted from the Tooling API's JSON - faithful for reading and diffing, element order alphabetical, not deploy-ready.`;
+    case "tooling_fallback":
+      return `${heading}: ${side.flow} is not in the snapshot of "${alias}"; this is its ${side.which} version, read live from the Tooling API and converted from JSON (element order alphabetical, not deploy-ready).`;
+    case "file":
+      return `${heading}: saved file ${side.basename} (sha256 ${(side.sha256 ?? "").slice(0, 12)}); Contrail did not read this side from an org.`;
+  }
+}
+function sweepRenders(now) {
+  try {
+    const root = dataDir();
+    const dir = path11.join(root, "renders");
+    if (!fs17.existsSync(dir)) return;
+    const realDir = fs17.realpathSync(dir);
+    if (!isInside3(realDir, fs17.realpathSync(root))) return;
+    for (const entry of fs17.readdirSync(realDir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith(".html")) continue;
+      const file = path11.join(realDir, entry.name);
+      try {
+        const st = fs17.lstatSync(file);
+        if (st.isFile() && now - st.mtimeMs > RENDER_RETENTION_MS) fs17.unlinkSync(file);
+      } catch {
+      }
+    }
+  } catch {
+  }
+}
+function registerFlowRenderTools(server, deps) {
+  const { db, audit } = deps;
+  const versionSchema = external_exports.union([external_exports.number().int().min(1), external_exports.enum(["active", "latest"])]).optional();
+  function checked(side, description, raw, bytes) {
+    const where = `Side ${sideLetter(side)} (${description})`;
+    if (bytes > RENDER_MAX_FLOW_BYTES) {
+      throw new ContrailError(
+        `${where} is ${bytes} bytes; render_flow's limit per side is ${RENDER_MAX_FLOW_BYTES}. Nothing was written.`,
+        "source_too_large"
+      );
+    }
+    const xml = stripBom(raw);
+    const verdict = checkFlowXml(xml);
+    if (!verdict.ok) {
+      if (verdict.reason === "doctype") {
+        throw new ContrailError(
+          `${where} declares a DOCTYPE or an entity. Flow metadata never does, and the page's XML parser would expand it, so Contrail will not embed it. Nothing was written.`,
+          "bad_flow_xml"
+        );
+      }
+      if (verdict.reason === "not_flow") {
+        throw new ContrailError(
+          `${where} is not Flow metadata XML - its root element is not <Flow>. Nothing was written.`,
+          "bad_flow_xml"
+        );
+      }
+      throw new ContrailError(
+        `${where} is not well-formed XML (${verdict.code}, line ${verdict.line}). render_flow draws only well-formed flow XML. Nothing was written.`,
+        "bad_flow_xml"
+      );
+    }
+    const elements = countFlowElements(xml);
+    return { xml, elements, overLimit: elements !== null && elements > FLOW_DIAGRAM_MAX_NODES };
+  }
+  async function versionSide(side, conn, flow, version2) {
+    const content = await fetchFlowVersionContent(deps, conn, flow, version2);
+    const status = content.version_status ?? null;
+    const description = `"${conn.alias}" version ${version2} (${status ?? "status unknown"})`;
+    const body = checked(side, description, content.body, Buffer.byteLength(content.body, "utf8"));
+    return {
+      side,
+      origin: "tooling_version",
+      xml: body.xml,
+      bytes: Buffer.byteLength(content.body, "utf8"),
+      description,
+      defaultHeading: `${conn.alias} \xB7 v${version2}`,
+      conn,
+      flow,
+      version: version2,
+      status,
+      elements: body.elements,
+      overLimit: body.overLimit
+    };
+  }
+  async function connectionSide(side, source) {
+    const { conn, flow, version: version2 } = source;
+    if (typeof version2 === "number") return versionSide(side, conn, flow, version2);
+    if (version2 === "active" || version2 === "latest") {
+      const rest = new RestClient(deps.tokenMgr, conn, deps.config.salesforce.apiVersion);
+      const esc3 = flow.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+      const rows = await rest.toolingQuery(
+        `SELECT VersionNumber, Status FROM Flow WHERE Definition.DeveloperName = '${esc3}' ORDER BY VersionNumber DESC LIMIT 200`,
+        200
+      );
+      if (rows.length === 0) {
+        throw new ContrailError(
+          `No flow named ${flow} is visible to the Tooling API on "${conn.alias}".`,
+          "artifact_not_found"
+        );
+      }
+      const row = version2 === "latest" ? rows[0] : rows.find((r) => r.Status === "Active");
+      if (!row) {
+        const listed = rows.slice(0, 50).map((r) => `${r.VersionNumber} (${r.Status ?? "?"})`);
+        if (rows.length > listed.length) listed.push(`and ${rows.length - listed.length} more`);
+        throw new ContrailError(
+          `Flow ${flow} has no active version on "${conn.alias}" (versions: ${listed.join(", ")}). Pass a version number or "latest". Nothing was written.`,
+          "artifact_not_found"
+        );
+      }
+      return versionSide(side, conn, flow, Number(row.VersionNumber));
+    }
+    const snapshot = readArtifactFromSnapshot(deps, conn, "Flow", flow);
+    if (snapshot !== null) {
+      const retrievedAt = db.getArtifact(conn.id, "Flow", flow)?.retrievedAt ?? null;
+      const description2 = `"${conn.alias}" snapshot (${utcMinute(retrievedAt)} UTC)`;
+      const bytes2 = Buffer.byteLength(snapshot, "utf8");
+      const body2 = checked(side, description2, snapshot, bytes2);
+      return {
+        side,
+        origin: "snapshot",
+        xml: body2.xml,
+        bytes: bytes2,
+        description: description2,
+        defaultHeading: conn.alias,
+        conn,
+        flow,
+        status: parseFlowStart(body2.xml).status,
+        retrievedAt,
+        elements: body2.elements,
+        overLimit: body2.overLimit
+      };
+    }
+    const live = await readFlowLive(deps, conn, flow);
+    if (live.kind === "descriptor") {
+      throw new ContrailError(
+        `Flow ${flow} on "${conn.alias}" is platform/feature-delivered: Salesforce exposes only a descriptor for it (identity, type, active status) and no API returns its definition, so there is nothing to draw. Nothing was written.`,
+        "artifact_not_found"
+      );
+    }
+    if (live.kind === "absent") {
+      throw new ContrailError(
+        `Flow ${flow} was not found on "${conn.alias}" - not in the snapshot, the Tooling API, or FlowDefinitionView. Check the name with list_metadata (type Flow, live=true), or run refresh_snapshot. Nothing was written.`,
+        "artifact_not_found"
+      );
+    }
+    const converted = flowMetadataJsonToXml(live.metadata);
+    const description = `"${conn.alias}" ${live.which} version, read live`;
+    const bytes = Buffer.byteLength(converted, "utf8");
+    const body = checked(side, description, converted, bytes);
+    return {
+      side,
+      origin: "tooling_fallback",
+      xml: body.xml,
+      bytes,
+      description,
+      defaultHeading: `${conn.alias} \xB7 ${live.which} (live)`,
+      conn,
+      flow,
+      which: live.which,
+      elements: body.elements,
+      overLimit: body.overLimit
+    };
+  }
+  function fileSide(side, source) {
+    const { arg, given } = source;
+    const staging = stagingDir();
+    if (!path11.isAbsolute(given)) {
+      throw new ContrailError(
+        `${arg} must be an absolute path (got "${given}"). Save the XML under ${staging} and pass that full path.`,
+        "bad_source_path"
+      );
+    }
+    if (given.startsWith("//") || given.startsWith("\\\\") || process.platform === "win32" && /^[\\/]{2}/.test(given)) {
+      throw new ContrailError(
+        `${arg} is a network or device path; render_flow reads saved XML only from local folders. Copy the file into ${staging} and pass that path.`,
+        "bad_source_path"
+      );
+    }
+    const snapshots = folder(snapshotsDir());
+    const roots = [
+      folder(staging),
+      ...deps.config.deploy.allowedSourceRoots.filter((r) => path11.isAbsolute(r)).map(folder)
+    ];
+    const inSnapshots = (p2) => isInsideOrSame(p2, snapshots.given) || snapshots.real !== null && isInsideOrSame(p2, snapshots.real);
+    const refuseSnapshot = () => {
+      throw new ContrailError(
+        `${arg} points inside Contrail's snapshot folder. Name the org instead - connection + flow - so the read goes through that connection's metadata_read grant.`,
+        "bad_source_path"
+      );
+    };
+    const refuseOutside = () => {
+      throw new ContrailError(
+        `${arg} is outside the folders render_flow reads saved XML from (${roots.map((r) => r.given).join(", ")}). Copy the file into ${staging} and pass that path.`,
+        "bad_source_path"
+      );
+    };
+    const p = path11.resolve(given);
+    if (inSnapshots(p)) refuseSnapshot();
+    if (!roots.some((r) => isInside3(p, r.given) || r.real !== null && isInside3(p, r.real))) {
+      refuseOutside();
+    }
+    const missing = () => {
+      throw new ContrailError(`${arg} does not exist: ${given}`, "source_not_found");
+    };
+    let real;
+    try {
+      real = fs17.realpathSync(p);
+    } catch {
+      return missing();
+    }
+    if (inSnapshots(real)) refuseSnapshot();
+    if (!roots.some((r) => r.real !== null && isInside3(real, r.real))) refuseOutside();
+    if (isInsideOrSame(canonicalPath(real), canonicalPath(snapshots.real ?? snapshots.given))) {
+      refuseSnapshot();
+    }
+    let stat;
+    try {
+      stat = fs17.statSync(real);
+    } catch {
+      return missing();
+    }
+    if (!stat.isFile()) {
+      throw new ContrailError(`${arg} is not a regular file: ${given}`, "bad_source_path");
+    }
+    const basename = path11.basename(real);
+    const description = `file ${basename}`;
+    if (stat.size > RENDER_MAX_FLOW_BYTES) {
+      throw new ContrailError(
+        `Side ${sideLetter(side)} (${description}) is ${stat.size} bytes; render_flow's limit per side is ${RENDER_MAX_FLOW_BYTES}. Nothing was written.`,
+        "source_too_large"
+      );
+    }
+    let buf;
+    try {
+      buf = fs17.readFileSync(real);
+    } catch {
+      return missing();
+    }
+    const body = checked(side, description, buf.toString("utf8"), buf.length);
+    return {
+      side,
+      origin: "file",
+      xml: body.xml,
+      bytes: buf.length,
+      description,
+      defaultHeading: basename,
+      file: real,
+      basename,
+      sha256: crypto8.createHash("sha256").update(buf).digest("hex"),
+      elements: body.elements,
+      overLimit: body.overLimit
+    };
+  }
+  function readTemplate() {
+    const { pack } = deps.skills;
+    const unavailable2 = (where) => {
+      const remedy = pack.source === "override" || pack.source === "override_missing" ? "CONTRAIL_SKILLS_DIR is set and decides which skills folder is read: correct or unset it." : "Reinstalling Contrail from its release restores it.";
+      throw new ContrailError(
+        `render_flow cannot build a page: ${TEMPLATE_FILE} is missing from this install's skills folder (${where}). ${remedy} Nothing was written.`,
+        "render_unavailable"
+      );
+    };
+    if (pack.root === null) return unavailable2("no skills folder was found");
+    const file = path11.join(pack.root, TEMPLATE_SKILL, "assets", TEMPLATE_FILE);
+    try {
+      return { text: fs17.readFileSync(file, "utf8"), file };
+    } catch {
+      return unavailable2(pack.root);
+    }
+  }
+  server.registerTool(
+    "render_flow",
+    {
+      title: "Render a flow diagram or flow diff page",
+      description: `Show a Salesforce flow as an interactive flow diagram, or two flows side by side in a diff viewer: visualize, display, draw or chart a flow; compare a flow across two orgs, two versions of one flow, or before and after an edit. Contrail builds the HTML page itself from the flow XML (Flow-Builder-style canvas, change highlighting, click a node to inspect it) - never hand-build one - writes it under renders/ in its data directory and returns the file path. By default it also asks this computer to open the page; to show it anywhere else (a human on their phone, a shared review), pass open:false and publish the returned file as a private artifact - publish the file, never paste its contents. Each side is one of: a connection's snapshot copy of the flow - its latest version, which may not be the active one (read live from the Tooling API when the snapshot lacks it); a historical version by number, or "active" / "latest" (the Tooling API's JSON converted to flow XML); or a saved flow XML file under Contrail's staging directory. Side A is the left/old pane, side B the right/new pane; give no side-B argument for a single view. Requires metadata_read on every connection it reads. Two snapshot copies, or two converted versions, compare like for like; a converted version against a snapshot or a saved retrieve is allowed but can mark nodes changed only because their child elements are ordered differently - the result and the page footer say when that applies. A flow whose definition no API exposes (platform/feature-delivered) is refused, not drawn. The page embeds the flow's full XML: treat the file as client-confidential. Pages in renders/ older than 7 days are deleted when the Contrail server starts and each time render_flow writes a page.`,
+      inputSchema: {
+        flow: external_exports.string().optional().describe(
+          "Flow API name (DeveloperName), for example Send_Invoice. Used for both sides unless flow_b is given. Required whenever a side reads from a connection."
+        ),
+        connection: external_exports.string().optional().describe("Side A: connection alias (or id) to read the flow from."),
+        version: versionSchema.describe(
+          'Side A: a historical version - a version number, or "active" / "latest". Omit for the snapshot copy. Needs connection.'
+        ),
+        file: external_exports.string().optional().describe(
+          "Side A instead of a connection: absolute path of a saved flow XML file under Contrail's staging directory (list_connections returns staging_dir)."
+        ),
+        label: external_exports.string().max(80).optional().describe(
+          "Side A pane heading (default: the connection alias, plus the version when one is given; or the file name)."
+        ),
+        connection_b: external_exports.string().optional().describe(
+          "Side B: connection alias (or id). Omit to reuse side A's connection when version_b or flow_b is given."
+        ),
+        flow_b: external_exports.string().optional().describe("Side B: a different flow API name (default: flow)."),
+        version_b: versionSchema.describe(
+          'Side B: a version number, or "active" / "latest". Omit for the snapshot copy.'
+        ),
+        file_b: external_exports.string().optional().describe(
+          "Side B instead of a connection: absolute path of a saved flow XML file under Contrail's staging directory."
+        ),
+        label_b: external_exports.string().max(80).optional().describe("Side B pane heading."),
+        title: external_exports.string().max(120).optional().describe("Page title (default: the flow name and the pane headings)."),
+        open: external_exports.boolean().optional().describe(
+          "Ask this computer to open the page in its default app for .html files (default true). Pass false when the human is not at this computer."
+        )
+      }
+    },
+    async (args) => guarded(async () => {
+      const diff = args.connection_b !== void 0 || args.flow_b !== void 0 || args.version_b !== void 0 || args.file_b !== void 0;
+      const refuseShape = (message2) => {
+        throw new ContrailError(message2, "bad_render_request");
+      };
+      const bothGiven = (letter) => refuseShape(
+        `Side ${letter} names both a connection and a file - give one. A connection reads the flow from that org; a file reads saved XML.`
+      );
+      if (args.connection === void 0 && args.file === void 0) {
+        refuseShape("render_flow needs a source for side A: either connection + flow, or file.");
+      }
+      if (args.connection !== void 0 && args.file !== void 0) bothGiven("A");
+      if (args.file !== void 0 && args.version !== void 0) {
+        refuseShape("version applies to a connection, not to a file.");
+      }
+      if (diff) {
+        if (args.connection_b !== void 0 && args.file_b !== void 0) bothGiven("B");
+        if (args.file_b !== void 0 && args.version_b !== void 0) {
+          refuseShape("version applies to a connection, not to a file.");
+        }
+        if (args.connection_b === void 0 && args.file_b === void 0 && args.file !== void 0) {
+          refuseShape(
+            "Side B needs connection_b or file_b: side A is a file, so there is no connection to reuse."
+          );
+        }
+      }
+      const aIsConnection = args.file === void 0;
+      const bIsConnection = diff && args.file_b === void 0;
+      const flowA = args.flow;
+      const flowB = args.flow_b ?? args.flow;
+      if (aIsConnection && flowA === void 0 || bIsConnection && flowB === void 0) {
+        refuseShape("flow is required when a side reads from a connection.");
+      }
+      for (const name of [args.flow, args.flow_b]) {
+        if (name !== void 0 && !flowNameOk(name)) refuseShape("invalid flow name");
+      }
+      const resolve = (ref) => {
+        const rec = db.resolveConnection(ref);
+        if (!rec) throw new ConnectionNotFoundError(ref);
+        return rec;
+      };
+      const connA = aIsConnection ? resolve(args.connection) : null;
+      const connB = !bIsConnection ? null : args.connection_b !== void 0 ? resolve(args.connection_b) : connA;
+      const distinct = /* @__PURE__ */ new Map();
+      for (const rec of [connA, connB]) if (rec) distinct.set(rec.id, rec);
+      for (const rec of distinct.values()) assertGrant(rec, "render_flow", audit);
+      const sourceA = connA ? { kind: "connection", conn: connA, flow: flowA, version: args.version } : { kind: "file", arg: "file", given: args.file };
+      const sourceB = !diff ? null : connB ? { kind: "connection", conn: connB, flow: flowB, version: args.version_b } : { kind: "file", arg: "file_b", given: args.file_b };
+      const sameSource = (description) => {
+        throw new ContrailError(
+          `Both sides name the same source (${description}); there is nothing to compare. Drop the side-B arguments for a single view, or change one side.`,
+          "bad_render_request"
+        );
+      };
+      if (sourceB && sourceA.kind === "connection" && sourceB.kind === "connection" && sourceA.conn.id === sourceB.conn.id && sourceA.flow.toLowerCase() === sourceB.flow.toLowerCase() && sourceA.version === sourceB.version) {
+        sameSource(describeSource(sourceA));
+      }
+      const readSide = (side, source) => source.kind === "file" ? fileSide(side, source) : connectionSide(side, source);
+      const a = await readSide("a", sourceA);
+      const b = sourceB ? await readSide("b", sourceB) : null;
+      if (b && a.origin === "file" && b.origin === "file" && fold(a.file ?? "") === fold(b.file ?? "")) {
+        sameSource(a.description);
+      }
+      const template = readTemplate();
+      const aLabel = args.label || a.defaultHeading;
+      const bLabel = b ? args.label_b || b.defaultHeading : void 0;
+      const subtitle = b ? `${a.description} \u2192 ${b.description}` : a.description;
+      const titleFlow = args.flow ?? args.flow_b ?? null;
+      const headings = b ? `${aLabel} vs ${bLabel} (diff)` : aLabel;
+      const title = args.title || (titleFlow ? `${titleFlow} \u2014 ${headings}` : headings);
+      const converted = (s) => s.origin === "tooling_version" || s.origin === "tooling_fallback";
+      let fidelity;
+      const notes = [sideNote(a, aLabel)];
+      if (b) {
+        notes.push(sideNote(b, bLabel));
+        if (a.origin === "file" || b.origin === "file") {
+          fidelity = "unknown";
+          notes.push(FILE_IN_DIFF_NOTE);
+        } else if (converted(a) === converted(b)) {
+          fidelity = "like_for_like";
+        } else {
+          fidelity = "mixed";
+          notes.push(MIXED_NOTE);
+        }
+      }
+      for (const [s, heading] of [
+        [a, aLabel],
+        [b, bLabel]
+      ]) {
+        if (s && s.overLimit) {
+          notes.push(
+            `${heading} has ${s.elements} elements; above ${FLOW_DIAGRAM_MAX_NODES} the page shows a plain message instead of a diagram for that side.`
+          );
+        }
+      }
+      const built = `Built by Contrail ${ENGINE_VERSION} render_flow at ${(/* @__PURE__ */ new Date()).toISOString()}.`;
+      const footer = [...notes, built].join(" ");
+      const rc = deps.remoteControl.status();
+      if (rc.state === "on") {
+        notes.push(
+          `Remote Control was last reported on at ${rc.at}: the human may be away from this computer, where an opened page is not in front of them. Publish the file as a private artifact.`
+        );
+      }
+      notes.push(built);
+      const meta = {
+        aLabel,
+        ...bLabel !== void 0 ? { bLabel } : {},
+        subtitle,
+        note: footer
+      };
+      let html;
+      try {
+        html = buildFlowPage(template.text, { title, xmlA: a.xml, xmlB: b ? b.xml : null, meta });
+      } catch (err2) {
+        if (err2 instanceof ContrailError && err2.code === "template_invalid") {
+          throw new ContrailError(
+            `render_flow cannot build a page: the template at ${template.file} does not carry each placeholder exactly once, so it is not the template this engine expects. Nothing was written.`,
+            "template_invalid"
+          );
+        }
+        throw err2;
+      }
+      const dir = rendersDir();
+      const realDir = fs17.realpathSync(dir);
+      if (!isInside3(realDir, fs17.realpathSync(dataDir()))) {
+        throw new ContrailError(
+          `Contrail's renders folder resolves outside its data directory (${realDir}); refusing to write there. Remove the link at ${dir} and retry.`,
+          "unsafe_render_dir"
+        );
+      }
+      sweepRenders(Date.now());
+      const slug = (titleFlow ?? (a.basename ?? "").split(".")[0] ?? "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 60) || "flow";
+      const stamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
+      let file = "";
+      for (let attempt = 0; ; attempt += 1) {
+        file = path11.join(
+          dir,
+          `${slug}-${b ? "diff" : "view"}-${stamp}Z-${crypto8.randomBytes(2).toString("hex")}.html`
+        );
+        try {
+          fs17.writeFileSync(file, html, { encoding: "utf8", flag: "wx" });
+          break;
+        } catch (err2) {
+          if (err2.code !== "EEXIST" || attempt >= 8) throw err2;
+        }
+      }
+      const pageBytes = Buffer.byteLength(html, "utf8");
+      const openRequested = args.open !== false;
+      let opened = false;
+      if (openRequested) {
+        try {
+          await deps.openExternal(file);
+          opened = true;
+        } catch {
+          opened = false;
+        }
+      }
+      const sides = b ? [a, b] : [a];
+      audit.record("flow.rendered", {
+        connectionId: a.conn?.id ?? b?.conn?.id ?? null,
+        tool: "render_flow",
+        detail: {
+          mode: b ? "diff" : "single",
+          flow: titleFlow,
+          sides: sides.map((s) => ({
+            side: s.side,
+            origin: s.origin,
+            ...s.conn ? { connection_id: s.conn.id } : {},
+            ...s.version !== void 0 ? { version: s.version } : {},
+            ...s.file !== void 0 ? { file: s.file, sha256: s.sha256 } : {}
+          })),
+          file,
+          page_bytes: pageBytes,
+          open_requested: openRequested,
+          opened
+        }
+      });
+      return ok(
+        {
+          file,
+          file_url: pathToFileURL(file).href,
+          mode: b ? "diff" : "single",
+          title,
+          opened,
+          sides: sides.map((s) => ({
+            side: s.side,
+            label: s.side === "a" ? aLabel : bLabel,
+            origin: s.origin,
+            ...s.conn ? { connection: s.conn.alias } : {},
+            ...s.flow !== void 0 ? { flow: s.flow } : {},
+            ...s.version !== void 0 ? { version: s.version } : {},
+            ...s.status !== void 0 ? { status: s.status } : {},
+            ...s.origin === "snapshot" ? { retrieved_at: s.retrievedAt ?? null } : {},
+            ...s.file !== void 0 ? { file: s.file, sha256: s.sha256 } : {},
+            bytes: s.bytes,
+            elements: s.elements,
+            over_diagram_limit: s.overLimit
+          })),
+          ...fidelity ? { fidelity } : {},
+          notes,
+          page_bytes: pageBytes,
+          ...rc.state === "on" ? { remote_control: { state: "on", at: rc.at } } : {},
+          retention: RETENTION_TEXT,
+          note: PUBLISH_NOTE
+        },
+        !openRequested ? "Flow page written; not opened, because open was false." : opened ? "Flow page written and this computer was asked to open it (its default app for .html files)." : "Flow page written, but this computer could not open it automatically."
+      );
+    })
+  );
+}
+var FLOW_NAME_RE, flowNameOk, RENDER_RETENTION_MS, TEMPLATE_SKILL, TEMPLATE_FILE, RETENTION_TEXT, PUBLISH_NOTE, sideLetter, MIXED_NOTE, FILE_IN_DIFF_NOTE;
+var init_flowrender = __esm({
+  "src/tools/flowrender.ts"() {
+    "use strict";
+    init_zod();
+    init_register();
+    init_metadata();
+    init_errors4();
+    init_gate();
+    init_paths();
+    init_version();
+    init_rest();
+    init_flowversion();
+    init_automation();
+    init_flowpage();
+    FLOW_NAME_RE = /^[A-Za-z0-9_.\-]{1,120}$/;
+    flowNameOk = (name) => FLOW_NAME_RE.test(name) && !name.includes("..");
+    RENDER_RETENTION_MS = 7 * 24 * 60 * 60 * 1e3;
+    TEMPLATE_SKILL = "salesforce-flow-visualize";
+    TEMPLATE_FILE = "flow-diff-template.html";
+    RETENTION_TEXT = "Pages in this folder older than 7 days are deleted when the Contrail server starts and each time render_flow writes a page; nothing deletes them in between.";
+    PUBLISH_NOTE = "To show this page anywhere else, publish this file as a private artifact. Publish the file itself; do not paste or retype its contents.";
+    sideLetter = (side) => side === "a" ? "A" : "B";
+    MIXED_NOTE = "Mixed sources: one side was converted from Tooling API JSON and the other is a Metadata API retrieve. Their child elements are ordered differently, so nodes can be marked changed when nothing real differs - check the inspector's parsed rows before trusting a mark. For a like-for-like comparison, pass a version on both sides.";
+    FILE_IN_DIFF_NOTE = "One side is a saved file whose origin Contrail cannot tell. If the two sides were not produced the same way (both Metadata API retrieves, or both converted Tooling versions), nodes can be marked changed only because their child elements are ordered differently.";
   }
 });
 
@@ -40681,8 +47808,8 @@ var init_lspClient = __esm({
 });
 
 // src/localdiag/apex.ts
-import path9 from "node:path";
-import { pathToFileURL } from "node:url";
+import path12 from "node:path";
+import { pathToFileURL as pathToFileURL2 } from "node:url";
 function severityOf(n) {
   switch (n) {
     case 2:
@@ -40722,9 +47849,9 @@ async function startApexServer(spawnLsp, serverScript, workspaceRoot) {
     "initialize",
     {
       processId: process.pid,
-      rootUri: pathToFileURL(workspaceRoot).toString(),
+      rootUri: pathToFileURL2(workspaceRoot).toString(),
       workspaceFolders: [
-        { uri: pathToFileURL(workspaceRoot).toString(), name: path9.basename(workspaceRoot) }
+        { uri: pathToFileURL2(workspaceRoot).toString(), name: path12.basename(workspaceRoot) }
       ],
       capabilities: {
         textDocument: {
@@ -40819,8 +47946,8 @@ var init_apex = __esm({
 });
 
 // src/localdiag/soql.ts
-import path10 from "node:path";
-import { pathToFileURL as pathToFileURL2 } from "node:url";
+import path13 from "node:path";
+import { pathToFileURL as pathToFileURL3 } from "node:url";
 async function startSoqlServer(spawnLsp, serverScript, workspaceRoot) {
   const child = spawnLsp(serverScript, ["--stdio"], workspaceRoot);
   const client = new LspClient(child, "soql");
@@ -40828,9 +47955,9 @@ async function startSoqlServer(spawnLsp, serverScript, workspaceRoot) {
     "initialize",
     {
       processId: process.pid,
-      rootUri: pathToFileURL2(workspaceRoot).toString(),
+      rootUri: pathToFileURL3(workspaceRoot).toString(),
       workspaceFolders: [
-        { uri: pathToFileURL2(workspaceRoot).toString(), name: path10.basename(workspaceRoot) }
+        { uri: pathToFileURL3(workspaceRoot).toString(), name: path13.basename(workspaceRoot) }
       ],
       capabilities: {
         textDocument: {
@@ -40845,7 +47972,7 @@ async function startSoqlServer(spawnLsp, serverScript, workspaceRoot) {
   return client;
 }
 async function checkSoqlOnce(client, workspaceRoot, query, version2, deadline) {
-  const uri = pathToFileURL2(path10.join(workspaceRoot, `__validate__${version2}.soql`)).toString();
+  const uri = pathToFileURL3(path13.join(workspaceRoot, `__validate__${version2}.soql`)).toString();
   let unsubscribe = () => void 0;
   const push = new Promise((resolve) => {
     unsubscribe = client.onNotification("textDocument/publishDiagnostics", (params) => {
@@ -40884,9 +48011,9 @@ var init_soql = __esm({
 
 // src/localdiag/runner.ts
 import { spawn } from "node:child_process";
-import fs15 from "node:fs";
-import path11 from "node:path";
-import { pathToFileURL as pathToFileURL3 } from "node:url";
+import fs18 from "node:fs";
+import path14 from "node:path";
+import { pathToFileURL as pathToFileURL4 } from "node:url";
 function newLane() {
   return {
     client: null,
@@ -40914,23 +48041,23 @@ function createLocalDiagRunner(opts) {
   const idleReapMs = opts.idleReapMs ?? SOQL_IDLE_REAP_MS;
   const lanes = { apex: newLane(), soql: newLane() };
   let apexInFlight = null;
-  const classesDir = () => path11.join(opts.workspaceRoot, "force-app", "main", "default", "classes");
+  const classesDir = () => path14.join(opts.workspaceRoot, "force-app", "main", "default", "classes");
   function ensureWorkspace() {
     const dir = classesDir();
-    fs15.mkdirSync(dir, { recursive: true });
-    for (const name of fs15.readdirSync(dir)) {
+    fs18.mkdirSync(dir, { recursive: true });
+    for (const name of fs18.readdirSync(dir)) {
       if (name === SEED_NAME) continue;
       try {
-        fs15.rmSync(path11.join(dir, name), { force: true });
+        fs18.rmSync(path14.join(dir, name), { force: true });
       } catch {
       }
     }
-    fs15.writeFileSync(path11.join(dir, SEED_NAME), SEED_SOURCE, "utf8");
+    fs18.writeFileSync(path14.join(dir, SEED_NAME), SEED_SOURCE, "utf8");
   }
   function scriptFor(lane) {
     if (!opts.vendorDir) return null;
-    const script = lane === "apex" ? path11.join(opts.vendorDir, "apex-ls", "dist", "server.node.js") : path11.join(opts.vendorDir, "bin", "soql-lsp.bundled.js");
-    return fs15.existsSync(script) ? script : null;
+    const script = lane === "apex" ? path14.join(opts.vendorDir, "apex-ls", "dist", "server.node.js") : path14.join(opts.vendorDir, "bin", "soql-lsp.bundled.js");
+    return fs18.existsSync(script) ? script : null;
   }
   function enqueue(name, work) {
     const lane = lanes[name];
@@ -41007,15 +48134,15 @@ function createLocalDiagRunner(opts) {
         const deadline = Date.now() + opts.timeoutMs;
         ensureWorkspace();
         const filename = apexScratchName(source, kind);
-        const filePath = path11.join(classesDir(), filename);
-        fs15.writeFileSync(filePath, source, "utf8");
+        const filePath = path14.join(classesDir(), filename);
+        fs18.writeFileSync(filePath, source, "utf8");
         let client = null;
         try {
           client = await startApexServer(spawnLsp, gate.script, opts.workspaceRoot);
           apexInFlight = client;
           const diagnostics = await checkApexOnce(
             client,
-            pathToFileURL3(filePath).toString(),
+            pathToFileURL4(filePath).toString(),
             source,
             ++lane.version,
             deadline
@@ -41039,7 +48166,7 @@ function createLocalDiagRunner(opts) {
         try {
           if (!lane.client?.alive) {
             killSoql();
-            fs15.mkdirSync(opts.workspaceRoot, { recursive: true });
+            fs18.mkdirSync(opts.workspaceRoot, { recursive: true });
             lane.client = await startSoqlServer(spawnLsp, gate.script, opts.workspaceRoot);
           }
           const diagnostics = await checkSoqlOnce(
@@ -41086,16 +48213,16 @@ var init_runner = __esm({
 });
 
 // src/core/remoteControl.ts
-import fs16 from "node:fs";
+import fs19 from "node:fs";
 import os4 from "node:os";
-import path12 from "node:path";
+import path15 from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
 function claudeSettingsPath() {
-  const base = process.env.CLAUDE_CONFIG_DIR?.trim() || path12.join(os4.homedir(), ".claude");
-  return path12.join(base, "settings.json");
+  const base = process.env.CLAUDE_CONFIG_DIR?.trim() || path15.join(os4.homedir(), ".claude");
+  return path15.join(base, "settings.json");
 }
 function userHookState(file) {
-  if (!fs16.existsSync(file)) return "not_installed";
+  if (!fs19.existsSync(file)) return "not_installed";
   let settings;
   try {
     settings = readSettings(file);
@@ -41121,10 +48248,10 @@ function isOurEntry(entry) {
   });
 }
 function readSettings(file) {
-  if (!fs16.existsSync(file)) return {};
+  if (!fs19.existsSync(file)) return {};
   let parsed;
   try {
-    parsed = JSON.parse(fs16.readFileSync(file, "utf8"));
+    parsed = JSON.parse(fs19.readFileSync(file, "utf8"));
   } catch (err2) {
     throw new Error(
       `${file} is not valid JSON (${err2 instanceof Error ? err2.message : String(err2)}) \u2014 nothing was changed. Fix the file, then try again.`
@@ -41144,39 +48271,39 @@ function hookLists(settings, file) {
   return { hooks, pre: [...pre] };
 }
 function writeSettings(file, settings, opts) {
-  fs16.mkdirSync(path12.dirname(file), { recursive: true });
+  fs19.mkdirSync(path15.dirname(file), { recursive: true });
   let target = file;
   let mode = null;
   let backup = null;
-  if (fs16.existsSync(file)) {
+  if (fs19.existsSync(file)) {
     try {
-      target = fs16.realpathSync(file);
-      mode = fs16.statSync(target).mode & 511;
+      target = fs19.realpathSync(file);
+      mode = fs19.statSync(target).mode & 511;
     } catch {
       target = file;
     }
     const candidate = `${target}.contrail-backup`;
-    if (!opts.touchedBefore && !fs16.existsSync(candidate)) {
+    if (!opts.touchedBefore && !fs19.existsSync(candidate)) {
       try {
-        fs16.copyFileSync(target, candidate);
+        fs19.copyFileSync(target, candidate);
       } catch {
       }
     }
-    if (fs16.existsSync(candidate)) backup = candidate;
+    if (fs19.existsSync(candidate)) backup = candidate;
   }
   const tmp = `${target}.${process.pid}.tmp`;
   try {
-    fs16.writeFileSync(tmp, JSON.stringify(settings, null, 2) + "\n", { encoding: "utf8", ...mode !== null ? { mode } : {} });
+    fs19.writeFileSync(tmp, JSON.stringify(settings, null, 2) + "\n", { encoding: "utf8", ...mode !== null ? { mode } : {} });
     if (mode !== null) {
       try {
-        fs16.chmodSync(tmp, mode);
+        fs19.chmodSync(tmp, mode);
       } catch {
       }
     }
-    fs16.renameSync(tmp, target);
+    fs19.renameSync(tmp, target);
   } catch (err2) {
     try {
-      fs16.rmSync(tmp, { force: true });
+      fs19.rmSync(tmp, { force: true });
     } catch {
     }
     throw err2;
@@ -41300,7 +48427,7 @@ var init_remoteControl = __esm({
         this.now = opts.now ?? Date.now;
       }
       get markerDir() {
-        return path12.join(this.root, "remote-control");
+        return path15.join(this.root, "remote-control");
       }
       /**
        * Run a tool handler with the Remote Control state sampled NOW, at call
@@ -41321,10 +48448,10 @@ var init_remoteControl = __esm({
       sample(toolUseId, toolName) {
         this.prune();
         if (toolUseId) {
-          const own = this.readMarker(path12.join(this.markerDir, `${toolUseId}.json`));
+          const own = this.readMarker(path15.join(this.markerDir, `${toolUseId}.json`));
           return own ? { state: own.remoteControl ? "on" : "off", source: "call", at: new Date(own.at).toISOString() } : { state: "unknown", source: "none", at: null };
         }
-        const latest = this.readMarker(path12.join(this.markerDir, "latest.json"));
+        const latest = this.readMarker(path15.join(this.markerDir, "latest.json"));
         if (latest && this.now() - latest.at <= RECENT_WINDOW_MS && toolNameMatches(latest.toolName, toolName)) {
           return { state: latest.remoteControl ? "on" : "off", source: "recent", at: new Date(latest.at).toISOString() };
         }
@@ -41332,7 +48459,7 @@ var init_remoteControl = __esm({
       }
       /** Status for list_connections and the Settings page. */
       status() {
-        const latest = this.readMarker(path12.join(this.markerDir, "latest.json"));
+        const latest = this.readMarker(path15.join(this.markerDir, "latest.json"));
         const fresh = latest !== null && this.now() - latest.at <= RECENT_WINDOW_MS;
         return {
           state: latest && fresh ? latest.remoteControl ? "on" : "off" : "unknown",
@@ -41385,7 +48512,7 @@ var init_remoteControl = __esm({
       }
       removeUserHook() {
         const file = this.claudeSettingsFile;
-        if (!fs16.existsSync(file)) return { changed: false, file };
+        if (!fs19.existsSync(file)) return { changed: false, file };
         const settings = readSettings(file);
         const { hooks, pre } = hookLists(settings, file);
         const kept = pre.filter((e) => !isOurEntry(e));
@@ -41401,7 +48528,7 @@ var init_remoteControl = __esm({
       readMarker(file) {
         let parsed;
         try {
-          parsed = JSON.parse(fs16.readFileSync(file, "utf8"));
+          parsed = JSON.parse(fs19.readFileSync(file, "utf8"));
         } catch {
           return null;
         }
@@ -41416,16 +48543,16 @@ var init_remoteControl = __esm({
       prune() {
         let names;
         try {
-          names = fs16.readdirSync(this.markerDir);
+          names = fs19.readdirSync(this.markerDir);
         } catch {
           return;
         }
         const cutoff = this.now() - PRUNE_AFTER_MS;
         for (const name of names) {
           if (name === "latest.json" || !name.endsWith(".json")) continue;
-          const file = path12.join(this.markerDir, name);
+          const file = path15.join(this.markerDir, name);
           try {
-            if (fs16.statSync(file).mtimeMs < cutoff) fs16.rmSync(file, { force: true });
+            if (fs19.statSync(file).mtimeMs < cutoff) fs19.rmSync(file, { force: true });
           } catch {
           }
         }
@@ -41764,8 +48891,8 @@ var init_settings2 = __esm({
         <a href="https://pushover.net" target="_blank" rel="noreferrer">Pushover</a> \u2014 one message
         per pushed proposal, so you can approve from anywhere by typing the code into your Contrail
         session (the code is the last line of the message, on its own, for easy copying). The
-        message deletes itself from your phone when the code expires. Claude never sees the code
-        or these keys. (The Contrail desktop app shares these keys.)</p>
+        message deletes itself from your phone when the code expires. Contrail never gives Claude
+        the code or these keys. (The Contrail desktop app shares these keys.)</p>
       <div class="field">
         <label for="method">Delivery</label>
         <select id="method" name="method">
@@ -41851,7 +48978,7 @@ __export(server_exports, {
   createDeps: () => createDeps,
   createServer: () => createServer
 });
-import path13 from "node:path";
+import path16 from "node:path";
 function createDeps(overrides) {
   const db = overrides?.db ?? new ContrailDb();
   const tokens = overrides?.tokens ?? new KeychainTokenStore();
@@ -41862,6 +48989,14 @@ function createDeps(overrides) {
   const store = overrides?.store ?? new SnapshotStore();
   const engine = new SnapshotEngine(db, store, tokenMgr, config2, audit);
   const deploys = new DeployEngine(db, store, tokenMgr, config2, audit, overrides?.approvals);
+  deploys.setSnapshotRebaseliner(
+    (i) => engine.rebaselineMembers(i.conn, i.members, {
+      timeoutMs: i.timeoutMs,
+      requestId: i.requestId,
+      deleted: i.deleted
+    })
+  );
+  if (!overrides?.config) deploys.setPolicySource(loadPolicies);
   const pushover = overrides?.notifier ?? new PushoverNotifier(
     config2,
     tokens,
@@ -41885,8 +49020,14 @@ function createDeps(overrides) {
     vendorDir: vendorDir(),
     enabled: config2.localDiagnostics.enabled,
     timeoutMs: config2.localDiagnostics.timeoutMs,
-    workspaceRoot: path13.join(dataDir(), "localdiag-workspace")
+    workspaceRoot: path16.join(dataDir(), "localdiag-workspace")
   });
+  const pack = loadSkillPack(resolveSkillsDir());
+  const skills = { pack, instructions: buildServerInstructions(pack, ENGINE_VERSION) };
+  const openExternal = overrides?.flowOps?.openBrowser ?? (async (target) => {
+    await open_default(target);
+  });
+  sweepRenders(Date.now());
   return {
     db,
     tokens,
@@ -41900,11 +49041,16 @@ function createDeps(overrides) {
     localDiag,
     notifier,
     remoteControl,
-    settingsPage
+    settingsPage,
+    skills,
+    openExternal
   };
 }
 function createServer(deps) {
-  const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
+  const server = new McpServer(
+    { name: SERVER_NAME, version: SERVER_VERSION },
+    { instructions: deps.skills.instructions }
+  );
   registerTools(server, deps);
   registerMetadataTools(server, deps);
   registerDiffTools(server, deps);
@@ -41912,6 +49058,9 @@ function createServer(deps) {
   registerDeployTools(server, deps);
   registerLocalDiagTools(server, deps);
   registerSettingsTools(server, deps);
+  registerEvidenceTools(server, deps);
+  registerSkillTools(server, deps);
+  registerFlowRenderTools(server, deps);
   return server;
 }
 var SERVER_VERSION;
@@ -41935,11 +49084,16 @@ var init_server3 = __esm({
     init_deploy();
     init_localdiag();
     init_settings();
+    init_evidence2();
+    init_skills();
+    init_flowrender();
     init_runner();
     init_notify();
     init_remoteControl();
     init_settings2();
     init_paths();
+    init_pack();
+    init_instructions();
     init_open();
     init_version();
     SERVER_VERSION = ENGINE_VERSION;

@@ -1,6 +1,6 @@
 # Contrail Reference — tools, features, configuration
 
-Everything Contrail can do, in one place. Current as of **v0.39.0** (39 tools).
+Everything Contrail can do, in one place. Current as of **v0.40.0** (43 tools).
 The same tool surface is available in all three installs — the Claude Desktop
 extension (`.mcpb`), the Claude Code plugin, and the Contrail desktop app —
 with a few desktop-app differences [noted at the end](#the-desktop-app).
@@ -8,7 +8,7 @@ with a few desktop-app differences [noted at the end](#the-desktop-app).
 **Contents:** [Security model](#the-security-model) ·
 [Connections](#connections--lifecycle) · [Metadata](#metadata-read--search) ·
 [Drift & audit](#org-drift--setup-audit) · [Diff](#cross-org-diff) ·
-[Data](#data-reads) · [Diagnostics](#diagnostics) ·
+[Flow pages](#flow-pages) · [Data](#data-reads) · [Diagnostics](#diagnostics) ·
 [Local checks](#local-static-checks) · [Writes](#writes--the-approval-ritual) ·
 [Skills](#the-skill-pack) · [Configuration](#configuration-configjson) ·
 [Desktop app](#the-desktop-app) · [Where things live](#where-things-live-on-disk)
@@ -21,19 +21,21 @@ with a few desktop-app differences [noted at the end](#the-desktop-app).
 | [`disconnect_org`](#disconnect_org) | — | Revoke the token and remove a connection |
 | [`manage_connection`](#manage_connection) | — | Open the grants page (the only place grants change) |
 | [`open_settings`](#open_settings) | — | Open the Settings page: approval codes to the human's phone (Pushover) |
-| [`list_connections`](#list_connections) | — | List connected orgs + grants (+ update notice when behind, + phone-notification status) |
+| [`list_connections`](#list_connections) | — | List connected orgs + grants (+ each connection's policy, + update notice when behind, + phone-notification status) |
 | [`get_permissions`](#get_permissions) | — | The full grants matrix, including what is NOT granted |
 | [`get_audit_log`](#get_audit_log) | — | Local audit log: connections, refusals, every write decision |
+| [`export_change_evidence`](#export_change_evidence) | — | Write a change-evidence dossier (md + json) for Contrail's writes; returns the path, never contents |
 | [`list_metadata`](#list_metadata) | metadata_read | Inventory from the snapshot index, or live from the org |
 | [`retrieve_metadata`](#retrieve_metadata) | metadata_read | Artifact source (flows, Apex, objects…) + one-hop dependencies |
 | [`describe_schema`](#describe_schema) | metadata_read | Live object/field describe for one SObject |
 | [`search_metadata`](#search_metadata) | metadata_read | Name + full-text search over the snapshot |
 | [`get_dependencies`](#get_dependencies) | metadata_read | Dependency graph: what uses this, what breaks if it changes |
-| [`refresh_snapshot`](#refresh_snapshot) | metadata_read | Re-retrieve the org into the local snapshot/index/graph |
+| [`refresh_snapshot`](#refresh_snapshot) | metadata_read | Re-retrieve the org (or only named components) into the local snapshot/index/graph |
 | [`get_org_changes`](#get_org_changes) | metadata_read | Drift report: live org vs your snapshot, grouped by who |
 | [`get_setup_audit`](#get_setup_audit) | metadata_read | SetupAuditTrail — config changes that never surface as metadata |
 | [`diff_orgs`](#diff_orgs) | metadata_read (both) | Whole-org snapshot diff, bucketed by type |
 | [`diff_artifact`](#diff_artifact) | metadata_read (both) | Semantic diff of one artifact across two orgs |
+| [`render_flow`](#render_flow) | metadata_read (every connection read) | Build an interactive flow diagram or flow diff page; asks this computer to open it, or publish the file as an artifact |
 | [`soql_query`](#soql_query) | data_read | Read-only SOQL, row-capped, truncation-honest (`tooling: true` needs metadata_read too) |
 | [`get_record`](#get_record) | data_read | One record by id |
 | [`explain_access`](#explain_access) | data_read | Why a user can/can't see an object or field (CRUD + FLS) |
@@ -56,6 +58,8 @@ with a few desktop-app differences [noted at the end](#the-desktop-app).
 | [`apex_execute`](#apex_execute) | data_write | Run the approved script; DML commits on success |
 | [`bulk_load_propose`](#bulk_load_propose) | data_write | Stage a multi-file Bulk API 2.0 load; CSVs frozen at propose |
 | [`bulk_load_execute`](#bulk_load_execute) | data_write | Drive the approved load; failed rows come back as file paths |
+| [`list_skills`](#list_skills) | — | The skills bundled with this install: names, full descriptions, files |
+| [`read_skill`](#read_skill) | — | Load a bundled skill (or one of its files) from this install |
 
 ---
 
@@ -84,18 +88,22 @@ already passed this ritual — see `run_agent_eval`), in every environment
    summary and opens an **approval page in the human's browser**: target org
    unmissable, every change listed (destructive changes first, in red), and a
    short **confirmation code**.
-2. The code appears **only on that page** — never in any tool result — so the
-   only way a write executes is the human reading the code back into chat.
-   Close the tab and nothing happens. If the human has set up **phone
+2. Contrail gives the code **only to the human** — on that page, and on their
+   phone if they set that up (below) — never in any tool result, so a
+   write executes only when that code is passed back. Contrail never passes it
+   to the agent; the human does, by reading it into chat (a screenshot of the
+   page, or an agent that can view the human's screen, exposes it too — the
+   house rules say when such a code may be used). Close the tab without
+   passing the code and nothing happens. If the human has set up **phone
    notifications** ([`open_settings`](#open_settings)), the engine also pushes
    the review summary and the code to their phone at the moment it mints
-   them — so they can approve from anywhere — but the code still counts only
-   when the human types it into chat, and the agent still never sees it. By
-   default the push goes out **only while the Claude Code session has Remote
-   Control connected** (the one situation in which a code on a phone can be
-   typed from the phone); see [`open_settings`](#open_settings) for how
-   Contrail learns that, and `notifications.when` to push every approval
-   instead.
+   them — so they can approve from anywhere — but the push approves nothing by
+   itself: the code still counts only when the human gives it to the agent as
+   their approval, and Contrail still never gives it to the agent. By default the push goes out **only while the Claude Code session
+   has Remote Control connected** (the one situation in which a code on a
+   phone can be typed from the phone); see [`open_settings`](#open_settings)
+   for how Contrail learns that, and `notifications.when` to push every
+   approval instead.
 
 Codes are single-use, expire in ~1 hour, are invalidated by any newer
 proposal **of the same kind** (deploy, DML, Apex, or bulk) on the same
@@ -107,6 +115,31 @@ org target to re-check, and bulk loads are not re-checked (their approval
 page shows no current values for the rows to compare against); their results
 say so (`target_check.status: "not_applicable"`). Every decision — proposals, executions, refusals — lands
 in the local audit log.
+
+**Policies.** The human can add rules to the `policies` section of
+`config.json` — matched by org type, connection label or org id — that require
+a justification or ticket, deny destructive metadata changes, data deletes or
+anonymous Apex, set a minimum test level, or freeze a connection during set
+windows. Contrail checks them when a write is proposed (for a deploy, again
+when its validation finishes), whenever the approval page is drawn, and again
+before a code is claimed; no Contrail tool or page writes that section. During
+a freeze the approval page shows no code until the human types an emergency
+reason there, and the phone push carries none. Policies cover the six
+proposing tools. Starting an agent test run (`run_agent_eval`) has no approval
+page: it is refused while a freeze is in effect or while the policies cannot be
+read, and no other rule applies to it. Setting a trace flag is outside the
+policies. Freeze windows use this machine's clock. An agent that has general
+file access on the machine is outside Contrail's control — every change to the
+section that Contrail observes is recorded in the audit log
+(`policy.config_seen`), and for 24 hours afterwards the approval page, Deploy
+Review and the phone push say that the policies changed. Policies are enforced
+by Contrail 0.40.0 and later. The Claude Desktop extension, the Claude Code
+plugin and the desktop app update separately and share one data directory; a
+copy older than 0.40.0 neither checks policies nor honours a freeze, so update
+every copy on the machine before relying on them. The change-evidence dossier
+marks any request such a copy created or executed. The rule keys are in the
+[configuration table](#configuration-configjson); what the write tools take and
+return for them is under [Writes](#writes--the-approval-ritual).
 
 Refresh tokens live in the OS keychain only. Contrail makes exactly two kinds
 of outbound call that are not to your Salesforce orgs, and both are
@@ -151,9 +184,11 @@ sweep.
 ### `manage_connection`
 
 Opens the localhost page where the human changes a connection's grants. The
-page opens directly in the browser; its session-bearing URL is returned only
-if the browser could not be opened (and is then for the human to open, never
-for the agent to fetch).
+page opens directly in the browser, and its session-bearing URL is never
+returned to the agent: if the browser cannot be opened, Contrail writes the
+address to its own server log (stderr) for the human, and the tool result
+says so — the agent asks the human to open the page from there, then calls
+`get_permissions` after they save.
 
 - `connection` — alias (or id).
 
@@ -257,9 +292,33 @@ whether both Pushover keys are stored — never the keys — and `remote_control
 the last state Contrail's hook reported, `on` / `off` / `unknown`, when, and
 `user_hook` — whether the entry in Claude Code's user `settings.json` is
 installed; `not_installed` is normal for plugin installs, whose hook ships
-bundled). When a newer Contrail
-release exists (from the cached daily check — never a network call at tool
-time), the result carries an update notice with the download link.
+bundled), and `skills` (how many skills Contrail can serve — the ones this
+install bundles, or, when the note says so, the ones in the folder
+`CONTRAIL_SKILLS_DIR` names — plus the read_skill call that loads the house
+rules when the pack has them; or, with `bundled: 0`, why there is nothing to
+serve). The pointer is repeated here because it is not verified
+that every client shows a server's MCP instructions to the model. When a newer
+Contrail release exists (from the cached daily check — never a network call at
+tool time), the result carries an update notice with the download link.
+
+**Policies (S46).** Each connection also carries `policy` — the
+[policies](#the-security-model) that apply to it right now, so a proposal can
+comply the first time: `rules` (their names), `requires_justification`,
+`requires_ticket`, `ticket_patterns`, `denies` (any of
+`destructive_metadata`, `data_deletes`, `anonymous_apex`), `min_test_level`,
+`freeze_windows` (each with its `rule`, `name`, `when` and `time_zone`) and
+`freeze_now` (the `rule`, `window` and `until` of the freeze in effect, or
+`null`; when windows overlap, the active window with the most time left is
+named, so `until` is the latest end among the windows active now). `policy`
+is `null` on every connection when the policies cannot be read. `policies_status` says which: `{status: "ok", source, unmatched_rules}`
+— `source` is `config` (the `policies` section of `config.json`) or `default`
+(Contrail's built-in rule: the file has no such section), and
+`unmatched_rules` names each rule whose label or org id matches no connection
+on this machine (a connection re-created under a new label may have left it
+behind; the agent tells the human) — or `{status: "unreadable", problem,
+note}`, and then every write proposal is refused until the human fixes the
+file. All of it comes from one read of the policies over one listing of the
+connections.
 
 ### `get_permissions`
 
@@ -270,13 +329,92 @@ The full permission matrix for one or all connections, including what is
 
 ### `get_audit_log`
 
-The local audit log: connection lifecycle, OAuth flows, grant refusals, and
-every deploy/DML/apex/bulk decision. Local and exportable — useful as a
-client-facing change record.
+The local audit log: connection lifecycle, OAuth flows, grant and policy
+refusals, freeze overrides, and every deploy/DML/apex/bulk/agent-activation
+decision, newest first. Local; for a client-facing change record,
+[`export_change_evidence`](#export_change_evidence) writes a per-request
+dossier from it.
 
 - `connection` *(optional)* — filter to one connection.
-- `since` *(optional)* — ISO 8601 timestamp.
+- `since` *(optional)* — ISO 8601 timestamp; only events at or after it. It is
+  compared as the instant it names, whatever its offset or precision; a value
+  Contrail cannot read as a date and time is refused.
+- `request_id` *(optional, S46)* — only events that name this request id (the
+  `request_id` a validate or propose result returned) — among them its
+  proposal, phone push, refusals (a wrong-code attempt names the request it was
+  counted against, never the code; an execute refused by a policy included),
+  freeze override, justification edits, execution, and the sweep that expired
+  it. Supersession by a newer validation is recorded per connection and is not
+  included; a policy check that passes is recorded on the request, not in the
+  log. It must be that UUID; anything else is refused, never matched loosely.
+- `event_type` *(optional, S46)* — one event type (`policy.refused`), or every
+  type under a prefix ending in a dot (`policy.`). A malformed value is
+  refused.
+- `until` *(optional, S46)* — ISO 8601 timestamp; only events at or before it,
+  compared the same way as `since`.
 - `limit` *(optional)* — 1–1000, default 100.
+
+The S46 events: `policy.refused` (a proposal, a deploy's mint, an agent
+test-run start or an execute refused by policy — `phase`, `kind`, `reason`
+and the rule, never a code), `policy.freeze_overridden` (the emergency reason
+the human typed, with the rule and window), `policy.config_seen` (a Contrail process read
+policies that differ both from what it last saw and from the newest such row
+on this database — their
+fingerprint and the previous one, `source`, the rule names, `status`, and
+`changed`, which is false for the first observation and for an unreadable
+interlude that ends with the same policies), `approval.justification_edited`
+(the human saved a different justification — its length and where, never the
+text), `evidence.exported`, `snapshot.members_refreshed` /
+`snapshot.members_refresh_failed` (a member-scoped refresh, from the tool or
+after a deploy), and `deploy.snapshot_rebaseline_unavailable` (the re-read
+after a deploy did not run or did not finish).
+
+### `export_change_evidence`
+
+No grant, no org call, no code. Writes a **change-evidence dossier** —
+`evidence.md` and `evidence.json` — for the writes Contrail validated,
+proposed and executed, into a new folder directly under `evidence/` in the
+data directory (`<YYYYMMDD-HHMMSS>-<label>`, the label built from the alias,
+ticket and request id; never under staging, never a deploy source root), and
+returns only the folder path and counts — never the dossier's text. Per
+request: kind, connection and org, ticket, the justification and who wrote it
+(the agent's draft, or the human on the approval page or in Deploy Review —
+with the agent's original draft when the human replaced or cleared it), the
+policy rules that applied at proposal and the re-check at execution, the
+freeze in effect and any override with its emergency reason, the acting
+Salesforce user as recorded at proposal (and at execution where that differs),
+when it was proposed and executed, what the approval page showed (never the
+confirmation code, never diff bodies), deploy pre-image fingerprints and
+last-modified stamps with their `stamp_source`, the execute-time target check,
+the org's result (failure messages reduced to status codes), the revert
+package location, and the request's audit events (their detail reduced to an
+allow-list). Then the policy refusals in the window that created no request.
+Record field values are left out: data-change rows are reduced to operation,
+object and record id, scripts and CSV files to fingerprints. It reports what
+Contrail recorded on this machine — not the org's current state, and not
+changes made outside Contrail. A request created or executed by a Contrail
+older than 0.40.0 is marked as such (no policy check was recorded for that
+step), and the summary table's `Policy checks` column says which checks ran.
+
+- `connection` *(optional)* — alias (or id) whose requests to include.
+- `ticket` *(optional, ≤120)* — only requests recorded with exactly this
+  ticket (case-insensitive). The search reads up to 20,000 requests, newest
+  first, so an old match is not lost behind a row cap; past that the dossier
+  says the search stopped.
+- `request_id` *(optional)* — one request, by the `request_id` a validate or
+  propose result returned.
+- `since` / `until` *(optional)* — ISO 8601 timestamps bounding when the
+  request was proposed.
+
+Name at least one of `connection`, `ticket`, `request_id` or `since` — an
+unfiltered dossier would mix every connection's changes in one folder. At most
+the newest 200 matching requests are included and 1,000 audit events per
+request; where a list was cut the dossier says so in place and the result's
+`truncated` is true. Nothing matched → no folder (`path: null`). The result:
+`path`, `files`, `requests`, `by_status`, `audit_events`, `policy_refusals`,
+`truncated`; `evidence.exported` is audited with the counts, the folder's name
+(never its path) and the filters. The dossier is the human's deliverable and
+is never swept.
 
 ---
 
@@ -375,12 +513,60 @@ app is mid-sync on the same org, the refresh refuses with a clear message
 instead of racing it over the shared snapshot — try again once its sync
 finishes. `check_only: true` reports staleness without retrieving anything.
 
+**Member-scoped refresh (S46).** `members: [{type, api_name}]` (at most 100,
+alone with `connection`) re-reads only those components into an existing
+snapshot: a child (CustomField, ValidationRule, ListView, RecordType,
+CustomLabel, BotVersion) re-reads its whole parent document and every sibling
+in it; a bundle directory is replaced whole; a report or dashboard brings its
+folder definition; a `FlowDefinition` name re-reads the Flow. Each member comes
+back `refreshed`, `removed` (no longer in what the org returned for it: a
+component the org neither listed nor returned, or a child missing from its
+re-read parent document — its snapshot rows, its files when it has its own,
+and its outgoing dependency edges are deleted) or `skipped` with the reason.
+Skipped by design: Profile, types Contrail does not snapshot, a component (or
+the parent of a child) the org lists as package-owned that this snapshot does
+not already hold — for example a custom field on a managed-package object —
+and a member of a type this connection's snapshot does not cover — unless the
+org's listing shows no unpackaged component of that type other than the named
+ones (the first trigger or first LWC in an org; never a foldered type), in
+which case the type is complete as far as the listing shows and
+`get_org_changes` and `diff_orgs` keep meaning what they meant. Last-modified
+stamps come from the org's listing of the re-read document (the source the
+live checks read for a top-level component), or from the retrieve when the
+listing has none; a child's row carries its parent document's stamp, as after
+a whole refresh. Not done: no archive zip, no re-query of the org-computed
+dependency data, and references TO a new or deleted component from other
+components are rebuilt only by a whole-type refresh. Member jobs have their own
+ids (`members-…`), queue on the same per-connection chain and take the same
+cross-process lease where one exists: the lease lives in a table the Contrail
+desktop app creates, so on a machine that has never run the desktop app two
+Contrail plugin processes (for example two Claude sessions) are not serialised
+against each other, and a whole refresh running in one can replace a member
+re-read made by the other with what it retrieved earlier. A finished member job
+that nobody collected is handed to a re-send of the same members for 60 s;
+after that a re-send re-reads from the org. If a member refresh stops after it
+has begun writing, its error says the snapshot may be only partly updated for
+those components; re-run it with the same `members` to repair it.
+
+The result carries `members` (one entry per member: `outcome`, the `unit` that
+was re-read as `Type:name`, and for a skip its `reason` code —
+`unregistered_type`, `profile`, `type_not_in_snapshot`, `type_unsupported`,
+`package_owned`, `not_returned`, `presence_unknown`, `not_confirmed`,
+`child_not_in_parent` or `not_indexable`), `counts`, `units`,
+`artifact_counts`, `edge_counts`, `retrieved_at`, `notes` and `duration_ms`.
+Refused before anything is read: `members` beside `types`, `check_only` or
+`job_id`; a member whose name cannot be placed; more than 100 members; a
+connection with no snapshot yet. `snapshot.members_refreshed` is audited for
+every finished run (`origin`, counts, the units re-read, `duration_ms`).
+
 - `connection` — alias (or id).
 - `types` *(optional)* — types to refresh (default: the configured manifest —
   see [`snapshot.types`](#configuration-configjson)).
 - `check_only` *(optional)* — compare timestamps only.
+- `members` *(optional, alone)* — `[{type, api_name}]`, at most 100: re-read
+  only these components (children dotted, foldered names `Folder/Name`).
 - `job_id` *(optional, alone)* — poll a running refresh without re-sending
-  types.
+  types or members; a `members-…` id names a member job.
 
 ---
 
@@ -425,7 +611,11 @@ leak another's metadata.
 Whole-org comparison of two snapshots (e.g. sandbox vs production): only-in-A,
 only-in-B, changed, identical — bucketed by type with exact per-type counts
 (entry lists capped at 50 each, flagged when cut). Both sides need a
-snapshot; stale timestamps are called out.
+snapshot; each side reports the oldest and newest retrieval time among the
+rows compared (`snapshot_taken: {<alias>: {oldest, newest}}`, S46 — the type
+filter applied). Rows in one snapshot can have different ages: a refresh of
+some types, or the re-baseline after a deploy, updates only what it touched,
+so a side is only as fresh as its oldest row.
 
 - `connection_a`, `connection_b` — the "from" and "to" aliases.
 - `types` *(optional)* — restrict to these types.
@@ -440,6 +630,134 @@ split-screen two-org view.
 
 - `connection_a`, `connection_b` — aliases.
 - `type`, `name` — the artifact; children dotted.
+
+---
+
+## Flow pages
+
+Grant: `metadata_read` on **every** connection a call reads — both of them for
+a two-org diff, checked before anything is read. A side read from a saved file
+needs no grant.
+
+### `render_flow`
+
+Builds an interactive HTML page for one flow (a diagram) or two side by side
+(a diff): a layered, Flow-Builder-style canvas, change marks in a diff, and a
+parsed node inspector on click. Contrail fills the `salesforce-flow-visualize`
+skill's template itself — the flow XML is embedded by the engine and never
+passes through the model — writes the page under `renders/` in the data
+directory and returns its path. By default it also asks this computer to open
+the page (in the OS default app for `.html` files). To show it anywhere else —
+a human on their phone, a shared review — pass `open: false` and publish the
+returned file as a private artifact: the file itself, never its contents
+pasted or retyped. The page embeds the flow's full XML, so treat the file as
+client-confidential. Plugin and Claude Desktop extension only; the desktop app
+draws flows on its own Metadata and Diff screens.
+
+Side A is the left / old pane and side B the right / new pane; give no side-B
+argument for a single view.
+
+- `flow` *(optional)* — flow API name (DeveloperName). Used for both sides
+  unless `flow_b` is given; required whenever a side reads from a connection.
+- `connection` *(optional)* — side A: connection alias (or id).
+- `version` *(optional)* — side A: a version number, or `"active"` /
+  `"latest"`. Omit for the snapshot copy. Needs `connection`.
+- `file` *(optional)* — side A instead of a connection: absolute path of a
+  saved flow XML file under Contrail's staging directory.
+- `label` *(optional, ≤80)* — side A pane heading (default: the connection
+  alias, plus the version when one is given; or the file name).
+- `connection_b` *(optional)* — side B: connection alias (or id). Omit to
+  reuse side A's connection when `version_b` or `flow_b` is given.
+- `flow_b` *(optional)* — side B: a different flow API name.
+- `version_b` *(optional)* — side B: a version number, or `"active"` /
+  `"latest"`.
+- `file_b` *(optional)* — side B instead of a connection: absolute path of a
+  saved flow XML file under Contrail's staging directory.
+- `label_b` *(optional, ≤80)* — side B pane heading.
+- `title` *(optional, ≤120)* — page title (default: the flow name and the pane
+  headings).
+- `open` *(optional, default true)* — ask this computer to open the page; pass
+  `false` when the human is not at this computer.
+
+| Case | Arguments |
+|---|---|
+| One flow from a snapshot | `connection`, `flow` |
+| A historical version | `connection`, `flow`, `version: 12` |
+| Cross-org diff | `connection`, `flow`, `connection_b` |
+| Version against version in one org | `connection`, `flow`, `version: 12`, `version_b: 13` |
+| Before/after against a saved file | `file` + `connection_b`, `flow`; or `connection`, `flow` + `file_b` |
+
+**Where each side comes from.**
+
+- **Snapshot** (`connection` + `flow`, no `version`) — the connection's
+  snapshot copy, which holds the flow's **latest** version: that can be a
+  draft saved above the active one. The side's `status` and the footer give
+  that version's `<status>`; when it is not `Active` (or the XML carries none)
+  the note points at `version: "active"` to draw the version that runs. A
+  flow the snapshot lacks is read live from the Tooling API instead — its
+  active version, else its latest — and converted (origin
+  `tooling_fallback`); the footer says so.
+- **Version** (`version: 12`, or `"active"` / `"latest"`, which one Tooling
+  query resolves to a number) — the Tooling API's JSON for that version,
+  converted to flow XML (origin `tooling_version`): faithful for reading and
+  diffing, element order alphabetical, not deploy-ready.
+- **File** (`file` / `file_b`) — saved flow XML under the staging directory,
+  or under an absolute folder listed in `deploy.allowedSourceRoots`. It is
+  read as a file: no connection and no grant, a revert package's pre-image
+  under `staging/_reverts/` included; the audit row records its path and the
+  sha256 of its bytes. No filesystem call touches the path until it is
+  absolute, not a network or device path (one beginning with two slashes or
+  two backslashes is refused outright), not inside Contrail's snapshot folder,
+  and lexically inside one of those folders; only then is it resolved — a link
+  that leads outside is refused — and read, up to 5,000,000 bytes. A path
+  outside those folders is refused with the same text whether or not it
+  exists.
+
+**Fidelity.** Two snapshot copies compare like for like, and so do two
+converted versions. A converted version against a snapshot (or a saved
+retrieve) is allowed, but their child elements are ordered differently, so
+nodes can be marked changed when nothing real differs; the result and the
+footer say so and suggest a version on both sides. In a diff the result's
+`fidelity` is `like_for_like`, `mixed`, or `unknown` (a file side, whose
+origin Contrail cannot tell).
+
+**Refusals worth knowing.** Every side must be well-formed flow XML, whatever
+its origin — snapshot, converted version or file — and Contrail checks each
+side before writing anything. It refuses, with nothing written:
+
+- a platform/feature-delivered flow — Salesforce exposes only a descriptor for
+  it and no API returns its definition, so there is nothing to draw;
+- a network or device path (`render_flow reads saved XML only from local
+  folders`) — copy the file into staging;
+- a path inside the snapshot folder — name the org instead (`connection` +
+  `flow`), so the read goes through that connection's `metadata_read` grant;
+- XML whose root element is not `<Flow>`;
+- XML that declares a DOCTYPE or an entity — flow metadata never does, and the
+  page's XML parser would expand it;
+- XML that is not well-formed (a cut or retyped file, a cut snapshot file) —
+  the refusal names the parser's error code and line.
+
+**Result.** `file` and `file_url` (the page), `mode` (`single` | `diff`),
+`title`, `opened`, and one `sides` entry per side — `label`, `origin`
+(`snapshot` | `tooling_version` | `tooling_fallback` | `file`), `connection`,
+`flow`, `version`, `status`, `retrieved_at` (snapshot sides), `file` and
+`sha256` (file sides), `bytes`, `elements`, and `over_diagram_limit` (a side
+with more than 250 elements, where the page shows a plain message instead of a
+diagram; a note says so) — plus `fidelity` (diff only), `notes` (the page's
+footer), `page_bytes`, `retention` and a publishing `note`. When Contrail's
+Remote Control hook last reported Remote Control on, the result also carries
+`remote_control` and a note that the human may be away from this computer and
+the file should be published as a private artifact; that note is in the result
+only, not on the page. Each page written audits one `flow.rendered` row (the
+sides' origins, connection ids, versions, file paths and hashes, the page path
+and size, whether it was opened) — never the XML.
+
+**Where pages live.** `renders/` in the data directory, one new file per page
+written (`<flow>-<view|diff>-<UTC time>Z-<4 hex>.html`, never overwritten).
+Pages older than 7 days are deleted when the Contrail server starts and each
+time `render_flow` writes a page; nothing deletes them in between, and the desktop app,
+which shares the data directory, never sweeps the folder. `renders/` is not a
+deploy source root.
 
 ---
 
@@ -574,6 +892,14 @@ Summer '26; older docs mention Einstein Requests) — check your org's
 consumption cards rather than trusting either claim; Salesforce's Beta
 documentation says Studio-runner runs consume Einstein Requests.
 
+**Policies (S46).** Starting a run is refused while a change freeze applies
+to the connection (`CHANGE FREEZE — the test run was not started …`, naming the
+rule, the window and until when) and while the policies cannot be read
+(`POLICY CHECK FAILED CLOSED …`); both refusals come before any org call and
+are audited as `policy.refused` with `phase: "start"`. No other rule applies to
+a run, and there is no override: a run has no approval page on which the human
+could record an emergency reason. A poll by `run_id` is never checked.
+
 **Two runners (S44).** The same tool also drives **Agentforce Studio test
 suites** — a deployed `AiTestingDefinition` (the type behind the Studio
 Tests tab; on the org probed a Contrail-deployed suite appeared in that tab
@@ -590,8 +916,10 @@ and asks for `runner`), one match picks the runner, a name held by both is
 refused as ambiguous, a name held by neither is refused (naming any type
 the org does not know), and a failed lookup is refused rather than
 defaulted — a real-actions run never starts on a guess. `runner` forces
-either runner and skips the lookup. Every result carries `runner` and
-`runner_detection`, and the submit echoes the canonical `definition` name.
+either runner and skips the lookup (no `metadata_read` needed then). Every
+result carries `runner` and `runner_detection`; when the lookup picks the
+runner, the org's exact-case name is what gets submitted, and the submit
+echoes it as the canonical `definition` name.
 Studio statuses — `IN_PROGRESS` and `FAILED` observed live, the rest per
 Salesforce's library — are `CREATED | IN_PROGRESS | SUCCESS | FAILED |
 TERMINATED`; `FAILED` reads results tolerantly and says the RUN failed
@@ -691,21 +1019,86 @@ generated SOQL to `soql_query`.
 
 Grants: `metadata_write` (deploys) / `data_write` (DML, Apex, bulk). Every
 tool here follows the [two-step ritual](#the-security-model): propose →
-human reads the code off the approval page → execute with that code. The
-code never appears in any tool result. Every propose/validate result carries
-`approval_page.phone_notification` — `sent`, `failed` (with a reason
-category and what to do), `skipped` (`remote_control_off`, the quiet
-desk case; or `remote_control_unknown`, no hook report for this call), or
-`off` — so the agent knows whether the human also has the code on their
+human reads the code off the approval page (or their phone) → execute with
+that code. Contrail gives the code only to the human (their approval page, and
+their phone if they set that up); it never appears in any tool result. Every
+propose/validate result carries `approval_page.phone_notification` —
+`sent`, `failed` (with a reason category and what to do), `skipped`
+(`remote_control_off`, the quiet desk case; or `remote_control_unknown`, no
+hook report for this call), or `off` — so the agent knows whether the human also has the code on their
 phone, without ever learning the code.
+
+**Change record (S46).** The six proposing tools — `validate_deploy`,
+`deactivate_flow`, `dml_propose`, `apex_propose`, `agent_activation_propose`,
+`bulk_load_propose` — take two optional parameters:
+
+- `justification` *(≤1,000 characters)* — one or two sentences on why the
+  change is being made now, drafted by the agent from what the human asked for,
+  in their terms — the reason, not the mechanics. The approval page shows it
+  under **Change record** in an editable field, marked as drafted by the agent;
+  the human can save a different text there (audited as
+  `approval.justification_edited` — its length and where, never the text), and
+  the record says who wrote what. A human who approves from the phone
+  notification alone does not see it. Required where a policy says so — by
+  default on production orgs and on orgs whose type Contrail could not
+  determine.
+- `ticket` *(≤120 characters, one line)* — the change ticket or reference the
+  human named, passed only when they gave one; never invented, guessed or
+  reused. Shown read-only on the page.
+
+Both are recorded with the request, together with the policy rules that
+applied, the freeze in effect and the connection's org and Salesforce user at
+proposal, and the result returns them to the agent as `governance` (`ticket`,
+`justification`, the `policy` rules and lines, `freeze`) — never a code. They
+are not part of what executes.
+
+**Policy checks at proposal (S46).** Every proposal is checked against the
+[policies](#the-security-model) first. One that breaks a rule — or any
+proposal while the policies cannot be read — is refused with the bare text
+(`POLICY REFUSAL — …`, one line per broken rule, or `POLICY CHECK FAILED CLOSED
+— …` naming the problem in `config.json`): no org call, nothing superseded (a
+pending code on the connection still executes), one `policy.refused` row. A
+deploy is checked again with a fresh read when its check-only validation
+finishes; a refusal then says the validation ran, creates no approval and
+leaves any pending one untouched. A re-send of the same full arguments while
+that validation is still running is checked first as well; its refusal says
+the call did not attach, and the running validation goes on to that second
+check. During a **freeze** the request is created, but the result's closing
+note is the **CHANGE FREEZE in effect** note in place of the approval
+instructions (`governance.freeze` carries the rule, the window and `until`),
+the approval page shows a CHANGE FREEZE card and no code until the human
+types an emergency reason (15–1,000 characters) there — recorded as
+`policy.freeze_overridden` for that request only, the freeze itself stays
+configured — and a phone push carries no code. When windows overlap, the
+freeze names the active window with the most time left, so its `until` is the
+latest end among the windows active now (a window that begins before then can
+extend the freeze). An open approval page follows the policies as they stand:
+it reloads within one status poll when a freeze begins or ends, another window
+becomes the one it names, a reason or justification is saved, or the policies
+change, and it shows **BLOCKED BY POLICY** without the code when the request
+no longer meets a rule or the policies cannot be read.
+
+**Policy checks at execute (S46).** Each `*_execute` tool re-checks the
+policies before the code is claimed, with no org call: a request a rule no
+longer allows is refused (`POLICY REFUSAL — not executed`), a frozen request
+with no emergency reason recorded is refused (`CHANGE FREEZE — not executed`),
+and unreadable policies refuse it too. In each case the code is not used up, no
+wrong attempt is counted and the request stays pending: the same code works
+again, until it expires, once nothing refuses it — the freeze has ended or the
+human recorded an emergency reason, the file is fixed, or the request meets the
+rules (a missing justification the human can type on the approval page). The
+check is repeated inside the claim, and the executed request
+records it (`governance.execute_check`, with the org id and user the
+connection had at that moment).
 
 ### `validate_deploy`
 
 Builds a deploy package and validates it against the org with
 `checkOnly=true` — nothing is committed. Returns the change summary
 (destructive changes flagged), validation/test results, permission warnings
-for components deploying without access, and blast radius from the
-dependency graph; puts the confirmation code on the approval page. A failed
+for components that need permissions the package does not grant, and blast
+radius from the dependency graph; puts the confirmation code on the approval
+page. A failed
 validation issues **no** code. With `dry_run: true` a PASSED validation
 issues no code either: same full results, but no approval request, page, or
 payload is created, nothing becomes executable through Contrail, and a
@@ -715,11 +1108,29 @@ mid-build check that stops half-finished work from piling up approval
 pages that were never meant to be used.
 
 Every outcome carries a `job_id` keyed to the validation's exact input
-(components, options, dry/real), so parallel validations — two dry runs,
+(components, options, dry/real — and, from S46, `ticket` and
+`justification`), so parallel validations — two dry runs,
 a dry run beside a real validate, two sessions — never read each other's
 results (S41); an in-progress validation is polled with
 `{connection, job_id}` alone, nothing re-sent and no `content_file`
-re-read.
+re-read (`ticket` or `justification` beside `job_id` is refused like any other
+argument). The in-progress message says so: re-sending with a reworded
+justification starts a second validation, and any code it issues replaces the
+first one's.
+
+**Policies on a validation (S46).** A real validation is checked against the
+[policies](#the-security-model) before it starts — a refusal sends nothing to
+the org — and again, with a fresh read, when the check-only validation
+finishes, before any pending approval is superseded or a code minted (see
+[Writes](#writes--the-approval-ritual)). A dry run is never refused for policy:
+its result carries `policy_check` — `status` (`ok`, `would_refuse` or
+`unreadable`, with `problem`), the `rules` that apply, `would_refuse` (the
+texts a real validation with the same arguments would be refused with),
+`freeze` and a `note` — so the package can be fixed before the real validate.
+Where a policy sets a minimum test level, `test_level` must be passed
+explicitly at that level or stricter: omitted is refused, because the org's
+own default cannot show the minimum is met. A package with deletions is
+refused where a policy denies destructive metadata changes.
 
 **Live diff and clobber flags (S45).** A real validation (never a dry run)
 also retrieves the org's current version of every component and deletion —
@@ -749,23 +1160,48 @@ stamp has no stamp of its own to compare, so its live stamp is compared
 with the time the snapshot was taken — the org's clock against this
 computer's — and CHANGED IN TARGET needs it more than 60 seconds after the
 snapshot; within a minute either way, differing bytes get the neutral note
-only. A deletion whose member the org's listing does not show is noted ("not
+only. A deletion whose member the org does not show is noted ("not
 present in the target … the org decides whether this delete fails or
-no-ops"). Types whose retrieved bytes cannot be compared (Profile) keep the
+no-ops"), naming what was consulted. Types whose retrieved bytes cannot be
+compared (Profile) keep the
 snapshot's content verdict and are diffed against the snapshot, labelled
 "diff vs your snapshot". When the
 **retrieve** fails or times out, a LIVE COMPARISON UNAVAILABLE banner says
 the org was not re-read and classifications and diffs come from the
-snapshot; when only the last-modified **listing** fails for some types, the
-live diff stands and a line names the types whose stamps were unavailable
-(the execute-time check then reports those members as unchecked). The
+snapshot; when only the last-modified **stamps** are missing — the listing
+failed for some types, a stamp query failed or returned no usable stamp for a
+member, or Contrail has no stamp query for a member — the live diff stands
+and one line names those types and members, each with its reason (the
+execute-time check then reports them as unchecked). The
 result carries `live_check` (`status`, `reason`, `started_at`, `at`, the
-checkOnly deploy's org-side `org_clock`, `dates_unavailable_types`) and a
-`pre_image` per change and deletion (`present`, `source`, `sha256`,
-last-modified date/by, `comparable`, `restorable`); the diffs themselves
-live on the page only. The restorable pre-images are written to
+checkOnly deploy's org-side `org_clock`, `dates_unavailable_types`,
+`stamp_scheme`, `probe_failures`, `probe_unmatched`, `retrieve_note`) and a
+`pre_image` per change and deletion (`present`, `source`, `stamp_source`,
+`sha256`, last-modified date/by, `comparable`, `restorable`); the diffs
+themselves live on the page only. The restorable pre-images are written to
 `staging/_reverts/<requestId>/` for the revert package (see
 [`execute_deploy`](#execute_deploy)).
+
+**Where stamps come from (S46).** Last-modified stamps for CustomField,
+ValidationRule, CustomLabel and ListView members come from one small query
+per type that names only the package's own members (Tooling API
+`CustomField`, `ValidationRule`, `ExternalString`; the `ListView` object),
+and their bytes from a retrieve that names the child itself (through the
+parent document instead for a standard field, or when the package also
+retrieves that document); every other type is listed with `listMetadata` as
+before. Each `pre_image` records its `stamp_source`, and `execute_deploy`
+reads the same source. On a dev org with about 24,000 custom fields the
+listing took over 90 seconds and the query under one — an observation on that
+org, not a Salesforce guarantee. Contrail issues no stamp query for a
+standard field (a CustomField member whose name does not end in `__c`), so it
+is diffed live from its parent object's document, carries no stamp and is
+unchecked at execute; the page names it. For these four types, "absent" at
+execute means that query returned no row for the member; whether it sees
+every member in an org that has its own namespace was not verified. A failed
+stamp query is not replaced by the listing: `live_check.probe_failures` names
+the type and the page says so. `live_check.retrieve_note`, when present, is
+what the org's retrieve reported, quoted as sent — Contrail does not decide
+what exists from it.
 
 - `connection` — target, named unmissably to the human.
 - `components` *(≤50)* — each `{type, api_name, content | content_file}`.
@@ -862,9 +1298,13 @@ live on the page only. The restorable pre-images are written to
   connection is refused LOCALLY (S41 §3.14) — the org would reject it
   anyway, at the cost of a round trip — so a no-Apex production deploy
   simply leaves this out, which is exactly what Contrail sends when the
-  agent doesn't specify one.
+  agent doesn't specify one. Where a policy sets a minimum test level, pass
+  it (or a stricter one) explicitly — see above.
 - `job_id` *(optional, alone)* — poll a running validation without
-  re-sending components.
+  re-sending components; it also collects a validation `deactivate_flow`
+  started.
+- `ticket`, `justification` *(optional, S46)* — the change record; see
+  [Writes](#writes--the-approval-ritual).
 
 `content_file` reads a file byte-exactly (mandatory habit for large flows —
 retyping tens of KB of XML risks silent corruption), confined to Contrail's
@@ -883,10 +1323,11 @@ when tests ran (stricter and faster than replaying bytes), falling back to
 the frozen zip. In-progress results mean call again with the same code — the
 running deploy is never restarted.
 
-**Target check (S45).** Before the code is claimed, Contrail re-lists the
-package's members with the same `listMetadata` calls the validate-time live
-check made and compares last-modified stamps — **stamps, not bytes** —
-against that validate-time retrieve. A member that changed, disappeared or
+**Target check (S45).** Before the code is claimed, Contrail re-reads each
+member's last-modified stamp from the source its frozen pre-image names — the
+same `listMetadata` calls, or the same per-member query, the validate-time
+live check made — and compares **stamps, not bytes** against that
+validate-time retrieve. A member that changed, disappeared or
 newly appeared is **TARGET MOVED**: nothing is deployed, the code is voided
 (the request reads `superseded`), the frozen payload and the revert files are
 removed, and the result is `{executed: false, target_moved: true, moved,
@@ -897,15 +1338,27 @@ replaced it". Re-validate for the current state and a fresh code. A member
 Contrail cannot compare is
 **unchecked** — named in `target_check.unchecked` with a reason
 (`type_not_enumerable`, `dates_unavailable_at_validate`,
-`dates_unavailable_at_execute` — the listing gave it no stamp now, or
-`absent_no_baseline` — see below) — never refused.
+`dates_unavailable_at_execute` — its stamp source gave it no usable stamp now,
+`stamp_query_failed_at_execute` — the member's stamp query failed now,
+`stamp_row_unmatched` — the stamp query, now or at validate, returned the
+member's name only under a namespace the package did not name, so Contrail
+cannot tell whether that row is the member's, `stamp_not_probeable` — no
+stamp query can name the member and no validate-time date said so earlier (a
+standard field that was present at validate is reported as
+`dates_unavailable_at_validate`), `stamp_source_mismatch` — the frozen
+pre-image names a stamp query this build does not read for that type, or
+`absent_no_baseline` — see below) — never refused. `target_check.checked`
+entries may carry `absent: true` (the execute-time read returned nothing for
+the member, as the approval assumed; no stamp was compared). This list is the
+only place the reasons are spelled out — the tool description no longer
+carries them.
 When validation captured no live baseline, the check falls back to the
 org's own clock: a stamp at or after the checkOnly deploy's org-side
 creation time, minus a 5-second ordering margin, counts as moved (so an edit
 in those 5 seconds before validation also refuses — re-validate; the refusal
-says "within 5 seconds before", never "after"); a member missing from that
-listing is unchecked (`absent_no_baseline` — without a live baseline
-Contrail cannot tell whether it vanished before or after validation),
+says "within 5 seconds before", never "after"); a member the execute-time
+read does not return is unchecked (`absent_no_baseline` — without a live
+baseline Contrail cannot tell whether it vanished before or after validation),
 except an ADD, whose absence is what the approval assumed; with no
 org-side time either — or for a request validated before the live check
 existed — there is no baseline: every member is unchecked
@@ -948,7 +1401,9 @@ which says what a revert does not undo — data changes, automation that
 ran, permission effects, changes to components outside the package — and
 that it overwrites anything changed since in the components it restores,
 another user's edits included; and re-deploying a Flow whose
-latest version is active creates a new version. Contrail never deploys a
+latest version is active creates a new version. When the package holds
+nothing to re-deploy, the README says so and that what it can revert is the
+components the deploy added, which a revert deletes. Contrail never deploys a
 revert on its own: pass each `content_file` (and the `destructive` list) to
 `validate_deploy`, and the human approves it like any deploy. When a timeout
 or transport error leaves the outcome unknown, the directory is **kept** and
@@ -962,6 +1417,39 @@ expired, superseded or locked validations are swept at the next real
 validate; executed (and outcome-unknown) ones are removed by the first real
 validate after `deploy.revertRetentionDays` (`0` keeps them forever).
 
+**Snapshot re-baseline (S46).** After a successful deploy — and, in the
+desktop app, after the project manifest has captured its before-side —
+Contrail runs a member-scoped refresh of the deploy's components (a child
+re-reads its whole parent document, never the child alone) and reports it as
+`snapshot: {status, rebaselined, removed, skipped, note}`; the top-level
+`note` stops asking for a `refresh_snapshot` when the status is `complete`.
+Statuses: `complete`, `partial`, `none` (every component skipped, each with its
+reason), `unavailable` (`reason`: `timeout`, `locked`, `refresh_running`,
+`failed`, `failed_after_write`, `no_snapshot`, `too_many_members`,
+`no_metadata_read`, `connection_removed`), `disabled`, and `pending` — what
+the stored result says until the re-read finishes, and what a replay shows if
+Contrail stopped in between. Every `unavailable` reason but one means nothing
+was written; `failed_after_write` means the re-read stopped while writing, so
+the snapshot's files and its index can disagree for the deploy's components
+until `refresh_snapshot` with `members` re-reads them. After a deploy only the
+deploy's own deletions are reported `removed`: a component the deploy created
+or changed that the re-read did not find is `skipped` with its reason
+(`not_returned`, `presence_unknown`, `not_confirmed`, or `child_not_in_parent`
+for a child missing from its re-read parent document), and the status is then
+`partial` or `none`, never `complete`. Each `skipped` entry carries its `code`
+and the `reason` in words. Nothing here can fail or undo the deploy. The
+re-read is bounded by `snapshot.rebaselineTimeoutMs` (60 s; a re-read that has
+begun writing is always let finish), waits at most 10 s behind another refresh
+on the connection (`refresh_running`), takes at most 100 components
+(`too_many_members` — the note names the `types` to refresh instead), and is
+turned off by `snapshot.rebaselineAfterDeploy: false` (`disabled`). While the
+re-read runs the call may return in-progress with a message saying the deploy
+itself has completed; call again with the same code. It covers only the
+deploy's own components and does not re-query the org-computed dependency
+data. `deploy.snapshot_rebaseline_unavailable` is audited when it did not run
+or did not finish; `snapshot.members_refreshed` (origin `execute_deploy`) when
+it did.
+
 - `connection`, `confirmation_code`.
 
 ### `deactivate_flow`
@@ -969,9 +1457,22 @@ validate after `deploy.revertRetentionDays` (`0` keeps them forever).
 Turns off a flow's active version through the same ritual (a native
 `FlowDefinition` deploy; execution via `execute_deploy`). Also the required
 first step before attempting flow deletion — which the Metadata API handles
-unreliably even then, and the tools say so rather than pretending.
+unreliably even then, and the tools say so rather than pretending. After
+`execute_deploy` runs it, the flow's snapshot copy is re-read like any
+deployed component. An in-progress result names its `job_id`; collect it with
+`validate_deploy {connection, job_id}`, or call `deactivate_flow` again with
+exactly the same arguments — `ticket`, `justification` and `test_level` are
+part of the job's identity, so changing any of them starts a second
+validation whose code replaces the first one's.
 
 - `connection`, `flow` (DeveloperName).
+- `test_level`, `run_tests` *(optional, S46)* — only when a policy on this
+  connection sets a minimum test level (`list_connections` reports it): pass
+  that level or a stricter one. Otherwise omit them — the org then applies
+  its own default. `RunSpecifiedTests` needs `run_tests`; `NoTestRun` is
+  refused locally on production, as for `validate_deploy`.
+- `ticket`, `justification` *(optional, S46)* — the change record; see
+  [Writes](#writes--the-approval-ritual).
 
 ### `dml_propose`
 
@@ -991,6 +1492,11 @@ Stages a data change with a before/after preview. Two shapes:
 Custom metadata (`__mdt`) records are refused here with a pointer to their
 real path (`validate_deploy`, type `CustomMetadata`) — they are metadata,
 not data.
+
+- `ticket`, `justification` *(optional, S46)* — the change record; see
+  [above](#writes--the-approval-ritual). A change that deletes records (a
+  flat `delete`, or a plan with a delete step) is refused where a policy
+  denies data deletes.
 
 ### `dml_execute`
 
@@ -1035,6 +1541,9 @@ in between. Publishing/compiling Agent Script is deliberately NOT this tool.
 
 - `connection`, `agent` (Bot DeveloperName), `version` (e.g. `v2`),
   `status` (`Active` | `Inactive`).
+- `ticket`, `justification` *(optional, S46)* — the change record; see
+  [Writes](#writes--the-approval-ritual). The policy check comes before the
+  version lookup, so a refusal makes no org call.
 
 ### `agent_activation_execute`
 
@@ -1064,6 +1573,11 @@ code like any failed write. Scripts return no output — `set_trace_flag`
 first when the debug log matters.
 
 - `connection`, `code` (the script).
+- `ticket`, `justification` *(optional, S46)* — the change record; see
+  [Writes](#writes--the-approval-ritual). A policy can deny anonymous Apex on
+  a connection outright. Contrail does not inspect a script for deletes, so a
+  policy that denies data deletes (but not anonymous Apex) adds a **POLICY
+  NOTE** to the page saying so — the human reads the script.
 
 ### `apex_execute`
 
@@ -1097,6 +1611,9 @@ shows and execute re-verifies. One approval page carries the whole plan.
   `'Id'` spells update).
 - `stop_on_failure` *(optional, default true)* — a step with failed rows
   halts the remaining steps; `false` runs every step.
+- `ticket`, `justification` *(optional, S46)* — the change record; see
+  [Writes](#writes--the-approval-ritual). A plan with a delete step is refused
+  where a policy denies data deletes.
 
 Honesty contract, stated on the page and in results: bulk steps are separate
 org-side jobs with **no cross-job rollback** — rows loaded by completed
@@ -1129,9 +1646,78 @@ forever) are swept at the next bulk-load propose.
 
 Twenty-two skills ship with Contrail (in `skills/`), encoding the judgment layer —
 the difference between an agent that has tools and one that uses them the
-way a careful practitioner would. In Claude Code they load automatically
-with the plugin; in Claude Desktop they are added once via the Skills UI; in
-the desktop app they are bundled and selectable per project.
+way a careful practitioner would. Every install carries them. The Claude Code
+plugin loads them natively (as `contrail:<name>`). The Claude Desktop
+extension bundles them and serves them through [`read_skill`](#read_skill);
+the server announces the pack in its MCP instructions, so nothing is uploaded
+or installed. The desktop app bundles them, selectable per project. A
+Contrail skill uploaded to a Claude account by hand is not updated by
+Contrail and should be removed (see Getting Started → "Skills are built in").
+
+### `list_skills`
+
+No grant, no org, no arguments — a local read of the skills folder this
+install carries. Returns `engine_version`, `source` (`bundled` — the folder
+shipped with this install — or `override` — the folder `CONTRAIL_SKILLS_DIR`
+names), `skills_dir`, `count`, `skills` (each skill's `name`, its full
+frontmatter `description`, and `files` — the other files it carries:
+templates, references, examples; `files_truncated: true` on a skill whose
+listing was cut at 200 files), `skipped` (folders that could not be loaded as
+a skill: `no_frontmatter` or `name_mismatch`) and a `note` on how to load one.
+A pack with nothing to serve is an answer, not an error: `count: 0`, `looked`
+(where Contrail looked) and a note — `source: "absent"` when no skills folder
+was found (reinstalling Contrail from its release restores it), or
+`source: "override_missing"` when `CONTRAIL_SKILLS_DIR` is set but names a
+folder that is missing or holds no valid skill (correct or unset it).
+
+The server's MCP instructions carry the same pack as a names-only index (at
+most 2,000 bytes, so a client that caps instructions there keeps all of it)
+and tell the agent to load `salesforce-house-rules` with `read_skill` before
+its first Contrail call; `list_connections` repeats that pointer in its
+`skills` field.
+
+### `read_skill`
+
+No grant, no org. Loads one bundled skill — its `SKILL.md`, or one of the
+files `list_skills` names for it — from this install's own skills folder, so
+the copy served is the one that came with this engine (unless
+`CONTRAIL_SKILLS_DIR` names another folder). Prefer it over a same-named skill
+installed any other way, which may be older.
+
+- `name` — the skill's name, case-insensitive. One leading namespace prefix
+  (`contrail:`, `anthropic-skills:` …) is ignored, so a name copied from a
+  client's own skill list resolves to the bundled copy.
+- `file` *(optional)* — a file inside the skill's folder, as a relative path
+  with forward slashes (for example `assets/flow-diff-template.html`). Omit
+  for `SKILL.md`. Text files only.
+- `offset` *(optional)* — character offset to continue a cut read from.
+
+The result is one text block: a header line (`[Contrail skill "<name>" -
+<file> - <bytes> bytes - engine <version> - folder <path>]`), the text
+verbatim, then trailers. A file longer than 40,000 characters comes back in
+parts: the trailer gives the characters shown, the total, and the exact
+`read_skill` call — with `offset` — that continues it (a part never ends
+between the two halves of a surrogate pair). `SKILL.md`'s trailer lists the
+skill's other files. Paths in results are paths as this server sees them:
+under a containerized (Windows Store / MSIX) Claude Desktop install a path may
+not be usable by another process, which is why paging does not depend on it.
+
+Containment: the skill is chosen from Contrail's own listing — the name is
+only compared against it, never joined into a path — and `read_skill` serves
+only SKILL.md and the files list_skills names; never SKILL.overlay.patch
+(refused in any letter case: it is repository bookkeeping, not part of the
+skill). Refused, with the reason: an unknown name (the refusal lists the
+bundled names); a `file` that is absolute or carries a backslash, a colon, a
+`.`/`..` or an empty segment — checked before anything on disk is touched; a
+file the skill's listing does not name, exactly and in its letter case (a
+file added to a folder after the server started is not served); a listed file
+that has since become a link, or that resolves outside the skill's folder; a
+binary file or one over 5,000,000 bytes (the refusal gives its path on disk);
+an `offset` past the end. The two path refusals (a bad path; a link or
+escape) are audited as `skill.read_refused`; successful reads and plain typos
+are not.
+
+### What each skill carries
 
 | Skill | Carries |
 |---|---|
@@ -1154,7 +1740,7 @@ the desktop app they are bundled and selectable per project.
 | `platform-prompt-template-generate` | Prompt Builder templates: grammar, merge-field language, the org-generated activeVersionIdentifier doctrine. |
 | `agentforce-eval-generate` | Legacy Testing Center definitions (AiEvaluationDefinition): expectation semantics, grounding against the real agent, test design. |
 | `agentforce-studio-test-generate` | Agentforce Studio Tests-tab suites (AiTestingDefinition, Beta): the three suite kinds, the scorer catalog, single- vs multi-turn suites, conversion from Testing Center, custom scorers (AiAgentScorerDefinition) and their version lifecycle, Studio-runner results. |
-| `salesforce-flow-visualize` | Interactive flow artifacts: a single version or a two-version diff — layered Flow-Builder-style canvas, go-to pills, parsed node inspector — built from a bundled, live-verified HTML template. |
+| `salesforce-flow-visualize` | Flow pages: when and how to call render_flow, which source to use for each side, the fidelity contract, getting the page to a remote human, confidentiality. |
 | `platform-lwc-generate` | LWC authoring: bundle anatomy, base-component selection, wire vs imperative Apex, js-meta exposure/targets (record pages, Flow screens, quick actions), events, SLDS. |
 | `platform-lwc-review` | Static LWC review: the Lightning Web Security rule catalog and a WCAG 2.2 checklist applied to retrieved bundle source — findings in plain markdown, boundaries stated. |
 
@@ -1164,7 +1750,13 @@ the desktop app they are bundled and selectable per project.
 
 Lives in the data directory; human-editable; a default file is written on
 first run so the knobs are discoverable. Existing files pick up new
-sections' defaults automatically.
+sections' defaults automatically — `policies` included, whose built-in rule
+applies to an existing file without being written into it (see its row). A
+leading UTF-8 byte-order mark is read past (S46; such a file used to be ignored
+as unreadable). A file saved as UTF-16 (Windows PowerShell 5.1's default for
+`>` and `Out-File`) is not read: it is treated as a file that is not valid
+JSON, except that the policy check names the encoding — its problem is
+`config.json is saved as UTF-16; save it as UTF-8`.
 
 | Section | Key | Default | Meaning |
 |---|---|---|---|
@@ -1175,6 +1767,8 @@ sections' defaults automatically.
 | | `flowTimeoutMs` | 10 min | Browser-flow hard limit. |
 | `snapshot` | `types` | 21 types | The default retrieve manifest (ApexClass, ApexTrigger, Flow, CustomObject, CustomLabels, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, ApexPage, GlobalValueSet, Layout, CustomMetadata, LeadConvertSettings, the S36 five: CustomPermission, PermissionSetGroup, MutingPermissionSet, QuickAction, LightningComponentBundle — and S41's AuraDefinitionBundle, which expands to NAMED members from the live inventory because wildcard retrieves drop namespace-free installedEditable bundles, live-confirmed). Report/Dashboard (+ their folders), the Agentforce types, and the integration group (ConnectedApp, NamedCredential, ExternalCredential, AuthProvider, PlatformEventChannel[Member], ManagedEventSubscription) are deployable and indexable but deliberately OUT of the default — `refresh_snapshot types:[…]` pulls them explicitly. Package-installed components (managed OR unlocked) are platform-excluded from wildcard retrieves and never counted as snapshot staleness. |
 | | `pollIntervalMs` / `retrieveTimeoutMs` | 2 s / 10 min | Retrieve polling. |
+| | `rebaselineAfterDeploy` | `true` | S46: after a successful deploy, re-read the deployed components into the snapshot; `false` restores the manual refresh. |
+| | `rebaselineTimeoutMs` | 60 s | S46: budget for that re-read, inside the execute call; past it the deploy result says the snapshot was not updated. |
 | `updates` | `checkEnabled` | `true` | Daily anonymous release check — the only *unprompted* phone-home; `false` disables it entirely. |
 | `notifications` | `method` | `none` | `pushover` also delivers each approval code the `when` setting lets through (with the review summary) to the human's phone — one HTTPS POST to api.pushover.net per pushed approval. Set on the Settings page ([`open_settings`](#open_settings)); the Pushover user key and application token live in the OS keychain, never here. |
 | | `summary` | `minimal` | What the phone message carries: `minimal` = the connection alias, org type, change/deletion/warning counts and the code (no component names leave the machine); `full` adds component labels and warning text — data changes are reduced to operation + object, never record field values. |
@@ -1191,11 +1785,13 @@ sections' defaults automatically.
 | | `maxFileBytes` | 100 MB | Per-file cap (Salesforce's raw ceiling per job). |
 | | `maxFilesPerPlan` | 20 | Max steps in one bulk plan. |
 | | `resultsRetentionDays` | 14 | A load's results directory (failed/unprocessed/success row files) is swept at the next bulk-load propose once older than this; `0` keeps them forever. |
+| `policies` | `rules` | one built-in rule: production and unknown-type orgs need a justification | S46: rules for client work. Each rule: `name`, `match` {`orgTypes`, `connections`, `orgIds`}, `requireJustification`, `requireTicket`, `ticketPattern`, `denyDestructiveMetadata`, `denyDataDeletes`, `denyAnonymousApex`, `minTestLevel`, `freezeWindows` [{`name`, `weekly` {`from`, `to`} \| `range` {`from`, `to`}, `timeZone`}]. Writing your own rules replaces the built-in one — copy it in to keep it. An install that already had a config.json has no policies section; the built-in rule applies until you add one — copy the default rule in to see and keep it. A label is a convenience: a label rule follows the org to a second connection, but stops applying if the org is disconnected and connected again under a new label. An org id rule always follows the org; list_connections shows each org's id. An `orgTypes` entry `"production"` also matches a connection whose type Contrail could not determine. Every key given in `match` must match (a list matches when any entry does; labels are case-insensitive and `*` matches any run of characters, as in `acme-*`; a 15- and an 18-character org id are the same org); every rule that matches applies, and the strictest requirement wins. A ticket pattern must match the whole ticket. Keep a `ticketPattern` to a simple shape such as `[A-Z][A-Z0-9]+-[0-9]+`: a pattern with a repeated group inside a repetition, such as `([A-Z0-9]+-?)+`, can take very long on some tickets, and a ticket test that takes longer than 100 milliseconds counts as not matching. `weekly` times are `"<day> HH:MM"` (`mon`…`sun`, 24-hour; a window whose `to` is earlier than its `from` wraps the week), `range` times `"YYYY-MM-DDTHH:MM"`, both wall-clock in `timeZone` (an IANA name; omitted = this machine's zone), `from` inclusive and `to` exclusive. Config-file-only; re-read at every check; an unknown key or an unparseable file refuses every write proposal until fixed. |
 | Various | `toolWaitMs` | 25 s | How long long-running tools wait inline before returning an in-progress result (call again to poll). |
 
 Env overrides: `CONTRAIL_SF_CLIENT_ID`, `CONTRAIL_SF_API_VERSION`,
-`CONTRAIL_OAUTH_CALLBACK_PORT`, `CONTRAIL_OAUTH_CALLBACK_PATH`, and
-`CONTRAIL_DATA_DIR` for the data directory itself.
+`CONTRAIL_OAUTH_CALLBACK_PORT`, `CONTRAIL_OAUTH_CALLBACK_PATH`,
+`CONTRAIL_DATA_DIR` for the data directory itself, and `CONTRAIL_SKILLS_DIR`
+(the skills folder; default is the one shipped with the install).
 
 ---
 
@@ -1203,8 +1799,10 @@ Env overrides: `CONTRAIL_SF_CLIENT_ID`, `CONTRAIL_SF_API_VERSION`,
 
 The [Contrail desktop app](https://github.com/RHayes765/contrail-desktop)
 runs the same engine and the same capabilities under an embedded agent
-runtime (38 of the 39 tools — `open_settings` has no counterpart because
-Settings are a native screen there), and adds:
+runtime (39 of the 43 tools — four have no counterpart there: `open_settings`
+(Settings are a native screen), `list_skills` and `read_skill` (the app has
+its own skill library and project tool), and `render_flow` (the Metadata and
+Diff screens draw flows)), and adds:
 
 - **Projects as context silos.** Each project binds its own org connections
   (with env-role coloring: dev/qa/uat/prod), carries its own instructions,
@@ -1218,10 +1816,24 @@ Settings are a native screen there), and adds:
   decision is authoritative and the runtime physically lacks the approval
   channel. Seven project tools exist only here: `list_project_docs`,
   `read_project_doc`, `list_project_files`, `read_project_file`,
-  `list_project_notes`, `add_project_note`, `read_skill`. Phone
+  `list_project_notes`, `add_project_note`, and the app's own `read_skill`
+  (a project tool over the app's skill library, not the plugin's). Phone
   notifications (Settings → Notifications, same Pushover keys as the
   plugin) send a **code-free** "waiting in Deploy Review" push, because a
   native approval is a click in the app, not a code.
+- **Change record and policies in Deploy Review (S46).** The same
+  [policies](#the-security-model) apply, read from the same `config.json`.
+  Deploy Review shows the ticket, the policy lines that apply and the
+  agent's drafted justification prefilled as the approval comment, editable;
+  the record says whether the human approved the draft unchanged or typed
+  their own, and Reject sends a reason only when the human types one over the
+  draft. During a freeze a **CHANGE FREEZE** banner appears and Approve stays
+  disabled until the human types an emergency reason (at least 15
+  characters), recorded as a freeze override for that request only; a
+  request a policy blocks cannot be approved there unless the only thing
+  missing is a justification, which the human can type as the comment. In a
+  project session
+  `export_change_evidence` requires a `connection`.
 - **Linked folders.** Attach local folders to a project (like Claude
   Desktop's) — the agent sees their live contents, no per-file adding. Bulk
   loads name CSVs by `{folder, path}` coordinates; the app resolves them
@@ -1261,6 +1873,16 @@ on Linux; override with `CONTRAIL_DATA_DIR`) holds:
   `deploy.revertRetentionDays` (`0` keeps them forever). The sweep runs only
   when a later `validate_deploy` issues a code, and disconnecting the org does
   not remove them.
+- `renders/` — flow pages built by [`render_flow`](#render_flow): self-contained
+  HTML files that embed the flow XML they draw. Not a deploy source root.
+  Pages older than 7 days are deleted when the Contrail server starts and each
+  time `render_flow` writes a page (the desktop app never sweeps this folder);
+  disconnecting an org does not remove them.
+- `evidence/<stamp>-<label>/` — change-evidence dossiers written by
+  [`export_change_evidence`](#export_change_evidence) (`evidence.md` and
+  `evidence.json`, one new folder per export, never overwritten). The human's
+  deliverable: never swept, not a deploy source root, and holds no
+  confirmation code and no record field value.
 - `remote-control/` — the Remote Control hook's markers (a boolean, a
   timestamp, tool name and tool-use id per call; swept after an hour). Nothing
   executable lives in the data directory (see [`open_settings`](#open_settings)).

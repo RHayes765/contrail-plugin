@@ -30,7 +30,36 @@ export type AuditEventType =
   | 'deploy.revert_written'
   | 'deploy.revert_swept'
   | 'deploy.expired'
+  // S46 (governance): a proposal, a deploy mint, an agent test-run start or
+  // an execute was refused by policy; the human recorded an emergency reason
+  // during a freeze; an engine saw a policies fingerprint no engine on this
+  // database had recorded; the human saved a different justification; a
+  // change-evidence dossier was written.
+  | 'policy.refused'
+  | 'policy.freeze_overridden'
+  | 'policy.config_seen'
+  | 'approval.justification_edited'
+  | 'evidence.exported'
+  // S46 (re-baseline): a member-scoped snapshot refresh finished or failed,
+  // and the post-deploy re-read did not run or did not finish.
+  | 'snapshot.members_refreshed'
+  | 'snapshot.members_refresh_failed'
+  | 'deploy.snapshot_rebaseline_unavailable'
   | (string & {});
+
+/**
+ * What the audit log can be filtered by. `requestId` keeps the events whose
+ * detail names that request; `eventType` is one type, or every type under a
+ * prefix ending in a dot (`policy.`); `until` is inclusive.
+ */
+export interface AuditQueryFilter {
+  connectionId?: string;
+  since?: string;
+  until?: string;
+  requestId?: string;
+  eventType?: string;
+  limit?: number;
+}
 
 export class AuditLog {
   constructor(private readonly db: ContrailDb) {}
@@ -57,7 +86,7 @@ export class AuditLog {
     }
   }
 
-  query(filter: { connectionId?: string; since?: string; limit?: number }): AuditEvent[] {
+  query(filter: AuditQueryFilter): AuditEvent[] {
     return this.db.queryAuditEvents(filter);
   }
 }

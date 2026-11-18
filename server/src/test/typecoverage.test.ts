@@ -4,6 +4,10 @@ import {
   analyzeChanges,
   analyzePermissionCoverage,
   buildDeployZip,
+  deployZipEntryPath,
+  isRegisteredType,
+  parseEnvelopeFor,
+  readOldContent,
   retrieveMemberFor,
   type ProposedComponent,
 } from '../deploy/package.js';
@@ -199,8 +203,18 @@ describe('S17 permission coverage', () => {
     const cov = analyzePermissionCoverage([page, app]);
     expect(cov.has_permission_container).toBe(false);
     expect(cov.uncovered).toEqual([
-      { type: 'ApexPage', api_name: 'Invoice_Portal', permission: 'Visualforce page access' },
-      { type: 'CustomApplication', api_name: 'Invoicing', permission: 'app visibility' },
+      {
+        type: 'ApexPage',
+        api_name: 'Invoice_Portal',
+        permission: 'Visualforce page access',
+        presence: 'unknown',
+      },
+      {
+        type: 'CustomApplication',
+        api_name: 'Invoicing',
+        permission: 'app visibility',
+        presence: 'unknown',
+      },
     ]);
     expect(cov.warning).toMatch(/no permission set or profile/);
   });
@@ -1076,7 +1090,12 @@ describe('S30 Stage 2: bundle envelope deploys', () => {
     const bot = comp('Bot', 'Support_Agent', '<Bot/>');
     const uncovered = analyzePermissionCoverage([bot]);
     expect(uncovered.uncovered).toEqual([
-      { type: 'Bot', api_name: 'Support_Agent', permission: 'agent access (agentAccesses)' },
+      {
+        type: 'Bot',
+        api_name: 'Support_Agent',
+        permission: 'agent access (agentAccesses)',
+        presence: 'unknown',
+      },
     ]);
 
     const granted = comp(
@@ -1537,6 +1556,7 @@ describe('S36: permissions & UI-action types', () => {
         type: 'CustomPermission',
         api_name: 'Can_Approve_Refunds',
         permission: 'custom permission access (customPermissions)',
+        presence: 'unknown',
       },
     ]);
 
@@ -2436,5 +2456,276 @@ describe('S45: retrieveMemberFor mirrors the component arms of buildDeployZip', 
     expect(retrieveMemberFor('PresenceUserConfig', 'Agents')).toBeNull();
     expect(retrieveMemberFor('NotAType', 'x')).toBeNull();
     expect(retrieveMemberFor('CustomField', '')).toBeNull();
+  });
+});
+
+describe('S46: a type named like an Object.prototype property is simply unregistered', () => {
+  const conn = { id: 'conn-1', alias: 'dev' } as ConnectionRecord;
+  const dbNone = { getArtifact: () => null } as unknown as ContrailDb;
+  const storeNone = { readCurrentFile: () => null } as unknown as SnapshotStore;
+  // Each passes the type grammar (letters only); "__proto__" does not.
+  const PROTO_TYPES = ['constructor', 'toString', 'hasOwnProperty', 'valueOf'];
+  const STRAYS = [
+    { type: 'constructor', api_name: 'Stray_One' },
+    { type: 'toString', api_name: 'Stray_Two' },
+  ];
+
+  it('no type-table lookup finds an inherited member: unregistered, no retrieve mirror, no zip entry', () => {
+    for (const type of PROTO_TYPES) {
+      expect(isRegisteredType(type), type).toBe(false);
+      expect(retrieveMemberFor(type, 'Stray'), type).toBeNull();
+      expect(retrieveMemberFor(type, 'Parent.Stray'), type).toBeNull();
+      expect(deployZipEntryPath(type, 'Stray'), type).toBeNull();
+      expect(deployZipEntryPath(type, 'Parent.Stray'), type).toBeNull();
+      // Not a child type: the snapshot copy is the file itself, never a block extraction.
+      const store = { readCurrentFile: () => '<Doc/>' } as unknown as SnapshotStore;
+      expect(readOldContent(store, conn, type, 'Parent.Stray', 'x/Parent.x'), type).toBe('<Doc/>');
+      expect(() => parseEnvelopeFor(type, 'Stray', '{}'), type).toThrow(
+        `${type} is not a bundle (envelope) type`,
+      );
+    }
+    expect(isRegisteredType('__proto__')).toBe(false);
+  });
+
+  it('validate path: a component of such a type is refused as not deployable — never a TypeError', () => {
+    for (const { type } of STRAYS) {
+      expect(() => buildDeployZip([comp(type, 'Stray', '<Stray/>')], [], V, noMeta)).toThrow(
+        `Type "${type}" is not deployable through Contrail yet`,
+      );
+    }
+  });
+
+  it('validate path: destructive members of type "constructor" and "toString" keep their literal manifest entry and are flagged UNREGISTERED TYPE DELETE', () => {
+    const built = buildDeployZip(
+      [comp('ApexClass', 'Foo', 'public class Foo {}')],
+      STRAYS,
+      V,
+      noMeta,
+    );
+    expect(built.destructiveXml).toContain(
+      '<members>Stray_One</members>\n        <name>constructor</name>',
+    );
+    expect(built.destructiveXml).toContain('<members>Stray_Two</members>\n        <name>toString</name>');
+    // Nothing of theirs lands in the deploy itself.
+    expect(built.files).toEqual([
+      'classes/Foo.cls',
+      'classes/Foo.cls-meta.xml',
+      'destructiveChangesPost.xml',
+      'package.xml',
+    ]);
+    const { destructive } = analyzeChanges(dbNone, storeNone, conn, [], STRAYS);
+    for (const [i, { type }] of STRAYS.entries()) {
+      expect(destructive[i]!.warnings.join(' ')).toContain(
+        `UNREGISTERED TYPE DELETE — Contrail cannot read ${type} or list its dependents`,
+      );
+    }
+  });
+});
+
+describe('S46 D3: the permission warning says what Contrail knows about each component', () => {
+  const cls = comp('ApexClass', 'InvoiceService', 'public class InvoiceService {}');
+  const page = comp('ApexPage', 'Invoice_Portal', '<apex:page/>');
+  const tab = comp('CustomTab', 'Invoice__c', '<CustomTab/>');
+  /** A permission set that grants nothing these tests ask about. */
+  const emptySet = comp('PermissionSet', 'Invoice_Access', '<PermissionSet></PermissionSet>');
+  const LIST =
+    'ApexClass:InvoiceService (Apex class access); ApexPage:Invoice_Portal (Visualforce page access)';
+
+  /** `presence` answering from a `Type:api_name` table; a missing key is "not known". */
+  const presenceFrom =
+    (known: Record<string, boolean | null>) =>
+    (type: string, apiName: string): boolean | null | undefined =>
+      known[`${type}:${apiName}`];
+  const all = (value: boolean | null) =>
+    presenceFrom({ 'ApexClass:InvoiceService': value, 'ApexPage:Invoice_Portal': value });
+
+  it('no permission set or profile in the package: the three sentences, verbatim', () => {
+    const fresh = analyzePermissionCoverage([cls, page], all(false));
+    expect(fresh.uncovered.map((u) => u.presence)).toEqual(['new', 'new']);
+    expect(fresh.warning).toBe(
+      'This package adds 2 component(s) that need permissions but includes no permission set ' +
+        'or profile to grant them — they will deploy but stay invisible or inaccessible until ' +
+        'you set permissions (deploy a permission set alongside, or grant FLS/access ' +
+        `afterward): ${LIST}.`,
+    );
+
+    const inOrg = analyzePermissionCoverage([cls, page], all(true));
+    expect(inOrg.uncovered.map((u) => u.presence)).toEqual(['in_org', 'in_org']);
+    expect(inOrg.warning).toBe(
+      'This package includes 2 component(s) that are already in the org and need permissions ' +
+        'to be usable, and no permission set or profile for them — who can use them depends on ' +
+        `the permissions already in the org, which Contrail did not check: ${LIST}.`,
+    );
+    // The fix itself: a component the org already has is never said to be
+    // added, and nothing is predicted about who can use it.
+    expect(inOrg.warning).not.toContain('adds');
+    expect(inOrg.warning).not.toContain('invisible');
+
+    const unplaced = analyzePermissionCoverage([cls, page], all(null));
+    expect(unplaced.uncovered.map((u) => u.presence)).toEqual(['unknown', 'unknown']);
+    expect(unplaced.warning).toBe(
+      'This package includes 2 component(s) that need permissions to be usable and no ' +
+        'permission set or profile to grant them. Contrail did not confirm whether they ' +
+        'already exist in the org — any that are new will deploy but stay invisible or ' +
+        'inaccessible until you set permissions (deploy a permission set alongside, or grant ' +
+        `FLS/access afterward): ${LIST}.`,
+    );
+    expect(unplaced.warning).not.toContain('adds');
+  });
+
+  it('a permission set or profile in the package that does not grant them: the three sentences, verbatim', () => {
+    const fresh = analyzePermissionCoverage([cls, page, emptySet], all(false));
+    expect(fresh.has_permission_container).toBe(true);
+    expect(fresh.warning).toBe(
+      'These new components are not granted by the permission set/profile in this package and ' +
+        `will be invisible or inaccessible to users until permissions are set: ${LIST}.`,
+    );
+
+    const inOrg = analyzePermissionCoverage([cls, page, emptySet], all(true));
+    expect(inOrg.warning).toBe(
+      'These components are already in the org and are not granted by the permission ' +
+        'set/profile in this package — who can use them depends on the permissions already in ' +
+        `the org, which Contrail did not check: ${LIST}.`,
+    );
+    expect(inOrg.warning).not.toContain('new components');
+
+    const unplaced = analyzePermissionCoverage([cls, page, emptySet], all(null));
+    expect(unplaced.warning).toBe(
+      'These components are not granted by the permission set/profile in this package, and ' +
+        'Contrail did not confirm whether they already exist in the org — any that are new ' +
+        `will be invisible or inaccessible to users until permissions are set: ${LIST}.`,
+    );
+    expect(unplaced.warning).not.toContain('new components');
+  });
+
+  it('a mixed package: one sentence per group, in the order new, in the org, not placed — each counting only its own', () => {
+    const cov = analyzePermissionCoverage(
+      [cls, page, tab],
+      presenceFrom({ 'ApexClass:InvoiceService': true, 'ApexPage:Invoice_Portal': false }),
+    );
+    expect(cov.uncovered).toEqual([
+      { type: 'ApexClass', api_name: 'InvoiceService', permission: 'Apex class access', presence: 'in_org' },
+      { type: 'ApexPage', api_name: 'Invoice_Portal', permission: 'Visualforce page access', presence: 'new' },
+      { type: 'CustomTab', api_name: 'Invoice__c', permission: 'tab visibility', presence: 'unknown' },
+    ]);
+    expect(cov.warning).toBe(
+      'This package adds 1 component(s) that need permissions but includes no permission set ' +
+        'or profile to grant them — they will deploy but stay invisible or inaccessible until ' +
+        'you set permissions (deploy a permission set alongside, or grant FLS/access ' +
+        'afterward): ApexPage:Invoice_Portal (Visualforce page access). ' +
+        'This package includes 1 component(s) that are already in the org and need permissions ' +
+        'to be usable, and no permission set or profile for them — who can use them depends on ' +
+        'the permissions already in the org, which Contrail did not check: ' +
+        'ApexClass:InvoiceService (Apex class access). ' +
+        'This package includes 1 component(s) that need permissions to be usable and no ' +
+        'permission set or profile to grant them. Contrail did not confirm whether they ' +
+        'already exist in the org — any that are new will deploy but stay invisible or ' +
+        'inaccessible until you set permissions (deploy a permission set alongside, or grant ' +
+        'FLS/access afterward): CustomTab:Invoice__c (tab visibility).',
+    );
+  });
+
+  it('no presence callback (a dry run, or the live check unavailable): every component is not placed and nothing is said to be added', () => {
+    const cov = analyzePermissionCoverage([cls, page]);
+    expect(cov.uncovered.map((u) => u.presence)).toEqual(['unknown', 'unknown']);
+    expect(cov.warning).toBe(
+      'This package includes 2 component(s) that need permissions to be usable and no ' +
+        'permission set or profile to grant them. Contrail did not confirm whether they ' +
+        'already exist in the org — any that are new will deploy but stay invisible or ' +
+        'inaccessible until you set permissions (deploy a permission set alongside, or grant ' +
+        `FLS/access afterward): ${LIST}.`,
+    );
+    expect(cov.warning).not.toContain('adds');
+    expect(analyzePermissionCoverage([cls, page, emptySet]).warning).not.toContain(
+      'new components',
+    );
+  });
+
+  it('an inline field answers for itself first, then through its object: the fields of a new object are new', () => {
+    const gadget = comp(
+      'CustomObject',
+      'Gadget__c',
+      '<CustomObject><label>G</label>' +
+        '<fields><fullName>Serial__c</fullName><type>Text</type></fields></CustomObject>',
+    );
+    const field = (cov: ReturnType<typeof analyzePermissionCoverage>) =>
+      cov.uncovered.find((u) => u.type === 'CustomField');
+
+    // The object is absent and nothing is known about the field itself.
+    const newObject = analyzePermissionCoverage(
+      [gadget],
+      presenceFrom({ 'CustomObject:Gadget__c': false }),
+    );
+    expect(newObject.uncovered.map((u) => `${u.type}:${u.api_name}:${u.presence}`)).toEqual([
+      'CustomObject:Gadget__c:new',
+      'CustomField:Gadget__c.Serial__c:new',
+    ]);
+    expect(newObject.warning).toMatch(/^This package adds 2 component\(s\)/);
+
+    // The object is in the org and the field cannot be placed: the field is
+    // NOT assumed to exist with its object, and not assumed new either.
+    const oldObject = analyzePermissionCoverage(
+      [gadget],
+      presenceFrom({ 'CustomObject:Gadget__c': true }),
+    );
+    expect(field(oldObject)).toMatchObject({ presence: 'unknown' });
+    expect(oldObject.warning).not.toContain('adds');
+
+    // The field's own answer wins over its owner's, both ways.
+    const ownTrue = analyzePermissionCoverage(
+      [gadget],
+      presenceFrom({ 'CustomObject:Gadget__c': false, 'CustomField:Gadget__c.Serial__c': true }),
+    );
+    expect(field(ownTrue)).toMatchObject({ presence: 'in_org' });
+    const ownFalse = analyzePermissionCoverage(
+      [gadget],
+      presenceFrom({ 'CustomObject:Gadget__c': true, 'CustomField:Gadget__c.Serial__c': false }),
+    );
+    expect(field(ownFalse)).toMatchObject({ presence: 'new' });
+  });
+
+  it('a credential principal is new with a new ExternalCredential, and not placed inside one the org already has', () => {
+    const cred = comp(
+      'ExternalCredential',
+      'Billing_Auth',
+      '<ExternalCredential><externalCredentialParameters>' +
+        '<parameterName>Basic</parameterName><parameterType>NamedPrincipal</parameterType>' +
+        '</externalCredentialParameters></ExternalCredential>',
+    );
+    const fresh = analyzePermissionCoverage(
+      [cred],
+      presenceFrom({ 'ExternalCredential:Billing_Auth': false }),
+    );
+    expect(fresh.uncovered).toEqual([
+      {
+        type: 'ExternalCredential',
+        api_name: 'Billing_Auth-Basic',
+        permission: 'external credential principal access (externalCredentialPrincipalAccesses)',
+        presence: 'new',
+      },
+    ]);
+    const existing = analyzePermissionCoverage(
+      [cred],
+      presenceFrom({ 'ExternalCredential:Billing_Auth': true }),
+    );
+    expect(existing.uncovered[0]).toMatchObject({ presence: 'unknown' });
+    expect(existing.warning).toContain('did not confirm whether they already exist');
+  });
+
+  it('presence never changes WHAT is uncovered: a granted component stays out whatever the org holds', () => {
+    const granting = comp(
+      'PermissionSet',
+      'Invoice_Access',
+      '<PermissionSet><classAccesses><apexClass>InvoiceService</apexClass>' +
+        '<enabled>true</enabled></classAccesses></PermissionSet>',
+    );
+    for (const value of [true, false, null]) {
+      const cov = analyzePermissionCoverage(
+        [cls, granting],
+        presenceFrom({ 'ApexClass:InvoiceService': value }),
+      );
+      expect(cov.uncovered).toEqual([]);
+      expect(cov.warning).toBeNull();
+    }
   });
 });

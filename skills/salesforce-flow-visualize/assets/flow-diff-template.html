@@ -1,6 +1,8 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
 <title>Flow Diff Viewer</title>
 <meta name="claude:viewport-fit-sides" content="cover">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
 /* Layout: sticky status header, twin layered flow canvases (stack <900px), shared inspector below. */
 :root {
@@ -370,6 +372,11 @@ function normalize(el) {
   };
   return walk(el);
 }
+/* Everything from the first parse to the end of boot runs inside ONE try block
+   (closed at the bottom of the script; its body is deliberately not indented),
+   so an input that cannot be parsed or drawn shows a line of text instead of a
+   blank page. */
+try {
 // Single-version mode: FLOW_B_XML null views one flow with no diff treatment.
 const A = parseFlowGraph(FLOW_A_XML);
 const B = FLOW_B_XML ? parseFlowGraph(FLOW_B_XML) : null;
@@ -485,7 +492,9 @@ function planEdges(graph, placed, depth, stacks, ownEdges, otherEdges) {
     });
     const stackPx = stacks.get(from) ?? 0;
     drawable.forEach((e, i) => {
-      const b = placed.get(e.to);
+      // A connector whose target no element defines has a depth but no place:
+      // there is nothing to draw an edge to. The footer lists such targets.
+      const b = placed.get(e.to); if (!b) return;
       const spread = (i - (drawable.length - 1) / 2) * 22;
       const x1 = a.x + NODE_W / 2 + spread, y1 = a.y + NODE_H;
       const arrivals = inboundCount.get(e.to) ?? 1;
@@ -517,11 +526,18 @@ function mk(tag, attrs, parent) {
   if (parent) parent.appendChild(el);
   return el;
 }
+function pill(cls, text) {
+  const el = document.createElement('span');
+  el.className = 'pill ' + cls; el.textContent = text;
+  return el;
+}
 function renderPane(host, graph, side, ownEdges, otherEdges) {
   if (graph.nodes.length > MAX_NODES) {
     host.classList.remove('canvas');
-    host.innerHTML = '<div class="toobig">This version has ' + graph.nodes.length +
-      ' elements — too many for the diagram view.</div>';
+    const big = document.createElement('div'); big.className = 'toobig';
+    big.textContent = 'This version has ' + graph.nodes.length +
+      ' elements — too many for the diagram view.';
+    host.replaceChildren(big);
     return { fit: () => {}, jump: () => {} };
   }
   const { placed, width, height, depth, stacks } = layout(graph);
@@ -673,6 +689,8 @@ function select(name) {
   document.querySelectorAll('.node').forEach((n) => { if (n.dataset.name === name) n.classList.add('sel'); });
   const a = A.byName.get(name) ?? A.resources.get(name) ?? null;
   const b = DIFF ? (B.byName.get(name) ?? B.resources.get(name) ?? null) : null;
+  // A go-to pill can name a connector target no element defines: nothing to inspect.
+  if (!a && !b) { empty.hidden = false; body.hidden = true; return; }
   const st = nodeStatus.get(name) ?? resStatus.get(name) ?? 'same';
   empty.hidden = true; body.hidden = false;
   const any = a ?? b;
@@ -698,17 +716,16 @@ if (DIFF) {
   document.getElementById('meta-b').textContent = B.nodes.length + ' nodes';
   const tally = { add: 0, del: 0, chg: 0, same: 0 };
   for (const s of nodeStatus.values()) tally[s]++;
-  document.getElementById('counts').innerHTML =
-    `<span class="pill add">+${tally.add} added</span><span class="pill del">−${tally.del} removed</span>` +
-    `<span class="pill chg">~${tally.chg} changed</span><span class="pill same">${tally.same} unchanged</span>`;
+  document.getElementById('counts').replaceChildren(
+    pill('add', '+' + tally.add + ' added'), pill('del', '−' + tally.del + ' removed'),
+    pill('chg', '~' + tally.chg + ' changed'), pill('same', tally.same + ' unchanged'));
 } else {
   document.getElementById('pane-b').hidden = true;
   document.querySelector('.panes').classList.add('single');
   document.getElementById('legend-diff').hidden = true;
   document.getElementById('side-b').hidden = true;
   document.querySelector('.sidegrid').classList.add('single');
-  document.getElementById('counts').innerHTML =
-    `<span class="pill same">${A.nodes.length} nodes</span>`;
+  document.getElementById('counts').replaceChildren(pill('same', A.nodes.length + ' nodes'));
   document.getElementById('insp-empty').textContent =
     'Select a node for its parsed attributes — element XML on demand.';
 }
@@ -719,7 +736,9 @@ if (paneB) document.getElementById('fit-b').addEventListener('click', paneB.fit)
 if (resStatus.size) {
   const host = document.getElementById('resources');
   host.hidden = false;
-  host.insertAdjacentHTML('afterbegin', '<span>Resource changes (not on canvas):</span>');
+  const lead = document.createElement('span');
+  lead.textContent = 'Resource changes (not on canvas):';
+  host.prepend(lead);
   for (const [name, st] of resStatus) {
     const chip = document.createElement('button');
     chip.type = 'button'; chip.className = 'chip ' + st;
@@ -732,4 +751,8 @@ const unresolved = [...new Set([...A.unresolved, ...(B ? B.unresolved : [])])];
 document.getElementById('footnote').textContent =
   [META.note, unresolved.length ? 'Unresolved connector targets: ' + unresolved.join(', ') : '']
     .filter(Boolean).join(' · ');
+} catch (err) {
+  document.getElementById('flow-title').textContent = 'Flow page could not be drawn';
+  document.getElementById('footnote').textContent = err && err.message ? err.message : String(err);
+}
 </script>

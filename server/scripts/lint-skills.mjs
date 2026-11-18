@@ -8,8 +8,14 @@ import { fileURLToPath } from 'node:url';
  * upstream skill quietly reintroducing `sf` CLI steps or force-app paths is
  * exactly the failure mode this catches. Run: `npm run lint:skills`.
  *
- * Contrail's own two skills are linted too: the same rules apply to the
- * whole pack.
+ * Contrail's own skills are linted too: the same rules apply to the whole
+ * pack.
+ *
+ * HTML assets (skills/<name>/assets/**\/*.html) get a second rule set: a
+ * shipped page must reference nothing on the network and must not build
+ * markup from strings. render_flow fills one of them with org-controlled flow
+ * XML, so an HTML-string sink or a remote resource there is a real hole, not
+ * a style point.
  */
 
 const skillsRoot = path.resolve(
@@ -35,7 +41,31 @@ const banned = [
   { re: /\bsf\s+agent\b/i, why: 'sf agent lifecycle CLI — no Contrail path; hand off to the human' },
 ];
 
+/** HTML-string sinks that must not appear in any shipped HTML asset. */
+const htmlSinks = [
+  { re: /innerHTML/, why: 'innerHTML — build the nodes and set textContent instead' },
+  { re: /outerHTML/, why: 'outerHTML — build the nodes and set textContent instead' },
+  { re: /insertAdjacentHTML/, why: 'insertAdjacentHTML — build the nodes and set textContent instead' },
+  { re: /document\.write/, why: 'document.write — build the nodes and set textContent instead' },
+];
+
+/** The one URL prefix an HTML asset may carry: XML namespace identifiers, never fetched. */
+const ALLOWED_URL_PREFIX = 'http://www.w3.org/';
+
+/** Every .html file under a directory, at any depth, sorted. */
+function htmlFilesUnder(dir) {
+  const out = [];
+  if (!fs.existsSync(dir)) return out;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...htmlFilesUnder(full));
+    else if (entry.isFile() && entry.name.toLowerCase().endsWith('.html')) out.push(full);
+  }
+  return out.sort();
+}
+
 let failures = 0;
+let htmlFailures = 0;
 for (const entry of fs.readdirSync(skillsRoot, { withFileTypes: true })) {
   if (!entry.isDirectory()) continue;
   const skillMd = path.join(skillsRoot, entry.name, 'SKILL.md');
@@ -49,10 +79,38 @@ for (const entry of fs.readdirSync(skillsRoot, { withFileTypes: true })) {
       }
     }
   });
+
+  for (const file of htmlFilesUnder(path.join(skillsRoot, entry.name, 'assets'))) {
+    const rel = path.relative(skillsRoot, file).replaceAll(path.sep, '/');
+    fs.readFileSync(file, 'utf8')
+      .split(/\r?\n/)
+      .forEach((line, i) => {
+        for (const m of line.matchAll(/https?:\/\//gi)) {
+          if (line.startsWith(ALLOWED_URL_PREFIX, m.index)) continue;
+          htmlFailures += 1;
+          console.error(
+            `${rel}:${i + 1}: network URL — an HTML asset may reference nothing on the network ` +
+              `(only ${ALLOWED_URL_PREFIX} namespace identifiers)\n    ${line.trim()}`,
+          );
+        }
+        for (const { re, why } of htmlSinks) {
+          if (re.test(line)) {
+            htmlFailures += 1;
+            console.error(`${rel}:${i + 1}: ${why}\n    ${line.trim()}`);
+          }
+        }
+      });
+  }
 }
 
 if (failures > 0) {
   console.error(`\nlint-skills: ${failures} banned actuator reference(s). The pack must speak Contrail.`);
-  process.exit(1);
 }
+if (htmlFailures > 0) {
+  console.error(
+    `\nlint-skills: ${htmlFailures} problem(s) in HTML assets. A shipped page loads nothing ` +
+      `from the network and builds no markup from strings.`,
+  );
+}
+if (failures > 0 || htmlFailures > 0) process.exit(1);
 console.log('lint-skills: clean.');

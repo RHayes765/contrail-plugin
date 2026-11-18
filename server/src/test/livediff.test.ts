@@ -75,12 +75,44 @@ const objectXml = (statusType: string) =>
   `    <fields>\n        <fullName>Status__c</fullName>\n        <type>${statusType}</type>\n    </fields>\n` +
   '    <label>Invoice</label>\n</CustomObject>\n';
 const STATUS_FIELD = `<fields>\n        <fullName>Status__c</fullName>\n        <type>Text</type>\n    </fields>`;
+const fieldBlock = (name: string, type = 'Text') =>
+  `<fields>\n        <fullName>${name}</fullName>\n        <type>${type}</type>\n    </fields>`;
+/**
+ * S46 D1: a parent document as a child-typed retrieve returns it — only the
+ * blocks the manifest named, none of the object's own elements.
+ */
+const partialObject = (...blocks: string[]) =>
+  `<?xml version="1.0" encoding="UTF-8"?>\n<CustomObject ${MD}>\n` +
+  blocks.map((b) => `    ${b}\n`).join('') +
+  '</CustomObject>\n';
 
 interface ListRow {
   fullName: string;
   date: string;
   by: string;
 }
+
+/** One row a stamp query can return (probeRows is keyed by the queried sObject). */
+interface ProbeRow {
+  /** The name column's value: DeveloperName, ValidationName, or a label's Name. */
+  name: string;
+  /** EntityDefinition.QualifiedApiName / SobjectType; none for a label. */
+  parent?: string;
+  /** NamespacePrefix; omitted = null. */
+  ns?: string;
+  /** LastModifiedDate, as the org writes it. */
+  date: string;
+  /** LastModifiedBy.Name; null = the row carries no user. */
+  by: string | null;
+}
+
+/** The stamp queries' name and parent columns per sObject (deploy/stampprobe.ts). */
+const PROBE_COLUMNS: Record<string, { name: string; parent: string | null; api: 'tooling' | 'data' }> = {
+  CustomField: { name: 'DeveloperName', parent: 'EntityDefinition.QualifiedApiName', api: 'tooling' },
+  ValidationRule: { name: 'ValidationName', parent: 'EntityDefinition.QualifiedApiName', api: 'tooling' },
+  ExternalString: { name: 'Name', parent: null, api: 'tooling' },
+  ListView: { name: 'DeveloperName', parent: 'SobjectType', api: 'data' },
+};
 
 let tmp: string;
 let db: ContrailDb;
@@ -94,9 +126,20 @@ let statusCalls: number;
 let liveFiles: Record<string, string>;
 let listRows: Record<string, ListRow[]>;
 let invalidTypes: Set<string>;
-let retrieveMode: 'ok' | 'fault' | 'never';
+/** 'failed' = the org reports the retrieve as finished and failed (its <messages> included). */
+let retrieveMode: 'ok' | 'fault' | 'never' | 'failed';
+/** 'fault' = every listMetadata call faults with something other than INVALID_TYPE. */
+let listMode: 'ok' | 'fault';
 let deployMode: 'ok' | 'http500AfterPolls';
 let toolingMode: 'ok' | 'fail';
+/** S46 D1: the rows the stamp queries answer from, per queried sObject. */
+let probeRows: Record<string, ProbeRow[]>;
+/** 'fault' = every stamp query answers HTTP 500. */
+let probeMode: 'ok' | 'fault';
+/** The decoded SOQL of every stamp query issued, in order. */
+let restQueries: string[];
+/** `problem` texts the finished retrieve status carries as <messages> elements. */
+let retrieveProblems: string[];
 
 function soapEnvelope(inner: string): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -120,10 +163,57 @@ function liveZipB64(): string {
 }
 
 /**
+ * S46 D1: answer ONE stamp query from its decoded SOQL — the probeRows of
+ * the queried sObject that a WHERE clause names (the name
+ * case-insensitively, the parent exactly; nothing is filtered on namespace,
+ * as the real queries filter nothing on it). null when the SOQL is not a
+ * stamp query. A stamp query sent to the wrong API answers as the org does
+ * for an sObject that API does not have.
+ */
+function stampQueryResponse(api: 'tooling' | 'data', soql: string): Response | null {
+  const m =
+    /^SELECT Id, (\w+), NamespacePrefix, LastModifiedDate, LastModifiedBy\.Name FROM (\w+) WHERE (.+)$/.exec(
+      soql,
+    );
+  const sobject = m?.[2] ?? '';
+  const cols = PROBE_COLUMNS[sobject];
+  if (!m || !cols || cols.name !== m[1]) return null;
+  restQueries.push(soql);
+  if (probeMode === 'fault') return new Response('stamp query down', { status: 500 });
+  if (cols.api !== api) {
+    return new Response(
+      JSON.stringify([{ errorCode: 'INVALID_TYPE', message: `sObject type '${sobject}' is not supported.` }]),
+      { status: 400 },
+    );
+  }
+  const valueOf = (clause: string, column: string) =>
+    new RegExp(`${column.replace(/\./g, '\\.')} = '([^']*)'`).exec(clause)?.[1];
+  const wanted = m[3]!.split(' OR ').map((clause) => ({
+    name: valueOf(clause, cols.name)?.toLowerCase(),
+    parent: cols.parent === null ? undefined : valueOf(clause, cols.parent),
+  }));
+  const records = (probeRows[sobject] ?? [])
+    .filter((r) => wanted.some((w) => w.name === r.name.toLowerCase() && w.parent === r.parent))
+    .map((r, i) => ({
+      attributes: { type: sobject },
+      Id: `stub-${sobject}-${i}`,
+      [cols.name]: r.name,
+      NamespacePrefix: r.ns ?? null,
+      LastModifiedDate: r.date,
+      LastModifiedBy: r.by === null ? null : { Name: r.by },
+    }));
+  return new Response(JSON.stringify({ done: true, totalSize: records.length, records }));
+}
+
+/**
  * The deploy.test.ts / preimage.test.ts stub idioms in one: the checkOnly
  * deploy (with org-side created/completed stamps), the pre-image retrieve
- * (ok / fault / never done), and listMetadata rows per queried type with an
- * sf:INVALID_TYPE fault for any type in invalidTypes.
+ * (ok / fault / never done / finished as failed; retrieveProblems ride its
+ * finished status as <messages>), listMetadata rows per queried type with an
+ * sf:INVALID_TYPE fault for any type in invalidTypes (or another fault for
+ * every listing when listMode is 'fault'), and the stamp queries (Tooling for
+ * CustomField / ValidationRule / ExternalString, the Data API for ListView)
+ * answered from probeRows.
  */
 function stubSalesforce(): void {
   vi.stubGlobal('fetch', async (input: string | URL, init?: RequestInit) => {
@@ -139,8 +229,16 @@ function stubSalesforce(): void {
       );
     }
     if (url.includes('/tooling/query')) {
+      const stamp = stampQueryResponse('tooling', new URL(url).searchParams.get('q') ?? '');
+      if (stamp) return stamp;
+      // Everything else on this route is the Aura live check's Tooling read.
       if (toolingMode === 'fail') return new Response('tooling down', { status: 500 });
       return new Response(JSON.stringify({ done: true, records: [], totalSize: 0 }));
+    }
+    if (/\/services\/data\/v[\d.]+\/query\?q=/.test(url)) {
+      const stamp = stampQueryResponse('data', new URL(url).searchParams.get('q') ?? '');
+      if (stamp) return stamp;
+      return new Response('not found', { status: 404 });
     }
     if (url.includes('/services/Soap/m/')) {
       const body = String(init?.body ?? '');
@@ -198,15 +296,32 @@ function stubSalesforce(): void {
             ),
           );
         }
+        const messages = retrieveProblems
+          .map(
+            (p) =>
+              `<messages><fileName>unpackaged/package.xml</fileName>` +
+              `<problem>${p.replace(/'/g, '&apos;')}</problem></messages>`,
+          )
+          .join('');
+        if (retrieveMode === 'failed') {
+          return new Response(
+            soapEnvelope(
+              `<checkRetrieveStatusResponse ${MD}><result><done>true</done><id>09S1</id>` +
+                `${messages}<status>Failed</status><success>false</success>` +
+                `<errorMessage>boom</errorMessage></result></checkRetrieveStatusResponse>`,
+            ),
+          );
+        }
         return new Response(
           soapEnvelope(
             `<checkRetrieveStatusResponse ${MD}><result><done>true</done><id>09S1</id>` +
-              `<status>Succeeded</status><success>true</success>` +
+              `${messages}<status>Succeeded</status><success>true</success>` +
               `<zipFile>${liveZipB64()}</zipFile></result></checkRetrieveStatusResponse>`,
           ),
         );
       }
       if (body.includes('<met:listMetadata>')) {
+        if (listMode === 'fault') return fault('INSUFFICIENT_ACCESS', 'no metadata api for you');
         const queries = [
           ...body.matchAll(
             /<met:queries>(?:<met:folder>([^<]*)<\/met:folder>)?<met:type>([^<]+)<\/met:type><\/met:queries>/g,
@@ -248,8 +363,13 @@ beforeEach(async () => {
   listRows = {};
   invalidTypes = new Set();
   retrieveMode = 'ok';
+  listMode = 'ok';
   deployMode = 'ok';
   toolingMode = 'ok';
+  probeRows = {};
+  probeMode = 'ok';
+  restQueries = [];
+  retrieveProblems = [];
 
   const tokens = new MemoryTokenStore();
   const grants = emptyGrantSet();
@@ -341,6 +461,7 @@ function jsonOf(result: Awaited<ReturnType<Client['callTool']>>): {
   request_id: string | null;
   changes: ResultChange[];
   destructive: ResultChange[];
+  permission_warning: string | null;
   live_check: Record<string, unknown> | null;
 } {
   const text = textOf(result);
@@ -428,6 +549,25 @@ function viewRow(label: string) {
   if (!row) throw new Error(`no row ${label}`);
   return row;
 }
+
+/** The page-top lines the engine handed the page + phone on the last validate. */
+const topWarnings = () => notifier.calls[notifier.calls.length - 1]!.view.warnings ?? [];
+/** Every type a listMetadata call has named so far in this test. */
+const listedTypes = () =>
+  soapBodies
+    .filter((b) => b.includes('<met:listMetadata>'))
+    .flatMap((b) => [...b.matchAll(/<met:type>([^<]+)<\/met:type>/g)].map((m) => m[1]!));
+/** The manifest of the most recent pre-image retrieve. */
+const lastRetrieveBody = () => soapBodies.filter((b) => b.includes('<met:retrieve>')).at(-1) ?? '';
+/** The one dates-unavailable line, built from its groups (already joined with '; '). */
+const datesLine = (at: unknown, groups: string) =>
+  `Live diff is against the org (retrieved ${hhmmOf(at)}); last-modified stamps were unavailable ` +
+  `for ${groups}, so CHANGED-IN-TARGET detection for those members relies on content only and ` +
+  'the execute-time check will report them as unchecked.';
+/** The stamp query for CustomField Invoice__c.Status__c, verbatim. */
+const STATUS_STAMP_QUERY =
+  'SELECT Id, DeveloperName, NamespacePrefix, LastModifiedDate, LastModifiedBy.Name FROM ' +
+  "CustomField WHERE (DeveloperName = 'Status' AND EntityDefinition.QualifiedApiName = 'Invoice__c')";
 
 describe('S45 F1: live pre-image classification and the approval page diff', () => {
   it('EXISTS IN TARGET: a snapshot ADD the org has flips to MODIFY with a live diff — escaped, collapsed, who in the detail only', async () => {
@@ -635,7 +775,7 @@ describe('S45 F1: live pre-image classification and the approval page diff', () 
     const a = jsonOf(await validate({ components: [foo()] }));
     expect(a.changes[0]!.change).toBe('modify');
     expect(a.changes[0]!.warnings[0]).toMatch(
-      /^live bytes differ from your snapshot \(retrieved \d\d:\d\d\) — last-modified stamps were unavailable for this type, so Contrail cannot say who or when\.$/,
+      /^live bytes differ from your snapshot \(retrieved \d\d:\d\d\) — a last-modified stamp was missing for this member — the org's or your snapshot's — so Contrail cannot say who or when\.$/,
     );
     expect(a.changes[0]!.warnings.join(' ')).not.toContain('CHANGED IN TARGET');
     expect(a.live_check).toMatchObject({ status: 'ok', dates_unavailable_types: ['ApexClass'] });
@@ -655,9 +795,20 @@ describe('S45 F1: live pre-image classification and the approval page diff', () 
     ]);
     listRows = { ApexClass: [{ fullName: 'Foo', date: '2026-11-12T10:00:00.000Z', by: 'Alice Example' }] };
     const b = jsonOf(await validate({ components: [foo()] }));
-    expect(b.changes[0]!.warnings[0]).toMatch(/^live bytes differ from your snapshot/);
+    // S46 D1: here the ORG's stamp is there and the snapshot's is the missing
+    // one — the sentence is the same one, and it never says the org's (or
+    // "this type's") stamps were unavailable.
+    expect(b.changes[0]!.pre_image).toMatchObject({ last_modified_date: '2026-11-12T10:00:00.000Z' });
+    expect(b.changes[0]!.warnings[0]).toBe(
+      `live bytes differ from your snapshot (retrieved ${hhmmOf(b.live_check!.at)}) — a ` +
+        "last-modified stamp was missing for this member — the org's or your snapshot's — so " +
+        'Contrail cannot say who or when.',
+    );
+    expect(b.changes[0]!.warnings.join(' ')).not.toContain('for this type');
     expect(b.changes[0]!.warnings.join(' ')).not.toContain('CHANGED IN TARGET');
     expect(presentedPages[1]!).not.toContain('Alice Example');
+    // No stamp was unavailable on the org's side, so the page carries no dates line.
+    expect(presentedPages[1]!).not.toContain('last-modified stamps were unavailable');
 
     // (c) a date is missing AND the bytes match → nothing at all.
     liveFiles = { 'classes/Foo.cls': FOO_PROPOSED, 'classes/Foo.cls-meta.xml': APEX_META };
@@ -672,21 +823,44 @@ describe('S45 F1: live pre-image classification and the approval page diff', () 
       { type: 'CustomObject', apiName: 'Invoice__c', filePath: 'objects/Invoice__c.object', lastModifiedDate: stamp, lastModifiedBy: 'Bob' },
       { type: 'CustomField', apiName: 'Invoice__c.Status__c', filePath: 'objects/Invoice__c.object', lastModifiedDate: stamp, lastModifiedBy: 'Bob' },
     ]);
-    liveFiles = { 'objects/Invoice__c.object': objectXml('Text') };
+    // S46 D1: the retrieve names the field by its own type, so the org
+    // answers with a container holding only that block; the field's stamp
+    // comes from its stamp query, written the way Tooling writes it.
+    liveFiles = { 'objects/Invoice__c.object': partialObject(fieldBlock('Status__c', 'Text')) };
     // The field's own stamp predates the snapshot: unchanged since it.
-    listRows = { CustomField: [{ fullName: 'Invoice__c.Status__c', date: '2026-10-25T08:00:00.000Z', by: 'Bob' }] };
+    probeRows = { CustomField: [{ name: 'Status', parent: 'Invoice__c', date: '2026-10-25T08:00:00.000+0000', by: 'Bob' }] };
     const field = { type: 'CustomField', api_name: 'Invoice__c.Status__c', content: STATUS_FIELD };
     const before = jsonOf(await validate({ components: [field] }));
     expect(before.changes[0]!.warnings.join(' ')).not.toContain('CHANGED IN TARGET');
-    expect(before.changes[0]!.pre_image).toMatchObject({ present: true, last_modified_date: '2026-10-25T08:00:00.000Z' });
+    expect(before.changes[0]!.pre_image).toMatchObject({
+      present: true,
+      stamp_source: 'tooling:CustomField',
+      last_modified_date: '2026-10-25T08:00:00.000Z',
+      last_modified_by: 'Bob',
+    });
+    expect(before.live_check).toMatchObject({ status: 'ok', stamp_scheme: 2, dates_unavailable_types: [] });
+    expect(before.live_check!.probe_failures).toBeUndefined();
+    expect(before.live_check!.probe_unmatched).toBeUndefined();
+    expect(presentedPages[0]!).not.toContain('last-modified stamps were unavailable');
 
     // Its own stamp is after the snapshot was taken: changed since it.
-    liveFiles = { 'objects/Invoice__c.object': objectXml('LongTextArea') };
-    listRows = { CustomField: [{ fullName: 'Invoice__c.Status__c', date: '2026-11-12T08:00:00.000Z', by: 'Alice Example' }] };
+    liveFiles = { 'objects/Invoice__c.object': partialObject(fieldBlock('Status__c', 'LongTextArea')) };
+    probeRows = { CustomField: [{ name: 'Status', parent: 'Invoice__c', date: '2026-11-12T08:00:00.000+0000', by: 'Alice Example' }] };
     const after = jsonOf(await validate({ components: [field] }));
     expect(after.changes[0]!.change).toBe('modify');
     expect(after.changes[0]!.warnings[0]).toMatch(/^CHANGED IN TARGET SINCE YOUR SNAPSHOT/);
     expect(viewRow('CustomField:Invoice__c.Status__c').diff).toMatchObject({ format: 'xml', identical: false });
+
+    // The org-wide listing of the type is never issued: one stamp query per
+    // validate names the package's own member, and the retrieve names the
+    // child, not its parent document.
+    expect(listedTypes()).not.toContain('CustomField');
+    expect(restQueries).toEqual([STATUS_STAMP_QUERY, STATUS_STAMP_QUERY]);
+    expect(STATUS_STAMP_QUERY.startsWith('SELECT Id, DeveloperName, NamespacePrefix')).toBe(true);
+    expect(lastRetrieveBody()).toContain(
+      '<met:members>Invoice__c.Status__c</met:members><met:name>CustomField</met:name>',
+    );
+    expect(lastRetrieveBody()).not.toContain('<met:name>CustomObject</met:name>');
   });
 
   it('a container-stamped child: CHANGED IN TARGET only past a 60 s clock margin; inside it, the byte comparison and the neutral note', async () => {
@@ -699,9 +873,13 @@ describe('S45 F1: live pre-image classification and the approval page diff', () 
     const afterSnap = (s: number) => new Date(Date.parse(SNAP_AT) + s * 1000).toISOString();
     const fieldRow = () => viewRow('CustomField:Invoice__c.Status__c');
 
+    const stampedAt = (date: string): Record<string, ProbeRow[]> => ({
+      CustomField: [{ name: 'Status', parent: 'Invoice__c', date, by: 'Alice Example' }],
+    });
+
     // 61 s after the snapshot, bytes differ: attributed, who/when in the detail.
-    liveFiles = { 'objects/Invoice__c.object': objectXml('LongTextArea') };
-    listRows = { CustomField: [{ fullName: 'Invoice__c.Status__c', date: afterSnap(61), by: 'Alice Example' }] };
+    liveFiles = { 'objects/Invoice__c.object': partialObject(fieldBlock('Status__c', 'LongTextArea')) };
+    probeRows = stampedAt(afterSnap(61));
     const past = jsonOf(await validate({ components: [field] }));
     expect(past.changes[0]!.change).toBe('modify');
     expect(past.changes[0]!.warnings[0]).toMatch(/^CHANGED IN TARGET SINCE YOUR SNAPSHOT/);
@@ -713,7 +891,7 @@ describe('S45 F1: live pre-image classification and the approval page diff', () 
     );
 
     // 30 s after, bytes differ: no attribution — only the neutral note.
-    listRows = { CustomField: [{ fullName: 'Invoice__c.Status__c', date: afterSnap(30), by: 'Alice Example' }] };
+    probeRows = stampedAt(afterSnap(30));
     const inside = jsonOf(await validate({ components: [field] }));
     expect(inside.changes[0]!.change).toBe('modify');
     expect(inside.changes[0]!.warnings[0]).toBe(
@@ -727,10 +905,14 @@ describe('S45 F1: live pre-image classification and the approval page diff', () 
     expect(presentedPages.at(-1)!).not.toContain('Alice Example');
 
     // 30 s after, bytes equal: nothing at all.
-    liveFiles = { 'objects/Invoice__c.object': objectXml('Text') };
+    liveFiles = { 'objects/Invoice__c.object': partialObject(fieldBlock('Status__c', 'Text')) };
     const same = jsonOf(await validate({ components: [field] }));
     expect(same.changes[0]!.change).toBe('unchanged_content');
     expect(same.changes[0]!.warnings).toEqual([]);
+
+    // Every stamp above came from the field's stamp query — never a listing.
+    expect(listedTypes()).not.toContain('CustomField');
+    expect(restQueries).toEqual([STATUS_STAMP_QUERY, STATUS_STAMP_QUERY, STATUS_STAMP_QUERY]);
   });
 
   it('a reclassified row carries the change-dependent warnings of its NEW classification (ADD → MODIFY)', async () => {
@@ -845,7 +1027,11 @@ describe('S45 F1: live pre-image classification and the approval page diff', () 
     ]);
     retrieveMode = 'fault';
     const parsed = jsonOf(await validate({ components: [foo()] }));
-    expect(parsed.live_check).toMatchObject({ status: 'unavailable' });
+    // S46 D1: stamp_scheme rides an UNAVAILABLE live check too — with no
+    // pre-image to carry a stamp_source, it is the only marker the
+    // execute-time guard has that this request was validated under the
+    // stamp queries.
+    expect(parsed.live_check).toMatchObject({ status: 'unavailable', stamp_scheme: 2 });
     expect(String(parsed.live_check!.reason)).toMatch(/^retrieve_failed:/);
     expect(parsed.changes[0]!.change).toBe('modify');
     expect(parsed.changes[0]!.pre_image).toBeUndefined();
@@ -869,18 +1055,22 @@ describe('S45 F1: live pre-image classification and the approval page diff', () 
     expect(presentedPages[1]!).not.toContain('LIVE COMPARISON UNAVAILABLE');
   });
 
-  it('a dry run issues no retrieve or listing and leaves a pre-seeded _reverts directory untouched', async () => {
+  it('a dry run issues no retrieve, listing or stamp query and leaves a pre-seeded _reverts directory untouched', async () => {
     const orphan = path.join(tmp, 'staging', '_reverts', 'not-a-known-request');
     fs.mkdirSync(orphan, { recursive: true });
     fs.writeFileSync(path.join(orphan, 'keep.txt'), 'untouched');
     liveFiles = { 'classes/Foo.cls': FOO_OLD };
-    const result = await validate({ components: [foo()], dry_run: true });
+    const result = await validate({
+      components: [foo(), { type: 'CustomField', api_name: 'Invoice__c.Status__c', content: STATUS_FIELD }],
+      dry_run: true,
+    });
     const parsed = jsonOf(result);
     expect(parsed.request_id).toBeNull();
     expect(parsed.live_check).toBeNull();
     expect(parsed.changes[0]!.pre_image).toBeUndefined();
     expect(soapBodies.some((b) => b.includes('<met:retrieve>'))).toBe(false);
     expect(soapBodies.some((b) => b.includes('<met:listMetadata>'))).toBe(false);
+    expect(restQueries).toEqual([]);
     expect(fs.readFileSync(path.join(orphan, 'keep.txt'), 'utf8')).toBe('untouched');
     expect(fs.readdirSync(path.join(tmp, 'staging', '_reverts'))).toEqual(['not-a-known-request']);
     expect(presentedPages).toHaveLength(0);
@@ -898,8 +1088,14 @@ describe('S45 F1: live pre-image classification and the approval page diff', () 
       status: 'ok',
       org_clock: { created_date: CREATED, completed_date: COMPLETED },
       dates_unavailable_types: [],
+      stamp_scheme: 2,
       members: 1,
     });
+    // Nothing failed, nothing was unmatched and the retrieve said nothing:
+    // the optional S46 keys are absent, not empty.
+    expect(Object.keys(parsed.live_check!).sort()).toEqual(
+      ['at', 'dates_unavailable_types', 'members', 'org_clock', 'stamp_scheme', 'started_at', 'status'],
+    );
     expect(Date.parse(String(parsed.live_check!.started_at))).not.toBeNaN();
     expect(Date.parse(String(parsed.live_check!.at))).toBeGreaterThanOrEqual(
       Date.parse(String(parsed.live_check!.started_at)),
@@ -907,6 +1103,7 @@ describe('S45 F1: live pre-image classification and the approval page diff', () 
     expect(parsed.changes[0]!.pre_image).toMatchObject({
       present: true,
       source: 'retrieve',
+      stamp_source: 'listMetadata',
       last_modified_date: '2026-11-10T09:30:00.000Z',
       last_modified_by: 'Bob',
       comparable: true,
@@ -958,6 +1155,64 @@ describe('S45 F1: live pre-image classification and the approval page diff', () 
     );
     expect(presence!.pre_image).toMatchObject({ present: null, source: 'list' });
     expect(presence!.warnings.join(' ')).not.toContain('not present in the target');
+  });
+
+  it('S46 D1: a destructive member of a stamp-query type is "not present" only on the retrieve AND its query, and the line names both', async () => {
+    const gone = { type: 'CustomField', api_name: 'Invoice__c.Gone__c' };
+    const absentLine = (parsed: ReturnType<typeof jsonOf>) =>
+      parsed.destructive[0]!.warnings.filter((w) => w.startsWith('not present in the target'));
+
+    // The retrieve returned no container and the stamp query no row.
+    const plain = jsonOf(await validate({ components: [], destructive: [gone] }));
+    expect(plain.destructive[0]!.pre_image).toMatchObject({
+      present: false,
+      stamp_source: 'tooling:CustomField',
+      last_modified_date: null,
+    });
+    expect(absentLine(plain)).toEqual([
+      `not present in the target (retrieved ${hhmmOf(plain.live_check!.at)}) — the retrieve ` +
+        'returned nothing for it and a Tooling query on CustomField found no row; the org ' +
+        'decides whether this delete fails or no-ops',
+    ]);
+    expect(plain.live_check!.probe_unmatched).toBeUndefined();
+    // The listing is not what was consulted, and it is not named.
+    expect(listedTypes()).not.toContain('CustomField');
+    expect(presentedPages[0]!).not.toContain('listMetadata reports no such member');
+    // A member the org lacks has no stamp to be missing: the page-top dates
+    // line names only members the org holds, so it is not printed for this one.
+    expect(topWarnings().filter((w) => w.startsWith('Live diff is against the org'))).toEqual([]);
+    expect(presentedPages[0]!).not.toContain('last-modified stamps were unavailable');
+
+    // The query returned the member's name, under a namespace the package did
+    // not name: Contrail cannot say whose row that is, so "found no row" is
+    // never printed about it — the row gets no absence line at all.
+    probeRows = {
+      CustomField: [{ name: 'Gone', parent: 'Invoice__c', ns: 'ns', date: '2026-11-12T08:00:00.000+0000', by: 'Alice Example' }],
+    };
+    const unmatched = jsonOf(await validate({ components: [], destructive: [gone] }));
+    expect(unmatched.destructive[0]!.pre_image).toMatchObject({ present: false, last_modified_date: null });
+    expect(absentLine(unmatched)).toEqual([]);
+    expect(unmatched.live_check!.probe_unmatched).toEqual(['CustomField:Invoice__c.Gone__c']);
+    expect(presentedPages[1]!).not.toContain('not present in the target');
+    expect(presentedPages[1]!).not.toContain('found no row');
+
+    // The stamp query failed: no row is not "no row was found".
+    probeRows = {};
+    probeMode = 'fault';
+    const failed = jsonOf(await validate({ components: [], destructive: [gone] }));
+    expect(failed.destructive[0]!.pre_image).toMatchObject({ present: false });
+    expect(absentLine(failed)).toEqual([]);
+    expect(Object.keys(failed.live_check!.probe_failures as object)).toEqual(['CustomField']);
+
+    // No stamp query can name the member (a field name with no __c): nothing
+    // was asked about it, so nothing is said.
+    probeMode = 'ok';
+    const before = restQueries.length;
+    const unnamed = jsonOf(
+      await validate({ components: [], destructive: [{ type: 'CustomField', api_name: 'Invoice__c.Gone' }] }),
+    );
+    expect(restQueries).toHaveLength(before);
+    expect(absentLine(unnamed)).toEqual([]);
   });
 
   it('a page-wide diff budget: once spent, later rows keep their summary line and counts only', async () => {
@@ -1038,11 +1293,15 @@ describe('S45 F1 review fixes: warnings follow the LIVE baseline, the Aura live 
         lastModifiedBy: 'Bob',
       },
     ]);
+  /** S46 D1: the field's stamp comes from its stamp query, never a CustomField listing. */
+  const statusStamp = (date: string): Record<string, ProbeRow[]> => ({
+    CustomField: [{ name: 'Status', parent: 'Invoice__c', date, by: 'Bob' }],
+  });
 
   it('a MODIFY that stays MODIFY gains the FIELD TYPE CHANGE the LIVE type triggers (snapshot Text, live Number)', async () => {
     seedField('Text');
     liveFiles = { 'objects/Invoice__c.object': objectXml('Number') };
-    listRows = { CustomField: [{ fullName: 'Invoice__c.Status__c', date: '2026-11-12T09:30:00.000Z', by: 'Bob' }] };
+    probeRows = statusStamp('2026-11-12T09:30:00.000+0000');
     const parsed = jsonOf(await validate({ components: [fieldComponent(fieldWith('Text', 'New label'))] }));
     const entry = parsed.changes[0]!;
     expect(entry.change).toBe('modify');
@@ -1055,7 +1314,7 @@ describe('S45 F1 review fixes: warnings follow the LIVE baseline, the Aura live 
   it('…and loses the stale one the snapshot type triggered (snapshot Number, live Text)', async () => {
     seedField('Number');
     liveFiles = { 'objects/Invoice__c.object': objectXml('Text') };
-    listRows = { CustomField: [{ fullName: 'Invoice__c.Status__c', date: '2026-11-12T09:30:00.000Z', by: 'Bob' }] };
+    probeRows = statusStamp('2026-11-12T09:30:00.000+0000');
     const parsed = jsonOf(await validate({ components: [fieldComponent(fieldWith('Text', 'New label'))] }));
     const entry = parsed.changes[0]!;
     expect(entry.change).toBe('modify');
@@ -1086,7 +1345,7 @@ describe('S45 F1 review fixes: warnings follow the LIVE baseline, the Aura live 
   it('live byte-equal to the snapshot: the warnings are exactly analyzeChanges’ (a no-op)', async () => {
     seedField('Number');
     liveFiles = { 'objects/Invoice__c.object': objectXml('Number') };
-    listRows = { CustomField: [{ fullName: 'Invoice__c.Status__c', date: '2026-11-10T09:30:00.000Z', by: 'Bob' }] };
+    probeRows = statusStamp('2026-11-10T09:30:00.000+0000');
     const component = fieldComponent(fieldWith('Text', 'New label'));
     const dry = jsonOf(await validate({ components: [component], dry_run: true }));
     const real = jsonOf(await validate({ components: [component] }));
@@ -1224,5 +1483,455 @@ describe('S45 F1 review fixes: warnings follow the LIVE baseline, the Aura live 
         String.raw`compared against your snapshot from ${SNAP_DAY} \d\d:\d\d to ${localDay(LATER)} \d\d:\d\d; the org was not re-read\.`,
       ),
     );
+  });
+});
+
+describe('S46 D1: stamps from per-member queries — failures, the one dates line, the retrieve note', () => {
+  const statusField = { type: 'CustomField', api_name: 'Invoice__c.Status__c', content: STATUS_FIELD };
+  const industry = {
+    type: 'CustomField',
+    api_name: 'Account.Industry',
+    content: fieldBlock('Industry', 'Picklist'),
+  };
+  const RULE_BLOCK =
+    '<validationRules>\n        <fullName>Positive_Amount</fullName>\n        <active>true</active>\n' +
+    '        <errorConditionFormula>Amount__c &lt; 0</errorConditionFormula>\n' +
+    '        <errorMessage>Amount must be positive</errorMessage>\n    </validationRules>';
+  const rule = { type: 'ValidationRule', api_name: 'Invoice__c.Positive_Amount', content: RULE_BLOCK };
+  const RULE_STAMP_QUERY =
+    'SELECT Id, ValidationName, NamespacePrefix, LastModifiedDate, LastModifiedBy.Name FROM ' +
+    "ValidationRule WHERE (ValidationName = 'Positive_Amount' AND EntityDefinition.QualifiedApiName = 'Invoice__c')";
+  const LIST_VIEW_BLOCK =
+    '<listViews>\n        <fullName>Open_Invoices</fullName>\n        <filterScope>Everything</filterScope>\n' +
+    '        <label>Open invoices</label>\n    </listViews>';
+  const listView = { type: 'ListView', api_name: 'Invoice__c.Open_Invoices', content: LIST_VIEW_BLOCK };
+  const STAMP_QUERY_DOWN =
+    /^Salesforce API error 500 on \/services\/data\/v[\d.]+\/tooling\/query: stamp query down$/;
+  /** The page-top dates-unavailable lines of the last validate (never more than one). */
+  const datesLines = () => topWarnings().filter((w) => w.startsWith('Live diff is against the org'));
+  const failureOf = (parsed: ReturnType<typeof jsonOf>, type: string) =>
+    String((parsed.live_check!.probe_failures as Record<string, string>)[type]);
+
+  it('a failed stamp query: the one dates line gives its reason, live_check.probe_failures names the type, and no listing is asked instead', async () => {
+    liveFiles = { 'objects/Invoice__c.object': partialObject(STATUS_FIELD) };
+    // The org has a row — the query that would return it fails.
+    probeRows = { CustomField: [{ name: 'Status', parent: 'Invoice__c', date: '2026-11-12T08:00:00.000+0000', by: 'Bob' }] };
+    probeMode = 'fault';
+    const parsed = jsonOf(await validate({ components: [statusField] }));
+
+    // The retrieve still decided presence and content: a live diff, no stamp.
+    expect(parsed.live_check).toMatchObject({
+      status: 'ok',
+      stamp_scheme: 2,
+      dates_unavailable_types: ['CustomField'],
+    });
+    expect(parsed.live_check!.dates_unavailable).toBeUndefined();
+    const reason = failureOf(parsed, 'CustomField');
+    expect(reason).toMatch(STAMP_QUERY_DOWN);
+    expect(parsed.changes[0]!.pre_image).toMatchObject({
+      present: true,
+      stamp_source: 'tooling:CustomField',
+      last_modified_date: null,
+      last_modified_by: null,
+      comparable: true,
+    });
+
+    expect(datesLines()).toEqual([
+      datesLine(parsed.live_check!.at, `CustomField (the stamp query failed: ${reason})`),
+    ]);
+    const page = presentedPages[0]!;
+    expect(page).toContain(
+      'last-modified stamps were unavailable for CustomField (the stamp query failed: Salesforce API error 500 on',
+    );
+    // Not the listing's reason, and never "not re-read": the retrieve answered.
+    expect(page).not.toContain('listMetadata reported INVALID_TYPE');
+    expect(page).not.toContain('the org was not re-read');
+    expect(page).not.toContain('Bob');
+
+    // No fallback: the failed query is not replaced by the org-wide listing.
+    expect(listedTypes()).not.toContain('CustomField');
+    expect(restQueries).toEqual([STATUS_STAMP_QUERY]);
+  });
+
+  it('a standard field rides its parent document and no stamp query names it; the page says Contrail has no stamp query for it', async () => {
+    liveFiles = {
+      'objects/Account.object': partialObject(fieldBlock('Industry', 'Picklist'), fieldBlock('Rating', 'Picklist')),
+    };
+    const parsed = jsonOf(await validate({ components: [industry] }));
+
+    expect(lastRetrieveBody()).toContain('<met:members>Account</met:members><met:name>CustomObject</met:name>');
+    expect(lastRetrieveBody()).not.toContain('<met:name>CustomField</met:name>');
+    expect(restQueries).toEqual([]);
+    expect(listedTypes()).not.toContain('CustomField');
+    expect(parsed.changes[0]!.pre_image).toMatchObject({
+      present: true,
+      stamp_source: 'tooling:CustomField',
+      last_modified_date: null,
+    });
+    // Nothing failed — no query was issued — so the type is in neither list.
+    expect(parsed.live_check!.dates_unavailable_types).toEqual([]);
+    expect(parsed.live_check!.probe_failures).toBeUndefined();
+
+    expect(datesLines()).toEqual([
+      datesLine(
+        parsed.live_check!.at,
+        'CustomField Account.Industry (Contrail has no stamp query for them)',
+      ),
+    ]);
+    const page = presentedPages[0]!;
+    expect(page).toContain('for CustomField Account.Industry (Contrail has no stamp query for them)');
+    // No query ran, so nothing may say one "returned no" stamp.
+    expect(page).not.toContain('returned no');
+    expect(page).not.toContain('stamp query failed');
+  });
+
+  it('a custom field the retrieve returned whose query gave it no stamp: "returned no usable stamp" — for zero rows and for a row under another namespace alike', async () => {
+    liveFiles = { 'objects/Invoice__c.object': partialObject(STATUS_FIELD) };
+    const expected = 'CustomField Invoice__c.Status__c (the stamp query returned no usable stamp for them)';
+
+    // Zero rows.
+    const zero = jsonOf(await validate({ components: [statusField] }));
+    expect(restQueries).toEqual([STATUS_STAMP_QUERY]);
+    expect(zero.changes[0]!.pre_image).toMatchObject({ present: true, last_modified_date: null });
+    expect(zero.live_check!.dates_unavailable_types).toEqual([]);
+    expect(zero.live_check!.probe_unmatched).toBeUndefined();
+    expect(datesLines()).toEqual([datesLine(zero.live_check!.at, expected)]);
+    expect(presentedPages[0]!).not.toContain('Contrail has no stamp query');
+
+    // Only a same-name row under a namespace the package did not name: never
+    // a stamp, never "absent" while the block is there — and recorded.
+    probeRows = {
+      CustomField: [{ name: 'Status', parent: 'Invoice__c', ns: 'ns', date: '2026-11-12T08:00:00.000+0000', by: 'Alice Example' }],
+    };
+    const unmatched = jsonOf(await validate({ components: [statusField] }));
+    expect(unmatched.changes[0]!.pre_image).toMatchObject({
+      present: true,
+      last_modified_date: null,
+      last_modified_by: null,
+    });
+    expect(unmatched.live_check!.probe_unmatched).toEqual(['CustomField:Invoice__c.Status__c']);
+    expect(datesLines()).toEqual([datesLine(unmatched.live_check!.at, expected)]);
+    expect(presentedPages[1]!).not.toContain('Alice Example');
+  });
+
+  it('ONE dates line however many reasons: an unlistable type, a failed stamp query and a standard field are three groups of one sentence', async () => {
+    liveFiles = {
+      'classes/Foo.cls': FOO_OLD,
+      'classes/Foo.cls-meta.xml': APEX_META,
+      'objects/Invoice__c.object': partialObject(RULE_BLOCK),
+      'objects/Account.object': partialObject(fieldBlock('Industry', 'Picklist')),
+    };
+    invalidTypes = new Set(['ApexClass']);
+    probeMode = 'fault';
+    const parsed = jsonOf(await validate({ components: [foo(), rule, industry] }));
+
+    expect(parsed.live_check).toMatchObject({
+      status: 'ok',
+      dates_unavailable_types: ['ApexClass', 'ValidationRule'],
+    });
+    const reason = failureOf(parsed, 'ValidationRule');
+    expect(reason).toMatch(STAMP_QUERY_DOWN);
+    expect(Object.keys(parsed.live_check!.probe_failures as object)).toEqual(['ValidationRule']);
+    // Only the rule was queried; nothing names the standard field.
+    expect(restQueries).toEqual([RULE_STAMP_QUERY]);
+
+    expect(datesLines()).toEqual([
+      datesLine(
+        parsed.live_check!.at,
+        'ApexClass (listMetadata reported INVALID_TYPE); ' +
+          `ValidationRule (the stamp query failed: ${reason}); ` +
+          'CustomField Account.Industry (Contrail has no stamp query for them)',
+      ),
+    ]);
+    // The page-top list is the permission warning and that one line: three
+    // reasons did not become three lines, so a row warning keeps its slot in
+    // the phone push (which takes three warnings, page-top lines first).
+    expect(topWarnings()).toHaveLength(2);
+    expect(topWarnings()[0]).toBe(parsed.permission_warning);
+    const page = presentedPages[0]!;
+    expect(page.split('Live diff is against the org').length - 1).toBe(1);
+  });
+
+  it('a member no stamp query named is said so even when the query of its OWN type failed: a standard field is never put down to a failure that did not name it', async () => {
+    liveFiles = {
+      'objects/Invoice__c.object': partialObject(STATUS_FIELD),
+      'objects/Account.object': partialObject(fieldBlock('Industry', 'Picklist')),
+    };
+    probeMode = 'fault';
+    const parsed = jsonOf(await validate({ components: [statusField, industry] }));
+
+    // One query was issued — for the custom field — and it failed; nothing
+    // was asked about the standard field.
+    expect(restQueries).toEqual([STATUS_STAMP_QUERY]);
+    const reason = failureOf(parsed, 'CustomField');
+    expect(reason).toMatch(STAMP_QUERY_DOWN);
+    expect(parsed.live_check!.dates_unavailable_types).toEqual(['CustomField']);
+    expect(parsed.changes.map((c) => c.pre_image)).toMatchObject([
+      { present: true, stamp_source: 'tooling:CustomField', last_modified_date: null },
+      { present: true, stamp_source: 'tooling:CustomField', last_modified_date: null },
+    ]);
+
+    // The type's group carries the failure; the standard field keeps its own
+    // group and its own reason, and the custom field is not listed twice.
+    expect(datesLines()).toEqual([
+      datesLine(
+        parsed.live_check!.at,
+        `CustomField (the stamp query failed: ${reason}); ` +
+          'CustomField Account.Industry (Contrail has no stamp query for them)',
+      ),
+    ]);
+    expect(datesLines()[0]).not.toContain('Invoice__c.Status__c');
+    expect(datesLines()[0]).not.toContain('returned no usable stamp');
+  });
+
+  it('a listing that threw says nothing about a stamp query: only the listing-sourced types carry its reason, and the field keeps its stamp', async () => {
+    liveFiles = {
+      'classes/Foo.cls': FOO_OLD,
+      'classes/Foo.cls-meta.xml': APEX_META,
+      'objects/Invoice__c.object': partialObject(STATUS_FIELD),
+    };
+    probeRows = { CustomField: [{ name: 'Status', parent: 'Invoice__c', date: '2026-11-12T08:00:00.000+0000', by: 'Bob' }] };
+    listMode = 'fault';
+    const parsed = jsonOf(await validate({ components: [foo(), statusField] }));
+
+    const listingReason = String(parsed.live_check!.dates_unavailable);
+    expect(listingReason).toContain('no metadata api for you');
+    expect(parsed.live_check!.dates_unavailable_types).toEqual([]);
+    expect(parsed.changes[0]!.pre_image).toMatchObject({ present: true, last_modified_date: null });
+    expect(parsed.changes[1]!.pre_image).toMatchObject({
+      present: true,
+      stamp_source: 'tooling:CustomField',
+      last_modified_date: '2026-11-12T08:00:00.000Z',
+      last_modified_by: 'Bob',
+    });
+    expect(datesLines()).toEqual([
+      datesLine(parsed.live_check!.at, `ApexClass (${listingReason.slice(0, 160)})`),
+    ]);
+    expect(datesLines()[0]).not.toContain('CustomField');
+  });
+
+  it('stamp queries that failed for the same reason share one group; a different reason is its own group', async () => {
+    liveFiles = { 'objects/Invoice__c.object': partialObject(STATUS_FIELD, RULE_BLOCK, LIST_VIEW_BLOCK) };
+    probeMode = 'fault';
+    const parsed = jsonOf(await validate({ components: [statusField, rule, listView] }));
+    // The two Tooling queries failed alike; the ListView query is a Data API
+    // call, so its reason names another path.
+    const tooling = failureOf(parsed, 'CustomField');
+    const data = failureOf(parsed, 'ListView');
+    expect(tooling).toMatch(STAMP_QUERY_DOWN);
+    expect(failureOf(parsed, 'ValidationRule')).toBe(tooling);
+    expect(data).toMatch(/^Salesforce API error 500 on \/services\/data\/v[\d.]+\/query: stamp query down$/);
+    expect(parsed.live_check!.dates_unavailable_types).toEqual(['CustomField', 'ListView', 'ValidationRule']);
+    expect(datesLines()).toEqual([
+      datesLine(
+        parsed.live_check!.at,
+        `CustomField, ValidationRule (the stamp query failed: ${tooling}); ` +
+          `ListView (the stamp query failed: ${data})`,
+      ),
+    ]);
+    // Members of a type whose query failed are covered by that type's group:
+    // none is listed again as "returned no usable stamp".
+    expect(datesLines()[0]).not.toContain('returned no usable stamp');
+    expect(listedTypes()).toEqual([]);
+  });
+
+  it('a long member group names the first ten and counts the rest', async () => {
+    const names = Array.from({ length: 12 }, (_, i) => `Std${String(i + 1).padStart(2, '0')}`);
+    liveFiles = { 'objects/Account.object': partialObject(...names.map((n) => fieldBlock(n))) };
+    const parsed = jsonOf(
+      await validate({
+        components: names.map((n) => ({
+          type: 'CustomField',
+          api_name: `Account.${n}`,
+          content: fieldBlock(n),
+        })),
+      }),
+    );
+    expect(restQueries).toEqual([]);
+    expect(datesLines()).toEqual([
+      datesLine(
+        parsed.live_check!.at,
+        `${names
+          .slice(0, 10)
+          .map((n) => `CustomField Account.${n}`)
+          .join(', ')} and 2 more (Contrail has no stamp query for them)`,
+      ),
+    ]);
+  });
+
+  it('a ListView is stamped through the Data API and a rule and a label through Tooling — one query each, and no listing at all', async () => {
+    const LABEL_BLOCK =
+      '<labels>\n        <fullName>Greeting</fullName>\n        <language>en_US</language>\n' +
+      '        <protected>false</protected>\n        <shortDescription>Greeting</shortDescription>\n' +
+      '        <value>Hello</value>\n    </labels>';
+    liveFiles = {
+      'objects/Invoice__c.object': partialObject(LIST_VIEW_BLOCK, RULE_BLOCK),
+      'labels/CustomLabels.labels': `<?xml version="1.0" encoding="UTF-8"?>\n<CustomLabels ${MD}>\n    ${LABEL_BLOCK}\n</CustomLabels>\n`,
+    };
+    probeRows = {
+      ListView: [{ name: 'Open_Invoices', parent: 'Invoice__c', date: '2026-11-11T08:00:00.000+0000', by: 'Bob' }],
+      ValidationRule: [{ name: 'Positive_Amount', parent: 'Invoice__c', date: '2026-11-12T08:00:00.000+0000', by: 'Alice Example' }],
+      // A row with no user: the stamp stands, the name is null.
+      ExternalString: [{ name: 'Greeting', date: '2026-11-13T08:00:00.000+0000', by: null }],
+    };
+    const parsed = jsonOf(
+      await validate({
+        components: [listView, rule, { type: 'CustomLabel', api_name: 'Greeting', content: LABEL_BLOCK }],
+      }),
+    );
+    expect(parsed.changes.map((c) => c.pre_image)).toMatchObject([
+      { present: true, stamp_source: 'data:ListView', last_modified_date: '2026-11-11T08:00:00.000Z', last_modified_by: 'Bob' },
+      { present: true, stamp_source: 'tooling:ValidationRule', last_modified_date: '2026-11-12T08:00:00.000Z', last_modified_by: 'Alice Example' },
+      { present: true, stamp_source: 'tooling:ExternalString', last_modified_date: '2026-11-13T08:00:00.000Z', last_modified_by: null },
+    ]);
+    expect(parsed.live_check).toMatchObject({ status: 'ok', dates_unavailable_types: [] });
+    expect(parsed.live_check!.probe_failures).toBeUndefined();
+    expect([...restQueries].sort()).toEqual(
+      [
+        'SELECT Id, DeveloperName, NamespacePrefix, LastModifiedDate, LastModifiedBy.Name FROM ' +
+          "ListView WHERE (SobjectType = 'Invoice__c' AND DeveloperName = 'Open_Invoices')",
+        RULE_STAMP_QUERY,
+        'SELECT Id, Name, NamespacePrefix, LastModifiedDate, LastModifiedBy.Name FROM ' +
+          "ExternalString WHERE Name = 'Greeting'",
+      ].sort(),
+    );
+    // Every member is of a stamp-query type: listMetadata is never called.
+    expect(listedTypes()).toEqual([]);
+    expect(datesLines()).toEqual([]);
+  });
+
+  it('the retrieve’s own messages ride live_check.retrieve_note and reach neither the page nor the phone', async () => {
+    const newField = { type: 'CustomField', api_name: 'Invoice__c.New__c', content: fieldBlock('New__c') };
+    const problem = "Entity of type 'CustomField' named 'Invoice__c.New__c' cannot be found";
+    retrieveProblems = [problem];
+    // (liveFiles is empty: the zip holds only package.xml.)
+    const result = await validate({ components: [newField] });
+    const parsed = jsonOf(result);
+    expect(parsed.live_check).toMatchObject({ status: 'ok', stamp_scheme: 2 });
+    expect(parsed.live_check!.retrieve_note).toBe(
+      "The org's retrieve returned 1 message(s) — reported as sent; Contrail does not decide " +
+        `what exists from them: ${problem}`,
+    );
+    // The note decides nothing: the member is an ADD because the retrieve
+    // returned no block and its stamp query no row.
+    expect(parsed.changes[0]).toMatchObject({ change: 'add', pre_image: { present: false } });
+    // An ADD of a member the org lacks is not a member with a missing stamp:
+    // the dates line names only members the org holds, so none is printed.
+    expect(datesLines()).toEqual([]);
+
+    const page = presentedPages[0]!;
+    expect(page).not.toContain('last-modified stamps were unavailable');
+    expect(page).not.toContain('cannot be found');
+    expect(page).not.toContain('retrieve returned');
+    const view = notifier.calls[0]!.view;
+    expect(JSON.stringify(view)).not.toContain('cannot be found');
+    expect(composePushover(view, { includeCode: true, summary: 'full' }).message).not.toContain(
+      'cannot be found',
+    );
+    // Persisted with the request, as the result carries it.
+    const request = db.findRequestByCode(connId, 'deploy', codeFromPage(page))!;
+    const summary = JSON.parse(request.summaryJson) as { live_check: Record<string, unknown> };
+    expect(summary.live_check).toEqual(parsed.live_check);
+
+    // A retrieve that FAILED and said why: the note rides the unavailable
+    // live check too, and the banner does not quote it.
+    retrieveMode = 'failed';
+    const failed = jsonOf(await validate({ components: [newField] }));
+    expect(failed.live_check).toMatchObject({
+      status: 'unavailable',
+      reason: 'retrieve_failed:boom',
+      stamp_scheme: 2,
+    });
+    expect(String(failed.live_check!.retrieve_note)).toContain(problem);
+    expect(presentedPages[1]!).toContain('LIVE COMPARISON UNAVAILABLE (retrieve_failed:boom)');
+    expect(presentedPages[1]!).not.toContain('cannot be found');
+  });
+});
+
+describe('S46 D3: permission_warning says what the live check knows', () => {
+  const IN_ORG_FOO =
+    'This package includes 1 component(s) that are already in the org and need permissions to ' +
+    'be usable, and no permission set or profile for them — who can use them depends on the ' +
+    'permissions already in the org, which Contrail did not check: ApexClass:Foo (Apex class access).';
+  const NOT_CONFIRMED_FOO =
+    'This package includes 1 component(s) that need permissions to be usable and no permission ' +
+    'set or profile to grant them. Contrail did not confirm whether they already exist in the ' +
+    'org — any that are new will deploy but stay invisible or inaccessible until you set ' +
+    'permissions (deploy a permission set alongside, or grant FLS/access afterward): ' +
+    'ApexClass:Foo (Apex class access).';
+
+  it('a class the org already has is "already in the org", never "adds"; a new one is added; with no live check Contrail says it did not confirm', async () => {
+    // The org has it and the snapshot does not: EXISTS IN TARGET.
+    liveFiles = { 'classes/Foo.cls': FOO_OLD, 'classes/Foo.cls-meta.xml': APEX_META };
+    listRows = { ApexClass: [{ fullName: 'Foo', date: '2026-11-10T09:30:00.000Z', by: 'Bob' }] };
+    const existing = jsonOf(await validate({ components: [foo()] }));
+    expect(existing.changes[0]!.warnings[0]).toMatch(/^EXISTS IN TARGET/);
+    expect(existing.permission_warning).toBe(IN_ORG_FOO);
+    expect(existing.permission_warning).not.toContain('adds');
+    // The page-top line is that same sentence.
+    expect(topWarnings()[0]).toBe(IN_ORG_FOO);
+    expect(presentedPages[0]!).toContain('are already in the org and need permissions to be usable');
+    expect(presentedPages[0]!).not.toContain('This package adds');
+
+    // The org does not have it: the package adds it.
+    liveFiles = {};
+    listRows = { ApexClass: [] };
+    const fresh = jsonOf(await validate({ components: [foo()] }));
+    expect(fresh.changes[0]!.pre_image).toMatchObject({ present: false });
+    expect(fresh.permission_warning).toBe(
+      'This package adds 1 component(s) that need permissions but includes no permission set ' +
+        'or profile to grant them — they will deploy but stay invisible or inaccessible until ' +
+        'you set permissions (deploy a permission set alongside, or grant FLS/access ' +
+        'afterward): ApexClass:Foo (Apex class access).',
+    );
+
+    // The live check was unavailable: nothing was placed.
+    retrieveMode = 'fault';
+    const degraded = jsonOf(await validate({ components: [foo()] }));
+    expect(degraded.live_check).toMatchObject({ status: 'unavailable' });
+    expect(degraded.permission_warning).toBe(NOT_CONFIRMED_FOO);
+
+    // A dry run never re-reads the org — even with the class sitting there.
+    retrieveMode = 'ok';
+    liveFiles = { 'classes/Foo.cls': FOO_OLD, 'classes/Foo.cls-meta.xml': APEX_META };
+    listRows = { ApexClass: [{ fullName: 'Foo', date: '2026-11-10T09:30:00.000Z', by: 'Bob' }] };
+    const dry = jsonOf(await validate({ components: [foo()], dry_run: true }));
+    expect(dry.live_check).toBeNull();
+    expect(dry.permission_warning).toBe(NOT_CONFIRMED_FOO);
+    expect(dry.permission_warning).not.toContain('adds');
+  });
+
+  it('fields authored inline in an object are placed by the object’s live document: in the org where it holds their block, new where it does not', async () => {
+    const proposed =
+      `<?xml version="1.0" encoding="UTF-8"?>\n<CustomObject ${MD}>\n` +
+      `    ${fieldBlock('Status__c')}\n    ${fieldBlock('New__c')}\n` +
+      '    <label>Invoice</label>\n</CustomObject>\n';
+    // The org's object holds Status__c only.
+    liveFiles = { 'objects/Invoice__c.object': objectXml('Text') };
+    listRows = { CustomObject: [{ fullName: 'Invoice__c', date: '2026-11-10T09:30:00.000Z', by: 'Bob' }] };
+    const parsed = jsonOf(
+      await validate({ components: [{ type: 'CustomObject', api_name: 'Invoice__c', content: proposed }] }),
+    );
+    expect(parsed.changes[0]!.pre_image).toMatchObject({ present: true });
+    expect(parsed.permission_warning).toBe(
+      'This package adds 1 component(s) that need permissions but includes no permission set ' +
+        'or profile to grant them — they will deploy but stay invisible or inaccessible until ' +
+        'you set permissions (deploy a permission set alongside, or grant FLS/access ' +
+        'afterward): CustomField:Invoice__c.New__c (field-level security (FLS)). ' +
+        'This package includes 2 component(s) that are already in the org and need permissions ' +
+        'to be usable, and no permission set or profile for them — who can use them depends on ' +
+        'the permissions already in the org, which Contrail did not check: ' +
+        'CustomObject:Invoice__c (object permissions); ' +
+        'CustomField:Invoice__c.Status__c (field-level security (FLS)).',
+    );
+
+    // The object itself is new: every inline field is new with it.
+    liveFiles = {};
+    listRows = { CustomObject: [] };
+    const fresh = jsonOf(
+      await validate({ components: [{ type: 'CustomObject', api_name: 'Invoice__c', content: proposed }] }),
+    );
+    expect(fresh.permission_warning).toMatch(/^This package adds 3 component\(s\) that need permissions/);
+    expect(fresh.permission_warning).not.toContain('already in the org');
   });
 });

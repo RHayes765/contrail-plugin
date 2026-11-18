@@ -12,6 +12,7 @@ import { findChildBlock } from '../snapshot/indexer.js';
 import { queryDependencies } from '../deps/graph.js';
 import { flowMetadataJsonToXml } from '../salesforce/flowversion.js';
 import { AURA_DEFTYPE_FILES } from '../deploy/package.js';
+import type { MemberRefreshSummary } from '../snapshot/members.js';
 
 /**
  * The P0.2 metadata_read tool surface. Every handler resolves its target
@@ -69,6 +70,20 @@ const CHILD_SPEC: Record<string, { parentType: string; tag: string }> = {
   // S30: bot versions live inline in the Bot document (dotted MyBot.v1).
   BotVersion: { parentType: 'Bot', tag: 'botVersions' },
 };
+
+/** S46 Part C: refresh_snapshot's message for a finished member-scoped refresh. */
+function memberCompleteMessage(summary: MemberRefreshSummary): string {
+  const { refreshed, removed, skipped } = summary.counts;
+  return `Member refresh complete: ${refreshed} refreshed, ${removed} removed, ${skipped} skipped.`;
+}
+
+/** S46 Part C: refresh_snapshot's message for a member-scoped refresh still running. */
+function memberRunningMessage(jobId: string): string {
+  return (
+    `Member refresh is still running — poll with {connection, job_id: "${jobId}"}, ` +
+    'or re-send the same members (which attaches to this same job).'
+  );
+}
 
 export function registerMetadataTools(server: McpServer, deps: ToolDeps): void {
   const { db, audit, config, engine, store, tokenMgr } = deps;
@@ -490,7 +505,14 @@ export function registerMetadataTools(server: McpServer, deps: ToolDeps): void {
       description:
         'Manifest-driven re-retrieve of the org\'s metadata into the local snapshot + index ' +
         '+ dependency graph. Long-running on big orgs: an in-progress result means call ' +
-        'refresh_snapshot again to check on it. check_only=true just reports staleness.',
+        'refresh_snapshot again to check on it. check_only=true just reports staleness. ' +
+        'members re-reads only the named components (a child such as a CustomField re-reads ' +
+        'its whole parent object; a bundle is replaced whole) into an EXISTING snapshot — use ' +
+        'it for what an execute_deploy result reports as not re-baselined, or to pick up one ' +
+        'change made in the org. A member whose type this snapshot does not cover is skipped, ' +
+        'unless the org\'s listing shows no unpackaged component of that type other than the ' +
+        'named ones (never for foldered types). A member-scoped refresh never re-queries the ' +
+        'org-computed dependency data and does not see anything else that changed in the org.',
       inputSchema: {
         connection: z.string().describe('Connection alias (or id).'),
         types: z
@@ -506,9 +528,22 @@ export function registerMetadataTools(server: McpServer, deps: ToolDeps): void {
           .optional()
           .describe(
             'Poll a RUNNING refresh by the job_id an earlier call returned — pass ' +
-              '{connection, job_id} ALONE. Jobs are keyed by their requested type set, ' +
-              'so a poll only ever returns the refresh it names (re-sending the same ' +
-              'types attaches to the same job too).',
+              '{connection, job_id} ALONE. Jobs are keyed by their requested type set (or ' +
+              'member set), so a poll only ever returns the refresh it names (re-sending the ' +
+              'same types or members attaches to the same job too).',
+          ),
+        // S46 Part C: a member-scoped re-read into an existing snapshot.
+        members: z
+          .array(z.object({ type: z.string(), api_name: z.string() }))
+          .min(1)
+          .max(100)
+          .optional()
+          .describe(
+            'Re-read ONLY these components — [{type, api_name}], at most 100, passed ALONE ' +
+              'with connection (not with types, check_only or job_id). Children are dotted ' +
+              '(Account.My_Field__c) and re-read their parent document; a FlowDefinition name ' +
+              're-reads the Flow. Each member comes back refreshed, removed (no longer in what ' +
+              'the org returned for it) or skipped with the reason.',
           ),
       },
     },
@@ -517,9 +552,32 @@ export function registerMetadataTools(server: McpServer, deps: ToolDeps): void {
       types?: string[];
       check_only?: boolean;
       job_id?: string;
+      members?: Array<{ type: string; api_name: string }>;
     }) =>
       guarded(async () => {
         const conn = requireConnection(args.connection, 'refresh_snapshot');
+        if (args.members !== undefined) {
+          if (args.types !== undefined || args.check_only !== undefined || args.job_id !== undefined) {
+            return fail('Pass members ALONE with connection — not with types, check_only or job_id.');
+          }
+          const bad = args.members.find((m) => !TYPE_RE.test(m.type) || !nameOk(m.api_name));
+          if (bad) {
+            return fail(
+              `invalid member "${bad.type}:${bad.api_name}" — expected a metadata type name and a ` +
+                'full API name (children dotted, foldered names "Folder/Name").',
+            );
+          }
+          const members = args.members.map((m) => ({ type: m.type, api_name: m.api_name }));
+          const run = await engine.refreshMembers(conn, members);
+          switch (run.status) {
+            case 'complete':
+              return ok({ job_id: run.job_id, ...run.summary }, memberCompleteMessage(run.summary));
+            case 'failed':
+              return fail(`Member refresh failed (job ${run.job_id}): ${run.error}`);
+            case 'in_progress':
+              return ok(run.state, memberRunningMessage(run.job_id));
+          }
+        }
         if (args.job_id !== undefined && (args.types !== undefined || args.check_only)) {
           return fail('Pass job_id ALONE to poll a running refresh.');
         }
@@ -531,15 +589,31 @@ export function registerMetadataTools(server: McpServer, deps: ToolDeps): void {
         const outcome = await engine.refresh(conn, args.types, args.job_id);
         switch (outcome.status) {
           case 'unknown_job':
+            // A members-… id names a member set: re-sending types would start a whole-type refresh.
             return fail(
               `No running or uncollected refresh job "${outcome.job_id}" on "${conn.alias}" — ` +
-                'its result may already have been collected. Re-send types to start a new refresh.',
+                'its result may already have been collected. ' +
+                (outcome.job_id.startsWith('members-')
+                  ? 'Re-send the same members to start a new member refresh.'
+                  : 'Re-send types to start a new refresh.'),
             );
           case 'complete':
-            return ok({ job_id: outcome.job_id, ...outcome.summary }, 'Snapshot refreshed.');
+            // A job_id poll serves type jobs and member jobs alike: the
+            // message follows the outcome's kind, never the summary's shape.
+            return outcome.kind === 'members'
+              ? ok({ job_id: outcome.job_id, ...outcome.summary }, memberCompleteMessage(outcome.summary))
+              : ok({ job_id: outcome.job_id, ...outcome.summary }, 'Snapshot refreshed.');
           case 'failed':
-            return fail(`Snapshot refresh failed (job ${outcome.job_id}): ${outcome.error}`);
+            // A members-… id names a member job: the members call's wording.
+            return fail(
+              `${outcome.job_id.startsWith('members-') ? 'Member' : 'Snapshot'} refresh failed ` +
+                `(job ${outcome.job_id}): ${outcome.error}`,
+            );
           case 'in_progress':
+            // A member job's state carries its members (re-sending types would not attach to it).
+            if (outcome.state.members !== undefined) {
+              return ok(outcome.state, memberRunningMessage(outcome.job_id));
+            }
             return ok(
               outcome.state, // carries job_id and the requested types
               `Refresh is still running — poll with {connection, job_id: "${outcome.job_id}"}, ` +
@@ -902,8 +976,12 @@ async function fetchAuraLiveContent(
  * Tooling Flow records whose Metadata field is JSON — fetched whole by REST
  * GET (never through soql_query, whose budget caps would truncate it) and
  * converted to flow XML by flowMetadataJsonToXml, fidelity contract there.
+ *
+ * S46: exported for render_flow, which also reads `version_status` (the
+ * Tooling record's Status, null when it carries none); retrieve_metadata
+ * ignores that key.
  */
-async function fetchFlowVersionContent(
+export async function fetchFlowVersionContent(
   deps: ToolDeps,
   conn: ConnectionRecord,
   name: string,
@@ -913,6 +991,7 @@ async function fetchFlowVersionContent(
   source: string;
   note?: string;
   bundle_files?: Array<{ path: string; bytes: number; snapshot_path: string | null }>;
+  version_status?: string | null;
 }> {
   const { tokenMgr, config } = deps;
   const rest = new RestClient(tokenMgr, conn, config.salesforce.apiVersion);
@@ -957,7 +1036,78 @@ async function fetchFlowVersionContent(
       'converted versions diff cleanly against each other — but element order is ' +
       'alphabetical, so comparing against a Metadata API retrieve may show ' +
       'ordering-only noise, and the output is NOT guaranteed deploy-ready.',
+    version_status: record.Status ?? null,
   };
+}
+
+/**
+ * What the org itself says about a flow the snapshot does not hold — the live
+ * half of the unversioned Flow read, shared by retrieve_metadata and
+ * render_flow:
+ *   tooling     the Tooling API's Metadata JSON for the flow's active version,
+ *               else its latest (`which` says which one it is);
+ *   descriptor  only the FlowDefinitionView row (attributes stripped) — a
+ *               platform/feature-delivered flow, whose definition no API
+ *               returns;
+ *   absent      neither source knows the name.
+ */
+export type FlowLiveRead =
+  | { kind: 'tooling'; metadata: Record<string, unknown>; which: 'active' | 'latest' }
+  | { kind: 'descriptor'; view: Record<string, unknown> }
+  | { kind: 'absent' };
+
+export async function readFlowLive(
+  deps: ToolDeps,
+  conn: ConnectionRecord,
+  name: string,
+): Promise<FlowLiveRead> {
+  const { tokenMgr, config } = deps;
+  // Standard/feature-delivered flows never appear in Metadata API
+  // retrieves; fall back to the Tooling API before reporting not-found.
+  const rest = new RestClient(tokenMgr, conn, config.salesforce.apiVersion);
+  const { ns, short } = splitNamespace(name);
+  const escaped = short.replaceAll("'", "\\'");
+  const defs = pickAllByNamespace(
+    await rest.toolingQuery<{
+      Id: string;
+      ActiveVersionId: string | null;
+      LatestVersionId: string | null;
+      NamespacePrefix: string | null;
+    }>(
+      `SELECT Id, ActiveVersionId, LatestVersionId, NamespacePrefix FROM FlowDefinition ` +
+        `WHERE DeveloperName = '${escaped}'`,
+      10,
+    ),
+    ns,
+  );
+  const versionId = defs[0]?.ActiveVersionId ?? defs[0]?.LatestVersionId;
+  if (versionId) {
+    const versions = await rest.toolingQuery<{ Metadata: unknown }>(
+      `SELECT Metadata FROM Flow WHERE Id = '${versionId.replaceAll("'", "\\'")}'`,
+      1,
+    );
+    if (versions[0]?.Metadata) {
+      return {
+        kind: 'tooling',
+        metadata: versions[0].Metadata as Record<string, unknown>,
+        which: defs[0]?.ActiveVersionId ? 'active' : 'latest',
+      };
+    }
+  }
+  // Platform/feature-delivered flows expose no content through ANY API —
+  // return the FlowDefinitionView descriptor instead of a dead not-found.
+  const views = pickAllByNamespace(
+    await rest.query<Record<string, unknown> & { NamespacePrefix: string | null }>(
+      `SELECT ApiName, Label, ProcessType, TriggerType, IsActive, NamespacePrefix, ` +
+        `Description, ActiveVersionId FROM FlowDefinitionView WHERE ApiName = '${escaped}'`,
+      10,
+    ),
+    ns,
+  );
+  if (views[0]) {
+    return { kind: 'descriptor', view: stripAttributes(views[0]) as Record<string, unknown> };
+  }
+  return { kind: 'absent' };
 }
 
 async function fetchArtifactContent(
@@ -1056,53 +1206,21 @@ async function fetchArtifactContent(
   if (type === 'Flow') {
     const body = readSnapshotArtifact(deps, conn, type, name);
     if (body) return { body, source: 'snapshot' };
-    // Standard/feature-delivered flows never appear in Metadata API
-    // retrieves; fall back to the Tooling API before reporting not-found.
-    const rest = new RestClient(tokenMgr, conn, config.salesforce.apiVersion);
-    const { ns, short } = splitNamespace(name);
-    const escaped = short.replaceAll("'", "\\'");
-    const defs = pickAllByNamespace(
-      await rest.toolingQuery<{
-        Id: string;
-        ActiveVersionId: string | null;
-        LatestVersionId: string | null;
-        NamespacePrefix: string | null;
-      }>(
-        `SELECT Id, ActiveVersionId, LatestVersionId, NamespacePrefix FROM FlowDefinition ` +
-          `WHERE DeveloperName = '${escaped}'`,
-        10,
-      ),
-      ns,
-    );
-    const versionId = defs[0]?.ActiveVersionId ?? defs[0]?.LatestVersionId;
-    if (versionId) {
-      const versions = await rest.toolingQuery<{ Metadata: unknown }>(
-        `SELECT Metadata FROM Flow WHERE Id = '${versionId.replaceAll("'", "\\'")}'`,
-        1,
-      );
-      if (versions[0]?.Metadata) {
-        return {
-          body: JSON.stringify(versions[0].Metadata, null, 2),
-          source: 'tooling_api_live',
-          note:
-            'This flow is not visible to the Metadata API. This is the Tooling API JSON ' +
-            `representation of the ${defs[0]?.ActiveVersionId ? 'active' : 'latest'} version.`,
-        };
-      }
-    }
-    // Platform/feature-delivered flows expose no content through ANY API —
-    // return the FlowDefinitionView descriptor instead of a dead not-found.
-    const views = pickAllByNamespace(
-      await rest.query<Record<string, unknown> & { NamespacePrefix: string | null }>(
-        `SELECT ApiName, Label, ProcessType, TriggerType, IsActive, NamespacePrefix, ` +
-          `Description, ActiveVersionId FROM FlowDefinitionView WHERE ApiName = '${escaped}'`,
-        10,
-      ),
-      ns,
-    );
-    if (views[0]) {
+    // Not in the snapshot: ask the org (S46: readFlowLive, shared with
+    // render_flow).
+    const live = await readFlowLive(deps, conn, name);
+    if (live.kind === 'tooling') {
       return {
-        body: JSON.stringify(stripAttributes(views[0]), null, 2),
+        body: JSON.stringify(live.metadata, null, 2),
+        source: 'tooling_api_live',
+        note:
+          'This flow is not visible to the Metadata API. This is the Tooling API JSON ' +
+          `representation of the ${live.which} version.`,
+      };
+    }
+    if (live.kind === 'descriptor') {
+      return {
+        body: JSON.stringify(live.view, null, 2),
         source: 'flow_definition_view',
         note:
           'This flow is platform/feature-delivered: Salesforce does not expose its definition ' +

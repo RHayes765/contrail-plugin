@@ -55,9 +55,11 @@ org — deploying metadata or writing data — follows a strict two-step path: t
 assistant *proposes* a change, a human reviews it and reads a one-time confirmation
 code shown on a local approval page in their own browser (and, if they opted in,
 pushed to their own phone), and the change executes only when that code is
-supplied. The code never appears in anything the assistant can see. Even an assistant that has been manipulated or has simply
-misunderstood the task cannot approve its own writes — the approval lives entirely
-outside its reach, in front of a person.
+supplied. Contrail never hands that code to the assistant — it goes only to the human. Even an assistant that has been manipulated or has simply
+misunderstood the task cannot get the code from Contrail — no tool result carries
+it — and the house rules forbid it from reading the approval page or the human's
+screen. That last part is a rule the assistant follows, not a control: an
+assistant given a tool that can view the human's screen could read the code there.
 
 **3. Access is granted deliberately, in layers.**
 A human decides, per connection, what the assistant is even allowed to attempt —
@@ -90,6 +92,11 @@ Phase 0 is a working engine, dogfooded end-to-end against a real development org
   validation, that a human can review and re-deploy through the same flow.
   Data-write pages also list the automation the local snapshot shows on the
   affected objects.
+- **Govern client work** — the human can write rules into Contrail's
+  configuration file that require a justification or a ticket for every change
+  to an org, deny deletions or anonymous Apex, set a minimum test level, or
+  freeze an org during set windows, and can export a change-evidence record of
+  what was proposed, approved and executed.
 - **Migrate data at scale** — load ordered CSV files (accounts, then the contacts
   that reference them) straight into an org through Salesforce's Bulk API, with the
   whole plan on one approval page and the rows travelling file → org, never through
@@ -97,7 +104,7 @@ Phase 0 is a working engine, dogfooded end-to-end against a real development org
 - **Guide the work** — bundled skills encode hard-won Salesforce judgment, like
   "permissions have to ship alongside the components that need them" and the quirks of
   how flows deploy, so the assistant builds things the way a careful practitioner
-  would.
+  would; they travel inside every install, so nothing is uploaded separately.
 
 It runs the same on Windows and macOS, and is packaged so a teammate can install it
 by handing their own assistant a short instruction file.

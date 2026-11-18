@@ -3,7 +3,41 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { ContrailDb } from '../core/db.js';
 import type { AuditLog } from '../core/audit.js';
-import type { ContrailConfig } from '../core/config.js';
+import type { ContrailConfig, PolicyLoad } from '../core/config.js';
+import {
+  APPROVAL_NOTICES,
+  POLICY_LIMITS,
+  TEST_LEVEL_ORDER,
+  apexDeletesNote,
+  dryRunPolicyNote,
+  evaluatePolicies,
+  freezeBannerText,
+  freezeExecuteRefusalText,
+  freezePageNotOpenedText,
+  freezeProposeNote,
+  freezeStartRefusalText,
+  hostTimeZone,
+  justificationProvenance,
+  normalizeFreezeReason,
+  normalizeJustification,
+  normalizeTicket,
+  parsePolicies,
+  policyInEffect,
+  policyRefusalText,
+  policyUnreadableText,
+  unmatchedRules,
+  type ApprovalNoticeCode,
+  type ApprovalSurfaceMode,
+  type PolicyConfig,
+  type PolicyFreeze,
+  type PolicyInEffect,
+  type PolicyKind,
+  type PolicySource,
+  type PolicyTestLevel,
+  type PolicyVerdict,
+  type PolicyViolationCode,
+  type StoredJustification,
+} from '../core/policy.js';
 import type {
   ArtifactRecord,
   ConnectionRecord,
@@ -12,6 +46,13 @@ import type {
 } from '../core/types.js';
 import type { AccessTokenManager } from '../salesforce/tokens.js';
 import type { SnapshotStore } from '../snapshot/store.js';
+import { findChildBlock } from '../snapshot/indexer.js';
+import {
+  REBASELINE_PROGRESS,
+  executeSnapshotResult,
+  type RebaselineOutcome,
+  type SnapshotMember,
+} from '../snapshot/members.js';
 import {
   MetadataSoapClient,
   type DeployResult,
@@ -145,12 +186,18 @@ import {
 import { deploysDir, stagingDir } from '../core/paths.js';
 import { ContrailError } from '../core/errors.js';
 import { generateConfirmationCode } from './codes.js';
-import { ApprovalPageServer } from './approval.js';
+import {
+  ApprovalPageServer,
+  type ApprovalLivePage,
+  type ApprovalStatusCheck,
+} from './approval.js';
 import {
   renderApprovalPage,
+  type ApprovalGovernance,
   type ApprovalPageOptions,
   type ApprovalRowDiff,
 } from '../connect/pages.js';
+import { codeFreePageView } from './evidence.js';
 import { diffText, semanticDiff, type Change, type DiffLimits } from '../diff/semantic.js';
 import {
   buildPreImageListQueries,
@@ -159,6 +206,7 @@ import {
   listedPropFor,
   preImageKey,
   preImageListQueryFor,
+  retrieveMessagesNote,
   retrievePreImages,
   revertDirFor,
   summarizePreImage,
@@ -167,13 +215,31 @@ import {
   type DeployMovedMember,
   type PreImage,
   type PreImageResult,
+  type RevertCheckedMember,
   type RevertPlan,
-  type RevertPlanMember,
   type RevertPlanReason,
   type RevertPreImageEntry,
   type RevertTargetCheck,
   type RevertWriteResult,
 } from './preimage.js';
+import {
+  STAMP_NO_ROW_REASON,
+  STAMP_NOT_QUERIED_REASON,
+  STAMP_QUERY_MAX_ROWS,
+  STAMP_SCHEME,
+  UNCHECKED_STAMP_NOT_PROBEABLE,
+  UNCHECKED_STAMP_QUERY_FAILED,
+  UNCHECKED_STAMP_ROW_UNMATCHED,
+  UNCHECKED_STAMP_SOURCE_MISMATCH,
+  isProbeable,
+  readMemberStamps,
+  stampAbsenceEvidence,
+  stampKey,
+  stampQueryFailedReason,
+  stampSourceFor,
+  type StampProbeResult,
+  type StampQuery,
+} from './stampprobe.js';
 import {
   NullNotifier,
   describePhoneOutcome,
@@ -197,6 +263,7 @@ import {
   type ComponentChange,
   type ProposedComponent,
   type ProposedDeletion,
+  type StampSource,
 } from './package.js';
 import { log } from '../core/log.js';
 
@@ -225,7 +292,7 @@ export interface DeployValidationSummary {
   test_failure_detail: unknown;
   code_coverage_warnings: string[];
   blast_radius: string[];
-  /** Advisory: new components that will be invisible/inaccessible without permissions. */
+  /** Advisory: components that need permissions this package does not grant. */
   permission_warning: string | null;
   /** null on a dry run — there is no code to expire. */
   expires_at: string | null;
@@ -234,6 +301,324 @@ export interface DeployValidationSummary {
    * page's diffs rest on. null on a dry run — no retrieve is issued.
    */
   live_check: LiveCheckSummary | null;
+  /**
+   * S46 (B): dry runs only — what a real validation with the same
+   * arguments would be refused for. Reported, never enforced.
+   */
+  policy_check?: DryRunPolicyCheck;
+  /** S46 (B): real validations only — the request's change record as the agent may see it. */
+  governance?: GovernanceForAgent;
+}
+
+/**
+ * S46 (B): summary_json.governance — one request's change record as it
+ * stood at mint (design B §4.3). `target` is the connection as it was then:
+ * a re-authorisation rewrites the connection row in place, so the record
+ * keeps its own copy. Once the request is presented, the later keys (a
+ * justification typed by the human, a freeze override, the execute-time
+ * check) are written by patchDeployRequestSummary only. Never the code.
+ */
+export interface StoredGovernance {
+  v: 1;
+  surface: ApprovalSurfaceMode;
+  target: {
+    alias: string;
+    org_id: string;
+    org_name: string | null;
+    org_type: string;
+    username: string | null;
+  };
+  ticket: string | null;
+  justification: StoredJustification | null;
+  inputs: { destructive: boolean; test_level: PolicyTestLevel | null };
+  policy: {
+    evaluated_at: string;
+    source: PolicySource;
+    sha256: string;
+    rules: string[];
+    requirements: PolicyInEffect['requirements'];
+    lines: string[];
+  };
+  /** The freeze in effect at mint. */
+  freeze: { rule: string; window: string; until: string; time_zone: string } | null;
+  freeze_override: {
+    reason: string;
+    at: string;
+    surface: 'approval_page' | 'deploy_review';
+    rule: string;
+    window: string;
+  } | null;
+  /** The connection as it was at the claim. */
+  execute_check: {
+    at: string;
+    rules: string[];
+    freeze_active: boolean;
+    overridden: boolean;
+    org_id: string;
+    username: string | null;
+  } | null;
+}
+
+/** S46 (B): a minted proposal's `governance` in the agent's result — never the code. */
+export interface GovernanceForAgent {
+  ticket: string | null;
+  justification: { text: string; source: 'agent' } | null;
+  policy: { rules: string[]; lines: string[] };
+  freeze: { active: true; rule: string; window: string; until: string; note: string } | null;
+}
+
+/**
+ * S46 (B): what mintGovernance returns. One freeze evaluation feeds all
+ * three, so the stored record, the agent's result and `frozen` cannot
+ * disagree about whether a freeze was in effect at mint.
+ */
+interface MintedGovernance {
+  stored: StoredGovernance;
+  frozen: boolean;
+  forAgent: GovernanceForAgent;
+}
+
+/** S46 (B): a dry run's policy report (DeployValidationSummary.policy_check). */
+export interface DryRunPolicyCheck {
+  status: 'ok' | 'would_refuse' | 'unreadable';
+  /** unreadable only: why config.json's policies could not be read. */
+  problem?: string;
+  rules: string[];
+  /** The violation texts a real validation would be refused with. */
+  would_refuse: string[];
+  freeze: { rule: string; window: string; until: string; time_zone: string } | null;
+  note: string;
+}
+
+/**
+ * S46 (B): the ticket and justification an agent passes with a write
+ * proposal. A separate argument to the propose methods — DML's payload_json
+ * is JSON.stringify(input), and these are not part of what executes.
+ */
+export interface GovernanceInput {
+  ticket?: string | null;
+  justification?: string | null;
+}
+
+/** S46 (B): list_connections' per-connection `policy` — what applies to that connection right now. */
+export interface PolicyReport {
+  rules: string[];
+  requires_justification: boolean;
+  requires_ticket: boolean;
+  ticket_patterns: string[];
+  denies: Array<'destructive_metadata' | 'data_deletes' | 'anonymous_apex'>;
+  min_test_level: PolicyTestLevel | null;
+  freeze_windows: Array<{ rule: string; name: string; when: string; time_zone: string }>;
+  freeze_now: { rule: string; window: string; until: string } | null;
+}
+
+/** S46 (B): list_connections' `policies_status` — whether the policies could be read, and from where. */
+export type PoliciesStatus =
+  | { status: 'ok'; source: PolicySource; unmatched_rules: string[] }
+  | { status: 'unreadable'; problem: string; note: string };
+
+/**
+ * S46 (B): one request's change record and policy state as a human surface
+ * shows it — the approval page renders from it, and Deploy Review reads it.
+ * Code-free: it is built from summary_json and the policies, never from the
+ * request's code column. A `validated` row is evaluated against the policies
+ * as they stand now; any other row reports what was recorded.
+ */
+export interface GovernanceState {
+  requestId: string;
+  kind: DeployRequestKind;
+  status: DeployRequestRecord['status'];
+  ticket: string | null;
+  justification: StoredJustification | null;
+  /** The hint under the justification (justificationProvenance). */
+  provenance: string;
+  /** Whether the policies require a justification for this request. */
+  required: boolean;
+  policySource: PolicySource;
+  policyLines: string[];
+  gate: 'open' | 'frozen' | 'overridden' | 'blocked';
+  blockedBy: 'unreadable' | 'violations' | null;
+  violationCodes: PolicyViolationCode[];
+  /** blocked: what stops the request — each violation, or why the policies could not be read. */
+  blockedLines: string[];
+  /** The freeze the gate is about (frozen; overridden while it lasts, else the one recorded at mint). */
+  freeze: { rule: string; window: string; until: string; time_zone: string } | null;
+  freezeLine: string | null;
+  /** summary_json.governance.freeze was set: the request was frozen when it was minted. */
+  frozenAtMint: boolean;
+  override: { reason: string; at: string } | null;
+  policyChangedAt: string | null;
+  /** Rules whose label or org id matches no connection on this machine — page state, never stored. */
+  unmatchedRules: string[];
+  /** Changes whenever the page should reload: state, justification edit, override, policies change. */
+  rev: string;
+}
+
+/**
+ * S46 (B): a request's policy state now (design B §4.4 liveGate). Blocked
+ * wins over everything — a request that no longer satisfies the policies, or
+ * whose policies cannot be read, shows no code even after an override; a
+ * recorded override then releases the request for the rest of its life; a
+ * freeze holds it; otherwise it is open.
+ */
+interface LiveGate {
+  state: 'open' | 'frozen' | 'overridden' | 'blocked';
+  blockedBy: 'unreadable' | 'violations' | null;
+  /** blocked: each violation's text, or the reason the policies could not be read. */
+  lines: string[];
+  codes: PolicyViolationCode[];
+  /** The freeze in effect now, when one is. */
+  freeze: PolicyFreeze | null;
+  override: StoredGovernance['freeze_override'];
+  /** The load's source — null when the policies could not be read. */
+  source: PolicySource | null;
+  /** What applies now — null when the policies could not be read. */
+  verdict: PolicyVerdict | null;
+  policies: PolicyConfig | null;
+}
+
+/** S46 (B): what one render of the approval page is for (pageOptionsFor). */
+interface PageRenderContext {
+  /** The page server's session — absent on the first render, which carries no forms. */
+  sessionId: string | undefined;
+  notice: ApprovalNoticeCode | null;
+  /**
+   * The first render only: the mint's own freeze evaluation, so the string
+   * present() receives cannot disagree with what was stored, the agent's
+   * result or the push — and no second policy load happens at mint.
+   */
+  mintState?: 'open' | 'frozen';
+  /** With mintState: the policies the mint was checked against (for the unmatched-rule lines). */
+  mintPolicies?: PolicyConfig;
+}
+
+/**
+ * S46 (B): what one policy check read and concluded. The policies, their
+ * source and the verdict come from ONE load, so nothing built from a check
+ * can disagree with it about which rules applied.
+ */
+interface PolicyGate {
+  ok: true;
+  policies: PolicyConfig;
+  source: PolicySource;
+  sha256: string;
+  verdict: PolicyVerdict;
+  /** Normalised: trimmed, blank → null. */
+  ticket: string | null;
+  /** Normalised: line breaks folded to LF, trimmed, blank → null. */
+  justification: string | null;
+}
+
+/** A dry run's check when the policies could not be read — a real check throws instead. */
+interface PolicyGateUnreadable {
+  ok: false;
+  problem: string;
+  sha256: string;
+  ticket: string | null;
+  justification: string | null;
+}
+
+type PolicyGateResult = PolicyGate | PolicyGateUnreadable;
+
+interface PolicyGateOptions {
+  /** deploy: the package deletes components; dml / bulk: the change deletes records. */
+  destructive: boolean;
+  testLevel: PolicyTestLevel | null;
+  ticket: string | null | undefined;
+  justification: string | null | undefined;
+  /**
+   * 'propose' (default); 'attach' — a deploy's first check on a call that
+   * would attach to a validation still running with the same arguments
+   * (audited as 'propose', its refusal says that validation goes on); or
+   * 'mint' — a deploy's second check, made when its validation finishes.
+   */
+  phase?: 'propose' | 'attach' | 'mint';
+}
+
+/**
+ * S46 (B): how long the human's surfaces cue a change to the policies section
+ * of config.json (the approval page, Deploy Review, the phone push). Fixed in
+ * code on purpose, like POLICY_LIMITS.
+ */
+const POLICY_CHANGE_NOTICE_MS = 24 * 60 * 60_000;
+
+/** S46 (B): the error codes of the execute-time policy refusals (assertPolicyAtExecute). */
+const POLICY_REFUSAL_CODES: ReadonlySet<string> = new Set([
+  'policy_freeze',
+  'policy_refused',
+  'policy_unreadable',
+]);
+
+/** JSON with every object's keys sorted, so equal policies always fingerprint alike. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    return `{${Object.keys(obj)
+      .filter((k) => obj[k] !== undefined)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonicalJson(obj[k])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
+/** S46 (B): the policy.config_seen fingerprint — of 'default', of the policies, or of the read failure. */
+function policyFingerprint(load: PolicyLoad): string {
+  const basis = !load.ok
+    ? `unreadable:${load.problem}`
+    : load.source === 'default'
+      ? 'default'
+      : canonicalJson(load.policies);
+  return crypto.createHash('sha256').update(basis).digest('hex');
+}
+
+/**
+ * S46 (B): list_connections' `policies_status` from one read of the
+ * policies — whether they could be read and where they came from, plus the
+ * rules whose label or org id matches none of `conns`, the stored
+ * connections (a re-created connection may have left one behind).
+ */
+function policiesStatusOf(load: PolicyLoad, conns: ConnectionRecord[]): PoliciesStatus {
+  if (!load.ok) {
+    return {
+      status: 'unreadable',
+      problem: load.problem,
+      note: 'Every write proposal is refused until the human fixes config.json.',
+    };
+  }
+  return {
+    status: 'ok',
+    source: load.source,
+    unmatched_rules: unmatchedRules(
+      load.policies,
+      conns.map((c) => ({ alias: c.alias, orgId: c.orgId })),
+    ),
+  };
+}
+
+/** S46 (B): the dry-run report, from the check made before the job started. */
+function dryRunPolicyCheck(pre: PolicyGateResult): DryRunPolicyCheck {
+  if (!pre.ok) {
+    return {
+      status: 'unreadable',
+      problem: pre.problem,
+      rules: [],
+      would_refuse: [],
+      freeze: null,
+      note: dryRunPolicyNote('unreadable', pre.problem),
+    };
+  }
+  const wouldRefuse = pre.verdict.violations.map((v) => v.text);
+  const status = wouldRefuse.length > 0 ? 'would_refuse' : 'ok';
+  const f = pre.verdict.freeze;
+  return {
+    status,
+    rules: pre.verdict.rules,
+    would_refuse: wouldRefuse,
+    freeze: f ? { rule: f.rule, window: f.window, until: f.until, time_zone: f.timeZone } : null,
+    note: dryRunPolicyNote(status),
+  };
 }
 
 /**
@@ -241,10 +626,12 @@ export interface DeployValidationSummary {
  * to the agent). `status: 'unavailable'` means the RETRIEVE failed — the org
  * was not re-read and everything on the page came from the local snapshot;
  * a listing fault only nulls dates (dates_unavailable_types /
- * dates_unavailable). `org_clock` carries the checkOnly DeployResult's
- * org-side stamps — the execute-time guard's clock when no live baseline
- * exists. The diffs themselves are NOT persisted (they would ride every
- * execute result); they live on the approval page's rows.
+ * dates_unavailable), and so does a failed stamp query (S46 D1: its type is
+ * in dates_unavailable_types and its reason in probe_failures). `org_clock`
+ * carries the checkOnly DeployResult's org-side stamps — the execute-time
+ * guard's clock when no live baseline exists. The diffs themselves are NOT
+ * persisted (they would ride every execute result); they live on the
+ * approval page's rows.
  */
 export interface LiveCheckSummary {
   status: 'ok' | 'unavailable';
@@ -255,6 +642,16 @@ export interface LiveCheckSummary {
   org_clock?: { created_date: string; completed_date?: string };
   dates_unavailable_types: string[];
   dates_unavailable?: string;
+  /** S46 D1: 2 = CustomField / ValidationRule / CustomLabel / ListView stamps come from per-member
+   *  queries. Absent = validated by 0.39: every stamp from listMetadata. */
+  stamp_scheme?: 2;
+  /** S46 D1: type → reason for the types whose stamp query failed (they are in dates_unavailable_types too). */
+  probe_failures?: Record<string, string>;
+  /** S46 D1: pre-image keys of members whose validate-time stamp query returned only a same-name row
+   *  under a namespace the package did not name. The guard never reports them absent on that query. */
+  probe_unmatched?: string[];
+  /** S46 D1f: what the org's retrieve said, as a note — never a presence verdict. */
+  retrieve_note?: string;
   /** Package members (components + deletions) the live check covered. */
   members: number;
 }
@@ -284,6 +681,12 @@ type ValidateInput = {
    * validate omits it so the human sees exactly one meaningful approval.
    */
   dryRun?: boolean;
+  /** S46 (B): the change ticket the human named — part of the job's identity. */
+  ticket?: string | null;
+  /** S46 (B): why this change is being made now, drafted by the agent — part of the job's identity. */
+  justification?: string | null;
+  /** S46 (B): the tool the call came through, for the policy refusal's audit row. */
+  viaTool?: 'validate_deploy' | 'deactivate_flow';
 };
 
 type ValidateResult = {
@@ -465,7 +868,9 @@ type TargetProbe = {
  * concurrent dry runs, a dry run beside a real validate (the S38 split now
  * rides the id prefix), or two sessions' validations never cross-deliver.
  * Re-sending identical arguments attaches to the running job, so the old
- * poll-by-resend pattern still works.
+ * poll-by-resend pattern still works. S46 (B): the ticket and the
+ * justification are in the digest — a job that ignored a new justification
+ * would mint a request the policy check never saw it for.
  */
 function validateJobId(input: ValidateInput): string {
   const h = crypto.createHash('sha256');
@@ -478,6 +883,8 @@ function validateJobId(input: ValidateInput): string {
       input.testLevel ?? null,
       input.runTests ?? null,
       input.allowUnregisteredDelete === true,
+      input.ticket ?? null,
+      input.justification ?? null,
     ])}\n`,
   );
   for (const c of input.components) {
@@ -503,6 +910,21 @@ export type ExecutionObserver = (info: {
   payloadPath: string | null;
 }) => void;
 
+/**
+ * S46 (C): re-read a successful deploy's components into the local snapshot
+ * (the snapshot engine's rebaselineMembers). Injected because the two
+ * engines are siblings; unset = no re-baseline, the legacy note and no
+ * `snapshot` key. The deploy engine calls it strictly after finishExecution.
+ */
+export type SnapshotRebaseliner = (input: {
+  conn: ConnectionRecord;
+  requestId: string;
+  members: SnapshotMember[];
+  /** The deploy's destructive members — the only ones a re-read may report as removed (Decision 14). */
+  deleted: SnapshotMember[];
+  timeoutMs: number;
+}) => Promise<RebaselineOutcome>;
+
 interface Job<T> {
   promise: Promise<T>;
   progress: string;
@@ -516,7 +938,42 @@ interface Job<T> {
 export class DeployEngine {
   private readonly jobs = new Map<string, Job<unknown>>();
   private executionObserver: ExecutionObserver | null = null;
+  private rebaseliner: SnapshotRebaseliner | null = null;
   private notifier: ApprovalNotifier = new NullNotifier();
+
+  /**
+   * S46 (B): where every policy check reads the policies from. By default
+   * the injected config's own section, so a test that hands the engine a
+   * config stays hermetic (the PushoverNotifier.syncFromDisk precedent);
+   * a wired engine is handed loadPolicies, which re-reads config.json on
+   * every call, so an edit applies without a restart.
+   */
+  private policySource: () => PolicyLoad = () => {
+    const parsed = parsePolicies(this.config.policies);
+    if (parsed.ok) return { ok: true, policies: parsed.policies, source: 'config' };
+    return {
+      ok: false,
+      problem: parsed.problem.startsWith('rules')
+        ? `policies.${parsed.problem}`
+        : `policies: ${parsed.problem}`,
+    };
+  };
+
+  /**
+   * S46 (B): the last policies fingerprints this engine has seen, and when
+   * it last saw them change. null until the first check, which primes it
+   * from the newest policy.config_seen audit rows.
+   */
+  private policyObserver: {
+    lastSeen: string | null;
+    lastReadable: string | null;
+    lastChange: { at: string } | null;
+  } | null = null;
+
+  /** S46 (B): the server wires loadPolicies here unless a test injected the config. */
+  setPolicySource(source: () => PolicyLoad): void {
+    this.policySource = source;
+  }
 
   /**
    * S42: register the approval notifier (the phone push of a freshly minted
@@ -534,16 +991,27 @@ export class DeployEngine {
    * the proposal. Audit rows carry outcome categories only — never the code,
    * never a key. `mode: 'native'` (the desktop's in-app review) sends the
    * summary WITHOUT the code: there is nowhere to type it.
+   * S46 (B): `frozen` is the mint's one freeze evaluation (mintGovernance). A
+   * frozen request's push carries no code — the view handed over has none —
+   * and says the human approves at their desk; a policies change Contrail
+   * noticed within the last day rides the push as one head line.
    */
   private async notifyApproval(
     view: ApprovalPageOptions,
     requestId: string,
     connectionId: string,
     mode: 'page' | 'native',
+    frozen: boolean,
   ): Promise<PhoneNotification> {
+    const includeCode = mode === 'page' && !frozen;
+    const changed = this.policyChangeNotice(Date.now());
     let outcome: NotifyOutcome;
     try {
-      outcome = await this.notifier.notify(view, { includeCode: mode === 'page' });
+      outcome = await this.notifier.notify(includeCode ? view : { ...view, code: '' }, {
+        includeCode,
+        ...(frozen ? { freeze: true } : {}),
+        ...(changed ? { policyChangedAt: changed.at } : {}),
+      });
     } catch (err) {
       // Category only: a notifier's error MESSAGE could carry the code, and
       // this seam exists to keep the code out of every log line.
@@ -556,7 +1024,13 @@ export class DeployEngine {
       this.audit.record('approval.notified', {
         connectionId,
         tool: proposeToolFor(view.kind),
-        detail: { requestId, kind: view.kind, method: 'pushover', codeIncluded: mode === 'page' },
+        detail: {
+          requestId,
+          kind: view.kind,
+          method: 'pushover',
+          codeIncluded: includeCode,
+          ...(frozen ? { freeze: true } : {}),
+        },
       });
     } else if (outcome.status === 'failed') {
       this.audit.record('approval.notify_failed', {
@@ -573,7 +1047,7 @@ export class DeployEngine {
         detail: { requestId, kind: view.kind, reason: outcome.reason },
       });
     }
-    return describePhoneOutcome(outcome, { includeCode: mode === 'page' });
+    return describePhoneOutcome(outcome, { includeCode, freeze: frozen, surface: mode });
   }
 
   /**
@@ -583,6 +1057,15 @@ export class DeployEngine {
    */
   setExecutionObserver(obs: ExecutionObserver): void {
     this.executionObserver = obs;
+  }
+
+  /**
+   * S46 (C): register the post-deploy snapshot re-baseline. A setter for the
+   * same reason as setExecutionObserver: the snapshot engine is a sibling,
+   * wired by every host where both exist. Unset = feature off.
+   */
+  setSnapshotRebaseliner(fn: SnapshotRebaseliner): void {
+    this.rebaseliner = fn;
   }
 
   /** Best-effort observer dispatch — never allowed to touch the outcome. */
@@ -609,6 +1092,920 @@ export class DeployEngine {
     private readonly approvals: ApprovalPageServer = new ApprovalPageServer(),
   ) {}
 
+  // ── policies (S46, B) ──────────────────────────────────────────────────
+
+  /**
+   * One read of the policies, fingerprinted and observed. A source that
+   * throws counts as unreadable — every check then fails closed.
+   */
+  private loadPoliciesObserved(): { load: PolicyLoad; sha256: string } {
+    let load: PolicyLoad;
+    try {
+      load = this.policySource();
+    } catch (err) {
+      load = {
+        ok: false,
+        problem: `config.json could not be read (${err instanceof Error ? err.message : String(err)})`,
+      };
+    }
+    const sha256 = policyFingerprint(load);
+    this.observePolicies(load, sha256);
+    return { load, sha256 };
+  }
+
+  /**
+   * The change trail. A fingerprint this engine has not seen is recorded as
+   * policy.config_seen — unless the newest such row already carries it
+   * (another engine on this database, the other surface or a second plugin
+   * process, recorded it first), in which case that row is adopted and
+   * nothing is written. `changed` is true only for readable policies that
+   * differ from the last readable ones seen: the first observation is not a
+   * change, and neither is an unreadable interlude that ends with the same
+   * policies. The observer never blocks a check.
+   */
+  private observePolicies(load: PolicyLoad, sha256: string): void {
+    try {
+      if (this.policyObserver === null) this.policyObserver = this.primePolicyObserver();
+      const o = this.policyObserver;
+      if (sha256 === o.lastSeen) return;
+      const newest = this.audit.query({ eventType: 'policy.config_seen', limit: 1 })[0];
+      if (newest && newest.detail?.sha256 === sha256) {
+        o.lastSeen = sha256;
+        if (load.ok) o.lastReadable = sha256;
+        if (newest.detail?.changed === true) o.lastChange = { at: newest.ts };
+        return;
+      }
+      const changed = load.ok && o.lastReadable !== null && sha256 !== o.lastReadable;
+      this.audit.record('policy.config_seen', {
+        detail: {
+          sha256,
+          previous_sha256: o.lastSeen,
+          source: load.ok ? load.source : null,
+          rules: load.ok ? load.policies.rules.map((r) => r.name) : [],
+          status: load.ok ? 'ok' : 'unreadable',
+          changed,
+        },
+      });
+      o.lastSeen = sha256;
+      if (load.ok) o.lastReadable = sha256;
+      if (changed) o.lastChange = { at: new Date().toISOString() };
+    } catch (err) {
+      log('warn', 'policies change trail could not be updated', {
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  /** The observer's state on first use: the newest policy.config_seen rows on this database. */
+  private primePolicyObserver(): NonNullable<DeployEngine['policyObserver']> {
+    const rows = this.audit.query({ eventType: 'policy.config_seen', limit: 1000 });
+    const shaOf = (row: (typeof rows)[number] | undefined): string | null => {
+      const sha = row?.detail?.sha256;
+      return typeof sha === 'string' ? sha : null;
+    };
+    const change = rows.find((r) => r.detail?.changed === true);
+    return {
+      lastSeen: shaOf(rows[0]),
+      lastReadable: shaOf(rows.find((r) => r.detail?.status === 'ok')),
+      lastChange: change ? { at: change.ts } : null,
+    };
+  }
+
+  /**
+   * The policies-changed cue of the human's surfaces (design B §3.1): when
+   * this engine — or another on the same database, whose policy.config_seen
+   * row it adopted — last saw the readable policies change, while that was
+   * less than 24 hours before `now` and the policies are readable now. null
+   * otherwise: the first policies ever seen are not a change, and neither is
+   * an unreadable interlude that ends with the same policies. It reads the
+   * observer's state; it loads the policies only when nothing has yet.
+   */
+  policyChangeNotice(now: number): { at: string } | null {
+    if (this.policyObserver === null) this.loadPoliciesObserved();
+    const o = this.policyObserver;
+    if (!o || !o.lastChange || o.lastSeen === null || o.lastSeen !== o.lastReadable) return null;
+    const at = Date.parse(o.lastChange.at);
+    if (Number.isNaN(at) || now - at >= POLICY_CHANGE_NOTICE_MS) return null;
+    return { at: o.lastChange.at };
+  }
+
+  /**
+   * The labels a `connections` matcher is tested against: this connection's
+   * own, then those of every other stored connection to the same org (org ids
+   * equal on their first 15 characters) — a label rule covers the org,
+   * however a second connection to it was labelled. `all` is the stored
+   * connections when the caller has already listed them.
+   */
+  private orgAliasesOf(conn: ConnectionRecord, all?: ConnectionRecord[]): string[] {
+    const key = conn.orgId.slice(0, 15);
+    const siblings =
+      key === ''
+        ? []
+        : (all ?? this.db.listConnections())
+            .filter((o) => o.id !== conn.id && o.orgId.slice(0, 15) === key)
+            .map((o) => o.alias);
+    return [conn.alias, ...siblings];
+  }
+
+  /**
+   * The policy check of a write proposal. It runs before anything is sent to
+   * the org and before any pending request is superseded, so a refusal costs
+   * no org call and leaves a code the human may be reading in place. The two
+   * texts are normalised first (a malformed one is refused as bad input).
+   * Unreadable policies or a broken rule → a policy.refused audit row and the
+   * refusal thrown, its text chosen by phase ('mint' = a deploy's second
+   * check, when its validation finishes; 'attach' = a deploy's first check
+   * on a call that would attach to its still-running validation, audited as
+   * 'propose'). A dry run never throws for policy and never audits: it
+   * returns the report.
+   */
+  private policyGate(
+    conn: ConnectionRecord,
+    kind: PolicyKind,
+    tool: string,
+    opts: PolicyGateOptions & { dryRun: boolean },
+  ): PolicyGateResult;
+  private policyGate(
+    conn: ConnectionRecord,
+    kind: PolicyKind,
+    tool: string,
+    opts: PolicyGateOptions,
+  ): PolicyGate;
+  private policyGate(
+    conn: ConnectionRecord,
+    kind: PolicyKind,
+    tool: string,
+    opts: PolicyGateOptions & { dryRun?: boolean },
+  ): PolicyGateResult {
+    const t = normalizeTicket(opts.ticket);
+    if (!t.ok) throw new ContrailError(t.problem, 'bad_governance_input');
+    const j = normalizeJustification(opts.justification);
+    if (!j.ok) throw new ContrailError(j.problem, 'bad_governance_input');
+    const ticket = t.value;
+    const justification = j.value;
+    const textPhase =
+      opts.phase === 'mint' ? 'after_validation' : opts.phase === 'attach' ? 'attach' : 'propose';
+    const phase = opts.phase === 'mint' ? 'mint' : 'propose';
+    const { load, sha256 } = this.loadPoliciesObserved();
+    if (!load.ok) {
+      if (opts.dryRun === true) {
+        return { ok: false, problem: load.problem, sha256, ticket, justification };
+      }
+      this.audit.record('policy.refused', {
+        connectionId: conn.id,
+        tool,
+        outcome: 'refused',
+        detail: { phase, kind, reason: 'config_unreadable' },
+      });
+      throw new ContrailError(policyUnreadableText(load.problem, textPhase), 'policy_unreadable');
+    }
+    const verdict = evaluatePolicies(load.policies, {
+      orgType: conn.orgType,
+      alias: conn.alias,
+      orgAliases: this.orgAliasesOf(conn),
+      orgId: conn.orgId,
+      kind,
+      destructive: opts.destructive,
+      testLevel: opts.testLevel,
+      ticket,
+      justification,
+      now: Date.now(),
+      hostTimeZone: hostTimeZone(),
+    });
+    if (verdict.violations.length > 0 && opts.dryRun !== true) {
+      this.audit.record('policy.refused', {
+        connectionId: conn.id,
+        tool,
+        outcome: 'refused',
+        detail: {
+          phase,
+          kind,
+          reason: 'violations',
+          rules: [...new Set(verdict.violations.map((v) => v.rule))],
+          violations: verdict.violations.map((v) => v.code),
+          ticket_given: ticket !== null,
+          justification_given: justification !== null,
+        },
+      });
+      throw new ContrailError(
+        policyRefusalText(conn.alias, conn.orgType, verdict.violations, textPhase, load.source),
+        'policy_refused',
+      );
+    }
+    return {
+      ok: true,
+      policies: load.policies,
+      source: load.source,
+      sha256,
+      verdict,
+      ticket,
+      justification,
+    };
+  }
+
+  /**
+   * list_connections' policy fields from ONE read of the policies: each
+   * listed connection's `policy` (null for every one when the policies
+   * cannot be read) and `policies_status`. `conns` is the listing itself —
+   * the stored connections, read once by the caller — and is also what the
+   * sibling labels and the unmatched rules are read from, so a config.json
+   * change during the call cannot put a policy beside status 'unreadable'.
+   */
+  policyListing(conns: ConnectionRecord[]): {
+    reports: Array<PolicyReport | null>;
+    status: PoliciesStatus;
+  } {
+    const { load } = this.loadPoliciesObserved();
+    return {
+      reports: conns.map((c) => (load.ok ? this.policyReportOf(load.policies, c, conns) : null)),
+      status: policiesStatusOf(load, conns),
+    };
+  }
+
+  /**
+   * list_connections' `policy` for one connection: the rules that apply to
+   * it right now and what they require. null when the policies cannot be
+   * read — policiesStatus() says why.
+   */
+  policyReportFor(conn: ConnectionRecord): PolicyReport | null {
+    const { load } = this.loadPoliciesObserved();
+    return load.ok ? this.policyReportOf(load.policies, conn, this.db.listConnections()) : null;
+  }
+
+  /**
+   * list_connections' `policies_status`: whether the policies could be read
+   * and where they came from, plus the rules whose label or org id matches no
+   * stored connection (a re-created connection may have left one behind).
+   */
+  policiesStatus(): PoliciesStatus {
+    const { load } = this.loadPoliciesObserved();
+    return policiesStatusOf(load, this.db.listConnections());
+  }
+
+  /** One connection's report from policies already read; `all` is the stored connections. */
+  private policyReportOf(
+    policies: PolicyConfig,
+    conn: ConnectionRecord,
+    all: ConnectionRecord[],
+  ): PolicyReport {
+    const p = policyInEffect(policies, {
+      orgType: conn.orgType,
+      alias: conn.alias,
+      orgAliases: this.orgAliasesOf(conn, all),
+      orgId: conn.orgId,
+      now: Date.now(),
+      hostTimeZone: hostTimeZone(),
+    });
+    const r = p.requirements;
+    const denies: PolicyReport['denies'] = [];
+    if (r.denyDestructiveMetadata) denies.push('destructive_metadata');
+    if (r.denyDataDeletes) denies.push('data_deletes');
+    if (r.denyAnonymousApex) denies.push('anonymous_apex');
+    return {
+      rules: p.rules,
+      requires_justification: r.justification,
+      requires_ticket: r.ticket,
+      ticket_patterns: r.ticketPatterns,
+      denies,
+      min_test_level: r.minTestLevel,
+      freeze_windows: p.windows.map((w) => ({
+        rule: w.rule,
+        name: w.name,
+        when: w.when,
+        time_zone: w.timeZone,
+      })),
+      freeze_now: p.freeze ? { rule: p.freeze.rule, window: p.freeze.window, until: p.freeze.until } : null,
+    };
+  }
+
+  /**
+   * The change record of a request about to be minted, from the policy check
+   * that allowed it (no second disk read). The freeze is evaluated ONCE,
+   * here, with one clock reading: that single result is the stored
+   * governance.freeze, the agent's governance.freeze and `frozen`, so the
+   * three cannot disagree. `target` records the connection as it is now.
+   * `surface` is where the human approves — always 'page' in the plugin.
+   */
+  private mintGovernance(
+    conn: ConnectionRecord,
+    kind: PolicyKind,
+    gate: PolicyGate,
+    inputs: { destructive: boolean; testLevel: PolicyTestLevel | null },
+    surface: ApprovalSurfaceMode,
+  ): MintedGovernance {
+    const now = Date.now();
+    const p = policyInEffect(gate.policies, {
+      orgType: conn.orgType,
+      alias: conn.alias,
+      orgAliases: this.orgAliasesOf(conn),
+      orgId: conn.orgId,
+      now,
+      hostTimeZone: hostTimeZone(),
+    });
+    const f = p.freeze;
+    const stored: StoredGovernance = {
+      v: 1,
+      surface,
+      target: {
+        alias: conn.alias,
+        org_id: conn.orgId,
+        org_name: conn.orgName,
+        org_type: conn.orgType,
+        username: conn.username,
+      },
+      ticket: gate.ticket,
+      justification:
+        gate.justification === null ? null : { text: gate.justification, source: 'agent' },
+      inputs: { destructive: inputs.destructive, test_level: inputs.testLevel },
+      policy: {
+        evaluated_at: new Date(now).toISOString(),
+        source: gate.source,
+        sha256: gate.sha256,
+        rules: p.rules,
+        requirements: p.requirements,
+        lines: p.lines,
+      },
+      freeze: f ? { rule: f.rule, window: f.window, until: f.until, time_zone: f.timeZone } : null,
+      freeze_override: null,
+      execute_check: null,
+    };
+    return {
+      stored,
+      frozen: f !== null,
+      forAgent: {
+        ticket: gate.ticket,
+        justification:
+          gate.justification === null ? null : { text: gate.justification, source: 'agent' },
+        policy: { rules: p.rules, lines: p.lines },
+        freeze: f
+          ? {
+              active: true,
+              rule: f.rule,
+              window: f.window,
+              until: f.until,
+              note: freezeProposeNote(conn.alias, f, surface),
+            }
+          : null,
+      },
+    };
+  }
+
+  /**
+   * Present a freshly minted request. Its code-free page view is stored
+   * first — through patchDeployRequestSummary, while the row is still
+   * 'validated' and before the page exists, so it merges into whatever the
+   * mint wrote. The first render — the string present() receives — is built
+   * from the mint's own record and freeze evaluation, so it cannot disagree
+   * with what was stored or with the agent's result, and it carries no forms
+   * (no session exists yet). Every later GET re-renders through approvalLive.
+   * The view handed in carries the code; codeFreePageView never reads it.
+   */
+  private async presentMinted(
+    conn: ConnectionRecord,
+    request: DeployRequestRecord,
+    view: ApprovalPageOptions,
+    gate: PolicyGate,
+    minted: MintedGovernance,
+  ): Promise<{ url: string; opened: boolean }> {
+    this.db.patchDeployRequestSummary(request.id, (s) => ({
+      ...s,
+      page_view: codeFreePageView(view),
+    }));
+    const first = this.pageOptionsFor(request.id, conn, view, {
+      sessionId: undefined,
+      notice: null,
+      mintState: minted.frozen ? 'frozen' : 'open',
+      mintPolicies: gate.policies,
+    });
+    return this.approvals.present(
+      renderApprovalPage(first),
+      this.requestStatusCheck(request.id, conn),
+      this.config.deploy.codeTtlMs + 60_000,
+      this.approvalLive(request.id, conn, view),
+    );
+  }
+
+  // ── the live approval page (S46, B) ────────────────────────────────────
+
+  /**
+   * The hooks of one request's live approval page. The page server calls
+   * them on the human's GET or POST; no tool reaches them. The session id is
+   * the page server's own and reaches render only, so the forms can carry it.
+   */
+  private approvalLive(
+    requestId: string,
+    conn: ConnectionRecord,
+    view: ApprovalPageOptions,
+  ): ApprovalLivePage {
+    return {
+      render: (ctx) => renderApprovalPage(this.pageOptionsFor(requestId, conn, view, ctx)),
+      saveJustification: (text) => this.saveJustification(requestId, text, 'approval_page'),
+      recordFreezeOverride: (reason) =>
+        this.recordFreezeOverride(requestId, reason, 'approval_page'),
+      refused: (reason, route) => {
+        // A reason and a route label only: get_audit_log returns audit detail
+        // to the agent, so never the URL, a query string or a session id.
+        this.audit.record('local_request.refused', {
+          connectionId: conn.id,
+          tool: 'approval_page',
+          outcome: 'refused',
+          detail: { reason, route },
+        });
+      },
+    };
+  }
+
+  /**
+   * One render of a request's approval page: the view, with its Change
+   * record as the request stands now. The code is shown only while the row
+   * is still 'validated' and not past its expiry (stillPending), and its gate
+   * is open or overridden — never while a
+   * change freeze holds it with no emergency reason recorded, and never
+   * while a policy blocks it (unreadable policies, or a rule the request no
+   * longer satisfies). A notice that is no longer true is dropped: the
+   * justification notices once the request has left 'validated', and
+   * override_recorded unless the request is overridden and its code shown.
+   */
+  private pageOptionsFor(
+    requestId: string,
+    conn: ConnectionRecord,
+    view: ApprovalPageOptions,
+    ctx: PageRenderContext,
+  ): ApprovalPageOptions {
+    const row = this.db.getDeployRequest(requestId);
+    if (!row) return { ...view, code: '' };
+    const g = this.governanceStateOf(
+      row,
+      conn,
+      ctx.mintState ? { state: ctx.mintState, policies: ctx.mintPolicies ?? null } : undefined,
+    );
+    const validated = stillPending(row);
+    const code = validated && (g.gate === 'open' || g.gate === 'overridden') ? view.code : '';
+    let notice = ctx.notice;
+    if (notice === 'override_recorded' && !(g.gate === 'overridden' && code !== '')) notice = null;
+    if (
+      !validated &&
+      (notice === 'justification_saved' ||
+        notice === 'justification_cleared' ||
+        notice === 'justification_unchanged')
+    ) {
+      notice = null;
+    }
+    const governance: ApprovalGovernance = {
+      gate: g.gate,
+      ...(ctx.sessionId ? { sessionId: ctx.sessionId } : {}),
+      ticket: g.ticket,
+      justification: {
+        text: g.justification?.text ?? '',
+        provenance: g.provenance,
+        required: g.required,
+      },
+      policySource: g.policySource,
+      policyLines: g.policyLines,
+      unmatchedRules: g.unmatchedRules,
+      ...(g.policyChangedAt ? { policyChangedAt: g.policyChangedAt } : {}),
+      ...(g.freezeLine ? { freezeLine: g.freezeLine } : {}),
+      frozenAtMint: g.frozenAtMint,
+      ...(g.override ? { override: g.override } : {}),
+      ...(g.blockedBy ? { blockedBy: g.blockedBy, blockedLines: g.blockedLines } : {}),
+      ...(notice ? { notice: APPROVAL_NOTICES[notice] } : {}),
+      rev: g.rev,
+      limits: {
+        justificationMax: POLICY_LIMITS.justificationMax,
+        reasonMin: POLICY_LIMITS.freezeReasonMin,
+        reasonMax: POLICY_LIMITS.freezeReasonMax,
+      },
+    };
+    return { ...view, code, governance };
+  }
+
+  /**
+   * A request's policy state now (design B §4.4). The row's own record is
+   * evaluated — its ticket, justification and inputs — or, with `candidate`,
+   * that justification in place of the stored one; nothing is written. A
+   * request minted before S46 has no record: it is evaluated with no ticket,
+   * no justification and the inputs its row shows.
+   */
+  private liveGate(
+    conn: ConnectionRecord,
+    request: DeployRequestRecord,
+    now: number,
+    candidate?: { justification: string | null },
+  ): LiveGate {
+    const summary = jsonObject(request.summaryJson);
+    const stored = storedGovernanceOf(summary);
+    const override = stored?.freeze_override ?? null;
+    const { load } = this.loadPoliciesObserved();
+    if (!load.ok) {
+      return {
+        state: 'blocked',
+        blockedBy: 'unreadable',
+        lines: [load.problem],
+        codes: [],
+        freeze: null,
+        override,
+        source: null,
+        verdict: null,
+        policies: null,
+      };
+    }
+    const inputs = stored?.inputs
+      ? { destructive: stored.inputs.destructive, testLevel: stored.inputs.test_level }
+      : rowPolicyInputs(request, summary);
+    const storedText = stored?.justification?.text ?? '';
+    const verdict = evaluatePolicies(load.policies, {
+      orgType: conn.orgType,
+      alias: conn.alias,
+      orgAliases: this.orgAliasesOf(conn),
+      orgId: conn.orgId,
+      kind: request.kind,
+      destructive: inputs.destructive,
+      testLevel: inputs.testLevel,
+      ticket: stored?.ticket ?? null,
+      justification: candidate ? candidate.justification : storedText === '' ? null : storedText,
+      now,
+      hostTimeZone: hostTimeZone(),
+    });
+    const base = {
+      freeze: verdict.freeze,
+      override,
+      source: load.source,
+      verdict,
+      policies: load.policies,
+    };
+    if (verdict.violations.length > 0) {
+      return {
+        ...base,
+        state: 'blocked',
+        blockedBy: 'violations',
+        lines: verdict.violations.map((v) => v.text),
+        codes: verdict.violations.map((v) => v.code),
+      };
+    }
+    const state = override ? 'overridden' : verdict.freeze ? 'frozen' : 'open';
+    return { ...base, state, blockedBy: null, lines: [], codes: [] };
+  }
+
+  /**
+   * The code-free state of one request, for a human surface (design B §5.2).
+   * A 'validated' row is evaluated against the policies now (liveGate); the
+   * first render passes `mint`, the mint's own freeze evaluation, so no
+   * second policy load happens there; any other row reports what was
+   * recorded, with no policy load.
+   */
+  private governanceStateOf(
+    row: DeployRequestRecord,
+    fallbackConn: ConnectionRecord | null,
+    mint?: { state: 'open' | 'frozen'; policies: PolicyConfig | null },
+  ): GovernanceState {
+    const stored = storedGovernanceOf(jsonObject(row.summaryJson));
+    const conn = this.db.getConnection(row.connectionId) ?? fallbackConn;
+    const override = stored?.freeze_override ?? null;
+    const storedFreeze: PolicyFreeze | null = stored?.freeze
+      ? {
+          rule: stored.freeze.rule,
+          window: stored.freeze.window,
+          until: stored.freeze.until,
+          timeZone: stored.freeze.time_zone,
+        }
+      : null;
+    let gate: LiveGate;
+    if (mint) {
+      gate = {
+        state: mint.state,
+        blockedBy: null,
+        lines: [],
+        codes: [],
+        freeze: mint.state === 'frozen' ? storedFreeze : null,
+        override,
+        source: stored?.policy?.source ?? null,
+        verdict: null,
+        policies: mint.policies,
+      };
+    } else if (row.status === 'validated' && conn) {
+      gate = this.liveGate(conn, row, Date.now());
+    } else {
+      gate = {
+        state: override ? 'overridden' : 'open',
+        blockedBy: null,
+        lines: [],
+        codes: [],
+        freeze: null,
+        override,
+        source: stored?.policy?.source ?? null,
+        verdict: null,
+        policies: null,
+      };
+    }
+    const justification = stored?.justification ?? null;
+    const f =
+      gate.freeze ?? (gate.state === 'frozen' || gate.state === 'overridden' ? storedFreeze : null);
+    const alias = conn?.alias ?? stored?.target?.alias ?? '';
+    // The policies-changed cue (design B §3.1), only while the request is
+    // pending and its policies could be read — the lines it introduces are
+    // then the policies as they stand now.
+    const policyChangedAt =
+      row.status === 'validated' && gate.blockedBy !== 'unreadable'
+        ? (this.policyChangeNotice(Date.now())?.at ?? null)
+        : null;
+    return {
+      requestId: row.id,
+      kind: row.kind,
+      status: row.status,
+      ticket: stored?.ticket ?? null,
+      justification,
+      provenance: justificationProvenance(justification),
+      required: gate.verdict
+        ? gate.verdict.requirements.justification
+        : (stored?.policy?.requirements.justification ?? false),
+      policySource: gate.source ?? stored?.policy?.source ?? 'config',
+      policyLines: gate.verdict
+        ? gate.verdict.lines
+        : gate.blockedBy === 'unreadable'
+          ? []
+          : (stored?.policy?.lines ?? []),
+      gate: gate.state,
+      blockedBy: gate.blockedBy,
+      violationCodes: gate.codes,
+      blockedLines: gate.lines,
+      freeze: f ? { rule: f.rule, window: f.window, until: f.until, time_zone: f.timeZone } : null,
+      freezeLine: f ? freezeBannerText(alias, f) : null,
+      frozenAtMint: storedFreeze !== null,
+      override: override ? { reason: override.reason, at: override.at } : null,
+      policyChangedAt,
+      unmatchedRules: gate.policies
+        ? unmatchedRules(
+            gate.policies,
+            this.db.listConnections().map((c) => ({ alias: c.alias, orgId: c.orgId })),
+          )
+        : [],
+      // The named freeze rides the rev too, so an open page reloads within
+      // one poll when one active window ends and another keeps the request
+      // frozen (its banner then names the new window and its end).
+      rev:
+        `${gate.state}:${justification?.edited_at ?? ''}:${override?.at ?? ''}:${policyChangedAt ?? ''}` +
+        (f ? `:${JSON.stringify([f.rule, f.window])}` : ''),
+    };
+  }
+
+  /**
+   * The code-free change record and policy state of one request, for a human
+   * surface (Deploy Review reads it; the approval page renders from the same
+   * state). null when no such request exists. Human surfaces only — no tool
+   * reaches it.
+   */
+  governanceState(requestId: string): GovernanceState | null {
+    const row = this.db.getDeployRequest(requestId);
+    return row ? this.governanceStateOf(row, null) : null;
+  }
+
+  /**
+   * The human saves a justification on their approval surface (design B
+   * §5.2). Line breaks are folded first, so an untouched multi-line draft
+   * submitted by a browser compares equal and changes nothing. An empty text
+   * clears it — unless the policies require one. The text is recorded with
+   * the request (source 'page', where and when, the agent's draft kept
+   * beside it); the audit row carries its length, never the text. Saving
+   * approves nothing and leaves the code as it is. A request that is no
+   * longer pending — executed, replaced, or past its expiry though not yet
+   * swept — takes none (request_closed). Human surfaces only — no tool
+   * reaches it.
+   */
+  saveJustification(
+    requestId: string,
+    text: string,
+    surface: 'approval_page' | 'deploy_review',
+  ): ApprovalNoticeCode {
+    const row = this.db.getDeployRequest(requestId);
+    if (!row || !stillPending(row)) return 'request_closed';
+    const normalized = normalizeJustification(text);
+    if (!normalized.ok) {
+      const folded = typeof text === 'string' ? text.replace(/\r\n?/g, '\n').trim() : '';
+      return folded.length > POLICY_LIMITS.justificationMax ? 'justification_too_long' : 'invalid_text';
+    }
+    const next = normalized.value ?? '';
+    const state = this.governanceStateOf(row, null);
+    if (next === '' && state.required) return 'justification_required';
+    const prev = state.justification;
+    if (next === (prev?.text ?? '')) return 'justification_unchanged';
+    const draft = prev ? (prev.source === 'agent' ? prev.text : prev.agent_draft) : undefined;
+    const justification: StoredJustification = {
+      text: next,
+      source: 'page',
+      surface,
+      edited_at: new Date().toISOString(),
+      ...(draft ? { agent_draft: draft } : {}),
+    };
+    const recorded = this.db.patchDeployRequestSummary(requestId, (s) => ({
+      ...s,
+      governance: { ...(isPlainObject(s.governance) ? s.governance : { v: 1 }), justification },
+    }));
+    if (!recorded) return 'request_closed';
+    this.audit.record('approval.justification_edited', {
+      connectionId: row.connectionId,
+      tool: surface,
+      detail: {
+        requestId,
+        kind: row.kind,
+        surface,
+        chars: next.length,
+        had_agent_draft: Boolean(draft),
+      },
+    });
+    return next === '' ? 'justification_cleared' : 'justification_saved';
+  }
+
+  /**
+   * The human records an emergency reason during a change freeze (design B
+   * §5.2), checked in this order: the request must still be pending
+   * ('validated' and not past its expiry, so a reason is never recorded for a
+   * code that can no longer execute), the policies readable, no reason recorded yet, nothing else blocking it, and
+   * a freeze actually in effect — so "no freeze is in effect" is never the
+   * answer under a freeze or a block. The reason (15–1,000 characters after
+   * line breaks are folded) is recorded with the request and in the audit
+   * log; it releases this request only, and the freeze stays configured.
+   * Human surfaces only — no tool reaches it.
+   */
+  recordFreezeOverride(
+    requestId: string,
+    reason: string,
+    surface: 'approval_page' | 'deploy_review',
+  ): ApprovalNoticeCode {
+    const row = this.db.getDeployRequest(requestId);
+    if (!row || !stillPending(row)) return 'request_closed';
+    const conn = this.db.getConnection(row.connectionId);
+    if (!conn) return 'request_closed';
+    const gate = this.liveGate(conn, row, Date.now());
+    if (gate.blockedBy === 'unreadable') return 'policies_unreadable';
+    if (gate.override) return 'override_already_recorded';
+    if (gate.state === 'blocked') return 'override_blocked';
+    if (gate.state !== 'frozen' || !gate.freeze) return 'override_not_needed';
+    const r = normalizeFreezeReason(reason);
+    if (!r.ok) return r.code;
+    const f = gate.freeze;
+    const freezeOverride: NonNullable<StoredGovernance['freeze_override']> = {
+      reason: r.value,
+      at: new Date().toISOString(),
+      surface,
+      rule: f.rule,
+      window: f.window,
+    };
+    const recorded = this.db.patchDeployRequestSummary(requestId, (s) => ({
+      ...s,
+      governance: {
+        ...(isPlainObject(s.governance) ? s.governance : { v: 1 }),
+        freeze_override: freezeOverride,
+      },
+    }));
+    if (!recorded) return 'request_closed';
+    this.audit.record('policy.freeze_overridden', {
+      connectionId: row.connectionId,
+      tool: surface,
+      detail: {
+        requestId,
+        kind: row.kind,
+        rule: f.rule,
+        window: f.window,
+        until: f.until,
+        surface,
+        reason: r.value,
+      },
+    });
+    return 'override_recorded';
+  }
+
+  /**
+   * The policy check of an execute (design B §4.6). The request is evaluated
+   * against the policies as they stand now, with its own ticket,
+   * justification and inputs: unreadable policies or a rule it no longer
+   * satisfies → a policy.refused row and the refusal; a change freeze with no
+   * emergency reason recorded → the same, with the freeze text for the
+   * surface the request was proposed on. It is synchronous, reads nothing
+   * from the org, never counts an attempt and never voids: the code matched
+   * and stays usable. When it passes it returns the execute_check the claim
+   * records — the rules, the freeze, and the connection as it is now.
+   */
+  private assertPolicyAtExecute(
+    conn: ConnectionRecord,
+    request: DeployRequestRecord,
+    tool: string,
+  ): NonNullable<StoredGovernance['execute_check']> {
+    const now = Date.now();
+    const gate = this.liveGate(conn, request, now);
+    const stored = storedGovernanceOf(jsonObject(request.summaryJson));
+    if (gate.state === 'blocked') {
+      if (gate.blockedBy === 'unreadable') {
+        this.audit.record('policy.refused', {
+          connectionId: conn.id,
+          tool,
+          outcome: 'refused',
+          detail: {
+            phase: 'execute',
+            requestId: request.id,
+            kind: request.kind,
+            reason: 'config_unreadable',
+          },
+        });
+        throw new ContrailError(
+          policyUnreadableText(gate.lines[0] ?? 'unknown problem', 'execute'),
+          'policy_unreadable',
+        );
+      }
+      const violations = gate.verdict?.violations ?? [];
+      this.audit.record('policy.refused', {
+        connectionId: conn.id,
+        tool,
+        outcome: 'refused',
+        detail: {
+          phase: 'execute',
+          requestId: request.id,
+          kind: request.kind,
+          reason: 'violations',
+          rules: [...new Set(violations.map((v) => v.rule))],
+          violations: violations.map((v) => v.code),
+          ticket_given: (stored?.ticket ?? null) !== null,
+          justification_given: (stored?.justification?.text ?? '') !== '',
+        },
+      });
+      throw new ContrailError(
+        policyRefusalText(conn.alias, conn.orgType, violations, 'execute', gate.source ?? 'config'),
+        'policy_refused',
+      );
+    }
+    if (gate.state === 'frozen' && gate.freeze) {
+      const f = gate.freeze;
+      this.audit.record('policy.refused', {
+        connectionId: conn.id,
+        tool,
+        outcome: 'refused',
+        detail: {
+          phase: 'execute',
+          requestId: request.id,
+          kind: request.kind,
+          reason: 'freeze',
+          rule: f.rule,
+          window: f.window,
+        },
+      });
+      // A request with no stored record takes this engine's own surface.
+      const surface: ApprovalSurfaceMode = stored?.surface === 'native' ? 'native' : 'page';
+      throw new ContrailError(freezeExecuteRefusalText(conn.alias, f, surface), 'policy_freeze');
+    }
+    return {
+      at: new Date(now).toISOString(),
+      rules: gate.verdict?.rules ?? [],
+      freeze_active: gate.freeze !== null,
+      overridden: gate.state === 'overridden',
+      org_id: conn.orgId,
+      username: conn.username,
+    };
+  }
+
+  /**
+   * Starting an agent test run (run_agent_eval) — the one write with no
+   * approval page: the agent under test executes its real actions on the
+   * strength of the data_write grant alone. So a start is refused while a
+   * change freeze applies to the connection, and while the policies cannot
+   * be read; no other rule applies to a run, and there is no override (a run
+   * has no page on which the human could record a reason). A poll of an
+   * existing run never comes here.
+   */
+  assertPolicyForStart(conn: ConnectionRecord, tool: string): void {
+    const { load } = this.loadPoliciesObserved();
+    if (!load.ok) {
+      this.audit.record('policy.refused', {
+        connectionId: conn.id,
+        tool,
+        outcome: 'refused',
+        detail: { phase: 'start', kind: 'agent_eval', reason: 'config_unreadable' },
+      });
+      throw new ContrailError(policyUnreadableText(load.problem, 'propose'), 'policy_unreadable');
+    }
+    const p = policyInEffect(load.policies, {
+      orgType: conn.orgType,
+      alias: conn.alias,
+      orgAliases: this.orgAliasesOf(conn),
+      orgId: conn.orgId,
+      now: Date.now(),
+      hostTimeZone: hostTimeZone(),
+    });
+    if (p.freeze) {
+      this.audit.record('policy.refused', {
+        connectionId: conn.id,
+        tool,
+        outcome: 'refused',
+        detail: {
+          phase: 'start',
+          kind: 'agent_eval',
+          reason: 'freeze',
+          rule: p.freeze.rule,
+          window: p.freeze.window,
+        },
+      });
+      throw new ContrailError(freezeStartRefusalText(conn.alias, p.freeze), 'policy_freeze');
+    }
+  }
+
   // ── deploys ────────────────────────────────────────────────────────────
 
   async validateDeploy(
@@ -618,7 +2015,28 @@ export class DeployEngine {
     // S41 (§3.1): keyed by INPUT, never by connection alone — see
     // validateJobId. The S38 dry/real split is part of the id.
     const jobId = validateJobId(input);
-    const outcome = await this.runJob(`${conn.id}:${jobId}`, () => this.doValidate(conn, input));
+    const jobKey = `${conn.id}:${jobId}`;
+    // S46 (B): the first policy check, before the job — a real validation
+    // that breaks a rule is refused here with no job and no org call, on
+    // every full-arguments call (a re-send that would attach included). A
+    // re-send that would attach to a validation still running is refused
+    // with the 'attach' text: that validation goes on, and the mint checks
+    // it again when it finishes. A dry run is never refused for policy; its
+    // report rides into the job.
+    const running = this.jobs.get(jobKey);
+    const pre = this.policyGate(conn, 'deploy', input.viaTool ?? 'validate_deploy', {
+      destructive: input.destructive.length > 0,
+      testLevel: input.testLevel ?? null,
+      ticket: input.ticket,
+      justification: input.justification,
+      dryRun: input.dryRun === true,
+      phase: running !== undefined && !running.done ? 'attach' : 'propose',
+    });
+    // S46 D2: doValidate is handed the job, so a poll reads the progress it
+    // writes instead of the job's initial 'starting'.
+    const outcome = await this.runJob<ValidateResult>(jobKey, (job) =>
+      this.doValidate(conn, input, job, pre),
+    );
     return { ...outcome, job_id: jobId };
   }
 
@@ -638,6 +2056,23 @@ export class DeployEngine {
     // work thunk is unreachable because the key is present.
     const outcome = await this.runJob(key, () => existing.promise as Promise<ValidateResult>);
     return { ...outcome, job_id: jobId };
+  }
+
+  /** S46 D1: the stamp-query executor handed to deploy/stampprobe.ts at validate AND at execute. */
+  private stampQueryFor(conn: ConnectionRecord): StampQuery {
+    const rest = new RestClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
+    return async (api, soql, signal) => {
+      const init = signal ? { signal } : undefined;
+      const res =
+        api === 'tooling'
+          ? await rest.toolingQueryWithCount<Record<string, unknown>>(
+              soql,
+              STAMP_QUERY_MAX_ROWS,
+              init,
+            )
+          : await rest.queryWithCount<Record<string, unknown>>(soql, STAMP_QUERY_MAX_ROWS, init);
+      return res.records;
+    };
   }
 
   /**
@@ -934,10 +2369,12 @@ export class DeployEngine {
       const image = live.images.get(preImageKey(d.type, d.api_name));
       if (!entry || !image) return;
       entry.pre_image = summarizePreImage(image);
-      // Only when the listing actually enumerated the type: present:null
-      // (unenumerable) never claims absence.
-      if (image.present === false && listingCovers(live, d)) {
-        entry.warnings.push(destructiveAbsentText(at));
+      // Only where a read that covered this member stands behind the absence
+      // (absenceEstablished): present:null (unenumerable) never claims it,
+      // and the line names what was consulted — the listing, or for the four
+      // stamp-query types the retrieve and that query.
+      if (image.present === false && absenceEstablished(live, d)) {
+        entry.warnings.push(destructiveAbsentText(at, stampAbsenceEvidence(image.stamp_source)));
       }
     });
     return { attributions, changedInTarget };
@@ -1170,9 +2607,42 @@ export class DeployEngine {
   }
 
   /**
+   * S46 D3: what the live check knows about one permission-needing
+   * component — true = it found it in the org, false = it found it absent,
+   * null = it cannot place it. A member of the package answers from its own
+   * pre-image. A field authored inline in a CustomObject document has no
+   * pre-image of its own, so it answers from that object's: absent with the
+   * object, else by whether the object's live document holds its block.
+   */
+  private livePresence(
+    live: Extract<PreImageResult, { status: 'ok' }>,
+    type: string,
+    apiName: string,
+  ): boolean | null {
+    const image = live.images.get(preImageKey(type, apiName));
+    if (image) return image.present;
+    if (type === 'CustomField') {
+      const dot = apiName.indexOf('.');
+      const obj =
+        dot > 0 ? live.images.get(preImageKey('CustomObject', apiName.slice(0, dot))) : undefined;
+      if (obj?.present === false) return false;
+      if (obj?.present === true && obj.content !== undefined) {
+        return findChildBlock(obj.content, 'fields', apiName.slice(dot + 1)) !== null;
+      }
+    }
+    return null;
+  }
+
+  /**
    * S45 hook 6: the page-top live-check lines — the UNAVAILABLE banner when
    * the retrieve failed (the only case where "the org was not re-read" is
    * true), else the CHANGED-IN-TARGET summary and the dates-unavailable line.
+   * S46 D1: still ONE dates-unavailable line at most. Every reason a member
+   * has no stamp — a listing that threw or could not enumerate a type, a
+   * failed stamp query, a member a stamp query named but gave no usable
+   * stamp, a member no stamp query names — is a group inside that one
+   * sentence, so the page-top list stays at three lines and a stamp
+   * disclosure never pushes a row warning out of the phone push.
    */
   private liveCheckWarnings(
     conn: ConnectionRecord,
@@ -1203,20 +2673,52 @@ export class DeployEngine {
     const at = hhmm(live.at);
     const out: string[] = [];
     if (changedInTarget > 0) out.push(changedSummaryText(changedInTarget, conn.alias, at));
+    const members = [...input.components, ...input.destructive];
+    const probeFailed = (type: string): boolean => Object.hasOwn(live.probe_failures, type);
+    const groups: string[] = [];
+    const listedTypes = [
+      ...new Set(
+        members.filter((m) => stampSourceFor(m.type) === 'listMetadata').map((m) => m.type),
+      ),
+    ];
     if (live.dates_unavailable !== undefined) {
-      const types = [
-        ...new Set([...input.components, ...input.destructive].map((m) => m.type)),
-      ];
-      out.push(datesUnavailableText(at, types, live.dates_unavailable.slice(0, 160)));
-    } else if (live.dates_unavailable_types.length > 0) {
-      out.push(
-        datesUnavailableText(
-          at,
-          live.dates_unavailable_types,
-          'listMetadata reported INVALID_TYPE',
-        ),
-      );
+      // The LISTING threw: it says nothing about a stamp query, so only the
+      // listing-sourced types are named with its reason.
+      if (listedTypes.length > 0) {
+        groups.push(`${listedTypes.join(', ')} (${live.dates_unavailable.slice(0, 160)})`);
+      }
+    } else {
+      const invalid = live.dates_unavailable_types.filter((t) => !probeFailed(t));
+      if (invalid.length > 0) {
+        groups.push(`${invalid.join(', ')} (listMetadata reported INVALID_TYPE)`);
+      }
     }
+    // One group per distinct failure reason.
+    for (const [reason, types] of groupByReason(live.probe_failures)) {
+      groups.push(`${types.join(', ')} (${stampQueryFailedReason(reason)})`);
+    }
+    // Members of a stamp-query type the org holds (the retrieve returned
+    // them, or their own row came back) that carry no stamp.
+    const undated = members.filter((m) => {
+      const img = live.images.get(preImageKey(m.type, m.api_name));
+      return (
+        img !== undefined &&
+        img.stamp_source !== 'listMetadata' &&
+        img.present === true &&
+        img.last_modified_date === null
+      );
+    });
+    // No query named them (a standard field, a name the grammar cannot
+    // place) — said even when their type's query failed.
+    const notQueried = undated.filter((m) => !isProbeable(m));
+    // A query that succeeded named them: zero rows, two rows, an unparseable
+    // date, or only a same-name row under another namespace.
+    const noStamp = undated.filter((m) => isProbeable(m) && !probeFailed(m.type));
+    if (notQueried.length > 0) {
+      groups.push(`${memberNames(notQueried)} (${STAMP_NOT_QUERIED_REASON})`);
+    }
+    if (noStamp.length > 0) groups.push(`${memberNames(noStamp)} (${STAMP_NO_ROW_REASON})`);
+    if (groups.length > 0) out.push(datesUnavailableText(at, groups));
     return out;
   }
 
@@ -1488,10 +2990,15 @@ export class DeployEngine {
         not_restorable: pre.not_restorable,
         // Requests validated before covered existed carry none.
         covered: pre.covered ?? [],
+        // A package with no pre-image files never refers to "these files":
+        // its README already hedges what it can revert ("if it committed").
         note: unknown
           ? `Contrail lost track of this deploy (${unknown.error.slice(0, 300)}); check Setup → ` +
-            `Deployment Status. If it committed, these files are what the org held when this ` +
-            `package was validated.`
+            `Deployment Status.` +
+            (pre.components.length > 0
+              ? ` If it committed, these files are what the org held when this package was ` +
+                `validated.`
+              : '')
           : 'Pre-images retrieved when this deploy was validated; README.txt says what a ' +
             'revert does and does not undo. Contrail never deploys a revert on its own.',
         ...(unknown
@@ -1566,6 +3073,8 @@ export class DeployEngine {
     conn: ConnectionRecord,
     input: ValidateInput,
     job?: Job<unknown>,
+    /** S46 (B): validateDeploy's policy check — read here for the dry-run report (passed or failed) only. */
+    prePolicy?: PolicyGateResult,
   ): Promise<ValidateResult> {
     const versionNumber = this.config.salesforce.apiVersion.replace(/^v/, '');
 
@@ -1624,8 +3133,6 @@ export class DeployEngine {
       input.destructive,
     );
 
-    const permCoverage = analyzePermissionCoverage(input.components);
-
     // S41: Aura bundles get two LIVE org checks the local snapshot cannot
     // answer — see auraLiveChecks. Mutates the change entries in place.
     let aura: Awaited<ReturnType<DeployEngine['auraLiveChecks']>> = {
@@ -1682,6 +3189,7 @@ export class DeployEngine {
         onProgress: (p) => {
           if (job && awaitingPreImages) job.progress = p;
         },
+        queryStamps: this.stampQueryFor(conn),
       });
     }
     if (job) {
@@ -1746,6 +3254,9 @@ export class DeployEngine {
           test_failures: result.numberTestErrors,
           test_failure_detail: this.gateTestDetail(conn, result),
           note,
+          // S46 (B): a failed dry run reports the policies too — mid-build
+          // dry runs are the ones that fail. Never approvable either way.
+          ...(input.dryRun && prePolicy ? { policy_check: dryRunPolicyCheck(prePolicy) } : {}),
         },
         approval: null,
       };
@@ -1782,9 +3293,13 @@ export class DeployEngine {
         test_failure_detail: this.gateTestDetail(conn, result),
         code_coverage_warnings: result.codeCoverageWarnings.slice(0, 10),
         blast_radius: blast,
-        permission_warning: permCoverage.warning,
+        // S46 D3: a dry run never re-reads the org, so every component is
+        // "not confirmed" — the warning never says the package adds it.
+        permission_warning: analyzePermissionCoverage(input.components).warning,
         expires_at: null,
         live_check: null,
+        // S46 (B): what a real validation would be refused for — reported, not enforced.
+        ...(prePolicy ? { policy_check: dryRunPolicyCheck(prePolicy) } : {}),
       };
       return { summary: drySummary, validation_passed: true, approval: null };
     }
@@ -1799,6 +3314,7 @@ export class DeployEngine {
       at: new Date().toISOString(),
       reason: 'retrieve_failed:not started',
     };
+    const retrieveNote = retrieveMessagesNote(live.retrieve_messages ?? []);
     const liveCheck: LiveCheckSummary = {
       status: live.status,
       ...(live.status === 'unavailable' ? { reason: live.reason } : {}),
@@ -1816,9 +3332,30 @@ export class DeployEngine {
       ...(live.status === 'ok' && live.dates_unavailable !== undefined
         ? { dates_unavailable: live.dates_unavailable }
         : {}),
+      // S46 D1: on EVERY real validation, the unavailable one included — with
+      // no pre-image to carry a stamp_source, this marker is what tells the
+      // execute-time guard the request was validated under the stamp queries.
+      stamp_scheme: STAMP_SCHEME,
+      ...(live.status === 'ok' && Object.keys(live.probe_failures).length > 0
+        ? { probe_failures: live.probe_failures }
+        : {}),
+      ...(live.status === 'ok' && live.probe_unmatched.length > 0
+        ? { probe_unmatched: live.probe_unmatched }
+        : {}),
+      // S46 D1f: what the org's retrieve said, on the result only — never on
+      // the page, where "cannot be found" beside an ADD would read as a verdict.
+      ...(retrieveNote !== undefined ? { retrieve_note: retrieveNote } : {}),
       members: input.components.length + input.destructive.length,
     };
     const review = this.applyLivePreImages(conn, input, changes, destructive, live, aura);
+    // S46 D3: only now is each member's presence known — the warning says
+    // "adds" for what the live check found absent, "already in the org" for
+    // what it found, and neither for what it could not place (every
+    // component, when the live check was unavailable).
+    const permCoverage = analyzePermissionCoverage(
+      input.components,
+      live.status === 'ok' ? (type, name) => this.livePresence(live, type, name) : undefined,
+    );
 
     // S41 (review fix): supersede IMMEDIATELY before inserting the new
     // request — atomically close the old approval as the new one opens.
@@ -1828,6 +3365,19 @@ export class DeployEngine {
     // only here means an org-FAILED validation (which issues no code)
     // leaves the pending approval intact, exactly like a local refusal.
     // Dry runs never reach this line (returned above).
+    // S46 (B): the second policy check — a fresh load, because a validation
+    // can run for minutes and the policies read before it may have changed.
+    // A refusal here throws before anything is swept, superseded or minted,
+    // so a code issued earlier still executes; the job's error starts with
+    // "POLICY " and the tool returns it bare. This check is the one the mint
+    // records.
+    const gate = this.policyGate(conn, 'deploy', input.viaTool ?? 'validate_deploy', {
+      destructive: input.destructive.length > 0,
+      testLevel: input.testLevel ?? null,
+      ticket: input.ticket,
+      justification: input.justification,
+      phase: 'mint',
+    });
     // S45 F4: a new code is about to be issued — sweep stale validations and
     // revert packages first (the sweepBulkResultDirs precedent).
     this.sweepRevertDirs();
@@ -1846,6 +3396,23 @@ export class DeployEngine {
         });
       }
     }
+    const minted = this.mintGovernance(
+      conn,
+      'deploy',
+      gate,
+      { destructive: input.destructive.length > 0, testLevel: input.testLevel ?? null },
+      'page',
+    );
+    // S46 (B): ONE summary object — the insert and the re-persist below both
+    // stringify it, so neither can drop the other's keys. After the page is
+    // presented, summary_json is written by patchDeployRequestSummary only.
+    const summaryObj: Record<string, unknown> = {
+      changes,
+      destructive,
+      blast,
+      live_check: liveCheck,
+      governance: minted.stored,
+    };
     const code = generateConfirmationCode();
     const expiresAt = new Date(Date.now() + this.config.deploy.codeTtlMs).toISOString();
     const request = this.db.insertDeployRequest({
@@ -1854,7 +3421,7 @@ export class DeployEngine {
       confirmationCode: code,
       expiresAt,
       payloadJson: JSON.stringify({ testLevel: input.testLevel, runTests: input.runTests }),
-      summaryJson: JSON.stringify({ changes, destructive, blast, live_check: liveCheck }),
+      summaryJson: JSON.stringify(summaryObj),
       validationId,
     });
     const zipPath = path.join(deploysDir(), `${request.id}.zip`);
@@ -1863,17 +3430,8 @@ export class DeployEngine {
     // S45 hook 7: freeze the pre-image bytes a revert needs — the retrieve
     // already happened, and execute must not re-read the org for them.
     if (live.status === 'ok') {
-      const revert = this.writeRevertFiles(request.id, input, live);
-      this.db.setDeployRequestSummaryJson(
-        request.id,
-        JSON.stringify({
-          changes,
-          destructive,
-          blast,
-          live_check: liveCheck,
-          revert_preimages: revert,
-        }),
-      );
+      summaryObj.revert_preimages = this.writeRevertFiles(request.id, input, live);
+      this.db.setDeployRequestSummaryJson(request.id, JSON.stringify(summaryObj));
     }
 
     const summary: DeployValidationSummary = {
@@ -1894,6 +3452,7 @@ export class DeployEngine {
       permission_warning: permCoverage.warning,
       expires_at: expiresAt,
       live_check: liveCheck,
+      governance: minted.forAgent,
     };
 
     // S45 hook 5: each row's diff — against the live version when the
@@ -1953,12 +3512,8 @@ export class DeployEngine {
         ...this.liveCheckWarnings(conn, input, live, review.changedInTarget),
       ],
     };
-    const approval = await this.approvals.present(
-      renderApprovalPage(view),
-      this.requestStatusCheck(request.id),
-      this.config.deploy.codeTtlMs + 60_000,
-    );
-    const phone = await this.notifyApproval(view, request.id, conn.id, 'page');
+    const approval = await this.presentMinted(conn, request, view, gate, minted);
+    const phone = await this.notifyApproval(view, request.id, conn.id, 'page', minted.frozen);
 
     this.audit.record('deploy.validated', {
       connectionId: conn.id,
@@ -1970,12 +3525,16 @@ export class DeployEngine {
         deletions: input.destructive.length,
         testLevel: input.testLevel,
         ...sourceProvenance(input.components),
+        governance: governanceAuditDetail(minted),
       },
     });
     return {
       summary,
       validation_passed: true,
-      approval: { ...approvalForAgent('deploy', approval), phone_notification: phone },
+      approval: {
+        ...approvalForAgent('deploy', approval, minted.frozen),
+        phone_notification: phone,
+      },
     };
   }
 
@@ -2003,10 +3562,31 @@ export class DeployEngine {
       // claimCode path. Once collected, runJob drops the job, so a later
       // resend gets claimCode's code_unusable replay. A non-null peek means
       // the code matched, so no attempt accounting is skipped.
-      if (peek && peek.status === 'superseded' && this.jobs.has(`deploy-exec:${peek.id}`)) {
-        return this.runDeployExecJob(`deploy-exec:${peek.id}`, peek, async () => ({
-          kind: 'running',
-        }));
+      // S46 (B): only the guard's own verdicts are collected here. A claim
+      // the policies refused left the row 'validated', so a 'superseded' row
+      // with that refusal was replaced by a newer validation since: the
+      // refusal ("the same code works") is no longer true — drop it, and
+      // claimCode says the code is superseded.
+      if (peek && peek.status === 'superseded') {
+        const voidedKey = `deploy-exec:${peek.id}`;
+        this.dropPolicyRefusedExecJob(voidedKey);
+        if (this.jobs.has(voidedKey)) {
+          return this.runDeployExecJob(voidedKey, peek, async () => ({ kind: 'running' }));
+        }
+      }
+      // S46 (C): the deploy committed and its row is stored 'executed' (with
+      // snapshot.status "pending") while its job is still re-reading the
+      // deployed components into the snapshot. Re-attach to that job, so the
+      // poll collects the final result rather than the pending row. A
+      // finished job, or none (another process, a restart), falls through to
+      // claimCode's terminal replay of the stored — by then amended — row.
+      // Never reaches claimCode, so it counts no attempt and replays nothing.
+      if (peek && peek.status === 'executed') {
+        const execKey = `deploy-exec:${peek.id}`;
+        const running = this.jobs.get(execKey);
+        if (running && !running.done) {
+          return this.runDeployExecJob(execKey, peek, async () => ({ kind: 'running' }));
+        }
       }
       // Resolve the code synchronously (better-sqlite3), before any await, so
       // the atomic claim and job creation cannot interleave with a second call.
@@ -2036,7 +3616,19 @@ export class DeployEngine {
     // two concurrent calls with the same code attach to one job through
     // runJob's key semantics (the second never re-reads or re-claims).
     const request = peek;
-    return this.runDeployExecJob(`deploy-exec:${request.id}`, request, async (job) => {
+    // S46 (B): the policies first, on every such call (a poll that would
+    // attach to the running job included) — before the job, so a frozen or
+    // blocked request costs no org read and cannot be voided by the target
+    // guard. It counts no attempt and voids nothing: the code stays usable.
+    this.assertPolicyAtExecute(conn, request, 'execute_deploy');
+    // A finished job whose claim was refused for policy (a freeze that began
+    // during the guard's org read, say) is stale once the check above has
+    // passed — the human has since recorded a reason, or the policies
+    // changed: drop it, so this call starts the job afresh instead of
+    // handing back a refusal that is no longer true.
+    const execKey = `deploy-exec:${request.id}`;
+    this.dropPolicyRefusedExecJob(execKey);
+    return this.runDeployExecJob(execKey, request, async (job) => {
       job.progress = 're-checking the target org before claiming the code';
       const guard = await this.preflightTargetMoved(conn, 'deploy', request, 'execute_deploy', {
         deadlineMs: TARGET_CHECK_DEADLINE_MS,
@@ -2063,6 +3655,22 @@ export class DeployEngine {
         result: await this.doExecute(conn, claim.request, job, targetCheck),
       };
     });
+  }
+
+  /**
+   * S46 (B): forget a FINISHED deploy-exec job whose claim was refused for
+   * policy (POLICY_REFUSAL_CODES). Its refusal describes a moment that has
+   * passed; the caller decides afresh instead of handing it back.
+   */
+  private dropPolicyRefusedExecJob(execKey: string): void {
+    const prior = this.jobs.get(execKey) as Job<DeployExecStep> | undefined;
+    if (
+      prior?.done &&
+      prior.result?.kind === 'refused' &&
+      POLICY_REFUSAL_CODES.has(prior.result.error.code)
+    ) {
+      this.jobs.delete(execKey);
+    }
   }
 
   /**
@@ -2247,29 +3855,169 @@ export class DeployEngine {
         status: result.status,
       },
     });
+    // S46 (C): the re-baseline of a successful deploy, on an engine a host
+    // wired (a bare DeployEngine keeps the legacy note and no snapshot key).
+    // The stored result says "pending" (or "disabled") first; the hook runs
+    // only after finishExecution — so the execution observer still reads the
+    // pre-deploy snapshot — and then amends the stored row.
+    const rebaseline =
+      result.success && this.rebaseliner
+        ? {
+            members: snapshotMembersOf([summary.changes, summary.destructive]),
+            deleted: snapshotMembersOf([summary.destructive]),
+            enabled: this.config.snapshot.rebaselineAfterDeploy,
+          }
+        : null;
     if (result.success) {
       // S45 F4: finalize the revert package immediately before the request
       // is marked executed — inline, not via the (desktop-only, best-effort)
       // ExecutionObserver.
       Object.assign(payload, this.finalizeRevert(conn, request, summary, { targetCheck }));
+      if (rebaseline) {
+        Object.assign(
+          payload,
+          executeSnapshotResult(
+            rebaseline.enabled ? { status: 'pending' } : { status: 'disabled' },
+            rebaseline.members,
+            this.config.snapshot.rebaselineTimeoutMs,
+          ),
+        );
+      }
     } else {
       // The org rolled back (rollbackOnError is pinned true): nothing
       // committed, nothing to revert.
       this.removeRevertDir(request.id);
     }
-    return this.finishExecution(
+    const finished = this.finishExecution(
       conn,
       request,
       result.success ? 'executed' : 'execution_failed',
       payload,
     );
+    if (rebaseline?.enabled) {
+      await this.rebaselineAfterExecute(
+        conn,
+        request,
+        rebaseline.members,
+        rebaseline.deleted,
+        finished,
+        job,
+      );
+    }
+    return finished;
   }
 
-  /** Status probe for the approval page: active only while the code is still executable. */
-  private requestStatusCheck(requestId: string): () => { active: boolean; status: string } {
+  /**
+   * S46 (C): re-read a successful deploy's components into the local
+   * snapshot. Runs strictly after finishExecution: the row is stored
+   * 'executed' with snapshot.status "pending", the execution observer has
+   * read the pre-deploy snapshot, the payload is unlinked. The job's
+   * progress stays REBASELINE_PROGRESS for the whole hook (the tool keys its
+   * message on it, and a poll re-attaches while it runs). The connection and
+   * its metadata_read grant are re-read here — the member run checks them
+   * once more at its commit point. The outcome is merged into `payload` (the
+   * result this call returns) and amended onto the stored row; an outcome
+   * that did not run is audited. Never throws: the deploy has committed
+   * whatever happens here, and the result says what the snapshot holds.
+   */
+  private async rebaselineAfterExecute(
+    conn: ConnectionRecord,
+    request: DeployRequestRecord,
+    members: SnapshotMember[],
+    deleted: SnapshotMember[],
+    payload: Record<string, unknown>,
+    job?: Job<unknown>,
+  ): Promise<void> {
+    const rebaseliner = this.rebaseliner;
+    if (!rebaseliner) return;
+    const timeoutMs = this.config.snapshot.rebaselineTimeoutMs;
+    if (job) job.progress = REBASELINE_PROGRESS;
+    let outcome: RebaselineOutcome;
+    let called = false;
+    try {
+      const live = this.db.getConnection(conn.id);
+      if (!live) {
+        outcome = { status: 'unavailable', reason: 'connection_removed' };
+      } else if (!live.grants.metadata_read) {
+        outcome = { status: 'unavailable', reason: 'no_metadata_read' };
+      } else {
+        called = true;
+        outcome = await rebaseliner({
+          conn: live,
+          requestId: request.id,
+          members,
+          deleted,
+          timeoutMs,
+        });
+      }
+    } catch (err) {
+      const detail = (err instanceof Error ? err.message : String(err)).slice(0, 200);
+      // The member re-read never throws; if the injected one rejected all the
+      // same, Contrail cannot know whether it wrote anything — never
+      // `failed`, whose text says nothing was updated. Before the call,
+      // nothing was written.
+      outcome = called
+        ? { status: 'unavailable', reason: 'failed_after_write', detail }
+        : { status: 'unavailable', reason: 'failed', detail };
+    }
+    try {
+      Object.assign(payload, executeSnapshotResult(outcome, members, timeoutMs));
+      if (!this.db.amendDeployRequestResult(request.id, JSON.stringify(payload))) {
+        log('warn', 'the re-baseline outcome was not stored: the request is no longer executed', {
+          requestId: request.id,
+        });
+      }
+    } catch (err) {
+      // The returned result is still the true one; the stored row keeps
+      // "pending", which says the re-read had not finished when it was stored.
+      log('warn', 'the re-baseline outcome could not be stored', {
+        requestId: request.id,
+        err: err instanceof Error ? err.name : typeof err,
+      });
+    }
+    if (outcome.status === 'unavailable') {
+      this.audit.record('deploy.snapshot_rebaseline_unavailable', {
+        connectionId: conn.id,
+        tool: 'execute_deploy',
+        outcome: 'error',
+        detail: {
+          requestId: request.id,
+          reason: outcome.reason,
+          ...(outcome.detail !== undefined ? { detail: outcome.detail } : {}),
+        },
+      });
+    }
+  }
+
+  /**
+   * Status probe for the approval page: active only while the code is still
+   * executable — a 'validated' row past its expiry that no sweep has marked
+   * yet reports 'expired'. S46 (B): while the row is pending it also carries
+   * `rev`, the request's policy state as a render would draw it now (liveGate), so
+   * the page reloads within one poll when a freeze begins or ends, a reason
+   * or justification is recorded, or the policies change. `conn` is the
+   * connection the page was presented for — the same fallback the render
+   * takes (approvalLive) once disconnect_org has removed the connection row,
+   * so the two never compute the rev against different connections (a page
+   * that would otherwise reload on every poll).
+   */
+  private requestStatusCheck(requestId: string, conn: ConnectionRecord): ApprovalStatusCheck {
     return () => {
-      const status = this.db.getDeployRequestStatus(requestId) ?? 'gone';
-      return { active: status === 'validated', status };
+      const row = this.db.getDeployRequest(requestId);
+      const status = row?.status ?? 'gone';
+      if (!row || status !== 'validated') return { active: false, status };
+      // Past its expiry but not yet swept: already dead to execute.
+      if (!stillPending(row)) return { active: false, status: 'expired' };
+      let rev: string | undefined;
+      try {
+        rev = this.governanceStateOf(row, conn).rev;
+      } catch (err) {
+        // The poll still answers; the page simply does not reload on this one.
+        log('warn', 'approval page state could not be computed', {
+          err: err instanceof Error ? err.name : typeof err,
+        });
+      }
+      return rev === undefined ? { active: true, status } : { active: true, status, rev };
     };
   }
 
@@ -2290,7 +4038,22 @@ export class DeployEngine {
 
   // ── dml ────────────────────────────────────────────────────────────────
 
-  async proposeDml(conn: ConnectionRecord, input: DmlInput): Promise<Record<string, unknown>> {
+  async proposeDml(
+    conn: ConnectionRecord,
+    input: DmlInput,
+    gov: GovernanceInput = {},
+  ): Promise<Record<string, unknown>> {
+    // S46 (B): the policy check is the first statement — a refusal makes no
+    // org call and supersedes nothing.
+    const deletes = isDmlPlan(input)
+      ? input.steps.some((s) => s.operation === 'delete')
+      : input.operation === 'delete';
+    const gate = this.policyGate(conn, 'dml', 'dml_propose', {
+      destructive: deletes,
+      testLevel: null,
+      ticket: gov.ticket,
+      justification: gov.justification,
+    });
     const superseded = this.db.supersedePendingRequests(conn.id, 'dml');
     if (superseded > 0) {
       this.audit.record('dml.superseded', {
@@ -2304,6 +4067,13 @@ export class DeployEngine {
       ? await this.buildDmlPlanPreview(rest, input)
       : await this.buildDmlPreview(rest, input);
 
+    const minted = this.mintGovernance(
+      conn,
+      'dml',
+      gate,
+      { destructive: deletes, testLevel: null },
+      'page',
+    );
     const code = generateConfirmationCode();
     const expiresAt = new Date(Date.now() + this.config.deploy.codeTtlMs).toISOString();
     const request = this.db.insertDeployRequest({
@@ -2312,7 +4082,7 @@ export class DeployEngine {
       confirmationCode: code,
       expiresAt,
       payloadJson: JSON.stringify(input),
-      summaryJson: JSON.stringify(preview),
+      summaryJson: JSON.stringify({ ...preview, governance: minted.stored }),
     });
 
     const allRows = preview.rows as Array<{
@@ -2380,12 +4150,8 @@ export class DeployEngine {
           }
         : {}),
     };
-    const approval = await this.approvals.present(
-      renderApprovalPage(view),
-      this.requestStatusCheck(request.id),
-      this.config.deploy.codeTtlMs + 60_000,
-    );
-    const phone = await this.notifyApproval(view, request.id, conn.id, 'page');
+    const approval = await this.presentMinted(conn, request, view, gate, minted);
+    const phone = await this.notifyApproval(view, request.id, conn.id, 'page', minted.frozen);
 
     this.audit.record('dml.proposed', {
       connectionId: conn.id,
@@ -2397,12 +4163,14 @@ export class DeployEngine {
             steps: input.steps.length,
             operations: summarizeOps(input.steps),
             all_or_none: input.all_or_none,
+            governance: governanceAuditDetail(minted),
           }
         : {
             requestId: request.id,
             operation: input.operation,
             object: input.object,
             rows: preview.row_count,
+            governance: governanceAuditDetail(minted),
           },
     });
     // S45 F2: the pre-check's before-values, found ids and verdict are the
@@ -2415,7 +4183,11 @@ export class DeployEngine {
       request_id: request.id,
       ...shown,
       expires_at: expiresAt,
-      approval_page: { ...approvalForAgent('dml', approval), phone_notification: phone },
+      governance: minted.forAgent,
+      approval_page: {
+        ...approvalForAgent('dml', approval, minted.frozen),
+        phone_notification: phone,
+      },
     };
   }
 
@@ -2430,6 +4202,9 @@ export class DeployEngine {
       peek.status === 'validated' &&
       new Date(peek.expiresAt).getTime() >= Date.now()
     ) {
+      // S46 (B): the policies before the guard — a frozen or blocked request
+      // costs no org read and is never voided; no attempt is counted.
+      this.assertPolicyAtExecute(conn, peek, 'dml_execute');
       const guard = await this.preflightTargetMoved(conn, 'dml', peek, 'dml_execute', {
         deadlineMs: TARGET_CHECK_DEADLINE_MS,
       });
@@ -2697,7 +4472,28 @@ export class DeployEngine {
    * page carries the script verbatim plus the sharpest warning in the product,
    * and a compile error at execute spends the code exactly like a failed DML.
    */
-  async proposeApex(conn: ConnectionRecord, script: string): Promise<Record<string, unknown>> {
+  async proposeApex(
+    conn: ConnectionRecord,
+    script: string,
+    gov: GovernanceInput = {},
+  ): Promise<Record<string, unknown>> {
+    // S46 (B): the policy check is the first statement — a refusal makes no
+    // org call and supersedes nothing.
+    const gate = this.policyGate(conn, 'apex', 'apex_propose', {
+      destructive: false,
+      testLevel: null,
+      ticket: gov.ticket,
+      justification: gov.justification,
+    });
+    // A data-deletes rule covers dml_propose and bulk_load_propose only:
+    // when it applies and anonymous Apex is allowed, the page says Contrail
+    // does not inspect the script for deletes.
+    const deletesRule =
+      gate.verdict.requirements.denyDataDeletes && !gate.verdict.requirements.denyAnonymousApex
+        ? gate.policies.rules.find(
+            (r) => r.denyDataDeletes === true && gate.verdict.rules.includes(r.name),
+          )?.name
+        : undefined;
     const superseded = this.db.supersedePendingRequests(conn.id, 'apex');
     if (superseded > 0) {
       this.audit.record('apex.superseded', {
@@ -2707,6 +4503,13 @@ export class DeployEngine {
       });
     }
     const lines = script.split(/\r?\n/).length;
+    const minted = this.mintGovernance(
+      conn,
+      'apex',
+      gate,
+      { destructive: false, testLevel: null },
+      'page',
+    );
     const code = generateConfirmationCode();
     const expiresAt = new Date(Date.now() + this.config.deploy.codeTtlMs).toISOString();
     const request = this.db.insertDeployRequest({
@@ -2715,7 +4518,7 @@ export class DeployEngine {
       confirmationCode: code,
       expiresAt,
       payloadJson: JSON.stringify({ apex: true, code: script }),
-      summaryJson: JSON.stringify({ lines, chars: script.length }),
+      summaryJson: JSON.stringify({ lines, chars: script.length, governance: minted.stored }),
     });
 
     const apexObjects = this.apexScriptObjects(conn, script);
@@ -2757,19 +4560,21 @@ export class DeployEngine {
         'ANONYMOUS APEX — this script runs with YOUR permissions and can read or write ' +
           'anything your user can. DML it performs COMMITS on success (nothing rolls back ' +
           'unless the script throws). Read every line below before approving.',
+        ...(deletesRule !== undefined ? [apexDeletesNote(deletesRule)] : []),
       ],
     };
-    const approval = await this.approvals.present(
-      renderApprovalPage(view),
-      this.requestStatusCheck(request.id),
-      this.config.deploy.codeTtlMs + 60_000,
-    );
-    const phone = await this.notifyApproval(view, request.id, conn.id, 'page');
+    const approval = await this.presentMinted(conn, request, view, gate, minted);
+    const phone = await this.notifyApproval(view, request.id, conn.id, 'page', minted.frozen);
 
     this.audit.record('apex.proposed', {
       connectionId: conn.id,
       tool: 'apex_propose',
-      detail: { requestId: request.id, lines, chars: script.length },
+      detail: {
+        requestId: request.id,
+        lines,
+        chars: script.length,
+        governance: governanceAuditDetail(minted),
+      },
     });
     return {
       connection: conn.alias,
@@ -2778,7 +4583,11 @@ export class DeployEngine {
       lines,
       chars: script.length,
       expires_at: expiresAt,
-      approval_page: { ...approvalForAgent('apex', approval), phone_notification: phone },
+      governance: minted.forAgent,
+      approval_page: {
+        ...approvalForAgent('apex', approval, minted.frozen),
+        phone_notification: phone,
+      },
     };
   }
 
@@ -2946,7 +4755,16 @@ export class DeployEngine {
   async proposeActivation(
     conn: ConnectionRecord,
     input: { agent: string; version: string; status: 'Active' | 'Inactive' },
+    gov: GovernanceInput = {},
   ): Promise<Record<string, unknown>> {
+    // S46 (B): the policy check is the first statement, ahead of the
+    // BotVersion query — a refusal makes no org call and supersedes nothing.
+    const gate = this.policyGate(conn, 'activation', 'agent_activation_propose', {
+      destructive: false,
+      testLevel: null,
+      ticket: gov.ticket,
+      justification: gov.justification,
+    });
     const rest = new RestClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
     const esc = (s: string) => s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     const rows = await rest.query<{
@@ -2994,6 +4812,13 @@ export class DeployEngine {
         detail: { count: superseded },
       });
     }
+    const minted = this.mintGovernance(
+      conn,
+      'activation',
+      gate,
+      { destructive: false, testLevel: null },
+      'page',
+    );
     const code = generateConfirmationCode();
     const expiresAt = new Date(Date.now() + this.config.deploy.codeTtlMs).toISOString();
     const verb = input.status === 'Active' ? 'ACTIVATE' : 'DEACTIVATE';
@@ -3012,7 +4837,7 @@ export class DeployEngine {
         from_status: version.Status,
         to_status: input.status,
       }),
-      summaryJson: JSON.stringify({ rows: [{ label, warnings: [] }] }),
+      summaryJson: JSON.stringify({ rows: [{ label, warnings: [] }], governance: minted.stored }),
     });
 
     const view: ApprovalPageOptions = {
@@ -3050,12 +4875,8 @@ export class DeployEngine {
           'deploy: there is no draft in between.',
       ],
     };
-    const approval = await this.approvals.present(
-      renderApprovalPage(view),
-      this.requestStatusCheck(request.id),
-      this.config.deploy.codeTtlMs + 60_000,
-    );
-    const phone = await this.notifyApproval(view, request.id, conn.id, 'page');
+    const approval = await this.presentMinted(conn, request, view, gate, minted);
+    const phone = await this.notifyApproval(view, request.id, conn.id, 'page', minted.frozen);
 
     this.audit.record('activation.proposed', {
       connectionId: conn.id,
@@ -3066,6 +4887,7 @@ export class DeployEngine {
         version: input.version,
         from: version.Status,
         to: input.status,
+        governance: governanceAuditDetail(minted),
       },
     });
     return {
@@ -3079,7 +4901,11 @@ export class DeployEngine {
       requested_status: input.status,
       proposed: true,
       expires_at: expiresAt,
-      approval_page: { ...approvalForAgent('activation', approval), phone_notification: phone },
+      governance: minted.forAgent,
+      approval_page: {
+        ...approvalForAgent('activation', approval, minted.frozen),
+        phone_notification: phone,
+      },
     };
   }
 
@@ -3093,6 +4919,9 @@ export class DeployEngine {
       peek.status === 'validated' &&
       new Date(peek.expiresAt).getTime() >= Date.now()
     ) {
+      // S46 (B): the policies before the guard — a frozen or blocked request
+      // costs no org read and is never voided; no attempt is counted.
+      this.assertPolicyAtExecute(conn, peek, 'agent_activation_execute');
       const guard = await this.preflightTargetMoved(
         conn,
         'activation',
@@ -3272,6 +5101,7 @@ export class DeployEngine {
   async proposeBulkLoad(
     conn: ConnectionRecord,
     input: BulkLoadInput,
+    gov: GovernanceInput = {},
   ): Promise<Record<string, unknown>> {
     const maxSteps = this.config.bulkLoad.maxFilesPerPlan;
     if (input.steps.length === 0) {
@@ -3310,6 +5140,16 @@ export class DeployEngine {
         throw new ContrailError(`${where}: invalid external_id_field`, 'bad_bulk_plan');
       }
     }
+
+    // S46 (B): the policy check, after the plan's grammar and before the
+    // sweep and the supersede — a refusal makes no org call and leaves any
+    // pending bulk approval in place.
+    const gate = this.policyGate(conn, 'bulk', 'bulk_load_propose', {
+      destructive: input.steps.some((s) => s.operation === 'delete'),
+      testLevel: null,
+      ticket: gov.ticket,
+      justification: gov.justification,
+    });
 
     // S40: retention sweep. Results directories survive execution so the
     // human can open failed/success exports afterward — but not forever.
@@ -3463,6 +5303,13 @@ export class DeployEngine {
       stop_on_failure: input.stopOnFailure,
       rows,
     };
+    const minted = this.mintGovernance(
+      conn,
+      'bulk',
+      gate,
+      { destructive: manifest.steps.some((s) => s.operation === 'delete'), testLevel: null },
+      'page',
+    );
     let request: DeployRequestRecord;
     try {
       request = this.db.insertDeployRequest({
@@ -3471,7 +5318,7 @@ export class DeployEngine {
         confirmationCode: code,
         expiresAt,
         payloadJson: JSON.stringify(manifest),
-        summaryJson: JSON.stringify(preview),
+        summaryJson: JSON.stringify({ ...preview, governance: minted.stored }),
       });
       const payloadDir = path.join(deploysDir(), request.id);
       fs.renameSync(stageDir, payloadDir);
@@ -3525,12 +5372,8 @@ export class DeployEngine {
           'completed steps remain in the org even if a later step fails.',
       ],
     };
-    const approval = await this.approvals.present(
-      renderApprovalPage(view),
-      this.requestStatusCheck(request.id),
-      this.config.deploy.codeTtlMs + 60_000,
-    );
-    const phone = await this.notifyApproval(view, request.id, conn.id, 'page');
+    const approval = await this.presentMinted(conn, request, view, gate, minted);
+    const phone = await this.notifyApproval(view, request.id, conn.id, 'page', minted.frozen);
 
     this.audit.record('bulk.proposed', {
       connectionId: conn.id,
@@ -3541,6 +5384,7 @@ export class DeployEngine {
         operations: summarizeOps(manifest.steps),
         totalRows,
         stopOnFailure: input.stopOnFailure,
+        governance: governanceAuditDetail(minted),
       },
     });
     return {
@@ -3560,7 +5404,11 @@ export class DeployEngine {
       total_rows: totalRows,
       stop_on_failure: input.stopOnFailure,
       expires_at: expiresAt,
-      approval_page: { ...approvalForAgent('bulk', approval), phone_notification: phone },
+      governance: minted.forAgent,
+      approval_page: {
+        ...approvalForAgent('bulk', approval, minted.frozen),
+        phone_notification: phone,
+      },
     };
   }
 
@@ -3889,7 +5737,7 @@ export class DeployEngine {
     try {
       probe = await withDeadline(opts.deadlineMs, (signal) =>
         kind === 'deploy'
-          ? this.probeDeployTarget(conn, request)
+          ? this.probeDeployTarget(conn, request, signal)
           : kind === 'dml'
             ? this.probeDmlTarget(conn, request, signal)
             : this.probeActivationTarget(conn, request, signal),
@@ -3951,20 +5799,43 @@ export class DeployEngine {
   }
 
   /**
-   * S45 F2, deploy: re-list every member with the SAME listMetadataDetailed /
-   * listMetadataQueries calls the validate-time live check made (children by
-   * their own type, foldered members scoped to their folder), so baseline and
-   * probe share one source, and compare stamps as epoch ms. A member whose
-   * type cannot be enumerated (at validate or now), or whose frozen stamp is
-   * missing, is reported `unchecked` — NEVER a void. With no live baseline
-   * (the retrieve was unavailable at validate) the ORG clock anchors the
-   * check: a stamp at or after the checkOnly DeployResult's createdDate
-   * minus 5 s counts as moved (fail-closed in that margin); no org clock →
-   * every member unchecked — never a host-clock comparison.
+   * S45 F2, deploy: re-read every member's last-modified stamp from the
+   * source its frozen pre-image names, so baseline and probe share one
+   * source, and compare stamps as epoch ms. A listing-sourced member is
+   * re-listed with the SAME listMetadataDetailed / listMetadataQueries calls
+   * the validate-time live check made (foldered members scoped to their
+   * folder). S46 D1: a CustomField, ValidationRule, CustomLabel or ListView
+   * whose pre-image names a stamp query is re-read by that query — the same
+   * readMemberStamps (deploy/stampprobe.ts) validate called, naming only the
+   * package's own members. A request with no pre-image (the live check was
+   * unavailable) follows live_check.stamp_scheme; one with neither marker was
+   * validated by 0.39 and is re-listed for every type, those four included.
+   *
+   * A member whose type cannot be enumerated (at validate or now), whose
+   * frozen stamp is missing, whose stamp query fails now, or that no stamp
+   * query can name is reported `unchecked` — NEVER a void. So is a member
+   * with no row of its own whose name a stamp query returned — now, or at
+   * validate — under a namespace the package did not name: never gone,
+   * created or checked on that query's word. A SOAP fault still throws out
+   * of the probe (the whole check is unavailable); a failed stamp query does
+   * not. With no live baseline (the retrieve was unavailable at validate) the
+   * ORG clock anchors the check: a stamp at or after the checkOnly
+   * DeployResult's createdDate minus 5 s counts as moved (fail-closed in that
+   * margin); no org clock → every member unchecked — never a host-clock
+   * comparison.
+   *
+   * S46 D4: a `checked` entry carries `absent: true` when the execute-time
+   * read returned nothing for a member the approval assumed absent — the
+   * validate-time check found it absent, or, with no live baseline (where
+   * nothing read the org at validate), the package proposes it as an add.
+   * For a stamp-query member that is "the query returned no row carrying its
+   * name": what Contrail read, not proof of what the org holds — where the
+   * query cannot see a member, one created after validate is not detected.
    */
   private async probeDeployTarget(
     conn: ConnectionRecord,
     request: DeployRequestRecord,
+    signal: AbortSignal,
   ): Promise<TargetProbe> {
     const summary = JSON.parse(request.summaryJson) as {
       changes?: ComponentChange[];
@@ -3980,29 +5851,55 @@ export class DeployEngine {
       seen.add(key);
       members.push(m);
     }
-    const checked: RevertPlanMember[] = [];
+    const checked: RevertCheckedMember[] = [];
     const unchecked: RevertPlanReason[] = [];
     const moved: DeployMovedMember[] = [];
     const uncheck = (m: ComponentChange, reason: string) =>
       unchecked.push({ type: m.type, api_name: m.api_name, reason });
-    const toProbe: ComponentChange[] = [];
+    // S46 D1: a member's stamp is re-read from the source recorded at
+    // validate — on its pre-image, or (no pre-image) by stamp_scheme.
+    const scheme2 = live?.stamp_scheme === STAMP_SCHEME;
+    const sourceOf = (m: ComponentChange): StampSource =>
+      m.pre_image?.stamp_source ?? (scheme2 ? stampSourceFor(m.type) : 'listMetadata');
+    const viaListing: ComponentChange[] = [];
+    const viaQuery: ComponentChange[] = [];
+    const route = (m: ComponentChange): void => {
+      const src = sourceOf(m);
+      if (src === 'listMetadata') {
+        if (preImageListQueryFor(m) === null) uncheck(m, 'type_not_enumerable');
+        else viaListing.push(m);
+      } else if (stampSourceFor(m.type) !== src) uncheck(m, UNCHECKED_STAMP_SOURCE_MISMATCH);
+      else if (!isProbeable(m)) uncheck(m, UNCHECKED_STAMP_NOT_PROBEABLE);
+      else viaQuery.push(m);
+    };
     let threshold: number | null = null;
     let degrade: { org_clock_created_date: string; live_check_reason: string } | undefined;
     let note: string | undefined;
 
     if (live?.status === 'ok') {
-      // Absence is a fact only where the validate-time listing covered the type.
-      const datesCovered = (type: string) =>
-        live.dates_unavailable === undefined && !live.dates_unavailable_types.includes(type);
+      // Absence is a fact only where the validate-time read covered the type:
+      // the listing enumerated it, or — a stamp-query member — its type's
+      // query answered (a listing that threw says nothing about a stamp query).
+      const datesCovered = (m: ComponentChange): boolean =>
+        sourceOf(m) === 'listMetadata'
+          ? live.dates_unavailable === undefined && !live.dates_unavailable_types.includes(m.type)
+          : !live.dates_unavailable_types.includes(m.type);
       for (const m of members) {
         const pre = m.pre_image;
-        if (!pre || pre.present === null) uncheck(m, 'type_not_enumerable');
-        else if (pre.present === true && Number.isNaN(Date.parse(pre.last_modified_date ?? ''))) {
+        // present: null on a stamp-query type means no read could place the
+        // name (e.g. a destructive '.X__c'); the type itself is enumerable.
+        if (!pre || pre.present === null) {
+          uncheck(
+            m,
+            pre?.stamp_source !== undefined && pre.stamp_source !== 'listMetadata'
+              ? UNCHECKED_STAMP_NOT_PROBEABLE
+              : 'type_not_enumerable',
+          );
+        } else if (pre.present === true && Number.isNaN(Date.parse(pre.last_modified_date ?? ''))) {
           uncheck(m, 'dates_unavailable_at_validate');
-        } else if (pre.present === false && !datesCovered(m.type)) {
+        } else if (pre.present === false && !datesCovered(m)) {
           uncheck(m, 'dates_unavailable_at_validate');
-        } else if (preImageListQueryFor(m) === null) uncheck(m, 'type_not_enumerable');
-        else toProbe.push(m);
+        } else route(m);
       }
     } else {
       const created = live?.org_clock?.created_date;
@@ -4018,49 +5915,104 @@ export class DeployEngine {
       } else {
         threshold = createdMs - ORG_CLOCK_MARGIN_MS;
         degrade = { org_clock_created_date: created, live_check_reason: liveReason };
-        for (const m of members) {
-          if (preImageListQueryFor(m) === null) uncheck(m, 'type_not_enumerable');
-          else toProbe.push(m);
-        }
+        for (const m of members) route(m);
       }
     }
 
     let checkedAt = new Date().toISOString();
-    if (toProbe.length > 0) {
+    if (viaListing.length > 0 || viaQuery.length > 0) {
       const soap = new MetadataSoapClient(this.tokenMgr, conn, this.config.salesforce.apiVersion);
-      const { types, folderQueries } = buildPreImageListQueries(toProbe);
+      const { types, folderQueries } = buildPreImageListQueries(viaListing);
       const none = { props: [] as FileProperties[], unsupportedTypes: [] as string[] };
-      const [flat, foldered] = await Promise.all([
+      const noStamps: StampProbeResult = {
+        rows: new Map(),
+        failed: new Map(),
+        unprobed: new Map(),
+        unmatched: new Set(),
+      };
+      // A SOAP fault throws out of the probe (the whole check is unavailable);
+      // readMemberStamps never throws — a failed stamp query fails its type.
+      const [flat, foldered, stamps] = await Promise.all([
         types.length > 0 ? soap.listMetadataDetailed(types) : Promise.resolve(none),
         folderQueries.length > 0 ? soap.listMetadataQueries(folderQueries) : Promise.resolve(none),
+        viaQuery.length > 0
+          ? readMemberStamps(this.stampQueryFor(conn), viaQuery, { signal })
+          : Promise.resolve(noStamps),
       ]);
       checkedAt = new Date().toISOString();
       const props = [...flat.props, ...foldered.props];
       const unsupported = new Set([...flat.unsupportedTypes, ...foldered.unsupportedTypes]);
-      for (const m of toProbe) {
-        if (unsupported.has(m.type)) {
-          uncheck(m, 'type_not_enumerable');
+      const listed = new Set(viaListing);
+      const queried = new Set(viaQuery);
+      const unmatchedAtValidate = new Set(
+        live?.status === 'ok' ? (live.probe_unmatched ?? []) : [],
+      );
+      // Package order, whichever source each member is read from.
+      for (const m of members) {
+        const src = sourceOf(m);
+        // The member's stamp as its source reports it now; undefined = the
+        // source returned no row for it.
+        let row: { last_modified_by: string | null; last_modified_date: string | null } | undefined;
+        if (listed.has(m)) {
+          if (unsupported.has(m.type)) {
+            uncheck(m, 'type_not_enumerable');
+            continue;
+          }
+          const prop = listedPropFor(props, m.type, m.api_name);
+          if (prop) {
+            row = {
+              last_modified_by: prop.lastModifiedByName ? prop.lastModifiedByName : null,
+              last_modified_date: prop.lastModifiedDate ? prop.lastModifiedDate : null,
+            };
+          }
+        } else if (queried.has(m)) {
+          const key = stampKey(m.type, m.api_name);
+          if (stamps.failed.has(m.type)) {
+            uncheck(m, UNCHECKED_STAMP_QUERY_FAILED);
+            continue;
+          }
+          // route() admitted only members a query can name; should the probe
+          // ever disagree, "no query named it" must not read as "no row".
+          if (stamps.unprobed.has(key)) {
+            uncheck(m, UNCHECKED_STAMP_NOT_PROBEABLE);
+            continue;
+          }
+          const stamp = stamps.rows.get(key);
+          // No row of its own, but its name came back under a namespace the
+          // package did not name — now, or at validate: the query cannot be
+          // taken at its word for this member. Never gone, created or absent.
+          if (!stamp && (stamps.unmatched.has(key) || unmatchedAtValidate.has(key))) {
+            uncheck(m, UNCHECKED_STAMP_ROW_UNMATCHED);
+            continue;
+          }
+          if (stamp) {
+            row = {
+              last_modified_by: stamp.last_modified_by,
+              last_modified_date: stamp.last_modified_date,
+            };
+          }
+        } else {
+          // Reported unchecked before any read.
           continue;
         }
-        const row = listedPropFor(props, m.type, m.api_name);
-        const stamps = {
-          last_modified_by: row?.lastModifiedByName ? row.lastModifiedByName : null,
-          last_modified_date: row?.lastModifiedDate ? row.lastModifiedDate : null,
-        };
         const name = { type: m.type, api_name: m.api_name };
-        const undated = row !== undefined && Number.isNaN(Date.parse(row.lastModifiedDate));
+        const via = src === 'listMetadata' ? {} : { source: src };
+        const nowMs = Date.parse(row?.last_modified_date ?? '');
+        const undated = row !== undefined && Number.isNaN(nowMs);
         if (threshold !== null) {
           if (!row) {
             // No live baseline says whether the member existed at validate:
             // absence is exactly what an ADD's approval assumed; for anything
             // else Contrail cannot tell whether it vanished before or after
-            // validation — unchecked, never "checked".
-            if (m.change === 'add') checked.push(name);
+            // validation — unchecked, never "checked". The ADD is marked
+            // absent (D4): no stamp was compared, and nothing read the org at
+            // validate — `add` is the local snapshot's classification.
+            if (m.change === 'add') checked.push({ ...name, absent: true });
             else uncheck(m, 'absent_no_baseline');
           } else if (undated) {
             uncheck(m, 'dates_unavailable_at_execute');
-          } else if (Date.parse(row.lastModifiedDate) >= threshold) {
-            moved.push({ ...name, ...stamps, frozen_date: null, state: 'changed' });
+          } else if (nowMs >= threshold) {
+            moved.push({ ...name, ...row, frozen_date: null, state: 'changed', ...via });
           } else {
             checked.push(name);
           }
@@ -4068,24 +6020,35 @@ export class DeployEngine {
         }
         const pre = m.pre_image!;
         if (pre.present === true && !row) {
+          // Reached only with a parseable frozen date (a null one was
+          // unchecked above) — for a stamp-query member that date came from
+          // a row of its own, and the query now returns no row with its name.
           moved.push({
             ...name,
             last_modified_by: null,
             last_modified_date: null,
             frozen_date: pre.last_modified_date,
             state: 'gone',
+            ...via,
           });
         } else if (pre.present === false && row) {
-          moved.push({ ...name, ...stamps, frozen_date: null, state: 'created' });
+          moved.push({ ...name, ...row, frozen_date: null, state: 'created', ...via });
         } else if (undated) {
-          // A listed row with no parseable stamp is no evidence of a change:
+          // A row with no parseable stamp is no evidence of a change:
           // unchecked, never a void.
           uncheck(m, 'dates_unavailable_at_execute');
-        } else if (
-          row &&
-          Date.parse(row.lastModifiedDate) !== Date.parse(pre.last_modified_date ?? '')
-        ) {
-          moved.push({ ...name, ...stamps, frozen_date: pre.last_modified_date, state: 'changed' });
+        } else if (row && nowMs !== Date.parse(pre.last_modified_date ?? '')) {
+          moved.push({
+            ...name,
+            ...row,
+            frozen_date: pre.last_modified_date,
+            state: 'changed',
+            ...via,
+          });
+        } else if (!row) {
+          // Absent at validate, and the execute-time read again returned
+          // nothing (D4): checked, but not a stamp comparison.
+          checked.push({ ...name, absent: true });
         } else {
           checked.push(name);
         }
@@ -4446,6 +6409,9 @@ export class DeployEngine {
           reason: attempt.locked ? 'too_many_attempts' : 'no_matching_code',
           attempts_remaining: attempt.pendingExisted ? attempt.attemptsRemaining : null,
           locked: attempt.locked,
+          // S46 (B): the request the attempt was counted against — its id,
+          // never a code — so lockout attempts join that request's trail.
+          ...(attempt.pendingExisted && attempt.requestId ? { requestId: attempt.requestId } : {}),
         },
       });
       if (attempt.locked) {
@@ -4563,11 +6529,29 @@ export class DeployEngine {
         'code_expired',
       );
     }
+    // S46 (B): the policies once more, here — after the wrong-code accounting,
+    // the status branches and the expiry check, never above them. This covers
+    // apex and bulk (no peek) and a freeze that began during the target
+    // guard's org read. Then the check is recorded with the request before
+    // the claim, and the claim is never attempted unless that record landed,
+    // so every request a 0.40 engine executes carries execute_check. The
+    // caller gets the row re-read after the patch and the claim — never the
+    // record read above, which predates both. Synchronous end to end.
+    const executeCheck = this.assertPolicyAtExecute(conn, request, tool);
+    const recorded = this.db.patchDeployRequestSummary(request.id, (s) => ({
+      ...s,
+      governance: {
+        ...(isPlainObject(s.governance) ? s.governance : { v: 1 }),
+        execute_check: executeCheck,
+      },
+    }));
+    // The row left 'validated' after it was read: another caller has it.
+    if (!recorded) return { kind: 'running', request };
     if (!this.db.claimRequestForExecution(request.id)) {
       // Lost the race — another call claimed it microseconds ago.
       return { kind: 'running', request };
     }
-    return { kind: 'claimed', request };
+    return { kind: 'claimed', request: this.db.getDeployRequest(request.id) ?? request };
   }
 
   /**
@@ -5102,18 +7086,25 @@ function changedInTargetText(at: string, snapshotFrom: string, comparable: boole
 function liveBytesDifferText(at: string, cause: 'no_dates' | 'within_margin'): string {
   return (
     `live bytes differ from your snapshot (retrieved ${at}) — ` +
+    // 'no_dates' fires when EITHER side has no parseable stamp (the org's, or
+    // the snapshot row's), so the sentence never says which one was missing.
     (cause === 'no_dates'
-      ? `last-modified stamps were unavailable for this type, so Contrail cannot say who or when.`
+      ? `a last-modified stamp was missing for this member — the org's or your snapshot's — so ` +
+        `Contrail cannot say who or when.`
       : `this member's last-modified stamp is within a minute of when your snapshot was taken, ` +
         `too close to tell apart from clock differences between this computer and the org, so ` +
         `Contrail cannot say who or when.`)
   );
 }
 
-function destructiveAbsentText(at: string): string {
+/**
+ * `evidence` names what Contrail consulted (stampAbsenceEvidence): the
+ * listing, or — for a stamp-query type — the retrieve and that query.
+ */
+function destructiveAbsentText(at: string, evidence: string): string {
   return (
-    `not present in the target (retrieved ${at}) — listMetadata reports no such member; the ` +
-    `org decides whether this delete fails or no-ops`
+    `not present in the target (retrieved ${at}) — ${evidence}; the org decides whether this ` +
+    `delete fails or no-ops`
   );
 }
 
@@ -5134,11 +7125,35 @@ function liveUnavailableText(reason: string, snapshotFrom: string | null): strin
   );
 }
 
-function datesUnavailableText(at: string, types: string[], reason: string): string {
+/**
+ * The ONE dates-unavailable line. Each group is `${types or member names}
+ * (${reason})` — built in liveCheckWarnings — and they are joined with '; ',
+ * so however many reasons there are the page carries a single sentence.
+ */
+function datesUnavailableText(at: string, groups: string[]): string {
   return (
     `Live diff is against the org (retrieved ${at}); last-modified stamps were unavailable ` +
-    `for ${types.join(', ')} (${reason}), so CHANGED-IN-TARGET detection for those members ` +
+    `for ${groups.join('; ')}, so CHANGED-IN-TARGET detection for those members ` +
     `relies on content only and the execute-time check will report them as unchecked.`
+  );
+}
+
+/** `{type: reason}` → reason → its types, both in first-appearance order. */
+function groupByReason(failures: Record<string, string>): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const [type, reason] of Object.entries(failures)) {
+    const types = out.get(reason);
+    if (types) types.push(type);
+    else out.set(reason, [type]);
+  }
+  return out;
+}
+
+/** The first ten members as `Type api_name`, then how many more there are. */
+function memberNames(members: Array<{ type: string; api_name: string }>): string {
+  const shown = members.slice(0, 10).map((m) => `${m.type} ${m.api_name}`);
+  return (
+    shown.join(', ') + (members.length > shown.length ? ` and ${members.length - 10} more` : '')
   );
 }
 
@@ -5178,11 +7193,27 @@ function isFlowDeactivation(c: ProposedComponent): boolean {
   );
 }
 
-/** Did the validate-time listing enumerate this member's type (so absence is a fact)? */
-function listingCovers(
+/**
+ * Does a validate-time read that covered this member stand behind "absent"?
+ * Asked only about a member whose pre-image says present: false — the
+ * retrieve returned nothing for it. A listing-sourced member: the listing
+ * enumerated its type. A member of a stamp-query type (S46 D1): its type's
+ * query succeeded, a query named it, and no row carrying its name came back
+ * — not even one under a namespace the package did not name
+ * (probe_unmatched). False means the page says nothing about the absence;
+ * it never means the member is there.
+ */
+function absenceEstablished(
   live: Extract<PreImageResult, { status: 'ok' }>,
   member: { type: string; api_name: string },
 ): boolean {
+  if (stampSourceFor(member.type) !== 'listMetadata') {
+    return (
+      !live.dates_unavailable_types.includes(member.type) &&
+      isProbeable(member) &&
+      !live.probe_unmatched.includes(preImageKey(member.type, member.api_name))
+    );
+  }
   return (
     live.dates_unavailable === undefined &&
     !live.dates_unavailable_types.includes(member.type) &&
@@ -5403,24 +7434,136 @@ function assertRealRevertDir(root: string, name: string): void {
  * browser cannot be opened, the URL goes to stderr (a channel the human
  * running the server can read and the model cannot); handing the URL to the
  * agent would let a prompt-injected agent fetch the page and read the code,
- * defeating the whole invariant.
+ * defeating the whole invariant. S46 (B): a request a change freeze held at
+ * mint (`frozen`) shows no code on that page until the human records an
+ * emergency reason there, so its note asks for no code to be read back.
  */
 function approvalForAgent(
   kind: DeployRequestKind,
   approval: { opened: boolean; url: string },
+  frozen: boolean,
 ): Record<string, unknown> {
   if (approval.opened) return { opened: true };
   log(
     'warn',
-    `approval page could not auto-open — open it yourself to read the ${kind} confirmation code`,
+    frozen
+      ? `approval page could not auto-open — open it yourself; a change freeze is in effect, so ` +
+          `it shows the ${kind} confirmation code only after you record an emergency reason there`
+      : `approval page could not auto-open — open it yourself to read the ${kind} confirmation code`,
     { url: approval.url },
   );
   return {
     opened: false,
-    note:
-      'The approval page could not be opened automatically. Its URL was written to the ' +
-      'Contrail server log (stderr) for the human to open — it is deliberately NOT provided ' +
-      'to you. Ask the human to open the Contrail log, visit the page, and read the code back.',
+    note: frozen
+      ? freezePageNotOpenedText()
+      : 'The approval page could not be opened automatically. Its URL was written to the ' +
+        'Contrail server log (stderr) for the human to open — it is deliberately NOT provided ' +
+        'to you. Ask the human to open the Contrail log, visit the page, and read the code back.',
+  };
+}
+
+/** A JSON object column, or {} when it holds anything else (or nothing). */
+function jsonObject(text: string | null): Record<string, unknown> {
+  if (!text) return {};
+  try {
+    const value = JSON.parse(text) as unknown;
+    return isPlainObject(value) ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * S46 (B): a request a human surface may still act on — 'validated', and its
+ * code not yet past expiresAt (the test claimCode applies). An expired row
+ * stays 'validated' until a sweep (expireStaleValidatedRequests) or a claim
+ * marks it, and its approval page outlives the code by a minute.
+ */
+function stillPending(row: DeployRequestRecord): boolean {
+  return row.status === 'validated' && new Date(row.expiresAt).getTime() >= Date.now();
+}
+
+/**
+ * S46 (C): the components of a stored deploy summary's lists (`changes`,
+ * `destructive`) as snapshot members — {type, api_name} only, in order.
+ */
+function snapshotMembersOf(lists: unknown[]): SnapshotMember[] {
+  const out: SnapshotMember[] = [];
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+    for (const entry of list) {
+      if (
+        isPlainObject(entry) &&
+        typeof entry.type === 'string' &&
+        typeof entry.api_name === 'string'
+      ) {
+        out.push({ type: entry.type, api_name: entry.api_name });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * S46 (B): summary_json.governance as read back from a row — null for a
+ * request minted before S46 (or by an older copy). Any key may be missing:
+ * on such a request a later write can start the record (a justification
+ * typed by the human, an override, the execute-time check).
+ */
+function storedGovernanceOf(summary: Record<string, unknown>): Partial<StoredGovernance> | null {
+  const g = summary.governance;
+  return isPlainObject(g) ? (g as Partial<StoredGovernance>) : null;
+}
+
+/**
+ * S46 (B): what a request with no stored record is evaluated with (design B
+ * §4.3): deploy — whether the package deletes components, and its test
+ * level; dml — any delete, flat or plan step; bulk — any delete step.
+ */
+function rowPolicyInputs(
+  request: DeployRequestRecord,
+  summary: Record<string, unknown>,
+): { destructive: boolean; testLevel: PolicyTestLevel | null } {
+  const payload = jsonObject(request.payloadJson);
+  const anyDelete = (steps: unknown) =>
+    Array.isArray(steps) && steps.some((s) => isPlainObject(s) && s.operation === 'delete');
+  if (request.kind === 'deploy') {
+    const level = payload.testLevel;
+    return {
+      destructive: Array.isArray(summary.destructive) && summary.destructive.length > 0,
+      testLevel:
+        typeof level === 'string' && (TEST_LEVEL_ORDER as readonly string[]).includes(level)
+          ? (level as PolicyTestLevel)
+          : null,
+    };
+  }
+  if (request.kind === 'dml') {
+    return {
+      destructive: payload.plan === true ? anyDelete(payload.steps) : payload.operation === 'delete',
+      testLevel: null,
+    };
+  }
+  if (request.kind === 'bulk') return { destructive: anyDelete(payload.steps), testLevel: null };
+  return { destructive: false, testLevel: null };
+}
+
+/**
+ * S46 (B): the `governance` detail of a deploy.validated / *.proposed audit
+ * row. get_audit_log returns audit detail to the agent verbatim, so this is
+ * counts and names only — never the justification's text, never a code.
+ */
+function governanceAuditDetail(minted: MintedGovernance): Record<string, unknown> {
+  const j = minted.stored.justification;
+  return {
+    ticket: minted.stored.ticket,
+    justification_source: j ? j.source : null,
+    justification_chars: j ? j.text.length : 0,
+    rules: minted.stored.policy.rules,
+    frozen: minted.frozen,
   };
 }
 

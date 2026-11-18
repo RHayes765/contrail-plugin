@@ -322,7 +322,10 @@ export class GatedNotifier implements ApprovalNotifier {
     private readonly probe: RemoteControlProbe,
   ) {}
 
-  async notify(view: ApprovalPageOptions, opts: { includeCode: boolean }): Promise<NotifyOutcome> {
+  async notify(
+    view: ApprovalPageOptions,
+    opts: { includeCode: boolean; freeze?: boolean; policyChangedAt?: string },
+  ): Promise<NotifyOutcome> {
     // status() also folds the on-disk section into the live config (S42), so
     // a `when` saved on the other surface applies to this send.
     const status = this.inner.status();

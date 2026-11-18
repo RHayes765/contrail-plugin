@@ -50,9 +50,10 @@ the full document — XML declaration and
 - **Modify = whole-document replace.** An omitted version is a deleted
   version. Always `retrieve_metadata` the current template, edit that
   document, redeploy it whole (§3).
-- **Snapshot note:** GenAiPromptTemplate is **explicit-refresh-only** — after
-  any deploy, `refresh_snapshot` with `types: ["GenAiPromptTemplate"]`; the
-  default sweep won't pick it up.
+- **Snapshot note:** GenAiPromptTemplate is **explicit-refresh-only** — the
+  default sweep won't pick it up. After a deploy, check the result's
+  `snapshot` block; if the template was skipped with `type_not_in_snapshot`,
+  run `refresh_snapshot` with `types: ["GenAiPromptTemplate"]` (§6 step 4).
 
 ## 2. Grammar
 
@@ -240,8 +241,10 @@ user needs it:
    modify, exactly which versions changed. Heed the identifier warning (§3).
    Human reads the confirmation code from the approval page;
    `execute_deploy`; full ritual is salesforce-house-rules §3.
-4. **Refresh + round-trip**: `refresh_snapshot` types
-   `["GenAiPromptTemplate"]`, then `retrieve_metadata` the template and read
+4. **Check the result's `snapshot` block, then round-trip** — the block says
+   whether the deployed template was re-read into the snapshot; if it was
+   skipped with `type_not_in_snapshot`, run `refresh_snapshot` with
+   `types: ["GenAiPromptTemplate"]`. Then `retrieve_metadata` the template and read
    back what the org actually holds — above all **which
    `versionIdentifier` the org minted** for a new version, and that
    `activeVersionIdentifier` points where intended. `diff_artifact` against

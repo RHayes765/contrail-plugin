@@ -350,7 +350,8 @@ beforeEach(async () => {
     ...DEFAULT_CONFIG,
     salesforce: { ...DEFAULT_CONFIG.salesforce },
     oauth: { ...DEFAULT_CONFIG.oauth },
-    snapshot: { ...DEFAULT_CONFIG.snapshot },
+    // S46 (C): these stubs model no post-execute listing or retrieve.
+    snapshot: { ...DEFAULT_CONFIG.snapshot, rebaselineAfterDeploy: false },
     deploy: { ...DEFAULT_CONFIG.deploy, pollIntervalMs: 10, toolWaitMs: 10_000 },
   };
   const deps = createDeps({
@@ -493,6 +494,14 @@ describe('validate_deploy', () => {
     expect(text).not.toContain(code); // THE invariant
     expect(openedUrls).toHaveLength(1);
     expect(text).not.toContain(openedUrls[0]); // opened browser → URL withheld too
+    // S46 D6: the page says what Contrail does with the code, and that anything
+    // which shows the agent the page shows it the code — not that the agent
+    // "cannot see" the page, and not that closing the tab makes nothing happen.
+    const page = presentedPages[0]!;
+    expect(page).toContain('Contrail itself never gives the agent this page or the code');
+    expect(page).toContain('tell it you do not approve');
+    expect(page).not.toContain('The agent cannot see this page');
+    expect(page).not.toContain('nothing happens');
   });
 
   it('withholds test failure detail without diagnostics_read but keeps the counts', async () => {

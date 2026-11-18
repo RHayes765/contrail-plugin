@@ -401,7 +401,9 @@ pair may ship together; if the org still refuses, deploy the template first
    diff against what you sent — the org **normalizes agent XML** (element
    reordering, generated names), so a byte-diff is expected; verify the
    semantic change survived and treat the org's spelling as the new baseline.
-2. **Refresh the snapshot** — agent types are explicit-refresh-only:
+2. **Check the result's `snapshot` block** — it says whether each deployed
+   agent component was re-read into the snapshot; if one was skipped with
+   `type_not_in_snapshot` (agent types are explicit-refresh-only), run
    `refresh_snapshot` with `types: ["Bot", "GenAiPlugin"]` (whatever you
    touched). Needs the v66+ apiVersion; unsupported types degrade per-type
    with a warning rather than failing the refresh — read the warnings.

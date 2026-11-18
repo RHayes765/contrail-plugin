@@ -103,6 +103,8 @@ function seedSnapshot(
 
 beforeEach(async () => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'contrail-diff-'));
+  // createDeps() sweeps renders/ under the data directory: keep that in the sandbox.
+  process.env.CONTRAIL_DATA_DIR = tmp;
   db = new ContrailDb(path.join(tmp, 'test.db'));
   store = new SnapshotStore(path.join(tmp, 'snapshots'));
   connA = seedConnection('acme-uat', '00Da000000000AAA', true);
@@ -153,6 +155,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await client.close();
   db.close();
+  delete process.env.CONTRAIL_DATA_DIR;
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -188,6 +191,88 @@ describe('diff_orgs', () => {
     });
     expect(result.isError).toBe(true);
     expect(textOf(result)).toContain('refresh_snapshot');
+  });
+});
+
+describe('S46: diff_orgs snapshot_taken {oldest, newest}', () => {
+  const SEEDED = '2026-08-06T00:00:00.000Z';
+  const REREAD = '2026-11-17T09:30:00.000Z';
+
+  // A member run (refresh_snapshot members, or the re-baseline after a deploy)
+  // replaces only its own rows, through the same accessor used here: the side
+  // then holds rows of two ages.
+  function rereadApexClass(connId: string): void {
+    db.replaceArtifactRows(
+      connId,
+      [{ type: 'ApexClass', apiName: 'InvoiceService' }],
+      [
+        {
+          connectionId: connId,
+          type: 'ApexClass',
+          apiName: 'InvoiceService',
+          filePath: 'classes/InvoiceService.cls',
+          contentHash: 'apex-same',
+          lastModifiedDate: null,
+          lastModifiedBy: null,
+          retrievedAt: REREAD,
+          content: INVOICE_SERVICE_APEX,
+        },
+      ],
+    );
+  }
+
+  async function diffOrgs(types?: string[]): Promise<Record<string, unknown>> {
+    const result = await client.callTool({
+      name: 'diff_orgs',
+      arguments: {
+        connection_a: 'acme-uat',
+        connection_b: 'acme-prod',
+        ...(types ? { types } : {}),
+      },
+    });
+    expect(result.isError).toBeFalsy();
+    return JSON.parse(textOf(result)) as Record<string, unknown>;
+  }
+
+  it('reports the oldest and the newest retrieval time per side, and says a side is only as fresh as its oldest row', async () => {
+    rereadApexClass(connA);
+    const parsed = await diffOrgs();
+    // The newest row alone would have reported acme-uat as taken "now".
+    expect(parsed.snapshot_taken).toEqual({
+      'acme-uat': { oldest: SEEDED, newest: REREAD },
+      'acme-prod': { oldest: SEEDED, newest: SEEDED },
+    });
+    expect(parsed.note).toBe(
+      'Buckets compare snapshot content hashes. Use diff_artifact for the semantic detail ' +
+        'of any changed artifact. Rows in one snapshot can have different ages (a refresh ' +
+        'of some types, or a re-baseline after a deploy, updates only what it touched) — a ' +
+        'side is only as fresh as its oldest row.',
+    );
+    expect(parsed.note).not.toContain('snapshot timestamps are stale');
+    // The re-read row hashes the same: the buckets are unchanged by its age.
+    expect((parsed.counts_by_type as Record<string, Record<string, number>>).ApexClass).toMatchObject(
+      { identical: 1, changed: 0 },
+    );
+  });
+
+  it('takes both ends over the rows it compared: the type filter applies', async () => {
+    rereadApexClass(connA);
+    expect((await diffOrgs(['CustomObject', 'CustomField'])).snapshot_taken).toEqual({
+      'acme-uat': { oldest: SEEDED, newest: SEEDED },
+      'acme-prod': { oldest: SEEDED, newest: SEEDED },
+    });
+    expect((await diffOrgs(['ApexClass'])).snapshot_taken).toEqual({
+      'acme-uat': { oldest: REREAD, newest: REREAD },
+      'acme-prod': { oldest: SEEDED, newest: SEEDED },
+    });
+  });
+
+  it('reports null for both ends on a side with no row of the filtered types', async () => {
+    // Only acme-uat holds a Flow.
+    expect((await diffOrgs(['Flow'])).snapshot_taken).toEqual({
+      'acme-uat': { oldest: SEEDED, newest: SEEDED },
+      'acme-prod': { oldest: null, newest: null },
+    });
   });
 });
 

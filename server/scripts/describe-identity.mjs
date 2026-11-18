@@ -68,9 +68,10 @@ const TEXT_TUPLES = [
 
   // S45 — the four describe edits (validate_deploy live diff; execute_deploy
   // target check + revert package; dml_execute and agent_activation_execute
-  // target checks).
+  // target checks). S46 Part D rewrote execute_deploy's target-check paragraph
+  // (stamps are re-read, not re-listed), so its start anchor changed.
   ['tools/deploy.ts', 'capabilities/deploy.ts', 'Live diff (real validations only, never dry_run)', 'the restorable bytes become its revert package.'],
-  ['tools/deploy.ts', 'capabilities/deploy.ts', "Target check: before claiming the code, Contrail re-lists the package's members", 'the deploy still runs and target_check says the check did not happen.'],
+  ['tools/deploy.ts', 'capabilities/deploy.ts', 'Target check: before claiming the code, Contrail re-reads the last-modified stamps', 'the deploy still runs and target_check says the check did not happen.'],
   ['tools/deploy.ts', 'capabilities/deploy.ts', "Revert package: on success the result's revert_package", 'a revert is its own validate_deploy.'],
   ['tools/deploy.ts', 'capabilities/deploy.ts', 'Target check: before claiming the code, Contrail re-runs the preview query', 'the write still runs and target_check says the check did not happen.'],
   ['tools/deploy.ts', 'capabilities/deploy.ts', "Target check: before claiming the code, Contrail re-reads the agent version's Status", 'the change still runs and target_check says the check did not happen.'],
@@ -130,16 +131,131 @@ const TEXT_TUPLES = [
   // page's inline script, inside a template literal, so the slice carries
   // that script's own quote-and-plus wrapping — pages.ts is code-identical).
   ['connect/pages.ts', 'connect/pages.ts', 'This code was replaced — by a newer validation', 'target had changed before executing.'],
+
+  // S46 Part B — governance. Tupled here: the ticket and justification
+  // parameters, the validate_deploy Policies paragraph, POLICY_NOTE,
+  // deactivate_flow's test_level, the two in-progress answers;
+  // list_connections' policy sentence and get_audit_log's describes;
+  // export_change_evidence's describe, parameters, refusals and result texts;
+  // the audit query's request-id, event-type and timestamp refusals
+  // (core/db.ts — get_audit_log relays them); and, in deploy/engine.ts,
+  // list_connections' policies_status note and the stderr line for a frozen
+  // request whose approval page did not open. Not tupled: the texts of the
+  // byte-identical core/policy.ts (the policy refusals, freeze notes and
+  // banners) and deploy/evidence.ts (the dossier), which are compared whole.
+  // Hand-mirrored and in no tuple: deploy/engine.ts's own wording for a
+  // policy problem — the path prefixes of an injected config's problem (a
+  // wired engine reads config.json through the code-identical
+  // core/config.ts instead) and the fallback for a policy source that
+  // throws. A tuple pins a constant's text where it is defined: that each
+  // proposing tool still appends POLICY_NOTE and describes ticket and
+  // justification with the two parameter constants is pinned by a test (the
+  // plugin's mcp.test.ts), not here.
+  ['tools/deploy.ts', 'capabilities/deploy.ts', 'The change ticket or reference for this write', 'ask the human for it before proposing.'],
+  ['tools/deploy.ts', 'capabilities/deploy.ts', 'One or two sentences on WHY this change is being made now', 'welcome everywhere else.'],
+  ['tools/deploy.ts', 'capabilities/deploy.ts', "Policies: the human's config.json can set rules", '(policy_check) without refusing.'],
+  ['tools/deploy.ts', 'capabilities/deploy.ts', "Policies in the human's config.json (list_connections reports them)", 'before it can be released.'],
+  ['tools/deploy.ts', 'capabilities/deploy.ts', 'Only when a policy on this connection sets a minimum test level', 'RunSpecifiedTests needs run_tests.'],
+  ['tools/deploy.ts', 'capabilities/deploy.ts', 'Still validating (job', "any code it issues replaces this one's."],
+  ['tools/deploy.ts', 'capabilities/deploy.ts', 'ticket and justification are part of that identity', 'poll with job_id.'],
+  ['tools/register.ts', 'capabilities/connections.ts', 'Also reports, per connection, policy:', 'until the human fixes the file.'],
+  ['tools/register.ts', 'capabilities/connections.ts', 'Query the local audit log: connection lifecycle, OAuth flows, grant and policy refusals', 'writes a per-request dossier from it.'],
+  ['tools/register.ts', 'capabilities/connections.ts', 'Only events that name this request id', 'only events at or before this instant.'],
+  ['tools/evidence.ts', 'capabilities/evidence.ts', 'Write a change-evidence dossier', 'Name at least one of connection, ticket, request_id or since.'],
+  ['tools/evidence.ts', 'capabilities/evidence.ts', 'Name at least one of connection, ticket, request_id or since. An unfiltered dossier', "connection's changes in one folder."],
+  // export_change_evidence's five parameter describes (adjacent literals, in
+  // order: connection, ticket, request_id, since, until).
+  ['tools/evidence.ts', 'capabilities/evidence.ts', 'Connection alias (or id) whose requests to include.', 'request was proposed.ISO 8601 timestamp bounding when the request was proposed.'],
+  // The request_not_found refusal: its frame, then the two fragments its
+  // placeholders take (the connection, and the since/until window).
+  ['tools/evidence.ts', 'capabilities/evidence.ts', 'No request matches request_id "${}"', '${}${}.'],
+  ['tools/evidence.ts', 'capabilities/evidence.ts', ' on "${}"', ' proposed within the given since/until'],
+  ['tools/evidence.ts', 'capabilities/evidence.ts', '${} must be an ISO 8601 timestamp (for example 2026-11-17T09:00:00Z), ', 'got "${}".'],
+  ['tools/evidence.ts', 'capabilities/evidence.ts', 'Nothing matched those filters', 'no dossier was written.'],
+  ['tools/evidence.ts', 'capabilities/evidence.ts', "Change evidence written to the folder below, on the human's machine", 'no record field values.'],
+  ['core/db.ts', 'core/db.ts', 'request id must be the request_id a validate or propose result returned (a UUID), ', 'got "${}"'],
+  ['core/db.ts', 'core/db.ts', 'event type must look like policy.refused, or a prefix ending in a dot such as policy., ', 'got "${}"'],
+  ['core/db.ts', 'core/db.ts', '${} must be an ISO 8601 timestamp (for example 2026-11-17T09:00:00Z), ', 'got "${}".'],
+  ['deploy/engine.ts', 'deploy/engine.ts', 'Every write proposal is refused until the human fixes config.json.', 'Every write proposal is refused until the human fixes config.json.'],
+  ['deploy/engine.ts', 'deploy/engine.ts', 'approval page could not auto-open — open it yourself; a change freeze is in effect', 'only after you record an emergency reason there'],
+
+  // S46 Part C — re-baseline after execute and member-scoped refresh: the
+  // execute_deploy Snapshot paragraph and its in-progress answer;
+  // refresh_snapshot's members describes, poll text, refusal and running
+  // message; diff_orgs' snapshot-age note. The other new strings live in the
+  // byte-identical snapshot/members.ts, except the hand-mirrored ones listed
+  // in the next block.
+  ['tools/deploy.ts', 'capabilities/deploy.ts', 'Snapshot re-baseline: after a successful deploy', 'does not re-query the org-computed dependency data.'],
+  ['tools/deploy.ts', 'capabilities/deploy.ts', 'The deploy has completed in the org; Contrail is still re-reading', 'to collect the result.'],
+  ['tools/metadata.ts', 'capabilities/metadata.ts', 'members re-reads only the named components', 'does not see anything else that changed in the org.'],
+  ['tools/metadata.ts', 'capabilities/metadata.ts', 'Re-read ONLY these components', 'or skipped with the reason.'],
+  ['tools/metadata.ts', 'capabilities/metadata.ts', 'Poll a RUNNING refresh by the job_id', 'attaches to the same job too).'],
+  ['tools/metadata.ts', 'capabilities/metadata.ts', 'Pass members ALONE with connection', 'not with types, check_only or job_id.'],
+  ['tools/metadata.ts', 'capabilities/metadata.ts', 'Member refresh is still running', 'attaches to this same job).'],
+  ['tools/diff.ts', 'capabilities/diff.ts', 'Rows in one snapshot can have different ages', 'only as fresh as its oldest row.'],
+
+  // S46 Part C — the hand-mirrored member-refresh texts: the tool's
+  // invalid-member refusal (its own copy of members.ts's text) and its
+  // complete / failed / re-send messages (tools/metadata.ts); the member
+  // job's errors — the 100-component cap, the retrieve timeout and failure,
+  // the cancellation — and its progress labels (snapshot/engine.ts). Each
+  // tuple holds only the text both engines share. Accepted differences stay
+  // outside it: the desktop's members call also answers 'Member refresh
+  // failed: …' with no job id (a run that never started). Its re-send
+  // sentence sits in its poll's 'gone' branch, not an unknown_job case, and
+  // the scanned text just before that sentence differs — not in its words,
+  // which match, but in the desktop's `${""}` placeholder for the job id
+  // (from `args.job_id ?? ''`) and the plugin's 'members-' literal between
+  // that sentence and the re-send one — so the tuple starts at the re-send
+  // sentence. Neither engine's job_id poll failure is tupled: the plugin's
+  // poll composes 'Member'/'Snapshot' inside a placeholder, so it scans as
+  // '${"members-"|"Member"|"Snapshot"} refresh failed (job ${}): ${}' and can
+  // never equal the desktop's 'Member refresh failed (job ${}): ${}' (whose
+  // poll also answers a type job 'Snapshot refresh failed: …' with no job
+  // id).
+  // A tuple takes the FIRST match of its start anchor, and a short or
+  // placeholder-ended text can match a longer one as a prefix, so some
+  // anchors run into a neighbouring literal (joined with no separator, as
+  // the scan joins them). The members call's failure starts at its switch's
+  // 'complete' and 'failed' case labels: the desktop's job_id poll carries
+  // the same words after 'Snapshot refreshed.failed', and a bare anchor would
+  // fall through to it. Each end anchor runs into the literal after the
+  // pinned text, the same literal in both engines, so text appended to it
+  // fails too: the retrieve timeout and failure and the cancellation end in
+  // their error codes, the progress labels and the other messages in the
+  // next literal. The members call's failure is pinned only from its start:
+  // the literal after it differs between the engines because of the
+  // accepted 'Member refresh failed: …' fallback (the plugin's next literal
+  // is 'in_progress').
+  ['tools/metadata.ts', 'capabilities/metadata.ts', 'invalid member "${}:${}" — expected a metadata type name', 'foldered names "Folder/Name").complete'],
+  ['tools/metadata.ts', 'capabilities/metadata.ts', 'Member refresh complete: ${} refreshed', '${} skipped.Member refresh is still running'],
+  ['tools/metadata.ts', 'capabilities/metadata.ts', 'completefailedMember refresh failed (job ${}): ${}', 'completefailedMember refresh failed (job ${}): ${}'],
+  ['tools/metadata.ts', 'capabilities/metadata.ts', 'Re-send the same members to start a new member refresh.', 'Re-send the same members to start a new member refresh.Re-send types to start a new refresh.'],
+  ['snapshot/engine.ts', 'snapshot/engine.ts', 'a member-scoped refresh takes at most ${} components', '(${} were named)${}:${}'],
+  ['snapshot/engine.ts', 'snapshot/engine.ts', 'retrieve did not complete within ${} s', 'within ${} sretrieve_timeout'],
+  ['snapshot/engine.ts', 'snapshot/engine.ts', 'retrieve failed: ${""}', 'retrieve failed: ${""}retrieve_failed'],
+  ['snapshot/engine.ts', 'snapshot/engine.ts', 'the member refresh was cancelled before it wrote anything', 'the member refresh was cancelled before it wrote anythingcancelled'],
+  ['snapshot/engine.ts', 'snapshot/engine.ts', 'listing members', 'listing memberstype_unsupported'],
+  ['snapshot/engine.ts', 'snapshot/engine.ts', 'retrieving members', 'retrieving membersretrieving memberscancelled'],
+  ['snapshot/engine.ts', 'snapshot/engine.ts', 'writing the snapshot', 'writing the snapshotremove'],
 ];
 
 /**
- * Byte-identical mirror units: the plan's Mirror checklist as of S45 (S46
- * adds its NEW units), plus the twin tests S45 extended. livediff /
+ * Byte-identical mirror units: the plan's Mirror checklist as of S45, plus
+ * the twin tests S45 extended, plus S46 Part D's new unit deploy/stampprobe.ts
+ * and its test, plus S46 Parts B and C's new units core/policy.ts,
+ * deploy/evidence.ts and snapshot/members.ts and their tests. livediff /
  * targetmoved / revert are adapted twins (D7) and are not listed. preimage
  * and automation tests import only modules both engines carry with the same
  * exports — including the hand-mirrored core/paths (stagingDir) and core/db
  * (ContrailDb), as the byte-identical engine/flow/graph-search tests already
- * do; the mirrored SOURCE units import neither.
+ * do; the mirrored SOURCE units import neither. The stampprobe, policy,
+ * evidence and members tests import only mirror units, node built-ins and
+ * fflate (evidence's also types from the code-identical connect/pages).
+ * policy.ts imports node:vm only (the time bound on a ticket pattern's
+ * test); evidence.ts imports node built-ins and types
+ * from core/policy and connect/pages; members.ts imports node:crypto and
+ * mirror units only.
  */
 const BYTE_IDENTICAL = [
   'core/grants.ts',
@@ -149,6 +265,7 @@ const BYTE_IDENTICAL = [
   'core/notify.ts',
   'core/updateCheck.ts',
   'core/agentforceScorers.ts',
+  'core/policy.ts',
   'salesforce/bulk.ts',
   'salesforce/client.ts',
   'salesforce/flowversion.ts',
@@ -162,6 +279,8 @@ const BYTE_IDENTICAL = [
   'deploy/codes.ts',
   'deploy/package.ts',
   'deploy/preimage.ts',
+  'deploy/stampprobe.ts',
+  'deploy/evidence.ts',
   'deps/extract.ts',
   'deps/graph.ts',
   'deps/orgdeps.ts',
@@ -169,7 +288,12 @@ const BYTE_IDENTICAL = [
   'diff/semantic.ts',
   'snapshot/indexer.ts',
   'snapshot/store.ts',
+  'snapshot/members.ts',
   'test/preimage.test.ts',
+  'test/stampprobe.test.ts',
+  'test/policy.test.ts',
+  'test/evidence.test.ts',
+  'test/members.test.ts',
   'test/automation.test.ts',
   'test/soap.test.ts',
   'test/typecoverage.test.ts',

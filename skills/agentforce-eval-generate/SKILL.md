@@ -149,8 +149,10 @@ Deploy the single component through the house-rules §3 ritual — one
 package, so **omit `test_level` entirely**. Then verify:
 
 1. Round-trip `retrieve_metadata` — confirm the org kept the cases you sent.
-2. `refresh_snapshot` with `types: ["AiEvaluationDefinition"]` — agent types
-   are explicit-refresh-only.
+2. **Check the result's `snapshot` block** — it says whether the deployed
+   definition was re-read into the snapshot; if it was skipped with
+   `type_not_in_snapshot`, run `refresh_snapshot` with
+   `types: ["AiEvaluationDefinition"]` (agent types are explicit-refresh-only).
 
 Running is Contrail's too now: **`run_agent_eval`** (§6) executes the
 deployed definition and fetches results. Two prerequisites survive: the

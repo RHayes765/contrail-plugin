@@ -1,18 +1,114 @@
 # Contrail — Phase 0 (Engine-as-Plugin)
 
 The Contrail engine shipped as a Claude plugin: a local stdio MCP server (the
-**Contrail Engine**) plus a skill carrying the house rules. Spec:
+**Contrail Engine**) plus a 22-skill pack, house rules first. Spec:
 `contrail-phase0-spec.md`.
 
 **📖 Full reference — every tool, feature, and config knob: [TOOLS.md](TOOLS.md).**
 For the narrative overview see [CONTRAIL_OVERVIEW.md](CONTRAIL_OVERVIEW.md); to
 install, see [Getting Started](Getting%20Started.md).
 
-**Status: v0.39.0 — one-click packaging (MCPB)** on top of the completed
+**Status: v0.40.0 — one-click packaging (MCPB)** on top of the completed
 P0.1–P0.6 Phase 0 surface. `npm run mcpb` builds `contrail-<version>.mcpb`, a
 single MCP Bundle that installs into Claude Desktop via Settings → Desktop App →
 Extensions (no Node install, no npm, no config editing on the target machine) and covers
-Windows x64/ARM and macOS Intel/Apple Silicon from one file. 39 tools.
+Windows x64/ARM and macOS Intel/Apple Silicon from one file. 43 tools.
+
+**Skills on every surface; flow pages built by the engine (S46).** The skill
+pack now travels inside every install and the server serves it itself. Its
+MCP instructions (at most 2,000 bytes) list the bundled skills by name and
+say to load the house rules first; `list_connections` repeats that
+pointer in a new `skills` field. Two new tools, `list_skills` and
+`read_skill`, list the pack with full descriptions and load a skill or one of
+its files from the install's own `skills/` folder — only `SKILL.md` and the
+files the listing names, in 40,000-character parts. The `.mcpb` now stages
+`skills/` (without the overlay patches), so the Claude Desktop extension needs
+nothing uploaded to a Claude account; copies uploaded there earlier are stale
+and should be removed. A third new tool, `render_flow`, builds the
+interactive flow diagram or flow diff page itself — from a connection's
+snapshot, a historical version read through the Tooling API, or a saved file
+under staging — writes it under `renders/` in the data directory, asks this
+computer to open it, and notes in the result and the page footer when two
+sides cannot compare like for like. Every side must be well-formed flow XML.
+Pages older than 7 days are deleted when the server starts and each time
+`render_flow` writes a page. The page template was hardened: a doctype, a charset, a
+Content-Security-Policy that stops a page opened from disk loading any
+resource from the network (whether an artifact host honours it is not
+verified), no Google Fonts, and no HTML-string sinks (a new `lint:skills`
+rule keeps HTML assets free of network URLs and string sinks).
+`CONTRAIL_SKILLS_DIR` points the server at another skills folder.
+
+**Governance for client work (S46).** The six proposing tools
+(`validate_deploy`, `deactivate_flow`, `dml_propose`, `apex_propose`,
+`agent_activation_propose`, `bulk_load_propose`) take a `justification` — one
+or two sentences the agent drafts from what the human asked for, shown on the
+approval page in an editable field and recorded with who wrote it — and a
+`ticket`, passed only when the human named one. A new `policies` section in
+`config.json`, written by the human (no Contrail tool or page writes it),
+holds rules matched by org type, connection label or org id: require a
+justification or a ticket (optionally matching a pattern), deny destructive
+metadata changes, data deletes or anonymous Apex, set a minimum test level, or
+freeze a connection during weekly or dated windows. Contrail re-reads the
+section at every check — when a write is proposed (for a deploy, again when
+its validation finishes), whenever the approval page is drawn, and again
+before a code is claimed. A proposal that breaks a rule is refused, naming the
+rule, and leaves any pending approval untouched. During a freeze the request
+is created, but the approval page shows no code until the human types an
+emergency reason there, and the phone push carries none; a code read
+before the freeze began is refused at execute without being used up; and
+starting an agent test run is refused while the freeze lasts. A fresh install
+writes one built-in rule (production and unknown-type orgs need a
+justification); an install that already had a `config.json` runs that rule
+until a `policies` section is added. For 24 hours after Contrail notices the
+section changed, the approval page and the phone push say so.
+`list_connections` reports each connection's `policy` and a `policies_status`;
+`get_audit_log` gains `request_id`, `event_type` and `until`, and compares
+`since` and `until` as the instants they name (a value Contrail cannot
+read as a date and time is refused; `since` used to be compared as text);
+and a new tool,
+`export_change_evidence`, writes a dossier (`evidence.md` and `evidence.json`)
+under `evidence/` in the data directory: per request the ticket, the
+justification and who wrote it, the rules that applied, any freeze override,
+pre-image stamps, the execute-time checks, the org's result and the audit
+rows that name it — never a confirmation code or a record field value. Two
+more behaviour changes: an unknown key in the `policies` section, or a
+`config.json` that cannot be parsed, now refuses every write proposal and
+every agent test-run start until the human fixes the file (reads keep
+working); and a `config.json` saved with a UTF-8 byte-order mark is now read
+normally (it was previously ignored as unreadable). A `config.json` saved as UTF-16 (Windows PowerShell
+5.1's default for `>` and `Out-File`) still cannot be read: it is refused like
+a file that cannot be parsed, and the refusal says to save it as UTF-8.
+Policies are enforced by Contrail 0.40.0 and later. The Claude
+Desktop extension, the Claude Code plugin and the desktop app update
+separately and share one data directory; a copy older than 0.40.0 neither
+checks policies nor honours a freeze, and the change-evidence dossier marks
+any request such a copy created or executed — so update every installed
+Contrail surface together: the extension, the Claude Code plugin and the
+desktop app.
+
+**Live-check fixes (S46).** Stamps for custom fields, validation rules,
+custom labels and list views now come from a query that names only the
+package's members instead of the org-wide listing — on a dev org with about
+24,000 custom fields that listing took over 90 seconds and pushed the
+execute-time check past its 15-second deadline. Their pre-images come from a
+retrieve that names the child (a standard field, or a child whose parent
+document the same package already retrieves, is still read from that
+document). A validation poll reports real progress; the permission warning no
+longer says a package "adds" what the org already has; the revert README is
+accurate for add-only deploys; and the approval page says plainly that a
+screenshot of it contains the code. Version skew: a 0.39 desktop app showing
+a request validated by the 0.40 plugin prints a failed stamp query as
+"listMetadata reported INVALID_TYPE" for that type. The guard behaviour is
+still correct; only that notice's reason is wrong. Update the desktop app
+together with the plugin.
+
+**Snapshot re-baseline (S46).** After a successful deploy Contrail re-reads
+the deployed components into the local snapshot — best-effort and bounded; the
+result's `snapshot` block says what was updated — and `refresh_snapshot` takes
+`members` to re-read named components. `snapshot.rebaselineAfterDeploy: false`
+turns the re-read off and `snapshot.rebaselineTimeoutMs` (60 s) bounds it;
+`diff_orgs` now reports each side's oldest and newest retrieval time in
+`snapshot_taken`, because a snapshot's rows can now have different ages.
 
 **Approval-page truth (S45).** The approval page now diffs against the org
 itself, not just the local snapshot. A real `validate_deploy` (never a dry
@@ -26,15 +122,15 @@ the org lacks is **NOT IN TARGET**, and one whose last-modified stamp in the
 org differs from the snapshot's is **CHANGED IN TARGET**, with who and when in
 the row's detail (never in the phone push); when the retrieve fails, a banner
 says the org was not re-read and the page falls back to the snapshot.
-Execution re-checks the target before the code is claimed: a deploy re-lists
-its members and compares last-modified stamps — not bytes — against that
+Execution re-checks the target before the code is claimed: a deploy re-reads
+its members' last-modified stamps and compares them — not bytes — against that
 validate-time retrieve, a DML re-runs its preview query against the
 before-values the page showed, and an agent activation re-reads the
 version's status. Anything that moved voids the code
 with a **TARGET MOVED** refusal naming what changed (re-sending the code
-replays it); a member it cannot compare (its type cannot be enumerated, no
-stamp is available, or — with no live baseline — it is missing from the
-listing) is named as unchecked, never refused; and when the org cannot be
+replays it); a member it cannot compare (no stamp could be read for it, or —
+with no live baseline — the org no longer reports it) is named as unchecked,
+never refused; and when the org cannot be
 re-read at all, the write
 still runs and the result's `target_check` says the check did not happen. The
 check is best-effort: it covers changes up to the claim, not changes landing
@@ -338,14 +434,14 @@ the P0.5 hardening:
 
 The write-safety invariant (spec §0/§5) remains enforced, not aspirational: the
 confirmation code appears only on human-only surfaces — the localhost approval
-page and, if the human opted in, their own phone — never in a tool result, so a
-prompt-injected agent with tool access cannot self-approve.
+page and, if the human opted in, their own phone — never in a tool result, so an
+agent cannot obtain the code from Contrail itself.
 
 ## Layout
 
 ```
 .claude-plugin/plugin.json      plugin manifest (registers the MCP server)
-skills/salesforce-house-rules/  the house rules skill
+skills/                         the skill pack (bundled into the .mcpb; served by read_skill)
 server/                         the Contrail Engine (TypeScript, Node >= 22)
   src/core/                     config, SQLite store (index/graph/audit), keychain, grants
   src/salesforce/               OAuth (PKCE), REST/Tooling client, Metadata API SOAP client
@@ -355,6 +451,7 @@ server/                         the Contrail Engine (TypeScript, Node >= 22)
   src/diff/                     semantic XML/Apex diff
   src/deploy/                   deploy engine, package builder, confirmation codes, approval page
   src/tools/                    MCP tool registrations (lifecycle + metadata + diff + data + deploy)
+  src/skillpack/                skill pack loader, MCP server instructions, flow page builder
 ```
 
 Snapshots live under `%LOCALAPPDATA%\Contrail\snapshots\{connection}` — raw
@@ -417,7 +514,7 @@ Desktop afterwards; MCP servers are only read at startup.
   "mcpServers": {
     "contrail-engine": {
       "command": "node",
-      "args": ["C:/Users/Ryley/Contrail/Phase 0 Plugin/server/dist/index.js"]
+      "args": ["<path to your Contrail checkout>/server/dist/index.js"]
     }
   }
 }
@@ -454,9 +551,10 @@ URL. Env overrides: `CONTRAIL_SF_CLIENT_ID`, `CONTRAIL_SF_API_VERSION`,
   `diagnostics_read`, `data_read`, `data_write`), set by a human on the localhost
   page only, enforced server-side on every tool call. The model cannot set or
   change them. `manage_connection` opens the page directly in the browser and
-  withholds its session-bearing URL from the tool result (returned only if the
-  browser fails to open) so a prompt-injected agent with an HTTP tool cannot
-  drive the grants form.
+  never puts its session-bearing URL in the tool result (if the browser fails
+  to open, the URL goes to Contrail's server log for the human, and the result
+  says so) so a prompt-injected agent with an HTTP tool cannot drive the
+  grants form.
 - **Localhost hardening:** all three local pages (grants, approval, settings)
   send `X-Frame-Options: DENY` + `frame-ancestors 'none'` (clickjacking) and
   refuse non-loopback Host headers (DNS rebinding); the `--http` transport

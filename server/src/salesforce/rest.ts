@@ -54,12 +54,21 @@ export class RestClient {
     ).records;
   }
 
-  /** S30: tooling flavor of queryWithCount (the agent-graph sObjects are Tooling-only). */
+  /**
+   * S30: tooling flavor of queryWithCount (the agent-graph sObjects are Tooling-only).
+   * S46 D1: takes the same optional `init.signal` as queryWithCount.
+   */
   async toolingQueryWithCount<T = Record<string, unknown>>(
     soql: string,
     maxRows = 2000,
+    init?: Pick<RequestInit, 'signal'>,
   ): Promise<{ records: T[]; totalSize: number | null }> {
-    return this.runQuery<T>(`/services/data/${this.apiVersion}/tooling/query`, soql, maxRows);
+    return this.runQuery<T>(
+      `/services/data/${this.apiVersion}/tooling/query`,
+      soql,
+      maxRows,
+      init,
+    );
   }
 
   async describeSObject(name: string): Promise<Record<string, unknown>> {

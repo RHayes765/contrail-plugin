@@ -250,6 +250,8 @@ function stubSalesforce(): void {
 
 beforeEach(async () => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'contrail-data-'));
+  // createDeps() sweeps renders/ under the data directory: keep that in the sandbox.
+  process.env.CONTRAIL_DATA_DIR = tmp;
   db = new ContrailDb(path.join(tmp, 'test.db'));
   const tokens = new MemoryTokenStore();
   const grants = emptyGrantSet();
@@ -327,6 +329,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   await client.close();
   db.close();
+  delete process.env.CONTRAIL_DATA_DIR;
   fs.rmSync(tmp, { recursive: true, force: true });
   flowInterviewStatusSupported = true;
   apexTestsDone = true;

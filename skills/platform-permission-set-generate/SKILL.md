@@ -291,10 +291,12 @@ same message. Three sharp edges:
 
 ## What Contrail's coverage checker counts as a grant
 
-`validate_deploy` cross-checks new components against any PermissionSet/Profile
-in the same package and returns a `permission_warning` listing what is not
-granted. A component counts as covered only when it is **named in the right block
-AND the enabling flag is on** — a mention with the flag off is NOT coverage:
+`validate_deploy` cross-checks the package's components against any
+PermissionSet/Profile in the same package and returns a `permission_warning`
+listing what is not granted — saying which of them are new, which are already in
+the org, and which it could not place. A component counts as covered only when it
+is **named in the right block AND the enabling flag is on** — a mention with the
+flag off is NOT coverage:
 
 | Component in package | Block checked | Name element | Must be |
 |---|---|---|---|
@@ -361,8 +363,10 @@ it grants (never a separate permissions-only follow-up for new components):
   production; name specific classes with `run_tests` + `RunSpecifiedTests`.
 - Then the standard write contract: present the validation summary (target org
   first, `permission_warning` and anything destructive leading), the human reads
-  the confirmation code from the approval page, `execute_deploy` with that code,
-  `refresh_snapshot` after success — see **salesforce-house-rules §3**.
+  the confirmation code from the approval page, `execute_deploy` with that code
+  — Contrail then re-reads the deployed components into the snapshot itself
+  (`refresh_snapshot` only for what the result's `snapshot` block reports as not
+  updated); see **salesforce-house-rules §3**.
 
 **Assigning the set** is data, not metadata: propose an insert of
 `PermissionSetAssignment` (`AssigneeId`, `PermissionSetId` — query the id with

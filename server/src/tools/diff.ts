@@ -110,15 +110,23 @@ export function registerDiffTools(server: McpServer, deps: ToolDeps): void {
           }
         }
 
-        const newest = (list: typeof aArtifacts) =>
-          list.reduce<string | null>(
-            (acc, x) => (acc && acc > x.retrievedAt ? acc : x.retrievedAt),
-            null,
-          );
+        // S46 (C4): a refresh of some types, or the re-baseline after a deploy,
+        // moves only the rows it touched, so the newest row alone would say
+        // "now" for a side whose other rows are old. Both ends, over the rows
+        // this call actually compared (the type filter applied).
+        const ages = (rows: Iterable<{ retrievedAt: string }>) => {
+          let oldest: string | null = null;
+          let newest: string | null = null;
+          for (const { retrievedAt } of rows) {
+            if (oldest === null || retrievedAt < oldest) oldest = retrievedAt;
+            if (newest === null || retrievedAt > newest) newest = retrievedAt;
+          }
+          return { oldest, newest };
+        };
         return ok({
           from: a.alias,
           to: b.alias,
-          snapshot_taken: { [a.alias]: newest(aArtifacts), [b.alias]: newest(bArtifacts) },
+          snapshot_taken: { [a.alias]: ages(aMap.values()), [b.alias]: ages(bMap.values()) },
           counts_by_type: counts,
           changed: changed.slice(0, BUCKET_LIST_CAP),
           changed_truncated: changed.length > BUCKET_LIST_CAP,
@@ -128,8 +136,9 @@ export function registerDiffTools(server: McpServer, deps: ToolDeps): void {
           only_in_b_truncated: onlyB.length > BUCKET_LIST_CAP,
           note:
             'Buckets compare snapshot content hashes. Use diff_artifact for the semantic ' +
-            'detail of any changed artifact. Consider refresh_snapshot on both sides if the ' +
-            'snapshot timestamps are stale.',
+            'detail of any changed artifact. Rows in one snapshot can have different ages ' +
+            '(a refresh of some types, or a re-baseline after a deploy, updates only what it ' +
+            'touched) — a side is only as fresh as its oldest row.',
         });
       }),
   );

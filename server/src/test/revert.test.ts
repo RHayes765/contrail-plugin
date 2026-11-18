@@ -13,7 +13,11 @@ import { SnapshotStore } from '../snapshot/store.js';
 import { ApprovalPageServer } from '../deploy/approval.js';
 import { createDeps, createServer } from '../server.js';
 import { emptyGrantSet } from '../core/grants.js';
-import { NOT_RESTORABLE_LIST_ONLY, type RevertTargetCheck } from '../deploy/preimage.js';
+import {
+  NOT_RESTORABLE_LIST_ONLY,
+  NOT_RESTORABLE_UNPLACED,
+  type RevertTargetCheck,
+} from '../deploy/preimage.js';
 import type { ApprovalNotifier, NotifyOutcome } from '../core/notify.js';
 import type { ToolDeps } from '../tools/register.js';
 import type { ConnectionRecord, DeployRequestRecord } from '../core/types.js';
@@ -72,6 +76,33 @@ let retrieveMode: 'ok' | 'fault';
 let realMode: 'ok' | 'fail' | 'never';
 let realDeploys: number;
 let cancels: number;
+/**
+ * S46 D1: the records a stamp query returns, per queried sObject — handed
+ * back whole (this stub does not evaluate the WHERE clause; targetmoved.test.ts
+ * and livediff.test.ts do).
+ */
+let probeRows: Record<string, Array<Record<string, unknown>>>;
+/** The decoded SOQL of every stamp query issued, in order. */
+let stampQueries: string[];
+/** Every listMetadata query issued, in order, as its raw `<met:queries>` body. */
+let listQueries: string[];
+/** 'fault' answers every stamp query with HTTP 500. */
+let probeMode: 'ok' | 'fault';
+/** 'fault' answers every listMetadata call with a SOAP fault (not INVALID_TYPE). */
+let listMode: 'ok' | 'fault';
+
+/** One stamp query answered from probeRows, or null when the SOQL is not a stamp query. */
+function stampQueryResponse(soql: string): Response | null {
+  const m =
+    /^SELECT Id, \w+, NamespacePrefix, LastModifiedDate, LastModifiedBy\.Name FROM (\w+) WHERE /.exec(
+      soql,
+    );
+  if (!m) return null;
+  stampQueries.push(soql);
+  if (probeMode === 'fault') return new Response('stamp query down', { status: 500 });
+  const records = probeRows[m[1]!] ?? [];
+  return new Response(JSON.stringify({ done: true, totalSize: records.length, records }));
+}
 
 function soapEnvelope(inner: string): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -117,9 +148,10 @@ function deployStatus(opts: { done: boolean; success: boolean; checkOnly: boolea
 
 /**
  * The livediff.test.ts stub idiom (checkOnly deploy, pre-image retrieve,
- * listMetadata rows per type with sf:INVALID_TYPE for invalidTypes), plus the
- * REAL deploy: done+success, an org-reported failure (rollbackOnError), or a
- * status that never reports done (the outcome-unknown path), and cancelDeploy.
+ * listMetadata rows per type with sf:INVALID_TYPE for invalidTypes, the
+ * stamp queries answered from probeRows), plus the REAL deploy: done+success,
+ * an org-reported failure (rollbackOnError), or a status that never reports
+ * done (the outcome-unknown path), and cancelDeploy.
  */
 function stubSalesforce(): void {
   vi.stubGlobal('fetch', async (input: string | URL, init?: RequestInit) => {
@@ -135,7 +167,15 @@ function stubSalesforce(): void {
       );
     }
     if (url.includes('/tooling/query')) {
+      const stamp = stampQueryResponse(new URL(url).searchParams.get('q') ?? '');
+      if (stamp) return stamp;
+      // Everything else on this route is the Aura live check's Tooling read.
       return new Response(JSON.stringify({ done: true, records: [], totalSize: 0 }));
+    }
+    if (/\/services\/data\/v[\d.]+\/query\?q=/.test(url)) {
+      const stamp = stampQueryResponse(new URL(url).searchParams.get('q') ?? '');
+      if (stamp) return stamp;
+      return new Response('not found', { status: 404 });
     }
     if (url.includes('/services/Soap/m/')) {
       const body = String(init?.body ?? '');
@@ -181,6 +221,8 @@ function stubSalesforce(): void {
         );
       }
       if (body.includes('<met:listMetadata>')) {
+        for (const q of body.matchAll(/<met:queries>(.*?)<\/met:queries>/g)) listQueries.push(q[1]!);
+        if (listMode === 'fault') return fault('UNKNOWN_EXCEPTION', 'list blew up');
         const queries = [
           ...body.matchAll(
             /<met:queries>(?:<met:folder>([^<]*)<\/met:folder>)?<met:type>([^<]+)<\/met:type><\/met:queries>/g,
@@ -250,6 +292,11 @@ beforeEach(async () => {
   realMode = 'ok';
   realDeploys = 0;
   cancels = 0;
+  probeRows = {};
+  stampQueries = [];
+  listQueries = [];
+  probeMode = 'ok';
+  listMode = 'ok';
 
   const tokens = new MemoryTokenStore();
   connId = insertConn('rev-org', '00DR', tokens);
@@ -269,7 +316,8 @@ beforeEach(async () => {
   config = {
     ...DEFAULT_CONFIG,
     salesforce: { ...DEFAULT_CONFIG.salesforce },
-    snapshot: { ...DEFAULT_CONFIG.snapshot, pollIntervalMs: 5 },
+    // S46 (C): these stubs model no post-execute re-read (rebaseline.test.ts does).
+    snapshot: { ...DEFAULT_CONFIG.snapshot, pollIntervalMs: 5, rebaselineAfterDeploy: false },
     deploy: { ...DEFAULT_CONFIG.deploy, pollIntervalMs: 5, toolWaitMs: 10_000 },
   };
   deps = createDeps({
@@ -448,7 +496,9 @@ describe('S45 F4: the frozen revert package', () => {
         status: 'ok',
         checked: [
           { type: 'ApexClass', api_name: 'Foo' },
-          { type: 'ApexClass', api_name: 'NewCls' },
+          // S46 D4: absent at validate and still not listed — checked, but
+          // no stamp was compared.
+          { type: 'ApexClass', api_name: 'NewCls', absent: true },
           { type: 'PresenceUserConfig', api_name: 'Voice_Agents' },
         ],
         unchecked: [
@@ -459,6 +509,11 @@ describe('S45 F4: the frozen revert package', () => {
       destructive: deletes,
       not_restorable: notRestorable,
     });
+    expect(plan.target_check.checked.map((c: { absent?: true }) => c.absent)).toEqual([
+      undefined,
+      true,
+      undefined,
+    ]);
     expect(plan.target_check).toEqual(result.target_check);
     expect(Date.parse(plan.executed_at)).not.toBeNaN();
     expect(plan.outcome).toBeUndefined();
@@ -468,9 +523,14 @@ describe('S45 F4: the frozen revert package', () => {
     expect(readme).toContain(
       `A revert re-deploys what Contrail retrieved from "rev-org" at ${summary.live_check.at}, when this deploy was validated.`,
     );
+    // Two stamp comparisons and one still-absent member — never "3 of 4 … unchanged".
     expect(readme).toContain(
-      "Contrail compared the org's last-modified stamps against that retrieve for 3 of 4 members and found them unchanged",
+      "Contrail compared the org's last-modified stamps against that retrieve for 2 of 4 members and found them unchanged, " +
+        'and re-checked 1 member(s) that were absent from the org at validate, and the execute-time read of their ' +
+        'stamp source again returned nothing for them; it did not re-read any contents, and a matching stamp is ' +
+        'evidence, not a byte comparison.',
     );
+    expect(readme).not.toContain('for 3 of 4 members');
     expect(readme).toContain(
       '1 member(s) could not be re-checked (BotVersion MyBot.v1 — dates_unavailable_at_validate)',
     );
@@ -522,7 +582,7 @@ describe('S45 F4: the frozen revert package', () => {
       checked_at: '2026-11-14T15:04:58.000Z',
       checked: [
         { type: 'ApexClass', api_name: 'Foo' },
-        { type: 'ApexClass', api_name: 'NewCls' },
+        { type: 'ApexClass', api_name: 'NewCls', absent: true },
         { type: 'PresenceUserConfig', api_name: 'Voice_Agents' },
       ],
       unchecked: [
@@ -545,7 +605,8 @@ describe('S45 F4: the frozen revert package', () => {
     expect(plan.target_check).toEqual(targetCheck);
     const readme = fs.readFileSync(path.join(dir, 'README.txt'), 'utf8');
     expect(readme).toContain(
-      "Contrail compared the org's last-modified stamps against that retrieve for 3 of 4 members and found them unchanged",
+      "Contrail compared the org's last-modified stamps against that retrieve for 2 of 4 members and found them unchanged, " +
+        'and re-checked 1 member(s) that were absent from the org at validate',
     );
     expect(readme).toContain(
       `1 member(s) could not be re-checked (BotVersion MyBot.v1 — dates_unavailable_at_validate); ` +
@@ -573,6 +634,272 @@ describe('S45 F4: the frozen revert package', () => {
     expect(readme).toContain("Contrail did not re-check the org's last-modified stamps");
     expect(readme).not.toContain('found them unchanged');
     expect(readme).not.toMatch(/for 0 of \d+ members/);
+  });
+
+  it('S46 D4: an add-only deploy holds nothing to re-deploy — the README says so, names what a revert deletes, and claims no stamp comparison', async () => {
+    const newCls = { type: 'ApexClass', api_name: 'NewCls' };
+    const req = await validate({ components: [{ ...newCls, content: NEW_CLS }] });
+    const dir = revertDir(req.id);
+    const result = jsonOf(await execute(req.code));
+    expect(result.deployed).toBe(true);
+    expect(result.target_check.status).toBe('ok');
+    expect(result.target_check.checked).toEqual([{ ...newCls, absent: true }]);
+    expect(result.target_check.unchecked).toEqual([]);
+    expect(result.revert_package).toMatchObject({
+      dir,
+      restores: [],
+      deletes: [newCls],
+      not_restorable: [],
+      plan: path.join(dir, 'revert-plan.json'),
+    });
+
+    const plan = JSON.parse(fs.readFileSync(path.join(dir, 'revert-plan.json'), 'utf8'));
+    expect(plan.components).toEqual([]);
+    expect(plan.destructive).toEqual([newCls]);
+    expect(plan.target_check).toEqual(result.target_check);
+    const readme = fs.readFileSync(path.join(dir, 'README.txt'), 'utf8').trimEnd();
+    expect(readme).toBe(result.revert_package.note);
+    expect(readme).toBe(
+      'This revert package holds no files to re-deploy: when Contrail retrieved from "rev-org" at ' +
+        `${plan.retrieved_at}, while this deploy was validated, it captured nothing a revert could ` +
+        'restore. What this package can revert is the 1 component(s) this deploy added: a revert ' +
+        'deletes them — revert-plan.json lists them under "destructive". Before executing at ' +
+        `${plan.executed_at}, Contrail re-checked 1 member(s) that were absent from the org at ` +
+        'validate — of 1 member(s) it considered — and the execute-time read of their stamp source ' +
+        'again returned nothing for them; no last-modified stamp was compared. A revert does not ' +
+        'undo data changes, automation that ' +
+        'ran, permission effects, or changes made since to components outside this package. Deleting ' +
+        'the components this deploy added is destructive. Contrail never deploys a revert on its ' +
+        'own: pass the destructive list to validate_deploy, and a human approves it like any deploy. ' +
+        'DML is out of scope — the persisted before-values and created_ids make a manual revert ' +
+        'possible.',
+    );
+    // Never the restore package's opening, nor a comparison that did not happen.
+    expect(readme).not.toContain('A revert re-deploys what Contrail retrieved');
+    expect(readme).not.toContain('OVERWRITES');
+    expect(readme).not.toContain('found them unchanged');
+    // No file of the deploy's own was written beside the plan and the README.
+    expect(walkFiles(dir).map((f) => path.basename(f)).sort()).toEqual(['README.txt', 'revert-plan.json']);
+    expect(audits('deploy.revert_written')[0]!.detail).toMatchObject({
+      requestId: req.id,
+      restores: 0,
+      deletes: 1,
+      not_restorable: 0,
+    });
+    expectCodeNowhere(req.code, [dir]);
+  });
+
+  it('S46 D4: an add-only deploy whose outcome is unknown hedges what it can revert — "if it committed"', async () => {
+    config.deploy.deployTimeoutMs = 40;
+    const req = await validate({ components: [{ type: 'ApexClass', api_name: 'NewCls', content: NEW_CLS }] });
+    const dir = revertDir(req.id);
+    realMode = 'never';
+    const result = jsonOf(await execute(req.code));
+    expect(result.deployed).toBe(false);
+    expect(result.revert_package).toMatchObject({ dir, outcome: 'unknown', restores: [] });
+    const plan = JSON.parse(fs.readFileSync(path.join(dir, 'revert-plan.json'), 'utf8'));
+    expect(plan).toMatchObject({ executed_at: null, outcome: 'unknown', components: [] });
+    const readme = fs.readFileSync(path.join(dir, 'README.txt'), 'utf8').trimEnd();
+    expect(readme.startsWith('This revert package holds no files to re-deploy: ')).toBe(true);
+    // The adds may never have landed.
+    expect(readme).toContain(
+      'What this package can revert is the 1 component(s) this deploy added, if it committed: a ' +
+        'revert deletes them',
+    );
+    expect(readme).toContain('Before submitting this deploy (whose outcome Contrail lost track of');
+    expect(readme.endsWith(plan.note)).toBe(true);
+    // A package that holds no files never refers to "these files" — neither
+    // the README nor the plan's note appended to it.
+    expect(plan.note).toBe(
+      `Contrail lost track of this deploy (${result.error_message}); check Setup → Deployment ` +
+        'Status.',
+    );
+    expect(readme).not.toContain('these files');
+  });
+
+  it('an add-only deploy whose execute-time check could not re-read the org: the README names revert-plan.json, never "these files"', async () => {
+    const newCls = { type: 'ApexClass', api_name: 'NewCls' };
+    const req = await validate({ components: [{ ...newCls, content: NEW_CLS }] });
+    const dir = revertDir(req.id);
+    listMode = 'fault';
+    const result = jsonOf(await execute(req.code));
+    expect(result.deployed).toBe(true);
+    expect(result.target_check.status).toBe('unavailable');
+    expect(result.target_check.reason).toContain('list blew up');
+    expect(result.revert_package).toMatchObject({ dir, restores: [], deletes: [newCls] });
+    const plan = JSON.parse(fs.readFileSync(path.join(dir, 'revert-plan.json'), 'utf8'));
+    const readme = fs.readFileSync(path.join(dir, 'README.txt'), 'utf8').trimEnd();
+    expect(readme).toBe(result.revert_package.note);
+    expect(readme.startsWith('This revert package holds no files to re-deploy: ')).toBe(true);
+    expect(readme).toContain(
+      `Before executing at ${plan.executed_at}, Contrail could not re-read the org to compare ` +
+        `last-modified stamps (${result.target_check.reason}); the deploy was submitted ` +
+        'unverified, and revert-plan.json describes the org as of the validate-time retrieve only.',
+    );
+    expect(readme).not.toContain('these files');
+    expect(readme).not.toContain('found them unchanged');
+  });
+
+  it('S46 D1: an add-only custom field whose stamp query failed at validate — nothing compared, and the README never says "these files"', async () => {
+    const field = { type: 'CustomField', api_name: 'Invoice__c.Status__c' };
+    const content = '<fields>\n        <fullName>Status__c</fullName>\n        <type>Text</type>\n    </fields>';
+    probeMode = 'fault';
+    const req = await validate({ components: [{ ...field, content }] });
+    const summary = JSON.parse(req.summaryJson) as {
+      live_check: { probe_failures?: Record<string, string> };
+    };
+    expect(Object.keys(summary.live_check.probe_failures ?? {})).toEqual(['CustomField']);
+    probeMode = 'ok';
+    const dir = revertDir(req.id);
+    const result = jsonOf(await execute(req.code));
+    expect(result.deployed).toBe(true);
+    expect(result.target_check).toMatchObject({
+      status: 'not_checked',
+      checked: [],
+      unchecked: [{ ...field, reason: 'dates_unavailable_at_validate' }],
+    });
+    expect(result.revert_package).toMatchObject({ dir, restores: [], deletes: [field] });
+    const plan = JSON.parse(fs.readFileSync(path.join(dir, 'revert-plan.json'), 'utf8'));
+    const readme = fs.readFileSync(path.join(dir, 'README.txt'), 'utf8').trimEnd();
+    expect(readme).toBe(result.revert_package.note);
+    expect(readme.startsWith('This revert package holds no files to re-deploy: ')).toBe(true);
+    expect(readme).toContain(
+      `Before executing at ${plan.executed_at}, Contrail did not re-check the org's last-modified ` +
+        'stamps; revert-plan.json describes the org as of the validate-time retrieve only.',
+    );
+    expect(readme).not.toContain('these files');
+    expect(readme).not.toContain('found them unchanged');
+  });
+
+  it('S46 D1 + D4: a new custom field — absent by the retrieve and its stamp query at validate, the query again returning nothing at execute', async () => {
+    const field = { type: 'CustomField', api_name: 'Invoice__c.Status__c' };
+    const content = '<fields>\n        <fullName>Status__c</fullName>\n        <type>Text</type>\n    </fields>';
+    const req = await validate({ components: [{ ...field, content }] });
+    const summary = JSON.parse(req.summaryJson) as { changes: Array<{ pre_image: Record<string, unknown> }> };
+    expect(summary.changes[0]!.pre_image).toMatchObject({
+      present: false,
+      stamp_source: 'tooling:CustomField',
+      last_modified_date: null,
+    });
+    const dir = revertDir(req.id);
+    const result = jsonOf(await execute(req.code));
+    expect(result.deployed).toBe(true);
+    expect(result.target_check.checked).toEqual([{ ...field, absent: true }]);
+    expect(result.revert_package).toMatchObject({ restores: [], deletes: [field] });
+    // The same query at both ends, naming the package's own member.
+    const stampQuery =
+      'SELECT Id, DeveloperName, NamespacePrefix, LastModifiedDate, LastModifiedBy.Name FROM ' +
+      "CustomField WHERE (DeveloperName = 'Status' AND EntityDefinition.QualifiedApiName = 'Invoice__c')";
+    expect(stampQueries).toEqual([stampQuery, stampQuery]);
+    const readme = fs.readFileSync(path.join(dir, 'README.txt'), 'utf8');
+    expect(readme.startsWith('This revert package holds no files to re-deploy: ')).toBe(true);
+    // What Contrail read — never "the org has none".
+    expect(readme).toContain(
+      'Contrail re-checked 1 member(s) that were absent from the org at validate — of 1 member(s) ' +
+        'it considered — and the execute-time read of their stamp source again returned nothing for ' +
+        'them; no last-modified stamp was compared.',
+    );
+    expect(readme).not.toContain('found them unchanged');
+  });
+
+  it('S46: a destructive CustomField no read can name (".X__c") — unknown at validate, no absence cited, unchecked at execute', async () => {
+    const unplaced = { type: 'CustomField', api_name: '.X__c' };
+    const req = await validate({
+      components: [{ type: 'ApexClass', api_name: 'Foo', content: FOO_PROPOSED }],
+      destructive: [unplaced],
+    });
+    const summary = JSON.parse(req.summaryJson) as {
+      destructive: Array<{ api_name: string; warnings: string[]; pre_image?: Record<string, unknown> }>;
+    };
+    const row = summary.destructive.find((d) => d.api_name === '.X__c')!;
+    expect(row.pre_image).toMatchObject({
+      present: null,
+      stamp_source: 'tooling:CustomField',
+      last_modified_date: null,
+      comparable: false,
+      restorable: false,
+    });
+    // Nothing read the org for it, and nothing says the org lacks it.
+    expect(stampQueries).toEqual([]);
+    expect(row.warnings.join(' ')).not.toContain('not present in the target');
+    expect(presentedPages.at(-1)!).not.toContain('not present in the target');
+    const dir = revertDir(req.id);
+    const result = jsonOf(await execute(req.code));
+    expect(result.deployed).toBe(true);
+    expect(stampQueries).toEqual([]);
+    // Reported unchecked by the guard — never "checked" and never absent.
+    expect(result.target_check.unchecked).toContainEqual({ ...unplaced, reason: 'stamp_not_probeable' });
+    expect(result.target_check.checked).toEqual([{ type: 'ApexClass', api_name: 'Foo' }]);
+    const plan = JSON.parse(fs.readFileSync(path.join(dir, 'revert-plan.json'), 'utf8'));
+    expect(plan.not_restorable).toContainEqual({ ...unplaced, reason: NOT_RESTORABLE_UNPLACED });
+    expect(plan.destructive).toEqual([]);
+    const readme = fs.readFileSync(path.join(dir, 'README.txt'), 'utf8');
+    expect(readme).not.toContain('absent from the org');
+    expect(readme).not.toContain('could not enumerate');
+  });
+
+  it('S46: destructive members of type "constructor" and "toString" — refused without the flag; with it never read (presence unknown), unplaced in the revert plan, unchecked at execute, and nothing throws', async () => {
+    const strays = [
+      { type: 'constructor', api_name: 'Stray_One' },
+      { type: 'toString', api_name: 'Stray_Two' },
+    ];
+    const foo = { type: 'ApexClass', api_name: 'Foo', content: FOO_PROPOSED };
+    // Without the flag: refused as a blind delete of an unregistered type.
+    const refused = await client.callTool({
+      name: 'validate_deploy',
+      arguments: { connection: 'rev-org', components: [foo], destructive: strays },
+    });
+    expect(refused.isError).toBe(true);
+    expect(textOf(refused)).toContain('constructor Stray_One: this type is not registered');
+    // With it: validated and flagged. On the pre-image path they are NOT handled
+    // like an unregistered type (which is listed by its type): FOLDERED_TYPES
+    // (salesforce/metadataSoap.ts) is a plain-object lookup, so these names read
+    // as foldered types with no folder — never retrieved, never listed, and
+    // their presence is unknown (null), never absent.
+    const req = await validate({
+      components: [foo],
+      destructive: strays,
+      allow_unregistered_delete: true,
+    });
+    const summary = JSON.parse(req.summaryJson) as {
+      destructive: Array<{ type: string; warnings: string[]; pre_image?: Record<string, unknown> }>;
+    };
+    for (const s of strays) {
+      const row = summary.destructive.find((d) => d.type === s.type)!;
+      expect(row.warnings.join(' ')).toContain(
+        `UNREGISTERED TYPE DELETE — Contrail cannot read ${s.type} or list its dependents`,
+      );
+      expect(row.warnings.join(' ')).not.toContain('not present in the target');
+      expect(row.pre_image).toMatchObject({
+        present: null,
+        source: 'list',
+        stamp_source: 'listMetadata',
+        last_modified_date: null,
+        comparable: false,
+        restorable: false,
+      });
+    }
+    expect(presentedPages.at(-1)!).not.toContain('not present in the target');
+    expect(listQueries).toEqual(['<met:type>ApexClass</met:type>']);
+    const dir = revertDir(req.id);
+    const result = jsonOf(await execute(req.code));
+    expect(result.deployed).toBe(true);
+    // The guard re-lists ApexClass only; the strays are reported unchecked with
+    // the reason its present:null arm gives today.
+    expect(listQueries).toEqual(['<met:type>ApexClass</met:type>', '<met:type>ApexClass</met:type>']);
+    expect(result.target_check.unchecked).toEqual(
+      expect.arrayContaining(strays.map((s) => ({ ...s, reason: 'type_not_enumerable' }))),
+    );
+    expect(result.target_check.checked).toEqual([{ type: 'ApexClass', api_name: 'Foo' }]);
+    const plan = JSON.parse(fs.readFileSync(path.join(dir, 'revert-plan.json'), 'utf8'));
+    expect(plan.components.map((c: { api_name: string }) => c.api_name)).toEqual(['Foo']);
+    expect(plan.not_restorable).toEqual(
+      expect.arrayContaining(strays.map((s) => ({ ...s, reason: NOT_RESTORABLE_UNPLACED }))),
+    );
+    expect(plan.destructive).toEqual([]);
+    const readme = fs.readFileSync(path.join(dir, 'README.txt'), 'utf8');
+    expect(readme).not.toContain('absent from the org');
+    expect(readme).not.toContain('could not enumerate');
   });
 
   it('an org-reported failure (rolled back) removes the revert dir and returns no package', async () => {

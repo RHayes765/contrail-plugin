@@ -224,7 +224,9 @@ Common operators: `equals`, `notEqual`, `lessThan`, `greaterThan`, `contains`, `
 
 ## Post-deploy verification
 
-After `execute_deploy` succeeds and `refresh_snapshot types:["Report"]` has run,
+After `execute_deploy` succeeds (its `snapshot` block says whether the report
+was re-read — if it was skipped because Report is not in this connection's
+snapshot, run `refresh_snapshot types:["Report"]`),
 **run the report**: `get_report_data` executes the deployed report through the
 synchronous Analytics API (needs the `data_read` grant — check
 `get_permissions`). Confirm the columns are the ones you meant and the row
@@ -263,7 +265,9 @@ copy). No-Apex packages OMIT `test_level` entirely — the org's default handles
 them in every environment, and production REFUSES an explicit `NoTestRun`.
 Lead the summary with the target org and the folder-sharing consequences; the
 human reads the confirmation code from the approval page, you pass it to
-`execute_deploy`, then `refresh_snapshot types:["Report"]` — the full ritual is
+`execute_deploy` (its `snapshot` block says whether the report was re-read — if
+it was skipped because Report is not in this connection's snapshot, run
+`refresh_snapshot types:["Report"]`) — the full ritual is
 salesforce-house-rules §3. Close the loop with `get_report_data`
 (post-deploy verification above). A report or folder *deletion* is a
 destructive change — it goes in `destructive`, is flagged prominently, and the

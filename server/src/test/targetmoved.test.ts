@@ -26,6 +26,12 @@ import type { DeployRequestRecord } from '../core/types.js';
  * whose validate-time stamp is missing, is unchecked — never a void; the
  * degrade path anchors on the ORG clock; an unreadable org FAILS OPEN WITH
  * DISCLOSURE (target_check unavailable + audit), Ryley's 2026-11-14 call.
+ *
+ * S46 D1.4: the guard re-reads each member from the stamp source recorded at
+ * validate — the listing, or (CustomField, ValidationRule, CustomLabel,
+ * ListView) the member's own stamp query; a request validated by 0.39, which
+ * recorded no source, is re-listed. A failed stamp query is member-level
+ * unchecked, never a void and never the whole check.
  */
 
 class SilentNotifier implements ApprovalNotifier {
@@ -56,9 +62,43 @@ const BOT_V1_PROPOSED =
 const ADMIN_LIVE = `<?xml version="1.0" encoding="UTF-8"?>\n<Profile ${MD}>\n    <custom>false</custom>\n</Profile>\n`;
 const ADMIN_PROPOSED = `<?xml version="1.0" encoding="UTF-8"?>\n<Profile ${MD}>\n    <custom>false</custom>\n    <description>x</description>\n</Profile>\n`;
 
+const STATUS_FIELD = `<fields>\n        <fullName>Status__c</fullName>\n        <type>Text</type>\n    </fields>`;
+/**
+ * S46 D1: a parent document as a child-typed retrieve returns it — only the
+ * blocks the manifest named, none of the object's own elements.
+ */
+const partialObject = (...blocks: string[]) =>
+  `<?xml version="1.0" encoding="UTF-8"?>\n<CustomObject ${MD}>\n` +
+  blocks.map((b) => `    ${b}\n`).join('') +
+  '</CustomObject>\n';
+/** The stamp Invoice__c.Status__c carries when a test validates it as present. */
+const FIELD_DATE = '2026-11-08T14:00:00.000Z';
+
 const ACCT = '001000000000001AAA';
 const ACCT2 = '001000000000002AAA';
 const LONG_DESCRIPTION = 'x'.repeat(1000);
+
+/** One row a stamp query can return (probeRows is keyed by the queried sObject). */
+interface ProbeRow {
+  /** The name column's value: DeveloperName, ValidationName, or a label's Name. */
+  name: string;
+  /** EntityDefinition.QualifiedApiName / SobjectType; none for a label. */
+  parent?: string;
+  /** NamespacePrefix; omitted = null. */
+  ns?: string;
+  /** LastModifiedDate, as the org writes it. */
+  date: string;
+  /** LastModifiedBy.Name; null = the row carries no user. */
+  by: string | null;
+}
+
+/** The stamp queries' name and parent columns per sObject (deploy/stampprobe.ts). */
+const PROBE_COLUMNS: Record<string, { name: string; parent: string | null; api: 'tooling' | 'data' }> = {
+  CustomField: { name: 'DeveloperName', parent: 'EntityDefinition.QualifiedApiName', api: 'tooling' },
+  ValidationRule: { name: 'ValidationName', parent: 'EntityDefinition.QualifiedApiName', api: 'tooling' },
+  ExternalString: { name: 'Name', parent: null, api: 'tooling' },
+  ListView: { name: 'DeveloperName', parent: 'SobjectType', api: 'data' },
+};
 
 let tmp: string;
 let db: ContrailDb;
@@ -85,8 +125,15 @@ let realDeploys: number;
 let listCalls: string[];
 let probeStarted: boolean;
 let accounts: Record<string, Record<string, unknown>>;
+/** The decoded SOQL of every Data API query AND every stamp query (Tooling ones included), in order. */
 let restQueries: string[];
 let restQueryMode: 'ok' | 'fault';
+/** S46 D1: the rows the stamp queries answer from, per queried sObject. */
+let probeRows: Record<string, ProbeRow[]>;
+/** 'fault' = every stamp query answers HTTP 500; 'hang' = a stamp query never answers. */
+let probeMode: 'ok' | 'fault' | 'hang';
+/** The fetch `init.signal` of every stamp query issued, in order. */
+let stampSignals: Array<AbortSignal | null | undefined>;
 let dmlWrites: number;
 let botVersionRows: Array<{ Id: string; DeveloperName: string; Status: string }>;
 let activationPosts: number;
@@ -145,11 +192,67 @@ function parseSoql(soql: string): { fields: string[]; object: string; ids: strin
 }
 
 /**
+ * S46 D1: answer ONE stamp query from its decoded SOQL — the probeRows of
+ * the queried sObject that a WHERE clause names (the name
+ * case-insensitively, the parent exactly; nothing is filtered on namespace,
+ * as the real queries filter nothing on it). null when the SOQL is not a
+ * stamp query. Every stamp query is recorded in restQueries and its fetch
+ * signal in stampSignals; probeMode 'fault' answers HTTP 500, 'hang' never
+ * answers. A stamp query sent to the wrong API answers as the org does for
+ * an sObject that API does not have.
+ */
+function stampQueryResponse(
+  api: 'tooling' | 'data',
+  soql: string,
+  init?: RequestInit,
+): Response | Promise<Response> | null {
+  const m =
+    /^SELECT Id, (\w+), NamespacePrefix, LastModifiedDate, LastModifiedBy\.Name FROM (\w+) WHERE (.+)$/.exec(
+      soql,
+    );
+  const sobject = m?.[2] ?? '';
+  const cols = PROBE_COLUMNS[sobject];
+  if (!m || !cols || cols.name !== m[1]) return null;
+  restQueries.push(soql);
+  stampSignals.push(init?.signal);
+  if (probeMode === 'hang') {
+    probeStarted = true;
+    return new Promise<Response>(() => {});
+  }
+  if (probeMode === 'fault') return new Response('stamp query down', { status: 500 });
+  if (cols.api !== api) {
+    return new Response(
+      JSON.stringify([{ errorCode: 'INVALID_TYPE', message: `sObject type '${sobject}' is not supported.` }]),
+      { status: 400 },
+    );
+  }
+  const valueOf = (clause: string, column: string) =>
+    new RegExp(`${column.replace(/\./g, '\\.')} = '([^']*)'`).exec(clause)?.[1];
+  const wanted = m[3]!.split(' OR ').map((clause) => ({
+    name: valueOf(clause, cols.name)?.toLowerCase(),
+    parent: cols.parent === null ? undefined : valueOf(clause, cols.parent),
+  }));
+  const records = (probeRows[sobject] ?? [])
+    .filter((r) => wanted.some((w) => w.name === r.name.toLowerCase() && w.parent === r.parent))
+    .map((r, i) => ({
+      attributes: { type: sobject },
+      Id: `stub-${sobject}-${i}`,
+      [cols.name]: r.name,
+      NamespacePrefix: r.ns ?? null,
+      LastModifiedDate: r.date,
+      LastModifiedBy: r.by === null ? null : { Name: r.by },
+    }));
+  return new Response(JSON.stringify({ done: true, totalSize: records.length, records }));
+}
+
+/**
  * The revert.test.ts SOAP idiom (checkOnly + real deploy, pre-image retrieve,
  * listMetadata rows per type with sf:INVALID_TYPE for invalidTypes) plus a
  * listMode for the guard's own read (a fault, or a call that never answers),
- * and REST routes for DML (Account rows by id, /composite writes) and the
- * activation resource (BotVersion rows, /connect/bot-versions POST).
+ * the stamp queries (Tooling for CustomField / ValidationRule /
+ * ExternalString, the Data API for ListView) answered from probeRows under
+ * probeMode, and REST routes for DML (Account rows by id, /composite writes)
+ * and the activation resource (BotVersion rows, /connect/bot-versions POST).
  */
 function stubSalesforce(): void {
   vi.stubGlobal('fetch', async (input: string | URL, init?: RequestInit) => {
@@ -166,6 +269,9 @@ function stubSalesforce(): void {
       );
     }
     if (url.includes('/tooling/query')) {
+      const stamp = stampQueryResponse('tooling', new URL(url).searchParams.get('q') ?? '', init);
+      if (stamp) return stamp;
+      // Everything else on this route is the Aura live check's Tooling read.
       return new Response(JSON.stringify({ done: true, records: [], totalSize: 0 }));
     }
     if (url.includes('/services/Soap/m/')) {
@@ -242,6 +348,8 @@ function stubSalesforce(): void {
     }
     if (url.includes('/query?q=')) {
       const soql = decodeURIComponent(url.slice(url.indexOf('?q=') + 3));
+      const stamp = stampQueryResponse('data', soql, init);
+      if (stamp) return stamp;
       restQueries.push(soql);
       if (gate && gate.on === 'query' && !gate.entered) {
         gate.entered = true;
@@ -348,6 +456,9 @@ beforeEach(async () => {
   gate = null;
   restQueries = [];
   restQueryMode = 'ok';
+  probeRows = {};
+  probeMode = 'ok';
+  stampSignals = [];
   dmlWrites = 0;
   botVersionRows = [
     { Id: '0X9000000000001AAA', DeveloperName: 'v1', Status: 'Inactive' },
@@ -390,7 +501,8 @@ beforeEach(async () => {
   config = {
     ...DEFAULT_CONFIG,
     salesforce: { ...DEFAULT_CONFIG.salesforce },
-    snapshot: { ...DEFAULT_CONFIG.snapshot, pollIntervalMs: 5 },
+    // S46 (C): these stubs model no post-execute re-read.
+    snapshot: { ...DEFAULT_CONFIG.snapshot, pollIntervalMs: 5, rebaselineAfterDeploy: false },
     deploy: { ...DEFAULT_CONFIG.deploy, pollIntervalMs: 5, toolWaitMs: 10_000 },
   };
   store = new SnapshotStore(path.join(tmp, 'snapshots'));
@@ -449,6 +561,13 @@ function codeFromPage(html: string): string {
 
 const FOO = { type: 'ApexClass', api_name: 'Foo', content: FOO_PROPOSED };
 const NEW_CLS = { type: 'ApexClass', api_name: 'NewCls', content: 'public class NewCls {\n}\n' };
+/** S46 D1: a member whose stamp comes from its own query (Tooling CustomField), never the listing. */
+const FIELD = { type: 'CustomField', api_name: 'Invoice__c.Status__c', content: STATUS_FIELD };
+const FIELD_NAME = { type: 'CustomField', api_name: 'Invoice__c.Status__c' };
+/** The one stamp query a package holding FIELD issues, verbatim. */
+const FIELD_STAMP_QUERY =
+  'SELECT Id, DeveloperName, NamespacePrefix, LastModifiedDate, LastModifiedBy.Name FROM ' +
+  "CustomField WHERE (DeveloperName = 'Status' AND EntityDefinition.QualifiedApiName = 'Invoice__c')";
 const revertDir = (id: string) => path.join(tmp, 'staging', '_reverts', id);
 const audits = (type: string) => db.queryAuditEvents({}).filter((e) => e.eventType === type);
 const at = (ms: number) => new Date(Date.parse(CREATED) + ms).toISOString();
@@ -515,6 +634,32 @@ async function execute(code: string) {
 /** Someone edits Foo in the org after validation. */
 function editFoo(date = '2026-11-14T15:04:00.000Z', by = 'Carol Jones'): void {
   listRows.ApexClass = [{ fullName: 'Foo', date, by }];
+}
+
+/** FIELD's stamp row as its query returns it (the zone written the way Tooling writes it). */
+function fieldRow(date = '2026-11-08T14:00:00.000+0000', by: string | null = 'Bob Baseline', ns?: string): ProbeRow {
+  return { name: 'Status', parent: 'Invoice__c', date, by, ...(ns ? { ns } : {}) };
+}
+
+/**
+ * The org holds FIELD: the child-typed retrieve returns its block (not the
+ * proposal's bytes) in a partial container, and its stamp query returns its row.
+ */
+function fieldInOrg(row: ProbeRow = fieldRow()): void {
+  liveFiles['objects/Invoice__c.object'] = partialObject(
+    '<fields>\n        <fullName>Status__c</fullName>\n        <label>Status</label>\n        <type>Text</type>\n    </fields>',
+  );
+  probeRows.CustomField = [row];
+}
+
+/** Rewrite a validated request's stored summary, as another build would have written it. */
+function rewriteSummary(
+  req: DeployRequestRecord,
+  edit: (summary: Record<string, any>) => void,
+): void {
+  const summary = JSON.parse(req.summaryJson) as Record<string, any>;
+  edit(summary);
+  db.setDeployRequestSummaryJson(req.id, JSON.stringify(summary));
 }
 
 describe('S45 F2: deploy — the guard inside the deploy-exec job', () => {
@@ -1004,7 +1149,11 @@ describe('S45 F2: deploy — the ORG-clock fallback when no live baseline exists
     expect(result.target_check.unchecked).toEqual([
       { type: 'ApexClass', api_name: 'Foo', reason: 'absent_no_baseline' },
     ]);
-    expect(result.target_check.checked).toEqual([{ type: 'ApexClass', api_name: 'NewCls' }]);
+    // S46 D4: marked absent — no stamp was compared, and (no live baseline)
+    // nothing read the org at validate either.
+    expect(result.target_check.checked).toEqual([
+      { type: 'ApexClass', api_name: 'NewCls', absent: true },
+    ]);
     expect(result.target_check.status).toBe('ok');
   });
 
@@ -1173,6 +1322,613 @@ describe('S45 F2: deploy — the guard cannot read the org: FAIL OPEN WITH DISCL
       reason: 'the org did not answer within 15 s',
     });
     expect(audits('deploy.target_check_unavailable')).toHaveLength(1);
+  });
+});
+
+describe('S46 D1.4: deploy — a stamp-query member is re-read by its own query, never the listing', () => {
+  const REFUSAL_TAIL =
+    'The approved diff no longer describes what this deploy would overwrite. Re-run ' +
+    'validate_deploy to see the current state and get a fresh code. This check is best-effort: ' +
+    'Contrail re-reads the org immediately before claiming the code and compares last-modified ' +
+    'stamps, not bytes; a change landing after that read — while the deploy is submitted and ' +
+    'processed by the org — is not caught.';
+  const NOTHING_COMPARED =
+    "No member could be compared (each one's reason is under unchecked), so this write ran " +
+    'without a target check.';
+  /** Every listMetadata body sent since `from`, joined. */
+  const listedSince = (from: number) => listCalls.slice(from).join('');
+
+  it("'changed': the refusal names a Tooling query on CustomField, moved[0].source is set, and CustomField is never listed", async () => {
+    fieldInOrg();
+    const req = await validate({ components: [FIELD] });
+    const summary = JSON.parse(req.summaryJson) as Record<string, any>;
+    expect(summary.changes[0].pre_image).toMatchObject({
+      present: true,
+      stamp_source: 'tooling:CustomField',
+      last_modified_date: FIELD_DATE,
+      last_modified_by: 'Bob Baseline',
+    });
+    expect(summary.live_check.stamp_scheme).toBe(2);
+    const queriesBefore = restQueries.length;
+    probeRows.CustomField = [fieldRow('2026-11-14T15:04:00.000+0000', 'Carol Jones')];
+    const exec = await execute(req.code);
+    expect(exec.isError).not.toBe(true);
+    const result = jsonOf(exec);
+    expect(result).toMatchObject({ executed: false, deployed: false, target_moved: true });
+    expect(result.moved).toEqual([
+      {
+        ...FIELD_NAME,
+        state: 'changed',
+        last_modified_by: 'Carol Jones',
+        last_modified_date: '2026-11-14T15:04:00.000Z',
+        frozen_date: FIELD_DATE,
+        source: 'tooling:CustomField',
+      },
+    ]);
+    expect(result.refusal).toBe(
+      'TARGET MOVED — not executed, and this code is now void. ' +
+        `A Tooling query on CustomField (${hhmm(result.checked_at)}) reports members changed in ` +
+        '"moved-org" since this package was validated: CustomField Invoice__c.Status__c — last ' +
+        'modified by Carol Jones at 2026-11-14T15:04:00.000Z (the approval was based on the ' +
+        `version last modified at ${FIELD_DATE}). ${REFUSAL_TAIL}`,
+    );
+    // One query naming the package's own member — at validate and again at
+    // execute — and no listMetadata call for the type at either end.
+    expect(restQueries.slice(queriesBefore)).toEqual([FIELD_STAMP_QUERY]);
+    expect(restQueries.slice(0, queriesBefore)).toEqual([FIELD_STAMP_QUERY]);
+    expect(listedSince(0)).not.toContain('CustomField');
+    expect(realDeploys).toBe(0);
+    expect(db.getDeployRequestStatus(req.id)).toBe('superseded');
+    const audited = audits('deploy.target_moved');
+    expect(audited).toHaveLength(1);
+    expect(audited[0]!.detail).toMatchObject({
+      requestId: req.id,
+      moved: [{ ...FIELD_NAME, state: 'changed' }],
+    });
+    expect(JSON.stringify(audited[0]!.detail)).not.toContain('Carol');
+    expectCodeNowhere(req.code);
+  });
+
+  it("'gone': a dated member whose query now returns no row with its name is TARGET MOVED, attributed to the query", async () => {
+    fieldInOrg();
+    const req = await validate({ components: [FIELD] });
+    probeRows.CustomField = [];
+    const result = jsonOf(await execute(req.code));
+    expect(result.target_moved).toBe(true);
+    expect(result.moved).toEqual([
+      {
+        ...FIELD_NAME,
+        state: 'gone',
+        last_modified_by: null,
+        last_modified_date: null,
+        frozen_date: FIELD_DATE,
+        source: 'tooling:CustomField',
+      },
+    ]);
+    expect(result.refusal).toContain(
+      `A Tooling query on CustomField (${hhmm(result.checked_at)}) reports members changed in "moved-org"`,
+    );
+    expect(result.refusal).toContain(
+      'CustomField Invoice__c.Status__c — a Tooling query on CustomField no longer reports it ' +
+        `(the approval was based on the version last modified at ${FIELD_DATE})`,
+    );
+    expect(result.refusal).not.toContain('listMetadata');
+    expect(listedSince(0)).not.toContain('CustomField');
+    expect(realDeploys).toBe(0);
+  });
+
+  it("'created': an ADD whose own row the query now returns is TARGET MOVED, attributed to the query", async () => {
+    // No block in the retrieve and no row: absent at validate.
+    const req = await validate({ components: [FIELD] });
+    const summary = JSON.parse(req.summaryJson) as Record<string, any>;
+    expect(summary.changes[0].pre_image).toMatchObject({
+      present: false,
+      stamp_source: 'tooling:CustomField',
+      last_modified_date: null,
+    });
+    probeRows.CustomField = [fieldRow('2026-11-14T15:04:00.000+0000', 'Carol Jones')];
+    const result = jsonOf(await execute(req.code));
+    expect(result.target_moved).toBe(true);
+    expect(result.moved).toEqual([
+      {
+        ...FIELD_NAME,
+        state: 'created',
+        last_modified_by: 'Carol Jones',
+        last_modified_date: '2026-11-14T15:04:00.000Z',
+        frozen_date: null,
+        source: 'tooling:CustomField',
+      },
+    ]);
+    expect(result.refusal).toContain(
+      'CustomField Invoice__c.Status__c — a Tooling query on CustomField now reports it, last ' +
+        'modified by Carol Jones at 2026-11-14T15:04:00.000Z (the approval was based on the org ' +
+        'reporting no such member)',
+    );
+    expect(listedSince(0)).not.toContain('CustomField');
+    expect(realDeploys).toBe(0);
+  });
+
+  it('a package moved on both sources: the head names both, each member keeps its own source', async () => {
+    fieldInOrg();
+    const req = await validate({ components: [FOO, FIELD] });
+    const listsBefore = listCalls.length;
+    editFoo();
+    probeRows.CustomField = [fieldRow('2026-11-14T15:05:00.000+0000', 'Dana Admin')];
+    const result = jsonOf(await execute(req.code));
+    expect(result.target_moved).toBe(true);
+    expect(result.refusal).toContain(
+      `listMetadata and a Tooling query on CustomField (${hhmm(result.checked_at)}) report members ` +
+        'changed in "moved-org" since this package was validated: ApexClass Foo — last modified by ' +
+        'Carol Jones',
+    );
+    // Package order, whichever source read the member; only the probed one carries `source`.
+    expect(result.moved.map((m: Record<string, unknown>) => [m.api_name, m.source])).toEqual([
+      ['Foo', undefined],
+      ['Invoice__c.Status__c', 'tooling:CustomField'],
+    ]);
+    // The listing named the listing-sourced type only.
+    expect(listedSince(listsBefore)).toContain('<met:type>ApexClass</met:type>');
+    expect(listedSince(0)).not.toContain('CustomField');
+  });
+
+  it('an unchanged stamp written +0000 at validate and Z at execute is checked (epoch comparison)', async () => {
+    fieldInOrg(fieldRow('2026-11-08T14:00:00.000+0000'));
+    const req = await validate({ components: [FIELD] });
+    probeRows.CustomField = [fieldRow('2026-11-08T14:00:00Z')];
+    const result = jsonOf(await execute(req.code));
+    expect(result.deployed).toBe(true);
+    expect(result.target_moved).toBeUndefined();
+    expect(result.target_check).toMatchObject({ status: 'ok', unchecked: [] });
+    // A stamp comparison — not marked absent.
+    expect(result.target_check.checked).toEqual([FIELD_NAME]);
+    expect(audits('deploy.target_moved')).toHaveLength(0);
+    expect(audits('deploy.target_check_unavailable')).toHaveLength(0);
+  });
+
+  it('an ADD for which the read returns nothing is checked with absent: true — by the query, and by the listing', async () => {
+    const field = await validate({ components: [FIELD] });
+    const queriesBefore = restQueries.length;
+    const viaQuery = jsonOf(await execute(field.code));
+    expect(viaQuery.deployed).toBe(true);
+    expect(viaQuery.target_check.status).toBe('ok');
+    expect(viaQuery.target_check.checked).toEqual([{ ...FIELD_NAME, absent: true }]);
+    expect(viaQuery.target_check.unchecked).toEqual([]);
+    expect(restQueries.slice(queriesBefore)).toEqual([FIELD_STAMP_QUERY]);
+
+    const cls = await validate({ components: [NEW_CLS] });
+    const viaListing = jsonOf(await execute(cls.code));
+    expect(viaListing.deployed).toBe(true);
+    expect(viaListing.target_check.checked).toEqual([
+      { type: 'ApexClass', api_name: 'NewCls', absent: true },
+    ]);
+    expect(audits('deploy.target_check_unavailable')).toHaveLength(0);
+  });
+
+  it('the 0.39 path: a request with no stamp_scheme and no stamp_source is re-LISTED — no stamp query at execute, and a move reads as 0.39 wrote it', async () => {
+    const as039 = (req: DeployRequestRecord): void =>
+      rewriteSummary(req, (summary) => {
+        delete summary.live_check.stamp_scheme;
+        for (const c of [...summary.changes, ...(summary.destructive ?? [])]) {
+          delete c.pre_image.stamp_source;
+        }
+      });
+    fieldInOrg();
+    const req = await validate({ components: [FIELD] });
+    as039(req);
+    // 0.39 froze the LISTING's stamp; the stamp query would now say "changed".
+    listRows.CustomField = [{ fullName: 'Invoice__c.Status__c', date: FIELD_DATE, by: 'Bob Baseline' }];
+    probeRows.CustomField = [fieldRow('2026-11-14T15:04:00.000+0000', 'Carol Jones')];
+    let listsBefore = listCalls.length;
+    let queriesBefore = restQueries.length;
+    const ok = jsonOf(await execute(req.code));
+    expect(ok.deployed).toBe(true);
+    expect(ok.target_check).toMatchObject({ status: 'ok', unchecked: [] });
+    expect(ok.target_check.checked).toEqual([FIELD_NAME]);
+    expect(listedSince(listsBefore)).toContain('<met:type>CustomField</met:type>');
+    expect(restQueries.slice(queriesBefore)).toEqual([]);
+
+    // The same request shape with the listing's stamp moved: 0.39's refusal, word for word.
+    probeRows.CustomField = [fieldRow()];
+    const again = await validate({ components: [FIELD] });
+    as039(again);
+    listRows.CustomField = [
+      { fullName: 'Invoice__c.Status__c', date: '2026-11-14T15:04:00.000Z', by: 'Carol Jones' },
+    ];
+    listsBefore = listCalls.length;
+    queriesBefore = restQueries.length;
+    const moved = jsonOf(await execute(again.code));
+    expect(moved.target_moved).toBe(true);
+    expect(moved.refusal).toBe(
+      'TARGET MOVED — not executed, and this code is now void. ' +
+        `listMetadata (${hhmm(moved.checked_at)}) reports members changed in "moved-org" since ` +
+        'this package was validated: CustomField Invoice__c.Status__c — last modified by Carol ' +
+        'Jones at 2026-11-14T15:04:00.000Z (the approval was based on the version last modified ' +
+        `at ${FIELD_DATE}). ${REFUSAL_TAIL}`,
+    );
+    expect(moved.moved[0].source).toBeUndefined();
+    expect(listedSince(listsBefore)).toContain('<met:type>CustomField</met:type>');
+    expect(restQueries.slice(queriesBefore)).toEqual([]);
+  });
+
+  it('a stamp query that fails at execute is member-level unchecked: siblings are still compared, nothing is voided or audited', async () => {
+    fieldInOrg();
+    const req = await validate({ components: [FOO, FIELD] });
+    probeMode = 'fault';
+    const result = jsonOf(await execute(req.code));
+    expect(result.deployed).toBe(true);
+    expect(result.target_moved).toBeUndefined();
+    expect(result.target_check.status).toBe('ok');
+    expect(result.target_check.checked).toEqual([{ type: 'ApexClass', api_name: 'Foo' }]);
+    expect(result.target_check.unchecked).toEqual([
+      { ...FIELD_NAME, reason: 'stamp_query_failed_at_execute' },
+    ]);
+    expect(audits('deploy.target_check_unavailable')).toHaveLength(0);
+    expect(audits('deploy.target_moved')).toHaveLength(0);
+    // Never replaced by the listing.
+    expect(listedSince(0)).not.toContain('CustomField');
+
+    // The only member: nothing was compared, and that is audited.
+    probeMode = 'ok';
+    const alone = await validate({ components: [FIELD] });
+    probeMode = 'fault';
+    const unverified = jsonOf(await execute(alone.code));
+    expect(unverified.deployed).toBe(true);
+    expect(unverified.target_check).toMatchObject({
+      status: 'not_checked',
+      checked: [],
+      note: NOTHING_COMPARED,
+    });
+    expect(unverified.target_check.unchecked).toEqual([
+      { ...FIELD_NAME, reason: 'stamp_query_failed_at_execute' },
+    ]);
+    expect(audits('deploy.target_check_unavailable').map((e) => e.detail)).toEqual([
+      { requestId: alone.id, kind: 'deploy', reason: 'nothing_compared' },
+    ]);
+    expect(listedSince(0)).not.toContain('CustomField');
+  });
+
+  it('a stamp-query row with no usable stamp at execute — two rows for the one member, or an unparseable date — is unchecked (dates_unavailable_at_execute), never a void', async () => {
+    fieldInOrg();
+    const req = await validate({ components: [FOO, FIELD] });
+    const summary = JSON.parse(req.summaryJson) as Record<string, any>;
+    expect(summary.changes[1].pre_image).toMatchObject({
+      present: true,
+      last_modified_date: FIELD_DATE,
+    });
+    // Two rows for the one target: the probe keeps the row and nulls its stamp.
+    probeRows.CustomField = [fieldRow(), fieldRow('2026-11-14T15:04:00.000+0000', 'Carol Jones')];
+    const result = jsonOf(await execute(req.code));
+    expect(result.deployed).toBe(true);
+    expect(result.target_moved).toBeUndefined();
+    expect(result.target_check.status).toBe('ok');
+    // The row is there, so the member is not 'gone'; it carries no stamp, so
+    // it is not 'changed' — and it is not counted as checked either.
+    expect(result.target_check.checked).toEqual([{ type: 'ApexClass', api_name: 'Foo' }]);
+    expect(result.target_check.unchecked).toEqual([
+      { ...FIELD_NAME, reason: 'dates_unavailable_at_execute' },
+    ]);
+    expect(audits('deploy.target_moved')).toHaveLength(0);
+
+    // One row whose date cannot be read: the same verdict.
+    probeRows.CustomField = [fieldRow()];
+    const again = await validate({ components: [FOO, FIELD] });
+    probeRows.CustomField = [fieldRow('not a date', 'Carol Jones')];
+    const unreadable = jsonOf(await execute(again.code));
+    expect(unreadable.deployed).toBe(true);
+    expect(unreadable.target_moved).toBeUndefined();
+    expect(unreadable.target_check.checked).toEqual([{ type: 'ApexClass', api_name: 'Foo' }]);
+    expect(unreadable.target_check.unchecked).toEqual([
+      { ...FIELD_NAME, reason: 'dates_unavailable_at_execute' },
+    ]);
+    expect(audits('deploy.target_moved')).toHaveLength(0);
+    expect(realDeploys).toBe(2);
+    expect(listedSince(0)).not.toContain('CustomField');
+  });
+
+  it('the ORG-clock path treats a stamp-query row with no usable stamp the same way: unchecked — never checked, never absent, never a void', async () => {
+    retrieveMode = 'fault';
+    probeRows.CustomField = [fieldRow(at(-60_000))];
+    const req = await validate({ components: [FOO, FIELD] });
+    const summary = JSON.parse(req.summaryJson) as Record<string, any>;
+    expect(summary.live_check).toMatchObject({ status: 'unavailable', stamp_scheme: 2 });
+    probeRows.CustomField = [fieldRow(at(-60_000)), fieldRow(at(-50_000), 'Carol Jones')];
+    const result = jsonOf(await execute(req.code));
+    expect(result.deployed).toBe(true);
+    expect(result.target_moved).toBeUndefined();
+    expect(result.target_check.checked).toEqual([{ type: 'ApexClass', api_name: 'Foo' }]);
+    expect(result.target_check.unchecked).toEqual([
+      { ...FIELD_NAME, reason: 'dates_unavailable_at_execute' },
+    ]);
+    expect(audits('deploy.target_moved')).toHaveLength(0);
+  });
+
+  it("a stamp query that never answers: the 15 s deadline aborts ITS fetch signal and the deploy executes with target_check unavailable", async () => {
+    fieldInOrg();
+    const req = await validate({ components: [FIELD] });
+    probeMode = 'hang';
+    config.deploy.toolWaitMs = 60_000;
+    const signalsBefore = stampSignals.length;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    let settled = false;
+    const pending = execute(req.code).finally(() => {
+      settled = true;
+    });
+    for (let i = 0; i < 500 && !probeStarted; i++) await vi.advanceTimersByTimeAsync(1);
+    expect(probeStarted).toBe(true);
+    // The guard's deadline signal reached the stamp query's fetch.
+    const signal = stampSignals[signalsBefore];
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect(signal!.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(signal!.aborted).toBe(true);
+    for (let i = 0; i < 500 && !settled; i++) await vi.advanceTimersByTimeAsync(1);
+    const result = jsonOf(await pending);
+    vi.useRealTimers();
+    expect(result.deployed).toBe(true);
+    expect(result.target_check).toMatchObject({
+      status: 'unavailable',
+      reason: 'the org did not answer within 15 s',
+    });
+    expect(audits('deploy.target_check_unavailable').map((e) => e.detail)).toEqual([
+      { requestId: req.id, kind: 'deploy', reason: 'the org did not answer within 15 s' },
+    ]);
+  });
+
+  it('the ORG-clock path goes through the query too (stamp_scheme with no pre-image): checked before the org clock, TARGET MOVED after it — never the listing', async () => {
+    retrieveMode = 'fault';
+    probeRows.CustomField = [fieldRow(at(-60_000))];
+    const req = await validate({ components: [FIELD] });
+    const summary = JSON.parse(req.summaryJson) as Record<string, any>;
+    expect(summary.live_check).toMatchObject({
+      status: 'unavailable',
+      stamp_scheme: 2,
+      org_clock: { created_date: CREATED },
+    });
+    expect(summary.changes[0].pre_image).toBeUndefined();
+    let listsBefore = listCalls.length;
+    let queriesBefore = restQueries.length;
+    const ok = jsonOf(await execute(req.code));
+    expect(ok.deployed).toBe(true);
+    expect(ok.target_check).toMatchObject({ status: 'ok', unchecked: [] });
+    expect(ok.target_check.checked).toEqual([FIELD_NAME]);
+    let issued = restQueries.slice(queriesBefore);
+    expect(issued).toHaveLength(1);
+    expect(issued[0]!.startsWith('SELECT Id, DeveloperName, NamespacePrefix')).toBe(true);
+    expect(listedSince(listsBefore)).not.toContain('CustomField');
+
+    // Edited after the org-side validation time: the degrade variant, its subject the query.
+    const again = await validate({ components: [FIELD] });
+    probeRows.CustomField = [fieldRow(at(30_000), 'Carol Jones')];
+    listsBefore = listCalls.length;
+    queriesBefore = restQueries.length;
+    const moved = jsonOf(await execute(again.code));
+    expect(moved.target_moved).toBe(true);
+    expect(moved.moved).toEqual([
+      {
+        ...FIELD_NAME,
+        state: 'changed',
+        last_modified_by: 'Carol Jones',
+        last_modified_date: at(30_000),
+        frozen_date: null,
+        source: 'tooling:CustomField',
+      },
+    ]);
+    expect(moved.refusal).toContain(
+      'TARGET MOVED — not executed, and this code is now void. ' +
+        `A Tooling query on CustomField (${hhmm(moved.checked_at)}) reports members changed in ` +
+        '"moved-org" since this package was validated: CustomField Invoice__c.Status__c — last ' +
+        `modified by Carol Jones at ${at(30_000)}, after this package was validated at ${CREATED} ` +
+        '(no live baseline was captured at validate: retrieve_failed:',
+    );
+    expect(moved.refusal).toContain(
+      'Contrail compared against the org-side validation time, minus a 5-second ordering margin)',
+    );
+    expect(audits('deploy.target_moved')[0]!.detail).toMatchObject({ org_clock_fallback: true });
+    issued = restQueries.slice(queriesBefore);
+    expect(issued).toEqual([FIELD_STAMP_QUERY]);
+    expect(listedSince(0)).not.toContain('CustomField');
+    expect(realDeploys).toBe(1);
+  });
+
+  it('stamp_source_mismatch: a frozen probe source this build does not read for the type is unchecked — no query, no listing', async () => {
+    fieldInOrg();
+    const req = await validate({ components: [FOO, FIELD] });
+    rewriteSummary(req, (summary) => {
+      summary.changes[1].pre_image.stamp_source = 'data:ListView';
+    });
+    const queriesBefore = restQueries.length;
+    // Whatever the query would say is not asked.
+    probeRows.CustomField = [fieldRow('2026-11-14T15:04:00.000+0000', 'Carol Jones')];
+    const result = jsonOf(await execute(req.code));
+    expect(result.deployed).toBe(true);
+    expect(result.target_check.status).toBe('ok');
+    expect(result.target_check.checked).toEqual([{ type: 'ApexClass', api_name: 'Foo' }]);
+    expect(result.target_check.unchecked).toEqual([
+      { ...FIELD_NAME, reason: 'stamp_source_mismatch' },
+    ]);
+    expect(restQueries.slice(queriesBefore)).toEqual([]);
+    expect(listedSince(0)).not.toContain('CustomField');
+  });
+
+  it('stamp_not_probeable: a member no stamp query can name that was absent at validate; one that was PRESENT is dates_unavailable_at_validate first', async () => {
+    // A destructive CustomField whose name does not end in __c: no query names
+    // it, and the parent-container retrieve returned no document for it.
+    const gone = { type: 'CustomField', api_name: 'Account.Gone' };
+    const absent = await validate({ components: [FOO], destructive: [gone] });
+    const absentSummary = JSON.parse(absent.summaryJson) as Record<string, any>;
+    expect(absentSummary.destructive[0].pre_image).toMatchObject({
+      present: false,
+      stamp_source: 'tooling:CustomField',
+      last_modified_date: null,
+    });
+    let queriesBefore = restQueries.length;
+    const first = jsonOf(await execute(absent.code));
+    expect(first.deployed).toBe(true);
+    expect(first.target_check.checked).toEqual([{ type: 'ApexClass', api_name: 'Foo' }]);
+    expect(first.target_check.unchecked).toEqual([{ ...gone, reason: 'stamp_not_probeable' }]);
+    expect(restQueries.slice(queriesBefore)).toEqual([]);
+
+    // A standard field the retrieve DID return: present, undated — caught by
+    // the validate-time null date before any routing.
+    liveFiles['objects/Account.object'] = partialObject(
+      '<fields>\n        <fullName>Industry</fullName>\n        <type>Picklist</type>\n    </fields>',
+    );
+    const industry = {
+      type: 'CustomField',
+      api_name: 'Account.Industry',
+      content:
+        '<fields>\n        <fullName>Industry</fullName>\n        <trackHistory>true</trackHistory>\n        <type>Picklist</type>\n    </fields>',
+    };
+    const present = await validate({ components: [FOO, industry] });
+    const presentSummary = JSON.parse(present.summaryJson) as Record<string, any>;
+    expect(presentSummary.changes[1].pre_image).toMatchObject({
+      present: true,
+      stamp_source: 'tooling:CustomField',
+      last_modified_date: null,
+    });
+    queriesBefore = restQueries.length;
+    const second = jsonOf(await execute(present.code));
+    expect(second.deployed).toBe(true);
+    expect(second.target_check.unchecked).toEqual([
+      { type: 'CustomField', api_name: 'Account.Industry', reason: 'dates_unavailable_at_validate' },
+    ]);
+    expect(restQueries.slice(queriesBefore)).toEqual([]);
+    expect(listedSince(0)).not.toContain('CustomField');
+  });
+
+  it('absence at validate is a fact only where the member\'s OWN source answered: a failed stamp query leaves it unchecked; a listing that threw does not', async () => {
+    // The type's stamp query failed at validate: "no row" was never read.
+    probeMode = 'fault';
+    const failed = await validate({ components: [FOO, FIELD] });
+    const failedSummary = JSON.parse(failed.summaryJson) as Record<string, any>;
+    expect(failedSummary.live_check.dates_unavailable_types).toEqual(['CustomField']);
+    expect(failedSummary.changes[1].pre_image).toMatchObject({ present: false });
+    probeMode = 'ok';
+    let queriesBefore = restQueries.length;
+    const first = jsonOf(await execute(failed.code));
+    expect(first.deployed).toBe(true);
+    expect(first.target_check.checked).toEqual([{ type: 'ApexClass', api_name: 'Foo' }]);
+    expect(first.target_check.unchecked).toEqual([
+      { ...FIELD_NAME, reason: 'dates_unavailable_at_validate' },
+    ]);
+    expect(restQueries.slice(queriesBefore)).toEqual([]);
+
+    // The LISTING threw at validate: every listing-sourced date is null, but
+    // that says nothing about the field's stamp query, which answered.
+    listMode = 'fault';
+    const listingDown = await validate({ components: [FOO, FIELD] });
+    const downSummary = JSON.parse(listingDown.summaryJson) as Record<string, any>;
+    expect(downSummary.live_check.dates_unavailable).toContain('list blew up');
+    expect(downSummary.live_check.dates_unavailable_types).toEqual([]);
+    listMode = 'ok';
+    queriesBefore = restQueries.length;
+    const second = jsonOf(await execute(listingDown.code));
+    expect(second.deployed).toBe(true);
+    expect(second.target_check.checked).toEqual([{ ...FIELD_NAME, absent: true }]);
+    expect(second.target_check.unchecked).toEqual([
+      { type: 'ApexClass', api_name: 'Foo', reason: 'dates_unavailable_at_validate' },
+    ]);
+    expect(restQueries.slice(queriesBefore)).toEqual([FIELD_STAMP_QUERY]);
+  });
+
+  describe('stamp_row_unmatched — the member\'s name came back only under a namespace the package did not name', () => {
+    const STRANGER = fieldRow('2026-11-01T10:00:00.000+0000', 'Pat Packager', 'ns');
+
+    it('an ADD whose query returns only the namespaced row at execute: the deploy runs, the member is unchecked — neither checked nor moved', async () => {
+      const req = await validate({ components: [FIELD] });
+      const summary = JSON.parse(req.summaryJson) as Record<string, any>;
+      expect(summary.changes[0].pre_image).toMatchObject({ present: false });
+      expect(summary.live_check.probe_unmatched).toBeUndefined();
+      probeRows.CustomField = [STRANGER];
+      const result = jsonOf(await execute(req.code));
+      expect(result.deployed).toBe(true);
+      expect(result.target_moved).toBeUndefined();
+      expect(result.target_check.unchecked).toEqual([
+        { ...FIELD_NAME, reason: 'stamp_row_unmatched' },
+      ]);
+      expect(result.target_check.checked).toEqual([]);
+      // Nothing compared: disclosed like any other unverified write.
+      expect(result.target_check.status).toBe('not_checked');
+      expect(audits('deploy.target_check_unavailable').map((e) => e.detail)).toEqual([
+        { requestId: req.id, kind: 'deploy', reason: 'nothing_compared' },
+      ]);
+      expect(audits('deploy.target_moved')).toHaveLength(0);
+    });
+
+    it("the member's own row beside the namespaced one is still 'created'", async () => {
+      const req = await validate({ components: [FIELD] });
+      probeRows.CustomField = [STRANGER, fieldRow('2026-11-14T15:04:00.000+0000', 'Carol Jones')];
+      const result = jsonOf(await execute(req.code));
+      expect(result.target_moved).toBe(true);
+      expect(result.moved).toEqual([
+        {
+          ...FIELD_NAME,
+          state: 'created',
+          last_modified_by: 'Carol Jones',
+          last_modified_date: '2026-11-14T15:04:00.000Z',
+          frozen_date: null,
+          source: 'tooling:CustomField',
+        },
+      ]);
+      expect(result.refusal).not.toContain('Pat Packager');
+      expect(realDeploys).toBe(0);
+    });
+
+    it('unmatched at VALIDATE and no row at all at execute: still stamp_row_unmatched, never absent', async () => {
+      probeRows.CustomField = [STRANGER];
+      const req = await validate({ components: [FIELD] });
+      const summary = JSON.parse(req.summaryJson) as Record<string, any>;
+      expect(summary.live_check.probe_unmatched).toEqual(['CustomField:Invoice__c.Status__c']);
+      expect(summary.changes[0].pre_image).toMatchObject({ present: false, last_modified_date: null });
+      probeRows.CustomField = [];
+      const result = jsonOf(await execute(req.code));
+      expect(result.deployed).toBe(true);
+      expect(result.target_check.unchecked).toEqual([
+        { ...FIELD_NAME, reason: 'stamp_row_unmatched' },
+      ]);
+      expect(result.target_check.checked).toEqual([]);
+      expect(JSON.stringify(result.target_check)).not.toContain('absent');
+    });
+
+    it("unmatched at VALIDATE, and the member's OWN row appears at execute: 'created' — the validate-time set speaks only for a member with no row of its own", async () => {
+      probeRows.CustomField = [STRANGER];
+      const req = await validate({ components: [FIELD] });
+      const summary = JSON.parse(req.summaryJson) as Record<string, any>;
+      expect(summary.live_check.probe_unmatched).toEqual(['CustomField:Invoice__c.Status__c']);
+      expect(summary.changes[0].pre_image).toMatchObject({ present: false, last_modified_date: null });
+      // Created after validate, beside the namespaced row.
+      probeRows.CustomField = [STRANGER, fieldRow('2026-11-14T15:04:00.000+0000', 'Carol Jones')];
+      const result = jsonOf(await execute(req.code));
+      expect(result).toMatchObject({ executed: false, deployed: false, target_moved: true });
+      expect(result.moved).toEqual([
+        {
+          ...FIELD_NAME,
+          state: 'created',
+          last_modified_by: 'Carol Jones',
+          last_modified_date: '2026-11-14T15:04:00.000Z',
+          frozen_date: null,
+          source: 'tooling:CustomField',
+        },
+      ]);
+      // Its own row was compared: it is not also reported unchecked.
+      expect(result.unchecked).toBeUndefined();
+      expect(result.refusal).not.toContain('Pat Packager');
+      expect(realDeploys).toBe(0);
+    });
+
+    it("a frozen, dated member whose query now returns only the namespaced row: stamp_row_unmatched, never 'gone'", async () => {
+      fieldInOrg();
+      const req = await validate({ components: [FOO, FIELD] });
+      probeRows.CustomField = [STRANGER];
+      const result = jsonOf(await execute(req.code));
+      expect(result.deployed).toBe(true);
+      expect(result.target_moved).toBeUndefined();
+      expect(result.target_check.checked).toEqual([{ type: 'ApexClass', api_name: 'Foo' }]);
+      expect(result.target_check.unchecked).toEqual([
+        { ...FIELD_NAME, reason: 'stamp_row_unmatched' },
+      ]);
+      expect(audits('deploy.target_moved')).toHaveLength(0);
+    });
   });
 });
 

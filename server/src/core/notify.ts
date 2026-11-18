@@ -93,8 +93,21 @@ export interface NotifierStatus {
   storeError?: string;
 }
 
+/**
+ * S46 (B): what the engine tells the notifier besides the view. `freeze`: a
+ * change freeze held the request at mint, so the push carries no code and
+ * says the human approves at their desk. `policyChangedAt`: Contrail noticed
+ * the policies section of config.json change within the last day (an ISO
+ * instant) — the push says so in one protected head line.
+ */
+export interface ApprovalNotifyOptions {
+  includeCode: boolean;
+  freeze?: boolean;
+  policyChangedAt?: string;
+}
+
 export interface ApprovalNotifier {
-  notify(view: ApprovalPageOptions, opts: { includeCode: boolean }): Promise<NotifyOutcome>;
+  notify(view: ApprovalPageOptions, opts: ApprovalNotifyOptions): Promise<NotifyOutcome>;
   /** Settings-page button: validate the stored keys, then send a test message. */
   sendTest(): Promise<{ ok: boolean; message: string }>;
   status(): NotifierStatus;
@@ -114,13 +127,21 @@ export interface PhoneNotification {
  * `includeCode` is true for the localhost approval page (the phone carries the
  * code; the plugin's open_settings tool exists) and false for the desktop
  * app's native Deploy Review (the push is code-free; settings live in the app).
+ * S46 (B): `surface` names where the human approves — 'page' (the plugin's
+ * approval page) or 'native' (Deploy Review) — and defaults from
+ * `includeCode`; the settings phrase keys on it, because a frozen plugin
+ * request has no code in its push and is still configured via open_settings.
+ * `freeze`: a change freeze held the request at mint — none of these
+ * sentences then says the code is on the page.
  */
 export function describePhoneOutcome(
   outcome: NotifyOutcome,
-  opts: { includeCode: boolean },
+  opts: { includeCode: boolean; freeze?: boolean; surface?: 'page' | 'native' },
 ): PhoneNotification {
   if (outcome.status === 'off') return { status: 'off' };
-  const settings = opts.includeCode ? 'via open_settings' : "in the app's Settings → Notifications";
+  const surface = opts.surface ?? (opts.includeCode ? 'page' : 'native');
+  const settings = surface === 'page' ? 'via open_settings' : "in the app's Settings → Notifications";
+  if (opts.freeze === true) return describeFrozenPhoneOutcome(outcome, surface, settings);
   if (outcome.status === 'skipped') {
     // S43. Neither reason is a fault in the ritual: the code is on the page.
     // 'off' is the designed quiet case (the human is at the desk) and warrants
@@ -147,11 +168,24 @@ export function describePhoneOutcome(
       status: 'sent',
       note: opts.includeCode
         ? "The approval summary and code were also pushed to the human's phone. The code " +
-          'still only counts when the human types it into this chat.'
+          'still counts only when the human gives it to you as their approval.'
         : "A code-free summary was pushed to the human's phone; they approve in the app's " +
           'Deploy Review screen as usual.',
     };
   }
+  return {
+    status: 'failed',
+    reason: outcome.reason,
+    note:
+      `Phone notification failed (${failureHint(outcome.reason, settings)}). ` +
+      (opts.includeCode
+        ? "The code is only on the approval page in the human's browser."
+        : "The proposal is still waiting in the app's Deploy Review screen."),
+  };
+}
+
+/** Why a push failed, for the agent — `settings` says where the human fixes the keys. */
+function failureHint(reason: NotifyFailure, settings: string): string {
   const hint: Record<NotifyFailure, string> = {
     not_configured:
       'phone notifications are switched on but the Pushover keys are missing — the human can ' +
@@ -167,14 +201,53 @@ export function describePhoneOutcome(
       'notifications are paused after a recent rejection — the human can fix the keys ' +
       `${settings}`,
   };
+  return hint[reason];
+}
+
+/**
+ * S46 (B): the phone outcome of a request a change freeze held at mint. The
+ * push (when one went out) carried no code, and the human approves at their
+ * desk after typing an emergency reason there — so no sentence here points
+ * at a code on the page.
+ */
+function describeFrozenPhoneOutcome(
+  outcome: Exclude<NotifyOutcome, { status: 'off' }>,
+  surface: 'page' | 'native',
+  settings: string,
+): PhoneNotification {
+  const where = surface === 'page' ? 'on the approval page' : 'in Deploy Review';
+  if (outcome.status === 'sent') {
+    return {
+      status: 'sent',
+      note:
+        "A code-free summary was pushed to the human's phone: a change freeze is in effect, and " +
+        'while it lasts they can only approve at their desk, after typing an emergency reason there.',
+    };
+  }
+  if (outcome.status === 'skipped') {
+    return {
+      status: 'skipped',
+      reason: outcome.reason,
+      note:
+        outcome.reason === 'remote_control_off'
+          ? 'Phone notification skipped: Remote Control was not connected when this was ' +
+            'proposed (phone delivery is set to "only while Remote Control is on"). A change ' +
+            'freeze is in effect, so a push would have carried no code; while it lasts the ' +
+            `human approves at their desk, after typing an emergency reason ${where}.`
+          : 'Phone notification skipped: phone delivery is set to "only while Remote Control ' +
+            'is on", but Contrail\'s Remote Control hook did not report for this call — it is ' +
+            'not installed, or this is not a Claude Code session. A change freeze is in effect: ' +
+            'while it lasts the request cannot be approved until the human types an emergency ' +
+            `reason ${where}. If the human expected a push, they can install the hook or switch ` +
+            `delivery to Always ${settings}.`,
+    };
+  }
   return {
     status: 'failed',
     reason: outcome.reason,
     note:
-      `Phone notification failed (${hint[outcome.reason]}). ` +
-      (opts.includeCode
-        ? "The code is only on the approval page in the human's browser."
-        : "The proposal is still waiting in the app's Deploy Review screen."),
+      `Phone notification failed (${failureHint(outcome.reason, settings)}). ` +
+      'A change freeze is in effect, so the human approves at their desk either way.',
   };
 }
 
@@ -233,6 +306,20 @@ function phoneLabel(kind: ApprovalPageOptions['kind'], label: string): string {
   return colon === -1 ? flat : flat.slice(0, colon).trim();
 }
 
+/** S46 (B): the tail of a push for a request a change freeze held at mint — it carries no code. */
+export const FREEZE_TAIL =
+  'CHANGE FREEZE in effect — this message carries no code. While the freeze lasts, this can ' +
+  'only be approved at your desk, after you type an emergency reason there (the approval page ' +
+  'in your browser, or Deploy Review in the Contrail desktop app).';
+
+/** HH:MM on this machine's wall clock (24-hour), or null for an unparseable instant. */
+function wallClock(iso: string): string | null {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return null;
+  const d = new Date(t);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
 /**
  * The message itself. 'minimal' carries the connection alias, org type and
  * counts — no component names leave the machine. 'full' adds labels and
@@ -240,10 +327,14 @@ function phoneLabel(kind: ApprovalPageOptions['kind'], label: string): string {
  * clipped code would be worse than no message at all. The code is the final
  * line, alone after a blank line (S43): on a phone, "select the last line" is
  * one long-press, and no other digits sit near it to be grabbed by mistake.
+ * S46 (B): during a change freeze the tail is FREEZE_TAIL and no code line
+ * exists. A policies change noticed within the last day adds one line
+ * directly after the counts line; it is a head line, not one of the three
+ * warning slots, and like the counts line it is never clipped.
  */
 export function composePushover(
   view: ApprovalPageOptions,
-  opts: { includeCode: boolean; summary: NotifySummary },
+  opts: { includeCode: boolean; summary: NotifySummary; freeze?: boolean; policyChangedAt?: string },
 ): PushoverMessage {
   const title = truncate(
     `Contrail: approve ${approvalKindNoun(view.kind)} → ${view.org.alias} (${view.org.orgType})`,
@@ -252,13 +343,21 @@ export function composePushover(
   const rowWarnings = [...view.destructive, ...view.changes].flatMap((r) => r.warnings);
   const warningCount = (view.warnings ?? []).length + rowWarnings.length;
 
-  const head: string[] = [
+  const fixed: string[] = [
     [
       plural(view.changes.length, 'change'),
       plural(view.destructive.length, 'deletion'),
       plural(warningCount, 'warning'),
     ].join(' · '),
   ];
+  const changedAt = opts.policyChangedAt ? wallClock(opts.policyChangedAt) : null;
+  if (changedAt !== null) {
+    fixed.push(
+      `Contrail noticed a policies change in config.json at ${changedAt} — read the approval ` +
+        'page or Deploy Review before approving.',
+    );
+  }
+  const head: string[] = [];
   if (view.org.orgType === 'production') head.push('PRODUCTION org.');
   if (view.destructive.length > 0) head.push('Includes DELETIONS.');
   if (opts.summary === 'full') {
@@ -271,16 +370,23 @@ export function composePushover(
 
   const clock = expiryClock(view.expiresAt);
   const expiry = clock === 'soon' ? 'it expires soon' : `it expires at ${clock}`;
-  const tail: string[] = opts.includeCode
-    ? [
-        `Type the code below into your Contrail session to approve — ${expiry}. Full details ` +
-          'are on the approval page on your desktop.',
-        '',
-        view.code,
-      ]
-    : ['Waiting in Deploy Review — open the Contrail desktop app to approve.'];
+  const tail: string[] = opts.freeze
+    ? [FREEZE_TAIL]
+    : opts.includeCode
+      ? [
+          `Type the code below into your Contrail session to approve — ${expiry}. Full details ` +
+            'are on the approval page on your desktop.',
+          '',
+          view.code,
+        ]
+      : ['Waiting in Deploy Review — open the Contrail desktop app to approve.'];
   const tailText = tail.join('\n');
-  const headText = truncate(head.join('\n'), Math.max(0, MESSAGE_MAX - tailText.length - 1));
+  // Only the lines after the fixed ones are ever clipped.
+  const fixedText = fixed.join('\n');
+  const rest = head.join('\n');
+  const headText = rest
+    ? `${fixedText}\n${truncate(rest, Math.max(0, MESSAGE_MAX - tailText.length - fixedText.length - 2))}`
+    : fixedText;
   return {
     title,
     message: `${headText}\n${tailText}`,
@@ -388,7 +494,7 @@ export class PushoverNotifier implements ApprovalNotifier {
 
   async notify(
     view: ApprovalPageOptions,
-    opts: { includeCode: boolean },
+    opts: ApprovalNotifyOptions,
   ): Promise<NotifyOutcome> {
     this.sync();
     if (this.config.notifications.method !== 'pushover') return { status: 'off' };
@@ -403,6 +509,8 @@ export class PushoverNotifier implements ApprovalNotifier {
     const msg = composePushover(view, {
       includeCode: opts.includeCode,
       summary: this.config.notifications.summary,
+      ...(opts.freeze === true ? { freeze: true } : {}),
+      ...(opts.policyChangedAt ? { policyChangedAt: opts.policyChangedAt } : {}),
     });
     const result = await this.call(PUSHOVER_MESSAGES_URL, {
       token: creds.token,

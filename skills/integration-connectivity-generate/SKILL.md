@@ -187,8 +187,11 @@ by name.
 1. **Ground** (table above) and pick the auth model.
 2. **Author** ExternalCredential → NamedCredential → permission set as one
    package (retrieve-first for any modify).
-3. **Deploy and verify** — the salesforce-house-rules §3 ritual, then
-   `refresh_snapshot types:["NamedCredential","ExternalCredential","AuthProvider"]`.
+3. **Deploy and verify** — the salesforce-house-rules §3 ritual, then **check
+   the result's `snapshot` block** — it says whether the deployed credentials
+   were re-read into the snapshot; if one was skipped with
+   `type_not_in_snapshot`, run `refresh_snapshot` with
+   `types: ["NamedCredential","ExternalCredential","AuthProvider"]`.
 4. **Hand the human their steps, explicitly**: enter each principal's values
    in Setup (name the principals), assign the permission set, and for per-user
    principals have users authenticate once. Contrail cannot do these.

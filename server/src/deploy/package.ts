@@ -44,10 +44,19 @@ export interface ComponentChange {
   pre_image?: ComponentPreImage;
 }
 
+/** S46 D1: where a member's last-modified stamp is read from. */
+export type StampSource =
+  | 'listMetadata'
+  | 'tooling:CustomField'
+  | 'tooling:ValidationRule'
+  | 'tooling:ExternalString'
+  | 'data:ListView';
+
 /**
  * S45: the frozen summary of one member's live pre-image (the bytes
  * themselves live on disk under staging/_reverts/, never here). `present` is
- * null when the org could not enumerate the type at all; `source` says
+ * null when the org could not enumerate the type at all, or when no read
+ * named the member (its name cannot be placed); `source` says
  * whether the member's bytes were retrieved or only the listing was
  * consulted; `comparable` is false when a diff against the retrieved bytes
  * would lie (Profile — a single-member retrieve is package-relative — and
@@ -58,6 +67,10 @@ export interface ComponentChange {
 export interface ComponentPreImage {
   present: boolean | null;
   source: 'retrieve' | 'list';
+  /** S46 D1: the source this member's stamp was read from at validate (or would have been —
+   *  the dates are null when it returned no usable stamp, failed, or cannot name this member, such
+   *  as a standard field). Absent = validated by 0.39: listMetadata. */
+  stamp_source?: StampSource;
   sha256?: string;
   last_modified_date: string | null;
   last_modified_by: string | null;
@@ -370,6 +383,17 @@ const CHILD_TYPES: Record<
   },
 };
 
+/**
+ * A type's row in a type table (FILE_TYPES, CHILD_TYPES) — an OWN property
+ * only. A type name arrives from the package as any run of letters, and
+ * "constructor", "toString" or "hasOwnProperty" must not find an inherited
+ * Object.prototype member and pass for a registered type: such a type is
+ * simply unregistered.
+ */
+function typeEntry<T>(table: Record<string, T>, type: string): T | undefined {
+  return Object.hasOwn(table, type) ? table[type] : undefined;
+}
+
 // Parens/apostrophe/ampersand are legal in layout labels (every standard
 // object ships an "Object (Marketing) Layout"); path safety stays with the
 // explicit '/', '\', '..' guards in validateTypeAndName.
@@ -433,7 +457,7 @@ export const AURA_DEFTYPE_FILES: Record<string, string> = {
  * delete gets type-aware arms or the UNREGISTERED TYPE DELETE treatment.
  */
 export function isRegisteredType(type: string): boolean {
-  return type in FILE_TYPES || type in CHILD_TYPES;
+  return Object.hasOwn(FILE_TYPES, type) || Object.hasOwn(CHILD_TYPES, type);
 }
 
 /**
@@ -450,9 +474,9 @@ export function retrieveMemberFor(
   type: string,
   apiName: string,
 ): { type: string; member: string } | null {
-  const fileSpec = FILE_TYPES[type];
+  const fileSpec = typeEntry(FILE_TYPES, type);
   if (fileSpec) return { type: fileSpec.manifestType ?? type, member: apiName };
-  const childSpec = CHILD_TYPES[type];
+  const childSpec = typeEntry(CHILD_TYPES, type);
   if (childSpec) {
     const parent = childSpec.parentFromName(apiName);
     return parent ? { type: childSpec.containerRoot, member: parent } : null;
@@ -466,7 +490,7 @@ export function parseEnvelopeFor(
   apiName: string,
   content: string,
 ): { files: Record<string, string>; main: string } {
-  const spec = FILE_TYPES[type];
+  const spec = typeEntry(FILE_TYPES, type);
   if (!spec?.envelope) {
     throw new ContrailError(`${type} is not a bundle (envelope) type`, 'bad_component');
   }
@@ -679,7 +703,7 @@ export function buildDeployZip(
 
   for (const c of components) {
     validateTypeAndName(c.type, c.api_name);
-    const fileSpec = FILE_TYPES[c.type];
+    const fileSpec = typeEntry(FILE_TYPES, c.type);
     if (fileSpec?.envelope) {
       const { files: bundleFiles } = parseBundleEnvelope(c.type, c.api_name, c.content, fileSpec);
       const dirPrefix = `${fileSpec.dir}/${fileSafeSegment(c.api_name)}/`;
@@ -713,7 +737,7 @@ export function buildDeployZip(
       addMember(fileSpec.manifestType ?? c.type, c.api_name);
       continue;
     }
-    const childSpec = CHILD_TYPES[c.type];
+    const childSpec = typeEntry(CHILD_TYPES, c.type);
     if (childSpec) {
       const parent = childSpec.parentFromName(c.api_name);
       if (!parent) {
@@ -773,7 +797,7 @@ export function buildDeployZip(
       // Folder components delete as members of their content type too
       // (deleting ReportFolder:Ops emits <members>Ops</members> under
       // <name>Report</name>); unknown types keep the ungated literal path.
-      const manifestType = FILE_TYPES[d.type]?.manifestType ?? d.type;
+      const manifestType = typeEntry(FILE_TYPES, d.type)?.manifestType ?? d.type;
       const list = delMembers.get(manifestType) ?? [];
       list.push(d.api_name);
       delMembers.set(manifestType, list);
@@ -917,7 +941,7 @@ export function deployZipEntryPath(
   | { path: string; child: false; bundleDir?: string; mainCandidates?: string[] }
   | { path: string; child: true; childTag: string; childName: string }
   | null {
-  const childSpec = CHILD_TYPES[type];
+  const childSpec = typeEntry(CHILD_TYPES, type);
   if (childSpec) {
     const parent = childSpec.parentFromName(apiName);
     if (!parent) return null;
@@ -928,7 +952,7 @@ export function deployZipEntryPath(
       childName: apiName.includes('.') ? apiName.slice(apiName.indexOf('.') + 1) : apiName,
     };
   }
-  const spec = FILE_TYPES[type];
+  const spec = typeEntry(FILE_TYPES, type);
   if (!spec) return null;
   if (spec.envelope) {
     // S30 bundle: path = the main file; bundleDir = the whole component's
@@ -962,7 +986,7 @@ function validateTypeAndName(type: string, name: string): void {
   if (name.includes('\\') || name.includes('..')) {
     throw new ContrailError(`invalid component name "${name}"`, 'bad_component');
   }
-  const spec = FILE_TYPES[type];
+  const spec = typeEntry(FILE_TYPES, type);
   if (spec?.foldered) {
     // Exactly one '/', both segments tight — leading/trailing/double slashes
     // and traversal are unrepresentable in this grammar.
@@ -1009,6 +1033,16 @@ function validateTypeAndName(type: string, name: string): void {
   }
   if (!NAME_RE.test(name) || name.includes('/')) {
     throw new ContrailError(`invalid component name "${name}"`, 'bad_component');
+  }
+}
+
+/** S46 D1: the existing type/name grammar (validateTypeAndName, above) as a predicate. */
+export function isValidComponentName(type: string, name: string): boolean {
+  try {
+    validateTypeAndName(type, name);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -1389,7 +1423,7 @@ export function analyzeChanges(
     }
     // S30 envelope bundles classify file-by-file against the snapshot
     // directory — the proposed content is an envelope, not a document.
-    const envSpec = FILE_TYPES[c.type];
+    const envSpec = typeEntry(FILE_TYPES, c.type);
     if (envSpec?.envelope) {
       const { files: proposed, main: mainFile } = parseBundleEnvelope(
         c.type,
@@ -1713,9 +1747,22 @@ function sourceOf(c: ProposedComponent): { source_path?: string; source_sha256?:
     : {};
 }
 
+/**
+ * S46 D3: what Contrail knows about whether an uncovered component is
+ * already in the org — 'new' = the live check found it absent, 'in_org' =
+ * the live check found it, 'unknown' = not placed (always, on a dry run and
+ * when the live check was unavailable).
+ */
+export type PermissionPresence = 'new' | 'in_org' | 'unknown';
+
 export interface PermissionCoverage {
   /** Components that need a permission and are NOT granted anywhere in this package. */
-  uncovered: Array<{ type: string; api_name: string; permission: string }>;
+  uncovered: Array<{
+    type: string;
+    api_name: string;
+    permission: string;
+    presence: PermissionPresence;
+  }>;
   /** True if the package itself contains a PermissionSet or Profile. */
   has_permission_container: boolean;
   warning: string | null;
@@ -1736,6 +1783,12 @@ interface PermissionNeed {
     | 'agent'
     | 'credentialPrincipal'
     | 'customPermission';
+  /**
+   * S46 D3: the package component this need lives inside when it is not a
+   * component itself — an inline field's CustomObject, a principal's
+   * ExternalCredential. A need whose owner is new is new.
+   */
+  owner?: { type: string; api_name: string };
 }
 
 /**
@@ -1870,8 +1923,20 @@ function isGranted(containerText: string, need: PermissionNeed): boolean {
  * (folderShares on the folder component), which no PermissionSet grants — an
  * arm here would flag every report deploy as uncovered with advice the human
  * cannot act on. The folder-sharing honesty warning lives in analyzeChanges.
+ *
+ * S46 D3: the warning says only what Contrail knows about each uncovered
+ * component. `presence(type, apiName)`: true = the live check found it in the
+ * org, false = found it absent, null/undefined = not known. Omitted on dry
+ * runs and when the live check was unavailable — every component is then
+ * 'unknown', and no sentence says the package "adds" it. Up to three
+ * sentences, in the order new, in_org, unknown. Which permissions the org
+ * already holds is never read here: for a component already in the org the
+ * warning says so instead of predicting who can use it.
  */
-export function analyzePermissionCoverage(components: ProposedComponent[]): PermissionCoverage {
+export function analyzePermissionCoverage(
+  components: ProposedComponent[],
+  presence?: (type: string, apiName: string) => boolean | null | undefined,
+): PermissionCoverage {
   const containers = components.filter((c) => c.type === 'PermissionSet' || c.type === 'Profile');
   const hasContainer = containers.length > 0;
   const containerText = containers.map((c) => c.content).join('\n');
@@ -1935,6 +2000,7 @@ export function analyzePermissionCoverage(components: ProposedComponent[]): Perm
           api_name: `${c.api_name}-${principal}`,
           permission: 'external credential principal access (externalCredentialPrincipalAccesses)',
           kind: 'credentialPrincipal',
+          owner: { type: 'ExternalCredential', api_name: c.api_name },
         });
       }
     } else if (c.type === 'CustomObject') {
@@ -1951,26 +2017,79 @@ export function analyzePermissionCoverage(components: ProposedComponent[]): Perm
           api_name: `${c.api_name}.${field}`,
           permission: 'field-level security (FLS)',
           kind: 'field',
+          owner: { type: 'CustomObject', api_name: c.api_name },
         });
       }
     }
   }
 
+  // A need answers for itself first; one that cannot (an inline field, a
+  // principal) is new when the component it lives inside is new.
+  const presenceOf = (need: PermissionNeed): PermissionPresence => {
+    const p = presence?.(need.type, need.api_name);
+    if (p === true) return 'in_org';
+    if (p === false) return 'new';
+    if (need.owner && presence?.(need.owner.type, need.owner.api_name) === false) return 'new';
+    return 'unknown';
+  };
+
   const uncovered: PermissionCoverage['uncovered'] = needs
     .filter((n) => !isGranted(containerText, n))
-    .map((n) => ({ type: n.type, api_name: n.api_name, permission: n.permission }));
+    .map((n) => ({
+      type: n.type,
+      api_name: n.api_name,
+      permission: n.permission,
+      presence: presenceOf(n),
+    }));
 
-  let warning: string | null = null;
-  if (uncovered.length > 0) {
-    const list = uncovered.map((u) => `${u.type}:${u.api_name} (${u.permission})`).join('; ');
-    warning = hasContainer
-      ? `These new components are not granted by the permission set/profile in this package and ` +
-        `will be invisible or inaccessible to users until permissions are set: ${list}.`
-      : `This package adds ${uncovered.length} component(s) that need permissions but includes no ` +
-        `permission set or profile to grant them — they will deploy but stay invisible or ` +
-        `inaccessible until you set permissions (deploy a permission set alongside, or grant FLS/` +
-        `access afterward): ${list}.`;
+  const sentences: string[] = [];
+  const group = (wanted: PermissionPresence): { n: number; list: string } => {
+    const members = uncovered.filter((u) => u.presence === wanted);
+    return {
+      n: members.length,
+      list: members.map((u) => `${u.type}:${u.api_name} (${u.permission})`).join('; '),
+    };
+  };
+  const fresh = group('new');
+  if (fresh.n > 0) {
+    sentences.push(
+      hasContainer
+        ? `These new components are not granted by the permission set/profile in this package and ` +
+          `will be invisible or inaccessible to users until permissions are set: ${fresh.list}.`
+        : `This package adds ${fresh.n} component(s) that need permissions but includes no ` +
+          `permission set or profile to grant them — they will deploy but stay invisible or ` +
+          `inaccessible until you set permissions (deploy a permission set alongside, or grant FLS/` +
+          `access afterward): ${fresh.list}.`,
+    );
   }
+  const inOrg = group('in_org');
+  if (inOrg.n > 0) {
+    sentences.push(
+      hasContainer
+        ? `These components are already in the org and are not granted by the permission ` +
+          `set/profile in this package — who can use them depends on the permissions already in ` +
+          `the org, which Contrail did not check: ${inOrg.list}.`
+        : `This package includes ${inOrg.n} component(s) that are already in the org and need ` +
+          `permissions to be usable, and no permission set or profile for them — who can use ` +
+          `them depends on the permissions already in the org, which Contrail did not check: ` +
+          `${inOrg.list}.`,
+    );
+  }
+  const unplaced = group('unknown');
+  if (unplaced.n > 0) {
+    sentences.push(
+      hasContainer
+        ? `These components are not granted by the permission set/profile in this package, and ` +
+          `Contrail did not confirm whether they already exist in the org — any that are new ` +
+          `will be invisible or inaccessible to users until permissions are set: ${unplaced.list}.`
+        : `This package includes ${unplaced.n} component(s) that need permissions to be usable ` +
+          `and no permission set or profile to grant them. Contrail did not confirm whether they ` +
+          `already exist in the org — any that are new will deploy but stay invisible or ` +
+          `inaccessible until you set permissions (deploy a permission set alongside, or grant ` +
+          `FLS/access afterward): ${unplaced.list}.`,
+    );
+  }
+  const warning = sentences.length > 0 ? sentences.join(' ') : null;
   return { uncovered, has_permission_container: hasContainer, warning };
 }
 
@@ -2014,7 +2133,7 @@ export function readOldContent(
 ): string | null {
   const file = store.readCurrentFile(conn.id, filePath);
   if (file === null) return null;
-  const child = CHILD_TYPES[type];
+  const child = typeEntry(CHILD_TYPES, type);
   if (!child) return file;
   // Child artifacts live inside their container file; extract the block.
   const childName = type === 'CustomLabel' ? apiName : apiName.split('.').slice(1).join('.');

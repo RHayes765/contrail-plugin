@@ -338,7 +338,9 @@ CRT; `content_file` from staging when large). No-Apex packages OMIT
 `test_level` entirely — the org's default handles them in every environment,
 and production REFUSES an explicit `NoTestRun`. Lead the summary with the
 target org; the human reads the confirmation code from the approval page, you
-pass it to `execute_deploy`, then `refresh_snapshot` — the full ritual is
+pass it to `execute_deploy` — Contrail then re-reads the deployed components
+into the snapshot itself (`refresh_snapshot` only for what the result's
+`snapshot` block reports as not updated); the full ritual is
 salesforce-house-rules §3. A CRT *deletion* is a destructive change — it goes
 in `destructive`, is flagged prominently, and the human decides.
 

@@ -178,6 +178,116 @@ export function vendorDir(): string | null {
   return null;
 }
 
+/** Where the skill pack was found, and how. `looked` is every folder examined. */
+export interface SkillsDirResolution {
+  dir: string | null;
+  source: 'bundled' | 'override' | 'override_missing' | 'absent';
+  looked: string[];
+}
+
+/**
+ * The skill pack (the root-level skills/ folder), resolved relative to the
+ * RUNNING CODE like vendorDir(): it ships with the install, in every channel.
+ * The candidate walk covers every layout this code runs from — the mcpb entry
+ * sits one level under the root that carries skills/ (`../skills`), the
+ * dist-plugin and dist-bundle entries two (`../../skills`), the tsc dist/core
+ * tree and vitest's src/core imports three (`../../../skills`).
+ *
+ * A candidate counts only when it holds the house rules AND its parent is a
+ * Contrail root (a plugin.json or manifest.json whose name is "contrail"), so
+ * a broken install cannot walk up into an unrelated skills/ folder that
+ * happens to hold a same-named skill.
+ *
+ * Override with CONTRAIL_SKILLS_DIR. A bad override is its own state
+ * (override_missing), never absent: "reinstall to restore the skills" is
+ * untrue for a folder the human named. Never throws.
+ *
+ * `fromDir` is the folder the walk starts from — the module's own by default;
+ * tests pass a temp folder to drive each shipped depth.
+ */
+export function resolveSkillsDir(
+  // fileURLToPath, not URL.pathname: see vendorDir().
+  fromDir: string = path.dirname(fileURLToPath(import.meta.url)),
+): SkillsDirResolution {
+  const override = process.env.CONTRAIL_SKILLS_DIR;
+  if (override) {
+    try {
+      if (fs.statSync(override).isDirectory()) {
+        return { dir: fs.realpathSync(override), source: 'override', looked: [override] };
+      }
+    } catch {
+      /* missing or unreadable — reported as override_missing below */
+    }
+    return { dir: null, source: 'override_missing', looked: [override] };
+  }
+  const looked: string[] = [];
+  for (const up of [['..'], ['..', '..'], ['..', '..', '..']]) {
+    const candidate = path.join(fromDir, ...up, 'skills');
+    looked.push(candidate);
+    try {
+      if (
+        fs.existsSync(path.join(candidate, 'salesforce-house-rules', 'SKILL.md')) &&
+        isContrailRoot(path.dirname(candidate))
+      ) {
+        return { dir: fs.realpathSync(candidate), source: 'bundled', looked };
+      }
+    } catch {
+      /* a candidate that cannot be read is not the pack */
+    }
+  }
+  return { dir: null, source: 'absent', looked };
+}
+
+/**
+ * True when `dir` carries a Contrail manifest: the plugin's
+ * .claude-plugin/plugin.json or the extension's manifest.json, parsed, with
+ * name "contrail". A file that cannot be read or parsed is not a marker, so a
+ * folder that merely holds a file called manifest.json does not qualify.
+ */
+function isContrailRoot(dir: string): boolean {
+  for (const marker of [
+    path.join(dir, '.claude-plugin', 'plugin.json'),
+    path.join(dir, 'manifest.json'),
+  ]) {
+    try {
+      const parsed: unknown = JSON.parse(fs.readFileSync(marker, 'utf8'));
+      if (
+        parsed !== null &&
+        typeof parsed === 'object' &&
+        (parsed as { name?: unknown }).name === 'contrail'
+      ) {
+        return true;
+      }
+    } catch {
+      /* absent, unreadable or not JSON — try the next marker */
+    }
+  }
+  return false;
+}
+
+/** The skill pack's folder, or null when this install has none to serve. */
+export function skillsDir(): string | null {
+  return resolveSkillsDir().dir;
+}
+
+/**
+ * Flow pages written by render_flow. Deliberately NOT under staging or
+ * snapshots: a rendered page is neither a deploy source nor an org read.
+ */
+export function rendersDir(): string {
+  return ensureDir(path.join(dataDir(), 'renders'));
+}
+
+/**
+ * S46: change-evidence dossiers written by export_change_evidence, one
+ * folder each. Never a content_file, csv_file or render_flow source root
+ * (like its siblings renders/ and S47's exports/), and never swept: a
+ * dossier is the human's deliverable. Hand-mirror to the desktop paths.ts.
+ */
+export function evidenceDir(): string {
+  return ensureDir(path.join(dataDir(), 'evidence'));
+}
+
 function ensureDir(dir: string): string {
   fs.mkdirSync(dir, { recursive: true });
   return dir;

@@ -26,7 +26,7 @@ Use this skill to:
 - Troubleshoot object deploy failures surfaced by `validate_deploy`
 - **Add, update, or delete a field OR a validation rule on an existing object** — any of these may make the object's `<description>` stale; refresh it (propose wording → confirm → include in the deploy package). See "Object description".
 
-**Operating contract:** every deploy in this skill is proposal-only. You author and validate; the write happens only after the human reads the confirmation code from the approval page — `validate_deploy` (checkOnly) → human reads the code back → `execute_deploy` → `refresh_snapshot`. See **salesforce-house-rules §3**. Never restate "done" as "deployed" — your deliverable is a validated, approvable package.
+**Operating contract:** every deploy in this skill is proposal-only. You author and validate; the write happens only after the human reads the confirmation code from the approval page — `validate_deploy` (checkOnly) → human reads the code back → `execute_deploy` — Contrail then re-reads the deployed components into the snapshot itself (`refresh_snapshot` only for what the result's `snapshot` block reports as not updated). See **salesforce-house-rules §3**. Never restate "done" as "deployed" — your deliverable is a validated, approvable package.
 
 **Environments, once:** in Claude Desktop chat there are no file tools — author metadata inline via `validate_deploy` `content`. In Claude Code, write sources into Contrail's `staging/` directory and pass `content_file` (absolute path). For large existing objects, `content_file` is the only safe modify path; in Desktop chat prefer surgical child-block components and say plainly when a root-level edit on a huge object is not safely re-emittable inline.
 
@@ -226,7 +226,7 @@ A Metadata API deploy grants no permissions: a deployed object is unreachable an
 1. Author the package (Sections 1–6). In Claude Code: files under `staging/`, `content_file`; in Desktop chat: inline `content`.
 2. One consolidated `validate_deploy` (checkOnly) with all components + any `destructive` entries. Objects alone need no tests — OMIT `test_level` (production refuses an explicit `NoTestRun`; omitted, the org's default waves a no-Apex package through everywhere). If the package also carries Apex to a production target, use `test_level: "RunLocalTests"` (or `RunSpecifiedTests` + `run_tests`).
 3. Verification = the validation result. There is no local linter or analyzer; failures come back as component errors — fix the XML from the message and re-validate. If validation cannot run at all, record it fail-closed (e.g. `validate=unavailable: <reason>`) after attempting — never claim a package "should deploy."
-4. Present the result — target org first and unmissable, destructive changes and `permission_warning` leading — then follow the approval ritual by reference: the human reads the confirmation code from the approval page, you pass it to `execute_deploy`, then `refresh_snapshot`. See **salesforce-house-rules §3**.
+4. Present the result — target org first and unmissable, destructive changes and `permission_warning` leading — then follow the approval ritual by reference: the human reads the confirmation code from the approval page, you pass it to `execute_deploy` — Contrail then re-reads the deployed components into the snapshot itself (`refresh_snapshot` only for what the result's `snapshot` block reports as not updated). See **salesforce-house-rules §3**.
 
 ## 8. Verification checklist (before validate_deploy)
 

@@ -21,6 +21,12 @@ export interface FileProperties {
   namespacePrefix?: string;
 }
 
+/** S46 D1f: one `messages` element of a retrieve's status — the org's own words, as sent. */
+export interface RetrieveMessage {
+  fileName: string;
+  problem: string;
+}
+
 export interface RetrieveStatus {
   id: string;
   done: boolean;
@@ -29,6 +35,7 @@ export interface RetrieveStatus {
   errorMessage?: string;
   zipFile?: Buffer;
   fileProperties: FileProperties[];
+  messages: RetrieveMessage[];
 }
 
 export interface DeployComponentFailure {
@@ -348,6 +355,9 @@ export class MetadataSoapClient {
         manageableState: p.manageableState,
         namespacePrefix: p.namespacePrefix,
       })),
+      messages: asArray(result.messages as Record<string, string>[])
+        .map((m) => ({ fileName: m.fileName ?? '', problem: m.problem ?? '' }))
+        .filter((m) => m.problem !== ''),
     };
   }
 

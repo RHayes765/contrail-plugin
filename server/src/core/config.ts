@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { configPath } from './paths.js';
 import { log } from './log.js';
+import { DEFAULT_POLICIES, parsePolicies, type PolicyConfig } from './policy.js';
 
 /**
  * Engine configuration. Stored as config.json in the data dir so humans can
@@ -45,6 +46,14 @@ export interface ContrailConfig {
     retrieveTimeoutMs: number;
     /** Inline wait before refresh_snapshot returns an in-progress result. */
     toolWaitMs: number;
+    /**
+     * S46: after a successful deploy, re-read the deployed components into
+     * the local snapshot (best-effort; the execute result's snapshot block
+     * says what was updated). false restores the manual refresh_snapshot.
+     */
+    rebaselineAfterDeploy: boolean;
+    /** S46: budget for that re-read inside the execute call. */
+    rebaselineTimeoutMs: number;
   };
   updates: {
     /**
@@ -146,6 +155,13 @@ export interface ContrailConfig {
     /** Inline wait before bulk_load_execute returns an in-progress result. */
     toolWaitMs: number;
   };
+  /**
+   * S46: rules for client work, matched by org type and/or connection.
+   * Deliberately config-file-only: no Contrail tool or page writes this
+   * section, and loosening a rule is the human's decision. Re-read from disk
+   * at every evaluation, so an edit applies without a restart.
+   */
+  policies: PolicyConfig;
 }
 
 export const DEFAULT_CONFIG: ContrailConfig = {
@@ -222,6 +238,8 @@ export const DEFAULT_CONFIG: ContrailConfig = {
     pollIntervalMs: 2000,
     retrieveTimeoutMs: 10 * 60 * 1000,
     toolWaitMs: 25 * 1000,
+    rebaselineAfterDeploy: true,
+    rebaselineTimeoutMs: 60_000,
   },
   updates: {
     checkEnabled: true,
@@ -255,14 +273,47 @@ export const DEFAULT_CONFIG: ContrailConfig = {
     resultsRetentionDays: 14,
     toolWaitMs: 25 * 1000,
   },
+  // Written into fresh config files only: an existing config.json is never
+  // back-filled, so an install upgraded from 0.39 has no policies section and
+  // loadPolicies() reports the built-in rule with source 'default'.
+  policies: DEFAULT_POLICIES,
 };
+
+/**
+ * S46: a config.json that starts with a UTF-16 byte-order mark (FF FE or
+ * FE FF — bytes UTF-8 never contains). Windows PowerShell 5.1 writes UTF-16
+ * by default for `>` and Out-File; Contrail reads config.json as UTF-8 only,
+ * so such a file is reported by its encoding rather than as broken JSON.
+ */
+class ConfigEncodingError extends Error {}
+
+const UTF16_PROBLEM = 'config.json is saved as UTF-16; save it as UTF-8';
+
+/**
+ * S46: the text of config.json, read as UTF-8 with a single leading UTF-8
+ * byte-order mark removed. Every reader and writer of the file goes through
+ * it, so they agree on what a readable file is (Windows PowerShell 5.1's
+ * `-Encoding UTF8` and some editors write the mark; such a file used to fall
+ * back to defaults silently). A UTF-16 file throws ConfigEncodingError.
+ */
+function readConfigText(file: string): string {
+  const bytes = fs.readFileSync(file);
+  if (
+    bytes.length >= 2 &&
+    ((bytes[0] === 0xff && bytes[1] === 0xfe) || (bytes[0] === 0xfe && bytes[1] === 0xff))
+  ) {
+    throw new ConfigEncodingError(UTF16_PROBLEM);
+  }
+  const text = bytes.toString('utf8');
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+}
 
 export function loadConfig(): ContrailConfig {
   const file = configPath();
   let fromDisk: Partial<ContrailConfig> = {};
   if (fs.existsSync(file)) {
     try {
-      fromDisk = JSON.parse(fs.readFileSync(file, 'utf8')) as Partial<ContrailConfig>;
+      fromDisk = JSON.parse(readConfigText(file)) as Partial<ContrailConfig>;
     } catch (err) {
       log('warn', `config.json is unreadable; using defaults`, { file, err: String(err) });
     }
@@ -283,6 +334,11 @@ export function loadConfig(): ContrailConfig {
     localDiagnostics: { ...DEFAULT_CONFIG.localDiagnostics, ...fromDisk.localDiagnostics },
     deploy: { ...DEFAULT_CONFIG.deploy, ...fromDisk.deploy },
     bulkLoad: { ...DEFAULT_CONFIG.bulkLoad, ...fromDisk.bulkLoad },
+    // A rules array on disk replaces the built-in rule wholesale. Not
+    // validated here: a wired engine reads policies through loadPolicies(),
+    // which fails closed on a bad section; this copy is what an engine built
+    // with an injected config evaluates (through parsePolicies).
+    policies: { ...DEFAULT_CONFIG.policies, ...fromDisk.policies },
   };
 
   if (process.env.CONTRAIL_SF_CLIENT_ID) {
@@ -310,6 +366,9 @@ export function loadConfig(): ContrailConfig {
  * Unknown sections on disk are preserved verbatim. An existing file that is
  * not valid JSON is NEVER overwritten (a hand-edit with a typo must stay
  * repairable) — the save throws and the Settings surface says so.
+ * S46: a leading UTF-8 byte-order mark is read past and not written back;
+ * the write stays in place (no temp file, no rename). A UTF-16 file is never
+ * overwritten either: the save throws, naming the encoding.
  */
 export function saveConfigSection<K extends keyof ContrailConfig>(
   section: K,
@@ -320,8 +379,11 @@ export function saveConfigSection<K extends keyof ContrailConfig>(
   if (fs.existsSync(file)) {
     let parsed: unknown;
     try {
-      parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+      parsed = JSON.parse(readConfigText(file));
     } catch (err) {
+      if (err instanceof ConfigEncodingError) {
+        throw new Error(`${err.message} (${file}), then save again — nothing was written.`);
+      }
       throw new Error(
         `config.json exists but is not valid JSON (${String(err instanceof Error ? err.message : err)}). ` +
           `Fix or remove ${file}, then save again — nothing was written.`,
@@ -352,7 +414,7 @@ export function readConfigSection<K extends keyof ContrailConfig>(
   const file = configPath();
   if (!fs.existsSync(file)) return null;
   try {
-    const parsed: unknown = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const parsed: unknown = JSON.parse(readConfigText(file));
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
     const value = (parsed as Record<string, unknown>)[section];
     return value && typeof value === 'object' && !Array.isArray(value)
@@ -361,4 +423,80 @@ export function readConfigSection<K extends keyof ContrailConfig>(
   } catch {
     return null;
   }
+}
+
+/** S46: what loadPolicies() read — the policies and where they came from, or why they could not be read. */
+export type PolicyLoad =
+  | { ok: true; policies: PolicyConfig; source: 'default' | 'config' }
+  | { ok: false; problem: string };
+
+/** Private to loadPolicies' pause: Atomics.wait needs a shared array. */
+const RETRY_PAUSE = new Int32Array(new SharedArrayBuffer(4));
+const RETRY_PAUSE_MS = 50;
+
+type PoliciesRead = { load: PolicyLoad; retry: boolean };
+
+function readPoliciesOnce(file: string): PoliciesRead {
+  if (!fs.existsSync(file)) {
+    // loadConfig writes the file at first start, so after that a missing
+    // file is most likely an editor's save in progress (rename the old file
+    // away, then write the new one): read again before applying the default.
+    return { load: { ok: true, policies: DEFAULT_POLICIES, source: 'default' }, retry: true };
+  }
+  let text: string;
+  try {
+    text = readConfigText(file);
+  } catch (err) {
+    // The bytes say UTF-16: no torn write produces that, so no second read.
+    if (err instanceof ConfigEncodingError) {
+      return { load: { ok: false, problem: err.message }, retry: false };
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    return { load: { ok: false, problem: `config.json could not be read (${message})` }, retry: true };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { load: { ok: false, problem: `config.json is not valid JSON (${message})` }, retry: true };
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { load: { ok: false, problem: 'config.json is not a JSON object' }, retry: false };
+  }
+  if (!Object.prototype.hasOwnProperty.call(parsed, 'policies')) {
+    return { load: { ok: true, policies: DEFAULT_POLICIES, source: 'default' }, retry: false };
+  }
+  const result = parsePolicies((parsed as Record<string, unknown>).policies);
+  if (!result.ok) {
+    // parsePolicies' paths start inside the section ("rules[0]…"); a
+    // problem with the section itself carries no path.
+    const problem = result.problem.startsWith('rules')
+      ? `policies.${result.problem}`
+      : `policies: ${result.problem}`;
+    return { load: { ok: false, problem }, retry: false };
+  }
+  return { load: { ok: true, policies: result.policies, source: 'config' }, retry: false };
+}
+
+/**
+ * S46: the policies section, read from disk on every call (each policy
+ * check calls it). No file, or a file without the section → the built-in
+ * rule with source 'default' (an existing file is never back-filled).
+ * Fails closed — every write proposal is then refused — on a section that
+ * does not parse, and on a file that cannot be read, is saved as UTF-16 or
+ * is not JSON. A read that may have landed inside a human-side save is
+ * retried once, about 50 ms later, before its verdict: a file that cannot be
+ * read or is not JSON (a save that rewrites the file in place), and a
+ * missing file (an editor that saves by renaming the old file away and then
+ * writing the new one leaves a brief gap) — so only a second miss yields the
+ * built-in rule. The pause blocks the thread; it happens only on a broken or
+ * missing file, or a torn read.
+ */
+export function loadPolicies(): PolicyLoad {
+  const file = configPath();
+  const first = readPoliciesOnce(file);
+  if (!first.retry) return first.load;
+  Atomics.wait(RETRY_PAUSE, 0, 0, RETRY_PAUSE_MS);
+  return readPoliciesOnce(file).load;
 }

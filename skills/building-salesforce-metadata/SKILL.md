@@ -286,8 +286,14 @@ Follow the **salesforce-house-rules** skill for the approval ritual. In short:
 any `permission_warning`, and only `execute_deploy` with a code the human reads back
 from the approval page. While a package is still work-in-progress, validate with
 `dry_run: true` — full results, no approval request — and save the real validate
-for the final package. After a successful deploy, `refresh_snapshot` so the local
-index and dependency graph reflect the org's new state.
+for the final package. Pass `justification` (and `ticket` when the human gave you
+one) on the final validate. A `dry_run` reports `policy_check` — fix what it lists
+before the real validate. Where the connection's policy sets a minimum test level,
+pass `test_level` explicitly. A package with deletions is refused where policy
+denies them — say so, do not restructure it. After a successful deploy Contrail
+re-reads the deployed components into the local snapshot on its own (the result's
+`snapshot` block); run `refresh_snapshot` only for what that block reports as not
+updated — see **salesforce-house-rules §3**.
 
 **Reverting a deploy uses its revert plan, through the same ritual.** A successful
 `execute_deploy` returns `revert_package`, pointing at

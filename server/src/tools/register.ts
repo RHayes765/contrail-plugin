@@ -14,6 +14,8 @@ import type { LocalDiagRunner } from '../localdiag/types.js';
 import type { ApprovalNotifier } from '../core/notify.js';
 import type { RemoteControlProbe } from '../core/remoteControl.js';
 import type { SettingsPageServer } from '../connect/settings.js';
+import type { SkillPack } from '../skillpack/pack.js';
+import { skillsAnnouncement } from '../skillpack/instructions.js';
 import { ContrailError } from '../core/errors.js';
 import { grantedList, notGrantedList } from '../core/grants.js';
 import { getUpdateNotice } from '../core/updateCheck.js';
@@ -41,6 +43,10 @@ export interface ToolDeps {
   remoteControl: RemoteControlProbe;
   /** S42: the human-only Settings page server behind open_settings. */
   settingsPage: SettingsPageServer;
+  /** S46: the skill pack that ships inside this install, and the MCP server instructions built from it (once, at startup). */
+  skills: { pack: SkillPack; instructions: string };
+  /** S46: asks this computer to open a file or URL in its default app (tests record the call through flowOps.openBrowser). */
+  openExternal: (target: string) => Promise<void>;
 }
 
 const PERMISSION_NOTES = [
@@ -184,8 +190,9 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
       description:
         'Open the localhost page where the human can change a connection\'s grants. Grants ' +
         'are only ever set there. The page opens directly in the human\'s browser; its URL ' +
-        'is returned only if the browser could not be opened automatically. After the human ' +
-        'saves, call get_permissions to see the updated grants.',
+        'is never returned to you — if the browser cannot be opened, the URL goes to ' +
+        'Contrail\'s server log for the human. After the human saves, call get_permissions ' +
+        'to see the updated grants.',
       inputSchema: {
         connection: z.string().describe('Connection alias (or id) to manage.'),
       },
@@ -193,20 +200,34 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     async (args: { connection: string }) =>
       guarded(async () => {
         const { url, opened, connection } = await flows.manageConnection(args.connection);
+        // The URL carries the session token that authorizes the grants save,
+        // so — exactly like the approval and settings pages — it never
+        // reaches model context on any path. The human already has the page
+        // open, or finds its URL in the server log (stderr).
         if (opened) {
-          // The URL carries the session token that authorizes the grants
-          // save; it stays out of model context on purpose. The human
-          // already has the page open in their browser.
           return ok(
             { connection: connection.alias, page_opened_in_browser: true },
             'Management page opened in the human\'s browser. They set grants there; call ' +
               'get_permissions afterwards to see the result.',
           );
         }
+        log(
+          'warn',
+          'connection management page could not auto-open — open it yourself to change grants',
+          { url },
+        );
         return ok(
-          { connection: connection.alias, page_opened_in_browser: false, management_url: url },
-          'The browser could not be opened automatically. Give the human this URL to open ' +
-            'themselves — do not fetch it. Call get_permissions after they save.',
+          {
+            connection: connection.alias,
+            page_opened_in_browser: false,
+            note:
+              'The management page could not be opened automatically. Its URL was written to the ' +
+              'Contrail server log (stderr) for the human to open — it is deliberately NOT ' +
+              'provided to you, because the page saves grants. Ask the human to open the page ' +
+              'from the Contrail log, and call get_permissions after they save.',
+          },
+          'The browser could not be opened automatically; the human can find the page URL in ' +
+            'the Contrail server log.',
         );
       }),
   );
@@ -224,13 +245,32 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
         'default only while this Claude Code session has Remote Control connected — and the ' +
         'last Remote Control state Contrail\'s hook reported (remote_control.user_hook covers ' +
         "Claude Code's user settings.json only: not_installed is normal for plugin installs, " +
-        'whose hook ships bundled — judge by state).',
+        'whose hook ships bundled — judge by state). ' +
+        'Also reports, per connection, policy: the rules that apply to it — from the ' +
+        "human's config.json, or Contrail's built-in default when that file has no policies " +
+        'section (policies_status.source says which) — whether a justification or ticket is ' +
+        'required (and the ticket pattern), what is denied, the minimum test_level, its ' +
+        'freeze windows and whether one is in effect right now — so a proposal can comply ' +
+        'the first time; policies_status.unmatched_rules names rules whose label or org id ' +
+        'matches no connection on this machine — tell the human, a re-created connection may ' +
+        'have left a rule behind; policies_status also says whether the rules could be read, ' +
+        'and when they could not, every write proposal is refused until the human fixes the ' +
+        'file. Also returns skills: how many skills this install bundles and the read_skill ' +
+        'call that loads the house rules.',
       inputSchema: {},
     },
     async (_args, extra) =>
       deps.remoteControl.run(extra, 'list_connections', () =>
       guarded(() => {
-        const list = db.listConnections().map(connectionSummary);
+        // S46 (B): each connection carries the policy that applies to it now
+        // (null when the policies cannot be read — policies_status says why),
+        // all from ONE read of the policies over ONE listing of connections.
+        const conns = db.listConnections();
+        const policy = deps.deploys.policyListing(conns);
+        const list = conns.map((rec, i) => ({
+          ...connectionSummary(rec),
+          policy: policy.reports[i] ?? null,
+        }));
         // Cached-only read (never the network): when a newer release exists,
         // say so on the session-start tool so the human hears about it.
         const update = getUpdateNotice(
@@ -253,6 +293,13 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
             ...deps.notifier.status(),
             remote_control: deps.remoteControl.status(),
           },
+          // S46 (B): whether the policies could be read, where they came
+          // from, and any rule that matches no connection on this machine.
+          policies_status: policy.status,
+          // S46: the second announcement of the skill pack. It is not verified
+          // that every client shows MCP server instructions to the model, so
+          // the session-start tool repeats the pointer.
+          skills: skillsAnnouncement(deps.skills.pack),
           ...(update
             ? {
                 update_available: update,
@@ -304,8 +351,9 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
     {
       title: 'Read the local audit log',
       description:
-        'Query the local audit log: connection lifecycle, OAuth flows, grant refusals, and ' +
-        '(from later milestones) every deploy and DML decision. Local and exportable.',
+        'Query the local audit log: connection lifecycle, OAuth flows, grant and policy ' +
+        'refusals, freeze overrides, and every deploy, data, Apex, bulk and agent-activation ' +
+        'decision. Local; export_change_evidence writes a per-request dossier from it.',
       inputSchema: {
         connection: z
           .string()
@@ -315,10 +363,39 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
           .string()
           .optional()
           .describe('ISO 8601 timestamp; only events at or after this instant.'),
+        // S46 (B): the rows that name one request, one event type or family, and an end bound.
+        request_id: z
+          .string()
+          .optional()
+          .describe(
+            'Only events that name this request id (the request_id a validate or propose result ' +
+              'returned) — among them its proposal, phone push, refusals (an execute refused by a ' +
+              'policy included), freeze override, justification edits, execution, and the sweep ' +
+              'that expired it. Supersession by a newer validation is recorded per connection and ' +
+              'is not included; a policy check that passes is recorded on the request, not in the log.',
+          ),
+        event_type: z
+          .string()
+          .optional()
+          .describe(
+            'Only this event type (for example policy.refused), or every type under a prefix ' +
+              'ending in a dot (for example policy.).',
+          ),
+        until: z
+          .string()
+          .optional()
+          .describe('ISO 8601 timestamp; only events at or before this instant.'),
         limit: z.number().int().min(1).max(1000).optional().describe('Max events (default 100).'),
       },
     },
-    async (args: { connection?: string; since?: string; limit?: number }) =>
+    async (args: {
+      connection?: string;
+      since?: string;
+      request_id?: string;
+      event_type?: string;
+      until?: string;
+      limit?: number;
+    }) =>
       guarded(() => {
         let connectionId: string | undefined;
         if (args.connection) {
@@ -330,7 +407,16 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
           }
           connectionId = rec.id;
         }
-        const events = audit.query({ connectionId, since: args.since, limit: args.limit });
+        // A request_id that is not a request id, or a malformed event_type, is
+        // refused by the query itself — never matched loosely.
+        const events = audit.query({
+          connectionId,
+          since: args.since,
+          until: args.until,
+          requestId: args.request_id,
+          eventType: args.event_type,
+          limit: args.limit,
+        });
         // Snake_case for model consistency with every other tool's output.
         return ok({
           events: events.map((e) => ({

@@ -193,7 +193,9 @@ noisier levels mean less usable evidence, not more.
    relevant test classes (prefer `RunLocalTests` for production targets).
    Verification = the validation's test results. Then the approval ritual: the
    human reads the code from the approval page and you pass it to
-   `execute_deploy`, then `refresh_snapshot` — see **salesforce-house-rules §3**.
+   `execute_deploy` — Contrail then re-reads the deployed components into the
+   snapshot itself (`refresh_snapshot` only for what the result's `snapshot`
+   block reports as not updated); see **salesforce-house-rules §3**.
    After the fix lands, re-run the relevant tests standalone with
    `run_apex_tests` (rolls back, no approval) instead of spending another
    validate cycle — and if a trace flag is active, that run also produces fresh

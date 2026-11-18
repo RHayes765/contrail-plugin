@@ -475,3 +475,69 @@ describe('S45: DeployResult org-side stamps + listMetadataQueries', () => {
     );
   });
 });
+
+describe('S46 D1f: checkRetrieveStatus carries the retrieve messages', () => {
+  function retrieveStatusResponse(messagesXml: string): string {
+    const zipB64 = Buffer.from('PK-fake-zip').toString('base64');
+    return soapEnvelope(
+      `<checkRetrieveStatusResponse xmlns="http://soap.sforce.com/2006/04/metadata">
+         <result><done>true</done>
+           <fileProperties><fullName>unpackaged/package.xml</fullName><type>Package</type>
+             <fileName>unpackaged/package.xml</fileName><id></id>
+             <lastModifiedDate>2026-11-17T00:00:00.000Z</lastModifiedDate>
+             <lastModifiedByName>Dana Admin</lastModifiedByName></fileProperties>
+           <id>09S1</id>${messagesXml}
+           <status>Succeeded</status><success>true</success>
+           <zipFile>${zipB64}</zipFile>
+         </result>
+       </checkRetrieveStatusResponse>`,
+    );
+  }
+  const message = (problem: string): string =>
+    `<messages><fileName>unpackaged/package.xml</fileName><problem>${problem}</problem></messages>`;
+
+  async function statusFor(messagesXml: string) {
+    vi.stubGlobal('fetch', async () => new Response(retrieveStatusResponse(messagesXml)));
+    const client = new MetadataSoapClient(fakeTokenMgr(['AT']), CONN, 'v68.0');
+    return client.checkRetrieveStatus('09S1', true);
+  }
+
+  it('one <messages> element: a single-element list, the text as the org sent it', async () => {
+    const status = await statusFor(
+      message("Entity of type 'CustomField' named 'Account.No_Such_Field__c' cannot be found"),
+    );
+    expect(status.messages).toEqual([
+      {
+        fileName: 'unpackaged/package.xml',
+        problem: "Entity of type 'CustomField' named 'Account.No_Such_Field__c' cannot be found",
+      },
+    ]);
+    // A message changes nothing else about the status: it is a note, not a verdict.
+    expect(status.success).toBe(true);
+    expect(status.status).toBe('Succeeded');
+    expect(status.zipFile?.toString()).toBe('PK-fake-zip');
+    expect(status.fileProperties).toHaveLength(1);
+  });
+
+  it('two <messages> elements keep their order; one with no problem text is dropped', async () => {
+    const status = await statusFor(
+      message("Entity of type 'CustomField' named 'Account.No_Such_Field__c' cannot be found") +
+        '<messages><fileName>unpackaged/package.xml</fileName></messages>' +
+        '<messages><problem>Entity of type &apos;CustomLabel&apos; named &apos;No_Such_Label&apos; cannot be found</problem></messages>',
+    );
+    expect(status.messages).toEqual([
+      {
+        fileName: 'unpackaged/package.xml',
+        problem: "Entity of type 'CustomField' named 'Account.No_Such_Field__c' cannot be found",
+      },
+      { fileName: '', problem: "Entity of type 'CustomLabel' named 'No_Such_Label' cannot be found" },
+    ]);
+  });
+
+  it('no <messages> element: an empty list', async () => {
+    const status = await statusFor('');
+    expect(status.messages).toEqual([]);
+    expect(status.success).toBe(true);
+    expect(status.fileProperties).toHaveLength(1);
+  });
+});

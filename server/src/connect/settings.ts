@@ -415,8 +415,8 @@ export class SettingsPageServer {
         <a href="https://pushover.net" target="_blank" rel="noreferrer">Pushover</a> — one message
         per pushed proposal, so you can approve from anywhere by typing the code into your Contrail
         session (the code is the last line of the message, on its own, for easy copying). The
-        message deletes itself from your phone when the code expires. Claude never sees the code
-        or these keys. (The Contrail desktop app shares these keys.)</p>
+        message deletes itself from your phone when the code expires. Contrail never gives Claude
+        the code or these keys. (The Contrail desktop app shares these keys.)</p>
       <div class="field">
         <label for="method">Delivery</label>
         <select id="method" name="method">

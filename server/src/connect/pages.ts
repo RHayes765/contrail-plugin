@@ -1,4 +1,5 @@
 import { GRANTS, GRANT_DESCRIPTIONS, type GrantSet } from '../core/grants.js';
+import { policyChangedText, unmatchedRuleText } from '../core/policy.js';
 
 /**
  * The localhost completion/management pages. This is the only place grants
@@ -44,10 +45,11 @@ const STYLE = `
   label.grant p { margin: 0.15rem 0 0; font-size: 0.83rem; color: light-dark(#5b6472, #9aa4b2); }
   .field { margin-bottom: 1rem; }
   .field label { display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem; }
-  .field input[type=text], .field input[type=password], .field select { width: 100%;
-      padding: 0.5rem 0.65rem; border-radius: 8px;
+  .field input[type=text], .field input[type=password], .field select, .field textarea {
+      width: 100%; padding: 0.5rem 0.65rem; border-radius: 8px;
       border: 1px solid light-dark(#c9cfd8, #3a3f48); background: light-dark(#fff, #14161a);
       color: inherit; font-size: 0.95rem; }
+  .field textarea { font: inherit; resize: vertical; }
   .field .hint { font-size: 0.8rem; color: light-dark(#5b6472, #9aa4b2); margin-top: 0.3rem; }
   .success { font-size: 0.9rem; background: #1a7c3a22; border: 1px solid #1a7c3a55;
              color: light-dark(#176b33, #8ce8a8); border-radius: 8px; padding: 0.6rem 0.8rem;
@@ -99,6 +101,10 @@ const STYLE = `
                overflow-wrap: anywhere; }
   .auto-nc { font-size: 0.78rem; color: light-dark(#5b6472, #9aa4b2); margin-top: 0.6rem; }
   .auto-nc ul { margin: 0.2rem 0 0; padding-left: 1.1rem; }
+  .gov-k { font-size: 0.85rem; font-weight: 600; margin-bottom: 0.3rem; }
+  .gov-text { font-size: 0.9rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .gov-list { margin: 0.3rem 0 0; padding-left: 1.1rem; font-size: 0.85rem; }
+  .freeze-line { font-weight: 600; }
 `;
 
 /** The shared page shell — exported so sibling human-only pages (S42 Settings) keep the exact look. */
@@ -169,10 +175,10 @@ export function renderGrantsPage(opts: GrantsPageOptions): string {
       <div class="org-row"><span class="k">Instance</span><span class="v">${esc(opts.org.instanceUrl)}</span></div>
       <div class="org-row"><span class="k">Logged in as</span><span class="v">${esc(opts.org.username ?? '(unknown)')}</span></div>
     </div>
-    <div class="warn">Grants are set on this page only. The AI agent cannot see this page,
-      cannot set grants, and cannot change them later — changes always come back here.
-      Every deploy or data write additionally requires your explicit confirmation, in every
-      environment.</div>
+    <div class="warn">Grants are set on this page only. Contrail does not show the AI agent
+      this page; the agent cannot set grants and cannot change them later — changes always
+      come back here. Every deploy or data write additionally requires your explicit
+      confirmation, in every environment.</div>
     <form method="post" action="${esc(opts.actionPath)}" class="card">
       <input type="hidden" name="session" value="${esc(opts.sessionId)}">
       ${labelField}
@@ -312,12 +318,55 @@ export interface ApprovalPageOptions {
   blast: string[];
   /** Advisory warnings (e.g. new components with no permissions) — amber, near the top. */
   warnings?: string[];
+  /**
+   * S46 (B): the request's change record — ticket, justification, the
+   * policies that apply and the policy state of the request. Code-free:
+   * every text in it is shown to the human only, and the engine fills it
+   * per render. Absent = the page has no Change record card.
+   */
+  governance?: ApprovalGovernance;
+}
+
+/**
+ * S46 (B): the Change record of one approval page. The engine composes every
+ * sentence (`provenance`, `policyLines`, `freezeLine`, `blockedLines`); this
+ * page escapes and lays them out, apart from the policies-changed and
+ * unmatched-rule sentences, which come from core/policy.ts so Deploy Review
+ * prints the same words.
+ */
+export interface ApprovalGovernance {
+  gate: 'open' | 'frozen' | 'overridden' | 'blocked';
+  /** Absent → read-only card, no forms. */
+  sessionId?: string;
+  ticket: string | null;
+  justification: { text: string; provenance: string; required: boolean };
+  /** From the same load that produced policyLines. */
+  policySource: 'default' | 'config';
+  policyLines: string[];
+  /** Rule names; live page state only. */
+  unmatchedRules?: string[];
+  /** ISO; engine.policyChangeNotice(now), filled live. */
+  policyChangedAt?: string;
+  /** frozen | overridden. */
+  freezeLine?: string;
+  /** Stored governance.freeze !== null. */
+  frozenAtMint: boolean;
+  override?: { reason: string; at: string };
+  blockedBy?: 'unreadable' | 'violations';
+  blockedLines?: string[];
+  notice?: { kind: 'success' | 'error'; text: string };
+  rev: string;
+  limits: { justificationMax: number; reasonMin: number; reasonMax: number };
 }
 
 /**
  * The write-approval page. This page is the ONLY place the confirmation code
- * appears — the agent never sees it, so reading it back is what approval
- * means. Everything shown here also went to the agent except the code.
+ * appears — Contrail never hands the agent this page or the code, so reading
+ * it back is what approval means. Everything shown here also went to the
+ * agent except the code. Anything that shows the agent this page shows it
+ * the code too (a screenshot pasted into the chat, an agent that can view
+ * the human's screen): the code card says so, and promises nothing about
+ * closing the tab that the page does not do.
  */
 export function renderApprovalPage(opts: ApprovalPageOptions): string {
   const isProd = opts.org.orgType === 'production';
@@ -332,6 +381,19 @@ export function renderApprovalPage(opts: ApprovalPageOptions): string {
           : opts.kind === 'activation'
             ? 'Approve this agent activation change'
             : 'Approve this data change';
+
+  // S46 (B): no code (the request is no longer pending), a change freeze with
+  // no emergency reason recorded, or a policy that blocks the request:
+  // neither the code element nor the note that tells the human to read a
+  // code back is emitted.
+  const gate = opts.governance?.gate;
+  const codeShown = opts.code !== '' && gate !== 'blocked' && gate !== 'frozen';
+  const codeHidden =
+    gate === 'frozen'
+      ? 'Hidden while the change freeze is in effect — record an emergency reason above to show it.'
+      : gate === 'blocked'
+        ? 'Not shown — see "Blocked by policy" above.'
+        : null;
 
   // `detail` carries file provenance for components read from disk. The human
   // is approving bytes they did not type, so the page has to say which file
@@ -362,6 +424,7 @@ export function renderApprovalPage(opts: ApprovalPageOptions): string {
         opts.org.instanceUrl,
       )}</span></div>
     </div>
+    ${opts.governance ? renderGovernance(opts.governance) : ''}
     ${
       opts.warnings && opts.warnings.length
         ? `<div class="warn">${opts.warnings.map((w) => esc(w)).join('<br><br>')}</div>`
@@ -406,11 +469,20 @@ export function renderApprovalPage(opts: ApprovalPageOptions): string {
     }
     <div class="card code-card" id="code-card">
       <h2>Confirmation code</h2>
-      <div class="code" id="code">${esc(opts.code)}</div>
+      ${
+        codeShown
+          ? `<div class="code" id="code">${esc(opts.code)}</div>
       <p class="note">If — and only if — you approve everything above, read this code back to
-        the agent. The agent cannot see this page. If anything looks wrong, close this tab and
-        nothing happens. The code is single-use and expires
-        ${esc(new Date(opts.expiresAt).toLocaleTimeString())}; re-validating replaces it.</p>
+        the agent. Contrail itself never gives the agent this page or the code — but anything that
+        shows the agent this page hands it the code too (a screenshot or copy pasted into the chat,
+        or an agent that can view your screen), so share it only if you mean to approve. If anything
+        looks wrong, close this tab and do not give the agent the code; if the agent has already
+        seen this page, tell it you do not approve. The code is single-use and expires
+        ${esc(new Date(opts.expiresAt).toLocaleTimeString())}; re-validating replaces it.</p>`
+          : codeHidden !== null
+            ? `<p class="note">${codeHidden}</p>`
+            : ''
+      }
     </div>
     <div class="card danger-card" id="dead" style="display:none">
       <h2>This code is no longer valid</h2>
@@ -425,6 +497,19 @@ export function renderApprovalPage(opts: ApprovalPageOptions): string {
       // Backend claimCode() is the real gate; this is defense-in-depth so a
       // stale tab is never misread as a live code.
       (function () {
+        // S46 (B): a form on this page answers with ?n=<notice>. Drop it from
+        // the address before the first poll, so a reload never replays the
+        // notice; ?s= stays, because the /status poll reads it.
+        var q = new URLSearchParams(location.search);
+        if (q.has('n')) {
+          var s = q.get('s') || '';
+          history.replaceState(null, '', location.pathname + '?s=' + encodeURIComponent(s));
+        }
+        // S46 (B): the request's policy state as this render drew it. When
+        // /status reports another one — a freeze began or ended, a reason was
+        // recorded, the policies changed — the page reloads, so a code that
+        // is no longer to be shown leaves the screen within one poll.
+        var REV = ${JSON.stringify(opts.governance ? opts.governance.rev : null).replace(/</g, '\\u003c')};
         var reasons = {
           executed: 'This change has already been executed.',
           executing: 'This change is currently being executed.',
@@ -457,6 +542,7 @@ export function renderApprovalPage(opts: ApprovalPageOptions): string {
             .then(function (s) {
               fails = 0;
               if (s && s.active === false) invalidate(s.status);
+              else if (REV !== null && s && s.rev && s.rev !== REV) location.reload();
               else setTimeout(check, 3000);
             })
             .catch(function () {
@@ -470,6 +556,144 @@ export function renderApprovalPage(opts: ApprovalPageOptions): string {
         setTimeout(function () { invalidate('expired'); }, msLeft > 0 ? msLeft : 0);
       })();
     </script>`,
+  );
+}
+
+/**
+ * S46 (B): everything the page shows about the request's governance, between
+ * the org card and the warnings — the notice a form answered with, the
+ * freeze or block card when the gate is not open, then the Change record
+ * card.
+ */
+function renderGovernance(g: ApprovalGovernance): string {
+  const notice = g.notice ? `<div class="${g.notice.kind}">${esc(g.notice.text)}</div>` : '';
+  return `${notice}${renderGateCard(g)}${renderChangeRecord(g)}`;
+}
+
+/** HH:MM on this machine's wall clock (24-hour). */
+function wallClock(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '--:--';
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+/**
+ * S46 (B): the card a gate other than 'open' adds above the Change record.
+ * frozen — the freeze, why no code is shown (by whether the freeze held the
+ * request when it was proposed, or began afterwards and its code may already
+ * have been seen), and, with a session, the emergency-reason form: the reason
+ * releases this request only, and the freeze stays configured. overridden —
+ * the reason the human recorded. blocked — what stops the request, and what
+ * the human can do about it. Every value goes through esc().
+ */
+function renderGateCard(g: ApprovalGovernance): string {
+  const freezeLine = g.freezeLine ? `<p class="freeze-line">${esc(g.freezeLine)}</p>` : '';
+  if (g.gate === 'frozen') {
+    const lead = g.frozenAtMint
+      ? 'No confirmation code is shown, and none was sent to your phone.'
+      : 'No confirmation code is shown. This freeze began after the request was proposed, so its ' +
+        'code may already have been shown on this page or sent to your phone; while the freeze ' +
+        'lasts that code does not execute until an emergency reason is recorded here.';
+    const form = g.sessionId
+      ? `<form method="post" action="/override" id="gov-override">` +
+        `<input type="hidden" name="session" value="${esc(g.sessionId)}">` +
+        `<div class="field"><label for="reason">Emergency reason</label>` +
+        `<textarea id="reason" name="reason" rows="3" required minlength="${g.limits.reasonMin}" ` +
+        `maxlength="${g.limits.reasonMax}" placeholder="Why this cannot wait until the freeze ends">` +
+        `</textarea>` +
+        `<div class="hint">At least ${g.limits.reasonMin} characters. Kept with this request in the ` +
+        `audit log and the change-evidence dossier.</div></div>` +
+        `<div class="actions"><button type="submit">Record emergency reason and show the code</button></div>` +
+        `</form>`
+      : '';
+    return (
+      `<div class="card danger-card" id="gov-freeze"><h2>CHANGE FREEZE</h2>${freezeLine}` +
+      `<p class="note">${lead} If this change cannot wait, type the emergency reason below: ` +
+      `the code then appears on this page, and the reason is recorded in Contrail's audit log as ` +
+      `a freeze override for this request only. The freeze itself stays configured — only ` +
+      `editing config.json changes it.</p>${form}</div>`
+    );
+  }
+  if (g.gate === 'overridden') {
+    const recorded = g.override
+      ? `<p class="note">You recorded an emergency reason at ${esc(wallClock(g.override.at))}: ` +
+        `“${esc(g.override.reason)}”. The override applies to this request only and is in the ` +
+        `audit log; the freeze stays configured.</p>`
+      : '';
+    return (
+      `<div class="card danger-card" id="gov-freeze">` +
+      `<h2>CHANGE FREEZE — OVERRIDDEN FOR THIS REQUEST</h2>${freezeLine}${recorded}</div>`
+    );
+  }
+  if (g.gate === 'blocked') {
+    const lines = (g.blockedLines ?? []).map((l) => `<div class="chg-warn">${esc(l)}</div>`).join('');
+    const closing =
+      g.blockedBy === 'unreadable'
+        ? 'No confirmation code is shown: Contrail could not read the policies in config.json — ' +
+          'the line above says why. Once the file is fixed, this page updates by itself within a ' +
+          'few seconds.'
+        : "No confirmation code is shown: this request does not satisfy this connection's " +
+          'policies as they stand now — the lines above say what is missing. If it is a ' +
+          'justification, type it under Change record below and save; otherwise ask the agent ' +
+          'to propose the change again.';
+    return (
+      `<div class="card danger-card" id="gov-block"><h2>BLOCKED BY POLICY</h2>${lines}` +
+      `<p class="note">${closing}</p></div>`
+    );
+  }
+  return '';
+}
+
+/**
+ * S46 (B): the Change record card — the ticket, the justification and who
+ * wrote it, and the policies that apply to this connection now. With no
+ * session it is read-only: nothing on it records anything. With one, the
+ * justification is a form the human can save; saving records their text and
+ * approves nothing. The ticket is read-only either way. Every value goes
+ * through esc(): the ticket and the justification are agent-written, the
+ * rule names and patterns come from the human's config.json.
+ */
+function renderChangeRecord(g: ApprovalGovernance): string {
+  const changed = g.policyChangedAt
+    ? `<p class="chg-warn" id="gov-changed">${esc(policyChangedText(g.policyChangedAt))}</p>`
+    : '';
+  const ticket =
+    `<div class="org-row"><span class="k">Ticket</span>` +
+    `<span class="v">${esc(g.ticket ?? 'none given')}</span></div>`;
+  const j = g.justification;
+  const label = `Justification${j.required ? ' (required by policy)' : ''}`;
+  const justification = g.sessionId
+    ? `<form method="post" action="/justification" id="gov-justification">` +
+      `<input type="hidden" name="session" value="${esc(g.sessionId)}">` +
+      `<div class="field"><label for="justification">${label}</label>` +
+      `<textarea id="justification" name="justification" rows="3" maxlength="${g.limits.justificationMax}">` +
+      `${esc(j.text)}</textarea>` +
+      `<div class="hint">${esc(j.provenance)}</div></div>` +
+      `<div class="actions"><button type="submit" class="secondary">Save justification</button></div>` +
+      `<p class="note">Saving records the text as typed on this page. It approves nothing and ` +
+      `does not change the code.</p></form>`
+    : `<div class="field" id="gov-justification">` +
+      `<div class="gov-k">${label}</div>` +
+      (j.text ? `<div class="gov-text">${esc(j.text)}</div>` : '') +
+      `<div class="hint">${esc(j.provenance)}</div></div>`;
+  // Unreadable policies: nothing is known about what applies, so no list.
+  const policies =
+    g.blockedBy === 'unreadable'
+      ? ''
+      : `<div class="gov-k">${
+          g.policySource === 'config'
+            ? 'Policies on this connection (from config.json):'
+            : "Policies on this connection (Contrail's built-in default — config.json has no policies section):"
+        }</div>` +
+        (g.policyLines.length
+          ? `<ul class="gov-list">${g.policyLines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>`
+          : '<p class="note">No policy rule applies to this connection.</p>');
+  const unmatched = (g.unmatchedRules ?? [])
+    .map((name) => `<p class="note">${esc(unmatchedRuleText(name))}</p>`)
+    .join('');
+  return (
+    `<div class="card" id="gov-record"><h2>Change record</h2>` +
+    `${changed}${ticket}${justification}${policies}${unmatched}</div>`
   );
 }
 

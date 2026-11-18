@@ -1035,4 +1035,28 @@ describe('the approval-page card', () => {
       'AUTOMATION IN YOUR SNAPSHOT',
     );
   });
+
+  // S46 D6: a screenshot of this page pasted into the chat hands the agent the
+  // code, and closing the tab voids nothing — so the card says what Contrail
+  // does and what the human does, and no longer claims the agent "cannot see"
+  // the page or that closing the tab makes "nothing happen".
+  it('the code card: Contrail never gives the agent the page or the code — and a screenshot does', () => {
+    for (const kind of ['deploy', 'dml', 'apex', 'bulk', 'activation'] as const) {
+      const html = pageWith(kind, undefined);
+      const from = html.indexOf('id="code-card"');
+      const to = html.indexOf('id="dead"');
+      expect(from).toBeGreaterThan(-1);
+      expect(to).toBeGreaterThan(from);
+      const card = html.slice(from, to);
+      expect(card).toContain('ABCD-EFGH');
+      expect(card).toContain('Contrail itself never gives the agent this page or the code');
+      expect(card).toContain('a screenshot or copy pasted into the chat');
+      expect(card).toContain('an agent that can view your screen');
+      expect(card).toContain('close this tab and do not give the agent the code');
+      expect(card).toContain('tell it you do not approve');
+      expect(card).toContain('re-validating replaces it.');
+      expect(html).not.toContain('The agent cannot see this page');
+      expect(html).not.toContain('nothing happens');
+    }
+  });
 });

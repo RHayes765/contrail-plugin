@@ -305,8 +305,11 @@ share pointing at a missing group, role, or user before deploying.
    picture — who will see this dashboard and as whom it runs. Human reads the
    confirmation code from the approval page; `execute_deploy`; the full
    ritual is salesforce-house-rules §3.
-4. **Refresh**: `refresh_snapshot` with `types: ["Dashboard"]` — Dashboard is
-   an explicit-refresh-only type; the default sweep won't pick it up.
+4. **Check the result's `snapshot` block** — it says whether the deployed
+   dashboard was re-read into the snapshot; if it was skipped with
+   `type_not_in_snapshot`, run `refresh_snapshot` with `types: ["Dashboard"]`
+   (Dashboard is an explicit-refresh-only type; the default sweep won't pick
+   it up).
 5. **Verify**: dashboards cannot be executed through Contrail. Run each
    underlying report with `get_report_data` (needs `data_read`) to prove the
    data the tiles will show, and `retrieve_metadata` the deployed dashboard to

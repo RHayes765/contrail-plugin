@@ -109,6 +109,12 @@ ids into child files). Salesforce resolves cross-object references natively:
 
 ## 5. Pre-flight before proposing
 
+- Read the target's `policy` in `list_connections` first. Where a rule denies
+  data deletes (`denies` lists `data_deletes`), a plan with a delete step — and
+  a delete through `dml_propose` — is refused outright. Plan the cleanup with
+  the human instead; anonymous Apex is not a workaround. A freeze in effect
+  (`freeze_now`) means the proposal waits for the human at their desk
+  (salesforce-house-rules §3).
 - Reconcile EVERY header against `describe_schema`: field exists, writable,
   correct type. A wrong column name fails the whole job org-side
   (`InvalidBatch: Field name not found`) — catch it here for free.
@@ -135,6 +141,11 @@ ids into child files). Salesforce resolves cross-object references natively:
   rows; `false` runs everything. Say plainly that completed steps are never
   rolled back either way, and that bulk deletes are SOFT (Recycle Bin,
   ~15 days).
+- Pass `justification` on `bulk_load_propose` and `dml_propose` — one or two
+  sentences, drafted from what the human asked for, on why this load is being
+  made now — and `ticket` only when the human gave you one. Where the
+  connection's policy requires either, a proposal without it is refused,
+  naming the rule; relay that and ask, never invent one.
 - After the human reads the code back: `bulk_load_execute`. Large jobs take
   minutes — an in-progress result means call it again with the SAME code; the
   running load is never restarted by a repeat call.

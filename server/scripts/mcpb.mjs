@@ -15,6 +15,9 @@ import { fileURLToPath } from 'node:url';
  *                                    for every Claude Desktop platform (the napi-rs
  *                                    loader prefers local ./keyring.<triple>.node
  *                                    files over platform packages)
+ *   skills/                  — the skill pack read_skill / list_skills serve and
+ *                              render_flow's page template, without the
+ *                              SKILL.overlay.patch files
  *
  * One bundle therefore serves win32-x64, win32-arm64, darwin-x64, darwin-arm64.
  * Both native deps are N-API, so Claude Desktop's bundled Node version (which
@@ -105,11 +108,15 @@ for (const triple of KEYRING_TRIPLES) {
     continue;
   }
   // npm pack pins the exact version matching the installed root package.
-  const tarball = run(`npm pack @napi-rs/keyring-${triple}@${krVersion} --pack-destination "${tmp}"`, tmp).trim().split('\n').pop().trim();
+  // --dry-run=false: `npm run release -- --dry-run` exports npm_config_dry_run=true
+  // to every child, and a dry-run pack prints the tarball name without writing it.
+  const tarball = run(`npm pack @napi-rs/keyring-${triple}@${krVersion} --dry-run=false --pack-destination "${tmp}"`, tmp).trim().split('\n').pop().trim();
   fs.writeFileSync(path.join(krDest, nodeFile), await readTgzEntry(path.join(tmp, tarball), `package/${nodeFile}`));
   console.error(`keyring ${triple}: vendored ${krVersion}`);
 }
 fs.rmSync(tmp, { recursive: true, force: true });
+
+const repoRoot = path.resolve(serverRoot, '..');
 
 // 7. Vendored language servers (check_apex / check_soql) + attribution.
 //    Staged at the extension ROOT so the bundle at server/index.mjs finds
@@ -129,16 +136,98 @@ for (const rel of VENDOR_REQUIRED) {
   }
 }
 fs.cpSync(vendorSrc, path.join(staging, 'vendor'), { recursive: true });
-const repoRoot = path.resolve(serverRoot, '..');
 for (const lic of ['NOTICE', 'LICENSE-APACHE-2.0', 'LICENSE-MIT', 'LICENSE-BSD-3-CLAUSE']) {
   const src = path.join(repoRoot, lic);
   if (fs.existsSync(src)) fs.copyFileSync(src, path.join(staging, lic));
 }
 
+// 7b. The skill pack (list_skills / read_skill, and render_flow's template).
+//     Staged at the extension ROOT, beside the manifest.json step 3 wrote: the
+//     server's resolver accepts ../skills from server/index.mjs only when the
+//     folder above it carries a manifest named "contrail" and the pack holds
+//     the house rules. SKILL.overlay.patch files (the diff from an upstream
+//     SKILL.md to the adapted one) and dotfiles are not skill content and
+//     stay out; read_skill never serves them anyway.
+const skillsSrc = path.join(repoRoot, 'skills');
+const skillsDest = path.join(staging, 'skills');
+const SKILLS_REQUIRED = [
+  'salesforce-house-rules/SKILL.md',
+  'salesforce-flow-visualize/SKILL.md',
+  'salesforce-flow-visualize/assets/flow-diff-template.html',
+];
+for (const rel of SKILLS_REQUIRED) {
+  if (!fs.existsSync(path.join(skillsSrc, rel))) {
+    throw new Error(`skill pack file missing: skills/${rel}`);
+  }
+}
+const isOverlayPatch = (name) => name.toLowerCase() === 'skill.overlay.patch';
+fs.cpSync(skillsSrc, skillsDest, {
+  recursive: true,
+  // Basename only: the repo itself may sit under a dot-folder.
+  filter: (src) => {
+    const name = path.basename(src);
+    return !isOverlayPatch(name) && !name.startsWith('.');
+  },
+});
+const filesUnder = (dir) =>
+  fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+    entry.isDirectory() ? filesUnder(path.join(dir, entry.name)) : [path.join(dir, entry.name)]);
+const skillFolderCount = (root) =>
+  fs.readdirSync(root, { withFileTypes: true }).filter((entry) =>
+    entry.isDirectory() &&
+    !entry.name.startsWith('.') &&
+    fs.existsSync(path.join(root, entry.name, 'SKILL.md'))).length;
+const strayPatches = filesUnder(skillsDest).filter((file) => isOverlayPatch(path.basename(file)));
+if (strayPatches.length > 0) {
+  throw new Error(
+    `SKILL.overlay.patch staged into the bundle: ${path.relative(staging, strayPatches[0])}`,
+  );
+}
+const skillsInSource = skillFolderCount(skillsSrc);
+const skillsStaged = skillFolderCount(skillsDest);
+if (skillsStaged !== skillsInSource) {
+  throw new Error(`staged ${skillsStaged} skill folder(s) but skills/ holds ${skillsInSource}`);
+}
+console.error(`skills: ${skillsStaged} staged`);
+
 // 8. Validate + pack.
 run(`npx --yes @anthropic-ai/mcpb validate "${path.join(staging, 'manifest.json')}"`);
 const outFile = path.join(outRoot, `contrail-${pkg.version}.mcpb`);
 run(`npx --yes @anthropic-ai/mcpb pack "${staging}" "${outFile}"`);
+
+// 9. Check the PACKED archive, not just staging. Which files `mcpb pack`
+//    leaves out on its own is not pinned anywhere in this repo, so the two
+//    entries the skill tools and render_flow depend on (the house rules the
+//    resolver looks for, the flow page template) are looked up in the .mcpb
+//    itself (a zip; names only — nothing is inflated). Every other staged
+//    skills file is then compared against the same names, so a skill asset
+//    the packer drops fails this build instead of going missing from the
+//    extension alone.
+const { unzipSync } = await import('fflate');
+const packed = new Set();
+unzipSync(fs.readFileSync(outFile), {
+  filter: (entry) => {
+    packed.add(entry.name);
+    return false;
+  },
+});
+const PACKED_REQUIRED = [
+  'skills/salesforce-house-rules/SKILL.md',
+  'skills/salesforce-flow-visualize/assets/flow-diff-template.html',
+];
+for (const entry of PACKED_REQUIRED) {
+  if (!packed.has(entry)) {
+    throw new Error(`${entry} is not in ${path.basename(outFile)} (mcpb pack left it out?)`);
+  }
+}
+const dropped = filesUnder(skillsDest)
+  .map((file) => path.relative(staging, file).split(path.sep).join('/'))
+  .filter((name) => !packed.has(name));
+if (dropped.length > 0) {
+  throw new Error(
+    `mcpb pack left ${dropped.length} skill file(s) out of ${path.basename(outFile)}: ${dropped.slice(0, 5).join(', ')}`,
+  );
+}
 
 const mb = (fs.statSync(outFile).size / 1024 / 1024).toFixed(1);
 console.error(`packed → ${outFile} (${mb} MB)`);

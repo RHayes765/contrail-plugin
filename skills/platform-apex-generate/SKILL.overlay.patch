@@ -57,8 +57,8 @@
 +    (`<data dir>/staging/`, e.g. `%USERPROFILE%\.contrail\staging\`) and pass an
 +    absolute `content_file` path. Prefer `content_file` for anything large or edited
 +    from a retrieved copy (see building-salesforce-metadata).
-+- **Every write is human-approved** via a confirmation code you never see. The full
-+  ritual is salesforce-house-rules §3; this skill only points at it.
++- **Every write is human-approved** via a confirmation code Contrail gives only to the
++  human. Full ritual, including a code seen in a screenshot: salesforce-house-rules §3.
 +- **Deleting a class is destructive**: propose it as a `destructive` entry in
 +  `validate_deploy`, lead your summary with it, and let the human decide on the
 +  approval page. Never fold a deletion quietly into a larger change.

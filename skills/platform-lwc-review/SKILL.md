@@ -364,7 +364,9 @@ with the reason.
    appear, the change lands in the meta's `isExposed`/`targets` — not in a
    permission set (LWCs have no permission-set grant).
 5. Then the write ritual — validation summary, human-read confirmation code,
-   `execute_deploy`, `refresh_snapshot` — by reference:
+   `execute_deploy` — Contrail then re-reads the deployed components into the
+   snapshot itself (`refresh_snapshot` only for what the result's `snapshot`
+   block reports as not updated) — by reference:
    **salesforce-house-rules §3**. Never restate or shortcut it.
 
 ## Cross-skill integration

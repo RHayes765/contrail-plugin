@@ -32,6 +32,8 @@ their personal preferences. **Merge, never overwrite**, and back it up first.
    nodejs.org, then resume. Any Node 22+ works — the native modules ship prebuilt
    binaries that are not tied to a specific Node version, so do **not** downgrade
    Node if something fails; diagnose instead.
+3. The server serves `skills/` itself through `read_skill`; do not upload these
+   skills to the human's Claude account.
 
 ## Step 1 — Install the runtime dependencies (no build)
 
