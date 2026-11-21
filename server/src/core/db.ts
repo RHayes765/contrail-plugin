@@ -534,12 +534,14 @@ export class ContrailDb {
     return (rows as ArtifactRow[]).map(rowToArtifact);
   }
 
+  /** Prepared on first use and kept: one validate can look up thousands of names. */
+  private getArtifactStatement: Database.Statement | undefined;
+
   getArtifact(connectionId: string, type: string, apiName: string): ArtifactRecord | null {
-    const row = this.db
-      .prepare(
-        `SELECT * FROM artifacts WHERE connection_id = ? AND type = ? AND api_name = ? COLLATE NOCASE`,
-      )
-      .get(connectionId, type, apiName);
+    this.getArtifactStatement ??= this.db.prepare(
+      `SELECT * FROM artifacts WHERE connection_id = ? AND type = ? AND api_name = ? COLLATE NOCASE`,
+    );
+    const row = this.getArtifactStatement.get(connectionId, type, apiName);
     return row ? rowToArtifact(row as ArtifactRow) : null;
   }
 

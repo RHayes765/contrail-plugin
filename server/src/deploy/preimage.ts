@@ -9,7 +9,7 @@ import {
   type MetadataSoapClient,
   type RetrieveMessage,
 } from '../salesforce/metadataSoap.js';
-import { findChildBlock } from '../snapshot/indexer.js';
+import { childBlockNames, findChildBlock } from '../snapshot/indexer.js';
 import {
   deployZipEntryPath,
   retrieveMemberFor,
@@ -168,6 +168,40 @@ export type PreImageResult =
 /** The key `images` is addressed by — the member's own type and api_name. */
 export function preImageKey(type: string, apiName: string): string {
   return `${type}:${apiName}`;
+}
+
+/**
+ * S46 D3: what the live check knows about one permission-needing
+ * component — true = it found it in the org, false = it found it absent,
+ * null = it cannot place it. A member of the package answers from its own
+ * pre-image. A field authored inline in a CustomObject document has no
+ * pre-image of its own, so it answers from that object's: absent with the
+ * object, else by whether the object's live document holds its block. Each
+ * live object document is read once, however many of its fields are asked
+ * about (a package can carry thousands of inline fields).
+ */
+export function livePresence(
+  images: ReadonlyMap<string, PreImage>,
+): (type: string, apiName: string) => boolean | null {
+  const fieldNames = new Map<PreImage, Set<string>>();
+  return (type, apiName) => {
+    const image = images.get(preImageKey(type, apiName));
+    if (image) return image.present;
+    if (type === 'CustomField') {
+      const dot = apiName.indexOf('.');
+      const obj = dot > 0 ? images.get(preImageKey('CustomObject', apiName.slice(0, dot))) : undefined;
+      if (obj?.present === false) return false;
+      if (obj?.present === true && obj.content !== undefined) {
+        let names = fieldNames.get(obj);
+        if (names === undefined) {
+          names = childBlockNames(obj.content, 'fields');
+          fieldNames.set(obj, names);
+        }
+        return names.has(apiName.slice(dot + 1).toLowerCase());
+      }
+    }
+    return null;
+  };
 }
 
 /**

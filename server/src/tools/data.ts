@@ -1365,10 +1365,48 @@ function fitToBudget(records: unknown[], budget: number): { kept: unknown[]; dro
   return { kept, dropped: records.length - kept.length };
 }
 
-/** Blank out quoted literals (keeping length illusions out of structural regexes). */
+/**
+ * Blank out quoted literals (keeping length illusions out of structural
+ * regexes): what `soql.replace(/'(?:[^'\\]|\\.)*'/g, "''")` returns, in one
+ * walk. That pattern starts again from every quote inside a literal that
+ * never closes (each escaped \' is one) and reads to the end each time,
+ * which is quadratic. Its answer, kept here: a literal runs from a quote to
+ * the next quote no backslash escapes; a backslash escapes the character
+ * after it, except a line end (\n, \r, U+2028, U+2029), which `.` does not
+ * match; there no literal can be read, and the search for the next one
+ * resumes after that backslash. A literal still open at the end of the text
+ * is left as it is. One difference, on absurd input only: the pattern
+ * overflowed V8's backtracking stack ("Maximum call stack size exceeded")
+ * on a literal of about 8 million characters, where the walk answers.
+ */
 function stripSoqlLiterals(soql: string): string {
-  return soql.replace(/'(?:[^'\\]|\\.)*'/g, "''");
+  let out = '';
+  let copied = 0;
+  let quote = soql.indexOf("'");
+  scan: while (quote !== -1) {
+    for (let i = quote + 1; i < soql.length; ) {
+      const ch = soql[i];
+      if (ch === "'") {
+        out += `${soql.slice(copied, quote)}''`;
+        copied = i + 1;
+        quote = soql.indexOf("'", copied);
+        continue scan;
+      }
+      if (ch !== '\\') {
+        i += 1;
+      } else if (i + 1 < soql.length && !SOQL_LINE_ENDS.has(soql[i + 1]!)) {
+        i += 2;
+      } else {
+        quote = soql.indexOf("'", i + 1);
+        continue scan;
+      }
+    }
+    break;
+  }
+  return out + soql.slice(copied);
 }
+
+const SOQL_LINE_ENDS = new Set(['\n', '\r', '\u2028', '\u2029']);
 
 const MAX_STRING_FIELD = 10_000;
 

@@ -4,15 +4,32 @@ import {
   analyzeChanges,
   analyzePermissionCoverage,
   buildDeployZip,
+  changeDependentWarnings,
   deployZipEntryPath,
   isRegisteredType,
+  isValidComponentName,
   parseEnvelopeFor,
   readOldContent,
   retrieveMemberFor,
   type ProposedComponent,
 } from '../deploy/package.js';
-import { indexSnapshotFiles } from '../snapshot/indexer.js';
-import type { ContrailDb } from '../core/db.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  childBlockNames,
+  extractChildBlocks,
+  findChildBlock,
+  indexSnapshotFiles,
+} from '../snapshot/indexer.js';
+import {
+  withoutXmlBlocks,
+  xmlBlocks,
+  xmlBlockText,
+  xmlTagTexts,
+  xmlTagValue,
+} from '../salesforce/xml.js';
+import { ContrailDb } from '../core/db.js';
 import type { SnapshotStore } from '../snapshot/store.js';
 import type { ConnectionRecord } from '../core/types.js';
 
@@ -2726,6 +2743,913 @@ describe('S46 D3: the permission warning says what Contrail knows about each com
       );
       expect(cov.uncovered).toEqual([]);
       expect(cov.warning).toBeNull();
+    }
+  });
+});
+
+describe('S47: Omnistudio Data Mappers (OmniDataTransform)', () => {
+  const conn = { id: 'conn-1', alias: 'dev' } as ConnectionRecord;
+  const V47 = '68.0';
+  const dbAdd = { getArtifact: () => null } as unknown as ContrailDb;
+  const storeNone = {
+    readCurrentFile: () => null,
+    listCurrentFiles: () => [],
+  } as unknown as SnapshotStore;
+  const dbMod = (filePath: string) =>
+    ({ getArtifact: () => ({ filePath }) }) as unknown as ContrailDb;
+  const storeWith = (old: string) =>
+    ({ readCurrentFile: () => old, listCurrentFiles: () => [] }) as unknown as SnapshotStore;
+  const warningsOf = (res: ReturnType<typeof analyzeChanges>) =>
+    res.changes[0]!.warnings.join(' ');
+
+  // Element grammar per Salesforce's OmniDataTransform type page (Industries
+  // developer guide): header elements alphabetical, the repeated
+  // <omniDataTransformItem> rows between nullInputsIncludedInOutput and
+  // outputType, item children alphabetical, item <name> = the mapper's name,
+  // uniqueName = <name>_<versionNumber>. Doc-derived — these strings pin
+  // Contrail's own arms, not a retrieved file.
+  const row = (name: string, input: string, output: string) =>
+    `    <omniDataTransformItem>\n        <disabled>false</disabled>\n` +
+    `        <filterGroup>0.0</filterGroup>\n        <inputFieldName>${input}</inputFieldName>\n` +
+    `        <name>${name}</name>\n        <outputCreationSequence>1.0</outputCreationSequence>\n` +
+    `        <outputFieldName>${output}</outputFieldName>\n` +
+    `        <outputObjectName>json</outputObjectName>\n    </omniDataTransformItem>\n`;
+  const mapper = (name: string, uniqueName: string | null, rows: string) =>
+    `<?xml version="1.0" encoding="UTF-8"?>\n` +
+    `<OmniDataTransform xmlns="http://soap.sforce.com/2006/04/metadata">\n` +
+    `    <active>true</active>\n    <inputType>JSON</inputType>\n    <name>${name}</name>\n` +
+    `    <nullInputsIncludedInOutput>false</nullInputsIncludedInOutput>\n${rows}` +
+    `    <outputType>JSON</outputType>\n    <type>Extract</type>\n` +
+    (uniqueName === null ? '' : `    <uniqueName>${uniqueName}</uniqueName>\n`) +
+    `    <versionNumber>1.0</versionNumber>\n</OmniDataTransform>\n`;
+  const extract = mapper(
+    'AccountSummaryExtract',
+    'AccountSummaryExtract_1',
+    row('AccountSummaryExtract', 'Account:Name', 'AccountName'),
+  );
+  const ADVISORY =
+    "OMNISTUDIO DATA MAPPER — deploys only where the org's Omnistudio Metadata setting is " +
+    'on (per Salesforce Help). Its <active> value decides whether it lands active (per a ' +
+    'Salesforce blog — not yet confirmed here). Formula items need the Data Mapper Designer ' +
+    "(formulaConverted is Designer-computed); check the result in the Designer's Preview.";
+  const MODIFY =
+    'MODIFY OF AN EXISTING DATA MAPPER — whether the org updates it in place (per Salesforce ' +
+    "Help, an active version can't be edited once Data Mapper Versioning is on) is not " +
+    'confirmed, nor whether mapping rows omitted here are removed org-side; carry every row ' +
+    'from a fresh retrieve.';
+  const MIXED =
+    "MIXED PACKAGE — Salesforce says Omnistudio components can't share a deploy with setup " +
+    'metadata (permission sets, profiles, fields, FlexiPages, Expression Sets); if the org ' +
+    'refuses, deploy the Data Mappers on their own.';
+
+  it('places omniDataTransforms/<Name>_<version>.rpt with a literal member and NO meta sidecar', () => {
+    const built = buildDeployZip(
+      [comp('OmniDataTransform', 'AccountSummaryExtract_1', extract)],
+      [],
+      V47,
+      noMeta,
+    );
+    expect(built.files).toEqual(['omniDataTransforms/AccountSummaryExtract_1.rpt', 'package.xml']);
+    expect(built.files.filter((f) => f.endsWith('-meta.xml'))).toEqual([]);
+    expect(built.packageXml).toContain(
+      '<members>AccountSummaryExtract_1</members>\n        <name>OmniDataTransform</name>',
+    );
+    // The body is written byte-for-byte — no envelope, no rewrite.
+    expect(zipText(built.zip, 'omniDataTransforms/AccountSummaryExtract_1.rpt')).toBe(extract);
+  });
+
+  it('deployZipEntryPath matches the builder; retrieveMemberFor and isRegisteredType see the type', () => {
+    expect(deployZipEntryPath('OmniDataTransform', 'AccountSummaryExtract_1')).toEqual({
+      path: 'omniDataTransforms/AccountSummaryExtract_1.rpt',
+      child: false,
+    });
+    expect(retrieveMemberFor('OmniDataTransform', 'AccountSummaryExtract_1')).toEqual({
+      type: 'OmniDataTransform',
+      member: 'AccountSummaryExtract_1',
+    });
+    expect(isRegisteredType('OmniDataTransform')).toBe(true);
+    // The metadata type is the mapper; its item sObject is NOT a type.
+    expect(isRegisteredType('OmniDataTransformItem')).toBe(false);
+  });
+
+  it('the indexer reads omniDataTransforms/<Name>_1.rpt as one row, version suffix intact, and skips a -meta.xml', () => {
+    const files = new Map<string, Uint8Array>([
+      ['omniDataTransforms/AccountSummaryExtract_1.rpt', strToU8(extract)],
+      ['omniDataTransforms/AccountSummaryExtract_1.rpt-meta.xml', strToU8('<stray/>')],
+    ]);
+    const rows = indexSnapshotFiles(files, [], '2026-11-20T00:00:00.000Z');
+    expect(rows.map((r) => `${r.type}:${r.apiName}:${r.filePath}`)).toEqual([
+      'OmniDataTransform:AccountSummaryExtract_1:omniDataTransforms/AccountSummaryExtract_1.rpt',
+    ]);
+  });
+
+  it('name grammar: letters and digits, optionally _<version>; anything else is refused with the reason', () => {
+    for (const name of ['AccountSummaryExtract_1', 'Abc_1', 'Abc', 'Abc2_12']) {
+      expect(isValidComponentName('OmniDataTransform', name), name).toBe(true);
+      expect(() =>
+        buildDeployZip([comp('OmniDataTransform', name, extract)], [], V47, noMeta),
+      ).not.toThrow();
+    }
+    for (const name of ['Abc_Def', 'Abc-1', 'Abc 1', '_1', 'Abc_1_2', 'Abc_', 'Abc.1']) {
+      expect(isValidComponentName('OmniDataTransform', name), name).toBe(false);
+      expect(
+        () => buildDeployZip([comp('OmniDataTransform', name, extract)], [], V47, noMeta),
+        name,
+      ).toThrow(
+        `invalid OmniDataTransform name "${name}" — letters and digits, optionally ` +
+          `_<version> (e.g. AccountSummaryExtract_1). Per Salesforce Help, Data Mapper names ` +
+          `hold letters and digits only once Omnistudio Metadata is on; Salesforce's guides ` +
+          `name the files <Name>_<version> (exact fullName rule not yet confirmed).`,
+      );
+    }
+    // The grammar is the type's, so it holds on the destructive path too.
+    expect(() =>
+      buildDeployZip([], [{ type: 'OmniDataTransform', api_name: 'Abc-1' }], V47, noMeta),
+    ).toThrow('invalid OmniDataTransform name "Abc-1"');
+    // Other types keep the generic grammar.
+    expect(isValidComponentName('ApexClass', 'Abc_Def')).toBe(true);
+  });
+
+  it('a stray envelope aimed at it fails locally and honestly', () => {
+    expect(() =>
+      buildDeployZip(
+        [
+          comp(
+            'OmniDataTransform',
+            'AccountSummaryExtract_1',
+            '{"contrail_bundle":1,"files":{"AccountSummaryExtract_1.rpt":"<OmniDataTransform/>"}}',
+          ),
+        ],
+        [],
+        V47,
+        noMeta,
+      ),
+    ).toThrow(/single-file type/);
+  });
+
+  it('the OMNISTUDIO DATA MAPPER advisory fires on add AND modify; modify adds the hedged arm, never WHOLE-DOCUMENT REPLACE', () => {
+    const added = analyzeChanges(
+      dbAdd,
+      storeNone,
+      conn,
+      [comp('OmniDataTransform', 'AccountSummaryExtract_1', extract)],
+      [],
+    );
+    expect(added.changes[0]!.change).toBe('add');
+    expect(added.changes[0]!.warnings).toEqual([ADVISORY]);
+
+    const modified = analyzeChanges(
+      dbMod('omniDataTransforms/AccountSummaryExtract_1.rpt'),
+      storeWith(mapper('AccountSummaryExtract', 'AccountSummaryExtract_1', '')),
+      conn,
+      [comp('OmniDataTransform', 'AccountSummaryExtract_1', extract)],
+      [],
+    );
+    expect(modified.changes[0]!.change).toBe('modify');
+    // The change-dependent arm leads; the change-independent advisory follows.
+    expect(modified.changes[0]!.warnings).toEqual([MODIFY, ADVISORY]);
+    // Removal of omitted rows is NOT confirmed — the generic sentence that
+    // states it as fact must never appear for this type.
+    expect(warningsOf(modified)).not.toMatch(/WHOLE-DOCUMENT REPLACE/);
+    expect(warningsOf(modified)).not.toContain('is removed.');
+    // Nor is an in-place update: no heading states that the modify REPLACES.
+    expect(warningsOf(modified)).not.toMatch(/REPLACE/);
+
+    // The engine re-runs the change-dependent arms against the live copy:
+    // the modify arm is change-dependent, the advisory is not.
+    const arms = (change: 'add' | 'modify' | 'unchanged_content') =>
+      changeDependentWarnings({
+        type: 'OmniDataTransform',
+        api_name: 'AccountSummaryExtract_1',
+        change,
+        proposed: extract,
+        before: change === 'add' ? null : extract,
+      });
+    expect(arms('modify')).toEqual([MODIFY]);
+    expect(arms('add')).toEqual([]);
+    expect(arms('unchanged_content')).toEqual([]);
+  });
+
+  it('UNIQUENAME MISMATCH: only when the header uniqueName differs from api_name — advisory, never a refusal', () => {
+    const run = (apiName: string, content: string) =>
+      analyzeChanges(dbAdd, storeNone, conn, [comp('OmniDataTransform', apiName, content)], []);
+    const mismatch = run('AccountSummaryExtract', extract);
+    expect(mismatch.changes[0]!.warnings).toContain(
+      "UNIQUENAME MISMATCH — api_name AccountSummaryExtract differs from the file's uniqueName " +
+        "AccountSummaryExtract_1; Salesforce's guides name Data Mapper files <Name>_<version> " +
+        '(fullName rule not yet confirmed).',
+    );
+    expect(() =>
+      buildDeployZip([comp('OmniDataTransform', 'AccountSummaryExtract', extract)], [], V47, noMeta),
+    ).not.toThrow();
+    expect(warningsOf(run('AccountSummaryExtract_1', extract))).not.toMatch(/UNIQUENAME/);
+    // No <uniqueName> in the file: nothing to compare.
+    expect(
+      warningsOf(run('AccountSummaryExtract_1', mapper('AccountSummaryExtract', null, ''))),
+    ).not.toMatch(/UNIQUENAME/);
+    // Only the header's value counts — an item row carrying one is ignored.
+    const rowOnly = mapper(
+      'AccountSummaryExtract',
+      null,
+      row('AccountSummaryExtract', 'Account:Name', 'AccountName').replace(
+        '<name>',
+        '<uniqueName>Other_2</uniqueName><name>',
+      ),
+    );
+    expect(warningsOf(run('AccountSummaryExtract_1', rowOnly))).not.toMatch(/UNIQUENAME/);
+  });
+
+  it('UNIQUENAME MISMATCH reads the header in linear time: about 1 MB of malformed rows or names answers fast, and the same', () => {
+    // The lazy row strip re-read to the end of the text once per row opener
+    // with no closer, and the lazy value pattern was cubic in the white space
+    // after a <uniqueName> with no closer: seconds to minutes of a blocked
+    // server for the first two shapes. Each answers what the patterns did.
+    const MB = 1_000_000;
+    const head = (rest: string) =>
+      `<OmniDataTransform xmlns="http://soap.sforce.com/2006/04/metadata">\n` +
+      `    <name>AccountSummaryExtract</name>\n${rest}`;
+    const decoyRow = row('AccountSummaryExtract', 'Account:Name', 'AccountName').replace(
+      '<name>',
+      '<uniqueName>Row_9</uniqueName><name>',
+    );
+    const shapes: Array<[string, string, string | null]> = [
+      // An opener with no closer leaves the rest in place: no header value.
+      [
+        'row openers with no closer',
+        head('<omniDataTransformItem>'.repeat(Math.floor(MB / 23))),
+        null,
+      ],
+      [
+        '<uniqueName> openers with no closer, each followed by white space',
+        head(`<uniqueName>${' '.repeat(200)}`.repeat(Math.floor(MB / 212))),
+        null,
+      ],
+      [
+        'closed rows carrying their own uniqueName, then the header value',
+        head(
+          decoyRow.repeat(Math.floor(MB / decoyRow.length)) +
+            '    <type>Extract</type>\n    <uniqueName> AccountSummaryExtract_2 </uniqueName>\n' +
+            '</OmniDataTransform>\n',
+        ),
+        'AccountSummaryExtract_2',
+      ],
+    ];
+    for (const [what, content, uniqueName] of shapes) {
+      expect(content.length, what).toBeGreaterThan(MB * 0.95);
+      const started = performance.now();
+      const res = analyzeChanges(
+        dbAdd,
+        storeNone,
+        conn,
+        [comp('OmniDataTransform', 'AccountSummaryExtract_1', content)],
+        [],
+      );
+      const took = performance.now() - started;
+      if (uniqueName === null) {
+        expect(warningsOf(res), what).not.toMatch(/UNIQUENAME/);
+      } else {
+        expect(warningsOf(res), what).toContain(`differs from the file's uniqueName ${uniqueName};`);
+      }
+      expect(took, `${what}: ${Math.round(took)} ms`).toBeLessThan(1000);
+    }
+  });
+
+  it('MIXED PACKAGE: on every Data Mapper entry when any other type shares the package; absent when they deploy alone', () => {
+    const alone = analyzeChanges(
+      dbAdd,
+      storeNone,
+      conn,
+      [
+        comp('OmniDataTransform', 'AccountSummaryExtract_1', extract),
+        comp('OmniDataTransform', 'AccountSummaryTransform_1', extract),
+      ],
+      [{ type: 'OmniDataTransform', api_name: 'OldSummaryExtract_1' }],
+    );
+    for (const entry of [...alone.changes, ...alone.destructive]) {
+      expect(entry.warnings, entry.api_name).not.toContain(MIXED);
+    }
+
+    const withSetup = analyzeChanges(
+      dbAdd,
+      storeNone,
+      conn,
+      [
+        comp('OmniDataTransform', 'AccountSummaryExtract_1', extract),
+        comp('PermissionSet', 'Summary_Access', '<PermissionSet/>'),
+      ],
+      [{ type: 'OmniDataTransform', api_name: 'OldSummaryExtract_1' }],
+    );
+    expect(withSetup.changes[0]!.warnings).toContain(MIXED);
+    expect(withSetup.destructive[0]!.warnings).toContain(MIXED);
+    // Said on the Data Mapper entries only.
+    expect(withSetup.changes[1]!.warnings).not.toContain(MIXED);
+
+    // A deletion of another type mixes the package too.
+    const withDeletion = analyzeChanges(
+      dbAdd,
+      storeNone,
+      conn,
+      [comp('OmniDataTransform', 'AccountSummaryExtract_1', extract)],
+      [{ type: 'CustomField', api_name: 'Account.Old_Region__c' }],
+    );
+    expect(withDeletion.changes[0]!.warnings).toContain(MIXED);
+    expect(withDeletion.destructive[0]!.warnings).not.toContain(MIXED);
+
+    // No Data Mapper, no advisory.
+    const none = analyzeChanges(
+      dbAdd,
+      storeNone,
+      conn,
+      [comp('PermissionSet', 'Summary_Access', '<PermissionSet/>')],
+      [{ type: 'CustomField', api_name: 'Account.Old_Region__c' }],
+    );
+    expect(JSON.stringify(none)).not.toContain('MIXED PACKAGE');
+  });
+
+  it('OmniDataTransform deliberately produces NO permission needs', () => {
+    const res = analyzePermissionCoverage([
+      comp('OmniDataTransform', 'AccountSummaryExtract_1', extract),
+    ]);
+    expect(res.uncovered).toHaveLength(0);
+    expect(res.warning).toBeNull();
+  });
+});
+
+describe('Deploy content is scanned in linear time (S47 review follow-up)', () => {
+  // Each shape is about 1 MB of malformed markup an agent could hand
+  // validate_deploy (readOldContent reads the snapshot copy instead). The
+  // lazy patterns these sites used took seconds to minutes on such text,
+  // blocking every tool on the server meanwhile: quadratic in openers with
+  // no closer after them, cubic in the white space after an opener whose
+  // value is not followed by its closer. Each shape must answer in well
+  // under a second, and with the answer those patterns gave.
+  const MB = 1_000_000;
+  const conn = { id: 'conn-1', alias: 'dev' } as ConnectionRecord;
+  const dbAdd = { getArtifact: () => null } as unknown as ContrailDb;
+  const storeNone = {
+    readCurrentFile: () => null,
+    listCurrentFiles: () => [],
+  } as unknown as SnapshotStore;
+  /** `unit` repeated to fill `bytes`. */
+  const fill = (unit: string, bytes = MB) => unit.repeat(Math.floor(bytes / unit.length));
+  /** An opener whose value is not followed by its closer: the next "<" opens another element. */
+  const stuck = (tag: string) => `<${tag}>${' '.repeat(200)}x${' '.repeat(200)}<b/>`;
+  const timed = <T>(run: () => T): [T, number] => {
+    const started = performance.now();
+    const answer = run();
+    return [answer, performance.now() - started];
+  };
+  const fast = (what: string, took: number) =>
+    expect(took, `${what}: ${Math.round(took)} ms`).toBeLessThan(1000);
+
+  it('S34 <target>: values not followed by their closer, then the real one', () => {
+    // The second shape packs the openers close together. The old pattern
+    // was fast on it, but a reader that looked for the closer anywhere
+    // after each opener would not be.
+    const shapes: Array<[string, string]> = [
+      ['values not followed by their closer', fill(stuck('target'))],
+      ['openers packed close together', fill('<target>x<b/>')],
+    ];
+    for (const [what, decoys] of shapes) {
+      const meta =
+        '<AiAuthoringBundle xmlns="http://soap.sforce.com/2006/04/metadata">' +
+        '<bundleType>AGENT</bundleType>' +
+        decoys +
+        '<target> Bot.v2 </target></AiAuthoringBundle>';
+      expect(meta.length, what).toBeGreaterThan(MB * 0.95);
+      const files = {
+        'My_Agent.agent': 'system:\n  instructions: |\n    Probe.\n',
+        'My_Agent.bundle-meta.xml': meta,
+      };
+      const bundle = comp(
+        'AiAuthoringBundle',
+        'My_Agent',
+        JSON.stringify({ contrail_bundle: 1, files }),
+      );
+      const [res, took] = timed(() => analyzeChanges(dbAdd, storeNone, conn, [bundle], []));
+      expect(res.changes[0]!.warnings.join(' '), what).toContain(
+        'pins this bundle to runtime version "Bot.v2";',
+      );
+      fast(what, took);
+    }
+  });
+
+  it('S44 <testCase>: openers with no closer after one single-turn and one multi-turn case', () => {
+    const suite =
+      '<AiTestingDefinition xmlns="http://soap.sforce.com/2006/04/metadata">' +
+      '<testCase><number>1</number></testCase>' +
+      '<testCase><conversationHistory><role>user</role></conversationHistory><number>2</number></testCase>' +
+      fill('<testCase>');
+    expect(suite.length).toBeGreaterThan(MB * 0.95);
+    const [res, took] = timed(() =>
+      analyzeChanges(dbAdd, storeNone, conn, [comp('AiTestingDefinition', 'Suite', suite)], []),
+    );
+    expect(res.changes[0]!.warnings.join(' ')).toContain(
+      '1 case(s) carry <conversationHistory> and 1 do not.',
+    );
+    fast('testCase', took);
+  });
+
+  it('S33 credential principals: parameter blocks with no closer, and values not followed by their closer', () => {
+    const shapes: Array<[string, string, string[]]> = [
+      [
+        'parameter blocks with no closer',
+        '<ExternalCredential><externalCredentialParameters><parameterName>Basic</parameterName>' +
+          '<parameterType>NamedPrincipal</parameterType></externalCredentialParameters>' +
+          fill('<externalCredentialParameters>'),
+        ['Cred-Basic'],
+      ],
+      [
+        'values not followed by their closer',
+        '<ExternalCredential><externalCredentialParameters>' +
+          fill(stuck('parameterType'), MB / 2) +
+          fill(stuck('parameterName'), MB / 2) +
+          '<parameterName> Ops </parameterName><parameterType>PerUserPrincipal</parameterType>' +
+          '</externalCredentialParameters></ExternalCredential>',
+        ['Cred-Ops'],
+      ],
+    ];
+    for (const [what, content, principals] of shapes) {
+      expect(content.length, what).toBeGreaterThan(MB * 0.95);
+      const [res, took] = timed(() =>
+        analyzePermissionCoverage([comp('ExternalCredential', 'Cred', content)]),
+      );
+      expect(res.uncovered.map((u) => u.api_name), what).toEqual(principals);
+      fast(what, took);
+    }
+  });
+
+  it('S44 scorer versions: version blocks with no closer after the one kept', () => {
+    const before =
+      '<AiAgentScorerDefinition>' +
+      '<scorerVersion><status>Available</status><versionNumber>1</versionNumber></scorerVersion>' +
+      '<scorerVersion><status>Draft</status><versionNumber>2</versionNumber></scorerVersion>' +
+      '</AiAgentScorerDefinition>';
+    const proposed =
+      '<AiAgentScorerDefinition>' +
+      '<scorerVersion><status>Draft</status><versionNumber>1</versionNumber></scorerVersion>' +
+      fill('<scorerVersion>');
+    expect(proposed.length).toBeGreaterThan(MB * 0.95);
+    const [warnings, took] = timed(() =>
+      changeDependentWarnings({
+        type: 'AiAgentScorerDefinition',
+        api_name: 'Tone_Check',
+        change: 'modify',
+        proposed,
+        before,
+      }),
+    );
+    expect(warnings.join(' ')).toContain('(org-side versions omitted here: 2)');
+    expect(warnings.join(' ')).toContain('(regressed here: 1 (Available → Draft))');
+    fast('scorerVersion', took);
+  });
+
+  it('inline fields: field blocks with no closer after a real one', () => {
+    const object =
+      '<CustomObject xmlns="http://soap.sforce.com/2006/04/metadata">' +
+      '<fields><fullName>F__c</fullName><type>Text</type></fields>' +
+      fill('<fields>');
+    expect(object.length).toBeGreaterThan(MB * 0.95);
+    const [res, took] = timed(() =>
+      analyzePermissionCoverage([comp('CustomObject', 'Obj__c', object)]),
+    );
+    expect(res.uncovered.map((u) => `${u.type}:${u.api_name}`)).toEqual([
+      'CustomObject:Obj__c',
+      'CustomField:Obj__c.F__c',
+    ]);
+    fast('fields', took);
+  });
+
+  it('permission blocks: grant blocks with no closer after the grant that covers', () => {
+    const ps =
+      '<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata">' +
+      '<fieldPermissions><editable>false</editable><field>Obj__c.F__c</field>' +
+      '<readable>true</readable></fieldPermissions>' +
+      fill('<fieldPermissions>') +
+      '</PermissionSet>';
+    expect(ps.length).toBeGreaterThan(MB * 0.95);
+    const field = '<fields><fullName>F__c</fullName><type>Text</type></fields>';
+    const [res, took] = timed(() =>
+      analyzePermissionCoverage([
+        comp('CustomField', 'Obj__c.F__c', field),
+        comp('PermissionSet', 'Ops', ps),
+      ]),
+    );
+    expect(res.uncovered).toEqual([]);
+    fast('fieldPermissions', took);
+  });
+
+  it('tab visibility: values not followed by their closer, then the real one', () => {
+    // Upper-case tags on purpose: the visibility pattern was case-insensitive.
+    // The real Hidden tag is upper-case too, so a reader that ignored case
+    // would miss it and wrongly count the tab as visible.
+    const shapes: Array<[string, string, string[]]> = [
+      ['Hidden', 'VISIBILITY', ['Obj__c']],
+      ['DefaultOn', 'visibility', []],
+    ];
+    for (const [visibility, tag, uncovered] of shapes) {
+      const ps =
+        '<PermissionSet xmlns="http://soap.sforce.com/2006/04/metadata"><tabSettings><tab>Obj__c</tab>' +
+        fill(stuck('VISIBILITY')) +
+        `<${tag}>${visibility}</${tag}></tabSettings></PermissionSet>`;
+      expect(ps.length, visibility).toBeGreaterThan(MB * 0.95);
+      const [res, took] = timed(() =>
+        analyzePermissionCoverage([
+          comp('CustomTab', 'Obj__c', '<CustomTab/>'),
+          comp('PermissionSet', 'Ops', ps),
+        ]),
+      );
+      expect(res.uncovered.map((u) => u.api_name), visibility).toEqual(uncovered);
+      fast(visibility, took);
+    }
+  });
+
+  it('readOldContent: child blocks with no closer after the one asked for', () => {
+    const block = '<fields><fullName>F__c</fullName><type>Text</type></fields>';
+    const file =
+      '<CustomObject xmlns="http://soap.sforce.com/2006/04/metadata">' + block + fill('<fields>');
+    expect(file.length).toBeGreaterThan(MB * 0.95);
+    const store = { readCurrentFile: () => file } as unknown as SnapshotStore;
+    const [old, took] = timed(() =>
+      readOldContent(store, conn, 'CustomField', 'Obj__c.F__c', 'objects/Obj__c.object'),
+    );
+    expect(old).toBe(block);
+    fast('readOldContent', took);
+  });
+
+  it('the readers answer what the patterns they replace did, edge cases included', () => {
+    // The patterns are the reference. These inputs exercise the rules the
+    // readers' comments name: an opener counts only if the next "<" begins
+    // its closer, an empty value is passed over unless emptyOk, a value of
+    // white space alone answers its last character, and only ASCII letters
+    // fold under ignoreCase.
+    const inputs = [
+      '',
+      '<t>x</t>',
+      '<t> x y </t>',
+      '<t></t><t>x</t>',
+      '<t>\t \n</t>',
+      '<t>\t \n</t><t>x</t>',
+      '<t>\u00a0\u2028x\ufeff</t>',
+      '<t>\u200bx\u200b</t>',
+      '<t>x<b/></t><t>y</t>',
+      '<t>x',
+      '<t><t>x</t>',
+      '<T>v</T><t>w</t>',
+      '<t>a</T><T>b</t>',
+      '<tx>a</tx><t>b</t>',
+      '<t>a</t><t>b</t>z<t>c',
+      '<t>ſ</t>',
+    ];
+    for (const s of inputs) {
+      const at = JSON.stringify(s);
+      expect(xmlBlocks(s, 't'), at).toEqual(s.match(/<t>[\s\S]*?<\/t>/g) ?? []);
+      expect(withoutXmlBlocks(s, 't'), at).toBe(s.replace(/<t>[\s\S]*?<\/t>/g, ''));
+      expect(xmlTagValue(s, 't'), at).toBe(s.match(/<t>\s*([^<]+?)\s*<\/t>/)?.[1]);
+      expect(xmlTagValue(s, 't', { emptyOk: true }), at).toBe(
+        s.match(/<t>\s*([^<]*?)\s*<\/t>/)?.[1],
+      );
+      expect(xmlTagValue(s, 't', { ignoreCase: true }), at).toBe(
+        s.match(/<t>\s*([^<]+?)\s*<\/t>/i)?.[1],
+      );
+      expect(xmlTagValue(s, 't', { emptyOk: true, ignoreCase: true }), at).toBe(
+        s.match(/<t>\s*([^<]*?)\s*<\/t>/i)?.[1],
+      );
+    }
+    // The same rules, spelled out.
+    expect(xmlTagValue('<t>\t \n</t>', 't')).toBe('\n');
+    expect(xmlTagValue('<t>\t \n</t>', 't', { emptyOk: true })).toBe('');
+    expect(xmlTagValue('<t></t><t>x</t>', 't')).toBe('x');
+    expect(xmlTagValue('<t></t><t>x</t>', 't', { emptyOk: true })).toBe('');
+    expect(xmlTagValue('<T>v</T>', 't')).toBeUndefined();
+    expect(xmlTagValue('<T>v</T>', 't', { ignoreCase: true })).toBe('v');
+  });
+});
+
+describe('Permission coverage, c: references and child blocks in linear time (slow-path follow-up)', () => {
+  // Each shape is about 1 MB: a large but legitimate package, or markup an
+  // agent could hand validate_deploy. The code these sites used took seconds
+  // on such input (needs × grants, a rescan per opener with no closer, an
+  // index lookup per token), and it runs synchronously, so every tool on the
+  // server waited. Each must answer in well under a second, and with the
+  // answer that code gave.
+  const MB = 1_000_000;
+  const conn = { id: 'conn-1', alias: 'dev' } as ConnectionRecord;
+  const storeNone = {
+    readCurrentFile: () => null,
+    listCurrentFiles: () => [],
+  } as unknown as SnapshotStore;
+  /** `unit` repeated to fill `bytes`. */
+  const fill = (unit: string, bytes = MB) => unit.repeat(Math.floor(bytes / unit.length));
+  const timed = <T>(run: () => T): [T, number] => {
+    const started = performance.now();
+    const answer = run();
+    return [answer, performance.now() - started];
+  };
+  const fast = (what: string, took: number) =>
+    expect(took, `${what}: ${Math.round(took)} ms`).toBeLessThan(1000);
+  const uncoveredNames = (components: ProposedComponent[]) =>
+    analyzePermissionCoverage(components).uncovered.map((u) => `${u.type}:${u.api_name}`);
+
+  it('permission coverage: an 800-field object against a 7,000-grant profile', () => {
+    // An admin profile granting fields on 40 objects, 20 of them on this
+    // object's fields; one more grant spelled in another case inside white
+    // space, one under a capitalised tag, and one switched off.
+    const fields = Array.from(
+      { length: 800 },
+      (_, i) => `<fields><fullName>F${i}__c</fullName><type>Text</type><length>80</length></fields>`,
+    ).join('\n');
+    const grants = [
+      ...Array.from(
+        { length: 7000 },
+        (_, i) =>
+          `<fieldPermissions><editable>true</editable><field>Obj${i % 40}__c.F${i}__c</field>` +
+          '<readable>true</readable></fieldPermissions>',
+      ),
+      '<fieldPermissions><field> obj0__c.f1__c </field><readable>TRUE</readable></fieldPermissions>',
+      '<fieldPermissions><FIELD>Obj0__c.F3__c</FIELD><readable>true</readable></fieldPermissions>',
+      '<fieldPermissions><field>Obj0__c.F7__c</field><readable>false</readable></fieldPermissions>',
+      ...Array.from(
+        { length: 3000 },
+        () => '<userPermissions><enabled>true</enabled><name>ApiEnabled</name></userPermissions>',
+      ),
+    ].join('\n');
+    const components = [
+      comp('CustomObject', 'Obj0__c', `<CustomObject>${fields}</CustomObject>`),
+      comp('Profile', 'Admin', `<Profile>${grants}</Profile>`),
+    ];
+    expect(components[1]!.content.length).toBeGreaterThan(MB);
+    const [uncovered, took] = timed(() => uncoveredNames(components));
+    // 800 fields less 22 granted, plus the object itself.
+    expect(uncovered).toHaveLength(779);
+    expect(uncovered).toContain('CustomObject:Obj0__c');
+    expect(uncovered).toContain('CustomField:Obj0__c.F7__c');
+    for (const granted of ['F0', 'F1', 'F3', 'F40', 'F760']) {
+      expect(uncovered).not.toContain(`CustomField:Obj0__c.${granted}__c`);
+    }
+    fast('800 fields against 7,000 grants', took);
+  });
+
+  it('permission coverage: a grant block packed with name openers that never close', () => {
+    const block =
+      '<fieldPermissions><field>Obj__c.F0__c</field>' +
+      fill('<field>x<b/>') +
+      '<readable>true</readable></fieldPermissions>';
+    const components = [
+      ...Array.from({ length: 2000 }, (_, i) => comp('CustomField', `Obj__c.F${i}__c`, '')),
+      comp('PermissionSet', 'PS', `<PermissionSet>${block}</PermissionSet>`),
+    ];
+    const [uncovered, took] = timed(() => uncoveredNames(components));
+    expect(uncovered).toHaveLength(1999);
+    expect(uncovered).not.toContain('CustomField:Obj__c.F0__c');
+    fast('2,000 needs against a block of about 83,000 openers', took);
+  });
+
+  it('permission coverage: one grant block naming 20,000 fields', () => {
+    // Every need's own pattern, run over the one block from its start,
+    // reached half the block on average: quadratic. A plain API name is
+    // answered by the index alone.
+    const block =
+      '<fieldPermissions>' +
+      Array.from({ length: 20_000 }, (_, i) => `<field>Obj__c.F${i}__c</field>`).join('') +
+      '<readable>true</readable></fieldPermissions>';
+    const fields = Array.from(
+      { length: 20_001 },
+      (_, i) => `<fields><fullName>F${i}__c</fullName></fields>`,
+    ).join('');
+    const components = [
+      comp('CustomObject', 'Obj__c', `<CustomObject>${fields}</CustomObject>`),
+      comp('PermissionSet', 'PS', `<PermissionSet>${block}</PermissionSet>`),
+    ];
+    const [uncovered, took] = timed(() => uncoveredNames(components));
+    expect(uncovered).toEqual(['CustomObject:Obj__c', 'CustomField:Obj__c.F20000__c']);
+    fast('20,000 needs against one block naming them all', took);
+  });
+
+  it('Aura controllers: 49 bundles against a 12,000-grant permission set', () => {
+    // The controller advisory walked every grant block, building a pattern
+    // for each, once per bundle; it now asks the package's grant index. A
+    // package holds at most 50 components, so that cost stayed bounded
+    // (about 0.24 s for this shape, against about 0.04 s now): the time
+    // check cannot tell them apart. What this test pins is the answer.
+    const auraMeta =
+      '<?xml version="1.0" encoding="UTF-8"?>\n' +
+      '<AuraDefinitionBundle xmlns="http://soap.sforce.com/2006/04/metadata">\n' +
+      '    <apiVersion>66.0</apiVersion>\n</AuraDefinitionBundle>\n';
+    const bundles = Array.from({ length: 49 }, (_, i) =>
+      comp(
+        'AuraDefinitionBundle',
+        `pop${i}`,
+        JSON.stringify({
+          contrail_bundle: 1,
+          files: {
+            [`pop${i}.cmp`]: `<aura:component controller="Ctl${i}"/>`,
+            [`pop${i}.cmp-meta.xml`]: auraMeta,
+          },
+        }),
+      ),
+    );
+    // Ctl0 … Ctl24 granted (one of them in another case), the rest not.
+    const grants = Array.from(
+      { length: 12_000 },
+      (_, i) =>
+        `<classAccesses><apexClass>${i === 3 ? 'CTL3' : `Ctl${i < 25 ? i : i + 1000}`}</apexClass>` +
+        '<enabled>true</enabled></classAccesses>',
+    ).join('');
+    expect(grants.length).toBeGreaterThan(MB * 0.95);
+    const dbNone = { getArtifact: () => null, edgesTo: () => [] } as unknown as ContrailDb;
+    const [res, took] = timed(() =>
+      analyzeChanges(
+        dbNone,
+        storeNone,
+        conn,
+        [...bundles, comp('PermissionSet', 'PS', `<PermissionSet>${grants}</PermissionSet>`)],
+        [],
+      ),
+    );
+    const warned = res.changes
+      .filter((c) => c.warnings.some((w) => w.startsWith('server-side controller')))
+      .map((c) => c.api_name);
+    expect(warned).toEqual(Array.from({ length: 24 }, (_, i) => `pop${i + 25}`));
+    fast('49 controllers against 12,000 grants', took);
+  });
+
+  it('permission coverage answers what the per-need pattern did, case folding included', () => {
+    // The pattern every grant was tested with, run here as the reference.
+    const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const reference = (permissionSet: string, name: string) =>
+      xmlBlocks(permissionSet, 'customPermissions').some(
+        (b) =>
+          new RegExp(`<name>\\s*${esc(name)}\\s*</name>`, 'i').test(b) &&
+          /<enabled>\s*true\s*<\/enabled>/i.test(b),
+      );
+    const coveredBy = (granted: string, needed: string) =>
+      analyzePermissionCoverage([
+        comp('CustomPermission', needed, ''),
+        comp(
+          'PermissionSet',
+          'PS',
+          `<customPermissions><enabled>true</enabled><name>${granted}</name></customPermissions>`,
+        ),
+      ]).uncovered.length === 0;
+    // [the name a grant carries, the name the package needs]
+    const pairs: Array<[string, string]> = [
+      ['Perm_A', 'PERM_a'],
+      ['é', 'É'],
+      ['µ', 'μ'],
+      ['ı', 'I'],
+      ['I', 'ı'],
+      ['ſ', 's'],
+      ['\u212a', 'k'],
+      ['ß', 'ẞ'],
+      ['Cred-', 'Cred-\n'],
+      ['Cred-\n\n', 'Cred-\n'],
+      [' \t', '\t'],
+      ['a<b', 'a<b'],
+      ['x y', 'X Y'],
+      ['x  y', 'x y'],
+    ];
+    for (const [granted, needed] of pairs) {
+      const ps = `<customPermissions><enabled>true</enabled><name>${granted}</name></customPermissions>`;
+      expect(coveredBy(granted, needed), JSON.stringify([granted, needed])).toBe(
+        reference(ps, needed),
+      );
+    }
+    // Some of those answers, spelled out: the i flag is not a plain
+    // case-insensitive compare.
+    expect(coveredBy('µ', 'μ')).toBe(true);
+    expect(coveredBy('ı', 'I')).toBe(false);
+    expect(coveredBy('ſ', 's')).toBe(false);
+    expect(coveredBy('\u212a', 'k')).toBe(false);
+    expect(coveredBy('Cred-', 'Cred-\n')).toBe(false);
+    expect(coveredBy('Cred-\n\n', 'Cred-\n')).toBe(true);
+    expect(coveredBy('a<b', 'a<b')).toBe(true);
+  });
+
+  it('c: references: 1 MB of names missing from the index, of one name it holds, and of its spellings', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'contrail-crefs-'));
+    const db = new ContrailDb(join(dir, 'test.db'));
+    try {
+      db.replaceArtifactsForTypes(
+        conn.id,
+        ['LightningComponentBundle'],
+        ['navCard', 'navigationCardPanel'].map((apiName) => ({
+          connectionId: conn.id,
+          type: 'LightningComponentBundle',
+          apiName,
+          filePath: `lwc/${apiName}/${apiName}.js`,
+          contentHash: 'h',
+          lastModifiedDate: null,
+          lastModifiedBy: null,
+          retrievedAt: '2026-11-21T00:00:00.000Z',
+          content: '',
+        })),
+      );
+      // A real index, so each lookup costs what it costs in a validate.
+      let lookups = 0;
+      const counted = {
+        getArtifact: (connectionId: string, type: string, apiName: string) => {
+          lookups += 1;
+          return db.getArtifact(connectionId, type, apiName);
+        },
+      } as unknown as ContrailDb;
+      const page = (body: string) => comp('FlexiPage', 'Home', `<FlexiPage>${body}</FlexiPage>`);
+
+      const distinct = Array.from({ length: 95_000 }, (_, i) => `c:Cmp${i}`).join(' ');
+      expect(distinct.length).toBeGreaterThan(MB);
+      const [missing, t1] = timed(() =>
+        analyzeChanges(counted, storeNone, conn, [page(distinct)], []),
+      );
+      expect(missing.changes[0]!.warnings.join(' ')).toContain(
+        'references Cmp0, Cmp1, Cmp2, Cmp3, Cmp4 (c: namespace)',
+      );
+      expect(lookups).toBeLessThan(20);
+      fast('95,000 distinct names missing from the index', t1);
+
+      lookups = 0;
+      const [held, t2] = timed(() =>
+        analyzeChanges(counted, storeNone, conn, [page(fill('c:navCard '))], []),
+      );
+      expect(held.changes[0]!.warnings.join(' ')).not.toContain('(c: namespace)');
+      expect(lookups).toBeLessThan(20);
+      fast('100,000 references to one name the index holds', t2);
+
+      // 45,000 different spellings of one name the index holds: its lookup
+      // ignores case, so they share one answer.
+      const base = 'navigationCardPanel';
+      const spellings = Array.from({ length: 45_000 }, (_, i) =>
+        [...base].map((ch, j) => ((i >> j) & 1 ? ch.toUpperCase() : ch.toLowerCase())).join(''),
+      );
+      expect(new Set(spellings).size).toBe(45_000);
+      lookups = 0;
+      const [spelled, t3] = timed(() =>
+        analyzeChanges(
+          counted,
+          storeNone,
+          conn,
+          [page(spellings.map((s) => `c:${s}`).join(' '))],
+          [],
+        ),
+      );
+      expect(spelled.changes[0]!.warnings.join(' ')).not.toContain('(c: namespace)');
+      expect(lookups).toBeLessThan(20);
+      fast('45,000 spellings of one name the index holds', t3);
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('child blocks: openers packed close together with no closer after a real block', () => {
+    const real = '<fields><fullName>Real__c</fullName></fields>';
+    const xml = real + fill('<fields>');
+    const [blocks, t1] = timed(() => extractChildBlocks(xml, 'fields'));
+    expect(blocks).toEqual([real]);
+    fast('extractChildBlocks', t1);
+    const [found, t2] = timed(() => findChildBlock(xml, 'fields', 'real__c'));
+    expect(found).toBe(real);
+    fast('findChildBlock', t2);
+    const [names, t3] = timed(() => childBlockNames(xml, 'fields'));
+    expect([...names]).toEqual(['real__c']);
+    fast('childBlockNames', t3);
+  });
+
+  it('the new readers answer what the patterns they replace did, edge cases included', () => {
+    const inputs = [
+      '',
+      '<t>',
+      '<t>a</t>',
+      '<t>a</t><t>b</t>',
+      '<t><t>a</t>',
+      '<t>a<b/></t><t>c</t>',
+      '<T>v</T><t>w</t>',
+      '<t>a</T><T>b</t>',
+      '<tx>a</tx><t>b</t>',
+      '<t> </t>',
+      '<t></t>',
+      '<t>a</t>z<t>c',
+      '</t><t>x</t>',
+      '<t>ſ</t><T>K</T>',
+    ];
+    for (const s of inputs) {
+      const at = JSON.stringify(s);
+      expect(xmlBlockText(s, 't'), at).toBe(s.match(/<t>([\s\S]*?)<\/t>/)?.[1]);
+      expect(xmlTagTexts(s, 't'), at).toEqual([...s.matchAll(/<t>([^<]*)<\/t>/g)].map((m) => m[1]));
+      expect(xmlTagTexts(s, 't', { ignoreCase: true }), at).toEqual(
+        [...s.matchAll(/<t>([^<]*)<\/t>/gi)].map((m) => m[1]),
+      );
+      expect(extractChildBlocks(s, 't'), at).toEqual(s.match(/<t>[\s\S]*?<\/t>/g) ?? []);
+    }
+    // childBlockNames answers findChildBlock's question, for every name.
+    const doc =
+      '<f><fullName>A</fullName></f><f><fullName> b </fullName></f>' +
+      '<f><fullName></fullName><fullName>C</fullName></f><f><label>x</label></f>' +
+      '<f><fullName>   </fullName></f><f><fullName>D</fullName>';
+    const names = childBlockNames(doc, 'f');
+    for (const q of ['a', 'A', 'b', ' b ', 'c', 'C', 'x', '', ' ', 'd']) {
+      expect(names.has(q.toLowerCase()), JSON.stringify(q)).toBe(
+        findChildBlock(doc, 'f', q) !== null,
+      );
     }
   });
 });

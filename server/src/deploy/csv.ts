@@ -34,8 +34,14 @@ export function scanCsv(bytes: Buffer, delimiter: ',' | '\t' = ','): CsvScan {
   if (text.trim().length === 0) throw new ContrailError('the CSV file is empty', 'bad_csv');
 
   const warnings: string[] = [];
+  // A Set beside the list: the stray-quote warning names its line, so a file
+  // with a stray quote in every row adds a new message per row, and a scan of
+  // the list for each one was quadratic.
+  const warned = new Set<string>();
   const warnOnce = (msg: string): void => {
-    if (!warnings.includes(msg)) warnings.push(msg);
+    if (warned.has(msg)) return;
+    warned.add(msg);
+    warnings.push(msg);
   };
 
   let headers: string[] | null = null;
@@ -53,6 +59,17 @@ export function scanCsv(bytes: Buffer, delimiter: ',' | '\t' = ','): CsvScan {
   let recordStartLine = 1;
   let line = 1;
   const headerFields: string[] = [];
+  // Header field text is copied from `text` in slices: from `segment` up to
+  // each character a field drops (its opening and closing quote, the second
+  // quote of a "" pair) and up to the field's end. Appending it a character
+  // at a time kept a string piece per character: gigabytes for a 100 MB
+  // header that never ends.
+  let segment = 0;
+  const take = (end: number, next: number): void => {
+    if (headers !== null) return;
+    field += text.slice(segment, end);
+    segment = next;
+  };
 
   const finishHeader = (): void => {
     headerFields.push(field);
@@ -65,8 +82,18 @@ export function scanCsv(bytes: Buffer, delimiter: ',' | '\t' = ','): CsvScan {
         'bad_csv',
       );
     }
-    const lower = headers.map((h) => h.toLowerCase());
-    const dupe = lower.find((h, i) => lower.indexOf(h) !== i);
+    // The first name already seen earlier in the header, found in one walk:
+    // a header can carry many thousands of columns.
+    const seen = new Set<string>();
+    let dupe: string | undefined;
+    for (const h of headers) {
+      const lower = h.toLowerCase();
+      if (seen.has(lower)) {
+        dupe = lower;
+        break;
+      }
+      seen.add(lower);
+    }
     if (dupe !== undefined) {
       throw new ContrailError(`duplicate column name in the header: ${dupe}`, 'bad_csv');
     }
@@ -131,14 +158,15 @@ export function scanCsv(bytes: Buffer, delimiter: ',' | '\t' = ','): CsvScan {
     if (inQuotes) {
       if (ch === '"') {
         if (text[i + 1] === '"') {
-          if (headers === null) field += '"';
+          // "" is one quote: keep this one, drop the next.
+          take(i + 1, i + 2);
           i += 1;
         } else {
+          take(i, i + 1);
           inQuotes = false;
         }
-      } else {
-        if (ch === '\n') line += 1;
-        if (headers === null) field += ch;
+      } else if (ch === '\n') {
+        line += 1;
       }
       continue;
     }
@@ -146,6 +174,7 @@ export function scanCsv(bytes: Buffer, delimiter: ',' | '\t' = ','): CsvScan {
       if (!fieldHasContent) {
         // Opening quote at field start (RFC 4180). A quoted field — even an
         // empty "" — makes both the field and the record real.
+        take(i, i + 1);
         inQuotes = true;
         fieldHasContent = true;
         recordHasContent = true;
@@ -153,12 +182,12 @@ export function scanCsv(bytes: Buffer, delimiter: ',' | '\t' = ','): CsvScan {
         // A quote mid-field, or text after a closing quote — invalid RFC 4180
         // but seen in hand-edited files. Passed through as data, flagged once.
         warnOnce(`stray double-quote inside a field (first at line ${line}) — check the file's quoting`);
-        if (headers === null) field += '"';
       }
       continue;
     }
     if (ch === delimiter) {
       if (headers === null) {
+        take(i, i + 1);
         headerFields.push(field);
         field = '';
       }
@@ -176,6 +205,7 @@ export function scanCsv(bytes: Buffer, delimiter: ',' | '\t' = ','): CsvScan {
       }
       noteLineEnding('CRLF');
       line += 1;
+      take(i, i + 2);
       endRecord(i + 2 >= text.length);
       i += 1;
       continue;
@@ -183,10 +213,10 @@ export function scanCsv(bytes: Buffer, delimiter: ',' | '\t' = ','): CsvScan {
     if (ch === '\n') {
       noteLineEnding('LF');
       line += 1;
+      take(i, i + 1);
       endRecord(i + 1 >= text.length);
       continue;
     }
-    if (headers === null) field += ch;
     fieldHasContent = true;
     recordHasContent = true;
   }
@@ -198,7 +228,10 @@ export function scanCsv(bytes: Buffer, delimiter: ',' | '\t' = ','): CsvScan {
     );
   }
   // Final record when the file has no trailing newline.
-  if (recordHasContent || fieldsInRecord > 1) endRecord(false);
+  if (recordHasContent || fieldsInRecord > 1) {
+    take(text.length, text.length);
+    endRecord(false);
+  }
 
   if (headers === null) throw new ContrailError('the CSV file has no header row', 'bad_csv');
   if (rowCount === 0) {

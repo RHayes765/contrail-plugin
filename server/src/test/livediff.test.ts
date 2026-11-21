@@ -1935,3 +1935,341 @@ describe('S46 D3: permission_warning says what the live check knows', () => {
     expect(fresh.permission_warning).not.toContain('already in the org');
   });
 });
+
+describe('S47: the Omnistudio Metadata setting at validate', () => {
+  const MAPPER_XML =
+    `<?xml version="1.0" encoding="UTF-8"?>\n<OmniDataTransform ${MD}>\n` +
+    '    <active>true</active>\n    <name>AccountSummaryExtract</name>\n' +
+    '    <type>Extract</type>\n    <uniqueName>AccountSummaryExtract_1</uniqueName>\n' +
+    '</OmniDataTransform>\n';
+  const mapper = () => ({
+    type: 'OmniDataTransform',
+    api_name: 'AccountSummaryExtract_1',
+    content: MAPPER_XML,
+  });
+  const OFF_PREFIX =
+    'OMNISTUDIO METADATA IS OFF in "live-org" — Salesforce Help says the Metadata API ' +
+    "can't deploy Omnistudio components until an admin turns on Omnistudio Metadata";
+  /**
+   * 'fault' = the settings retrieve itself faults; 'never' = it never
+   * finishes; 'slow' = it answers (off) only on its third poll.
+   */
+  let setting: 'on' | 'off' | 'fault' | 'never' | 'slow';
+  /** The checkOnly deploy finishes as failed, with one component failure. */
+  let failValidation: boolean;
+  /** The checkOnly deploy THROWS (HTTP 500) once the settings retrieve has polled twice. */
+  let throwValidation: boolean;
+  const settingsBodies = () => soapBodies.filter((b) => b.includes('<met:name>Settings</met:name>'));
+  const settingsPolls = () =>
+    soapBodies.filter((b) => b.includes('<met:asyncProcessId>09S-omni</met:asyncProcessId>')).length;
+  const omniLines = () => topWarnings().filter((w) => /omnistudio metadata/i.test(w));
+  const failureOf = (result: Awaited<ReturnType<Client['callTool']>>) => {
+    const text = textOf(result);
+    return JSON.parse(text.slice(text.indexOf('{'))) as Record<string, any>;
+  };
+
+  // The shared stub answers everything except the Settings retrieve, its
+  // status, (when failValidation) the deploy's status and (when
+  // throwValidation) the deploy itself.
+  beforeEach(() => {
+    setting = 'off';
+    failValidation = false;
+    throwValidation = false;
+    const shared = globalThis.fetch;
+    vi.stubGlobal('fetch', async (input: string | URL, init?: RequestInit) => {
+      const body = String(init?.body ?? '');
+      if (!String(input).includes('/services/Soap/m/')) return shared(input, init);
+      if (body.includes('<met:retrieve>') && body.includes('<met:name>Settings</met:name>')) {
+        soapBodies.push(body);
+        if (setting === 'fault') return fault('UNKNOWN_EXCEPTION', 'settings retrieve blew up');
+        return new Response(
+          soapEnvelope(
+            `<retrieveResponse ${MD}><result><id>09S-omni</id><done>false</done><state>Queued</state></result></retrieveResponse>`,
+          ),
+        );
+      }
+      if (body.includes('<met:asyncProcessId>09S-omni</met:asyncProcessId>')) {
+        soapBodies.push(body);
+        if (setting === 'never' || (setting === 'slow' && settingsPolls() < 3)) {
+          return new Response(
+            soapEnvelope(
+              `<checkRetrieveStatusResponse ${MD}><result><done>false</done><id>09S-omni</id>` +
+                `<status>InProgress</status><success>false</success></result></checkRetrieveStatusResponse>`,
+            ),
+          );
+        }
+        const settingsXml =
+          `<?xml version="1.0" encoding="UTF-8"?>\n<OmniStudioSettings ${MD}>\n` +
+          `    <enableOmniStudioMetadata>${setting === 'on'}</enableOmniStudioMetadata>\n` +
+          '</OmniStudioSettings>\n';
+        const zip = zipSync({
+          'unpackaged/package.xml': strToU8('<Package/>'),
+          'unpackaged/settings/OmniStudio.settings': strToU8(settingsXml),
+        });
+        return new Response(
+          soapEnvelope(
+            `<checkRetrieveStatusResponse ${MD}><result><done>true</done><id>09S-omni</id>` +
+              `<status>Succeeded</status><success>true</success>` +
+              `<zipFile>${Buffer.from(zip).toString('base64')}</zipFile></result></checkRetrieveStatusResponse>`,
+          ),
+        );
+      }
+      if (throwValidation && body.includes('<met:deploy>')) {
+        soapBodies.push(body);
+        // The checkOnly deploy fails only once the settings retrieve has
+        // polled twice — proving the two run CONCURRENTLY.
+        const deadline = Date.now() + 2000;
+        while (settingsPolls() < 2 && Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 5));
+        }
+        return new Response('deploy service down', { status: 500 });
+      }
+      if (failValidation && body.includes('<met:checkDeployStatus>')) {
+        soapBodies.push(body);
+        return new Response(
+          soapEnvelope(
+            `<checkDeployStatusResponse ${MD}><result>
+               <done>true</done><status>Failed</status>
+               <success>false</success><checkOnly>true</checkOnly>
+               <numberComponentsTotal>1</numberComponentsTotal>
+               <numberComponentsDeployed>0</numberComponentsDeployed>
+               <numberComponentErrors>1</numberComponentErrors>
+               <numberTestsTotal>0</numberTestsTotal>
+               <numberTestsCompleted>0</numberTestsCompleted>
+               <numberTestErrors>0</numberTestErrors>
+               <details><componentFailures><componentType>OmniDataTransform</componentType>
+                 <fullName>AccountSummaryExtract_1</fullName><problemType>Error</problemType>
+                 <problem>stub refusal</problem></componentFailures></details>
+             </result></checkDeployStatusResponse>`,
+          ),
+        );
+      }
+      return shared(input, init);
+    });
+  });
+
+  it('OFF: one Settings:OmniStudio retrieve with the validation; the page leads with the warning, and the summary and the stored record carry the state', async () => {
+    const result = await validate({ components: [mapper()] });
+    const parsed = jsonOf(result) as ReturnType<typeof jsonOf> & Record<string, unknown>;
+    expect(parsed.omnistudio_metadata).toEqual({ state: 'off' });
+
+    const retrieves = settingsBodies().filter((b) => b.includes('<met:retrieve>'));
+    expect(retrieves).toHaveLength(1);
+    expect(retrieves[0]).toContain(
+      '<met:types><met:members>OmniStudio</met:members><met:name>Settings</met:name></met:types>',
+    );
+    const polls = soapBodies.filter((b) => b.includes('<met:asyncProcessId>09S-omni<'));
+    expect(polls.length).toBeGreaterThan(0);
+    expect(polls.every((b) => b.includes('<met:includeZip>true</met:includeZip>'))).toBe(true);
+
+    // The page's (and the phone's) first top line.
+    const top = topWarnings()[0]!;
+    expect(top.startsWith(OFF_PREFIX)).toBe(true);
+    expect(top).toContain("(Setup → Omnistudio Settings; it can't be turned off again)");
+    expect(top.endsWith('so ADD / NOT IN TARGET below does not prove none exists.')).toBe(true);
+    expect(omniLines()).toHaveLength(1);
+    expect(presentedPages[0]!).toContain('OMNISTUDIO METADATA IS OFF in');
+    // The dry-run note is for a PASSED dry run only — never a real validation.
+    expect('omnistudio_note' in parsed).toBe(false);
+
+    const code = codeFromPage(presentedPages[0]!);
+    const request = db.findRequestByCode(connId, 'deploy', code)!;
+    expect(JSON.parse(request.summaryJson).omnistudio_metadata).toEqual({ state: 'off' });
+  });
+
+  it('OFF leads the page-top lines when others ride with it: before the permission warning', async () => {
+    // An Apex class no permission set in the package grants puts a second
+    // page-top line beside the OFF line, so the order is really pinned.
+    const parsed = jsonOf(await validate({ components: [mapper(), foo()] }));
+    expect(parsed.permission_warning).toBeTruthy();
+    const top = topWarnings();
+    expect(top.length).toBeGreaterThan(1);
+    expect(top[0]!.startsWith(OFF_PREFIX)).toBe(true);
+    expect(top.indexOf(parsed.permission_warning!)).toBeGreaterThan(0);
+    expect(omniLines()).toHaveLength(1);
+  });
+
+  it('OFF on a FAILED validation: the note carries the warning, the failure carries the state, no page', async () => {
+    failValidation = true;
+    const failure = failureOf(await validate({ components: [mapper()] }));
+    expect(failure.component_failures[0].problem).toBe('stub refusal');
+    expect(failure.omnistudio_metadata).toEqual({ state: 'off' });
+    expect(failure.note).toMatch(/^Validation failed — no confirmation code was issued\./);
+    expect(failure.note).toContain(OFF_PREFIX);
+    expect(failure.note.endsWith('records are invisible to Contrail.')).toBe(true);
+    // The note carries it; the dry-run field never rides a failure.
+    expect('omnistudio_note' in failure).toBe(false);
+    expect(presentedPages).toHaveLength(0);
+
+    // A failed DRY run reads it too.
+    soapBodies = [];
+    const dry = failureOf(await validate({ components: [mapper()], dry_run: true }));
+    expect(dry.omnistudio_metadata).toEqual({ state: 'off' });
+    expect(dry.note).toMatch(/^Dry run: validation FAILED\./);
+    expect(dry.note).toContain(OFF_PREFIX);
+    expect('omnistudio_note' in dry).toBe(false);
+    expect(settingsBodies().filter((b) => b.includes('<met:retrieve>'))).toHaveLength(1);
+  });
+
+  it('ON: the summary says so and nothing is added — on a real validation and on a dry run', async () => {
+    setting = 'on';
+    const parsed = jsonOf(await validate({ components: [mapper()] })) as Record<string, unknown>;
+    expect(parsed.omnistudio_metadata).toEqual({ state: 'on' });
+    expect(omniLines()).toEqual([]);
+
+    soapBodies = [];
+    const dry = jsonOf(await validate({ components: [mapper()], dry_run: true })) as Record<
+      string,
+      unknown
+    >;
+    expect(dry.request_id).toBeNull();
+    expect(dry.omnistudio_metadata).toEqual({ state: 'on' });
+    expect('omnistudio_note' in dry).toBe(false);
+    expect(settingsBodies().filter((b) => b.includes('<met:retrieve>'))).toHaveLength(1);
+  });
+
+  it('OFF on a PASSED dry run: the result explains the state — there is no page and no failure note', async () => {
+    const result = await validate({ components: [mapper()], dry_run: true });
+    const dry = jsonOf(result) as ReturnType<typeof jsonOf> & Record<string, unknown>;
+    expect(dry.request_id).toBeNull();
+    expect(dry.changes[0]!.change).toBe('add');
+    expect(dry.omnistudio_metadata).toEqual({ state: 'off' });
+    const note = String(dry.omnistudio_note);
+    expect(note.startsWith(OFF_PREFIX)).toBe(true);
+    expect(note).toContain("(Setup → Omnistudio Settings; it can't be turned off again)");
+    const tail = 'invisible to Contrail, so a change of "add" here does not prove none exists.';
+    expect(note.endsWith(tail)).toBe(true);
+    expect(presentedPages).toHaveLength(0);
+  });
+
+  it('unreadable: a neutral note naming the reason leads the page, rides a passed dry run and a failed validation — never a refusal', async () => {
+    setting = 'fault';
+    const NEUTRAL =
+      /^Omnistudio Metadata setting not read in "live-org" \(the settings retrieve failed: .*settings retrieve blew up.*\)\. Per Salesforce Help, the Metadata API deploys Omnistudio components only where that setting is on\./;
+    const IF_OFF =
+      ' If it is off, Data Mappers that exist there as records are invisible to Contrail, so ';
+    // An Apex class no permission set in the package grants puts a second
+    // page-top line beside the neutral one, so its place is really pinned.
+    const parsed = jsonOf(await validate({ components: [mapper(), foo()] })) as Record<
+      string,
+      any
+    >;
+    expect(parsed.request_id).toBeTruthy();
+    expect(parsed.omnistudio_metadata.state).toBe('unknown');
+    expect(parsed.omnistudio_metadata.reason).toContain('settings retrieve blew up');
+    expect(parsed.permission_warning).toBeTruthy();
+    expect(omniLines()).toHaveLength(1);
+    const [line] = omniLines();
+    expect(line).toMatch(NEUTRAL);
+    expect(
+      line!.endsWith(`.${IF_OFF}ADD / NOT IN TARGET below does not prove none exists.`),
+    ).toBe(true);
+    const top = topWarnings();
+    expect(top[0]).toBe(line);
+    expect(top.indexOf(parsed.permission_warning)).toBeGreaterThan(0);
+    expect(top.some((w) => w.startsWith('OMNISTUDIO METADATA IS OFF'))).toBe(false);
+    expect('omnistudio_note' in parsed).toBe(false);
+
+    // A passed dry run carries the same neutral note, with its own tail.
+    const dry = jsonOf(await validate({ components: [mapper()], dry_run: true })) as Record<
+      string,
+      any
+    >;
+    expect(dry.omnistudio_metadata.state).toBe('unknown');
+    expect(dry.omnistudio_note).toMatch(NEUTRAL);
+    expect(
+      dry.omnistudio_note.endsWith(`.${IF_OFF}a change of "add" here does not prove none exists.`),
+    ).toBe(true);
+
+    // A FAILED validation's note carries it too — no rows, so no caveat.
+    failValidation = true;
+    const failure = failureOf(await validate({ components: [mapper()] }));
+    expect(failure.component_failures[0].problem).toBe('stub refusal');
+    expect(failure.omnistudio_metadata.state).toBe('unknown');
+    expect(failure.note).toMatch(/^Validation failed — no confirmation code was issued\./);
+    expect(failure.note).toContain(
+      'Omnistudio Metadata setting not read in "live-org" (the settings retrieve failed:',
+    );
+    expect(
+      failure.note.endsWith('deploys Omnistudio components only where that setting is on.'),
+    ).toBe(true);
+    expect('omnistudio_note' in failure).toBe(false);
+    expect(presentedPages).toHaveLength(1);
+  });
+
+  it('a validation that THROWS stops the settings read: no Settings poll after the rejection', async () => {
+    setting = 'never';
+    throwValidation = true;
+    for (const dryRun of [false, true]) {
+      soapBodies = [];
+      const result = await validate({ components: [mapper()], dry_run: dryRun });
+      expect(result.isError).toBe(true);
+      // The deploy's own error — the settings read never rejects.
+      expect(textOf(result)).toContain('Metadata API HTTP 500');
+      const atRejection = settingsPolls();
+      // The read was polling while the checkOnly deploy was in flight.
+      expect(atRejection).toBeGreaterThanOrEqual(2);
+      await new Promise((r) => setTimeout(r, 120));
+      expect(settingsPolls()).toBe(atRejection);
+    }
+    expect(presentedPages).toHaveLength(0);
+  });
+
+  it('a settings read still polling when the checkOnly deploy finishes is waited for — never cut off as cancelled', async () => {
+    // The deploy's one status check answers done at once; the setting
+    // answers only on its third poll. Stopping the read with the
+    // validation's controller would turn OFF into unknown ("cancelled").
+    setting = 'slow';
+    for (const dryRun of [false, true]) {
+      soapBodies = [];
+      const parsed = jsonOf(await validate({ components: [mapper()], dry_run: dryRun })) as Record<
+        string,
+        unknown
+      >;
+      const at = (marker: string) => soapBodies.flatMap((b, i) => (b.includes(marker) ? [i] : []));
+      const deployChecks = at('<met:checkDeployStatus>');
+      const polls = at('<met:asyncProcessId>09S-omni</met:asyncProcessId>');
+      expect(deployChecks).toHaveLength(1);
+      expect(polls).toHaveLength(3);
+      // The validation was over before the setting answered.
+      expect(deployChecks[0]!).toBeLessThan(polls[2]!);
+      expect(parsed.omnistudio_metadata).toEqual({ state: 'off' });
+      if (dryRun) {
+        expect(String(parsed.omnistudio_note).startsWith(OFF_PREFIX)).toBe(true);
+      } else {
+        expect(topWarnings()[0]!.startsWith(OFF_PREFIX)).toBe(true);
+      }
+    }
+  });
+
+  it('a Data Mapper DELETION reads the setting too', async () => {
+    const parsed = jsonOf(
+      await validate({
+        destructive: [{ type: 'OmniDataTransform', api_name: 'AccountSummaryExtract_1' }],
+      }),
+    ) as Record<string, unknown>;
+    expect(parsed.omnistudio_metadata).toEqual({ state: 'off' });
+    expect(topWarnings()[0]!.startsWith(OFF_PREFIX)).toBe(true);
+  });
+
+  it('a package without OmniDataTransform makes NO settings retrieve and carries no omnistudio_metadata', async () => {
+    const parsed = jsonOf(await validate({ components: [foo()] })) as Record<string, unknown>;
+    expect(parsed.request_id).toBeTruthy();
+    expect('omnistudio_metadata' in parsed).toBe(false);
+    expect(omniLines()).toEqual([]);
+    const dry = jsonOf(await validate({ components: [foo()], dry_run: true })) as Record<
+      string,
+      unknown
+    >;
+    expect('omnistudio_metadata' in dry).toBe(false);
+    expect('omnistudio_note' in dry).toBe(false);
+
+    failValidation = true;
+    const failure = failureOf(await validate({ components: [foo()] }));
+    expect('omnistudio_metadata' in failure).toBe(false);
+    expect(failure.note).not.toMatch(/omnistudio/i);
+
+    expect(settingsBodies()).toEqual([]);
+    expect(soapBodies.some((b) => b.includes('OmniStudio'))).toBe(false);
+  });
+});

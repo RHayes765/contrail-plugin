@@ -100,3 +100,83 @@ describe('what it refuses', () => {
     bad('Id\rx1\r', /bare CR/);
   });
 });
+
+describe('wide headers in linear time (slow-path follow-up)', () => {
+  // bulk_load_propose scans the file before any approval, and a header can
+  // carry many thousands of columns. The duplicate-name check compared each
+  // column with every one before it: 140,000 columns took 15 s, with every
+  // tool on the server waiting. It must answer in well under a second and
+  // name the same column.
+  const cols = Array.from({ length: 140_000 }, (_, i) => `c${i}`);
+  const scanTimed = (text: string): [() => unknown, number] => {
+    const started = performance.now();
+    let outcome: () => unknown;
+    try {
+      const scan = scanCsv(buf(text));
+      outcome = () => scan;
+    } catch (err) {
+      outcome = () => {
+        throw err;
+      };
+    }
+    return [outcome, performance.now() - started];
+  };
+
+  it('140,000 distinct columns, then the same header with the first repeated at the end', () => {
+    const row = cols.map(() => '').join(',');
+    const [distinct, t1] = scanTimed(`${cols.join(',')}\n${row}\n`);
+    expect((distinct() as { headers: string[] }).headers).toHaveLength(140_000);
+    expect(t1, `distinct: ${Math.round(t1)} ms`).toBeLessThan(1000);
+
+    const [repeated, t2] = scanTimed(`${[...cols, 'C0'].join(',')}\n${row},\n`);
+    expect(repeated).toThrow(/duplicate column name in the header: c0$/);
+    expect(t2, `repeated: ${Math.round(t2)} ms`).toBeLessThan(1000);
+  });
+
+  it('names the first column whose name came earlier, case aside', () => {
+    expect(() => scanCsv(buf('A,b,B,a\nw,x,y,z\n'))).toThrow(
+      /duplicate column name in the header: b$/,
+    );
+  });
+
+  it('a stray quote in each of 100,000 rows', () => {
+    // An inch mark in every row. The warning names its line, so each row
+    // adds a message, and checking the list for each one was quadratic: over
+    // two minutes for these 1.1 MB.
+    const [scan, took] = scanTimed(`Name,Size\n${'Widget,12"\n'.repeat(100_000)}`);
+    const { rowCount, warnings } = scan() as { rowCount: number; warnings: string[] };
+    expect(rowCount).toBe(100_000);
+    expect(warnings).toHaveLength(100_000);
+    expect(warnings[0]).toBe(
+      "stray double-quote inside a field (first at line 2) — check the file's quoting",
+    );
+    expect(took, `${Math.round(took)} ms`).toBeLessThan(1000);
+  });
+
+  it('one 20,000,000-character header field', () => {
+    // Built a character at a time, this header held a string piece per
+    // character: about 1.8 s and 680 MB of heap, and gigabytes at the
+    // 100 MB file cap. The heap check only catches that if no collection
+    // runs in between, so the time is the main guard.
+    const heapBefore = process.memoryUsage().heapUsed;
+    const [scan, took] = scanTimed(`${'h'.repeat(20_000_000)}\nv\n`);
+    const grew = process.memoryUsage().heapUsed - heapBefore;
+    const { headers } = scan() as { headers: string[] };
+    expect(headers).toHaveLength(1);
+    expect(headers[0]).toHaveLength(20_000_000);
+    expect(took, `${Math.round(took)} ms`).toBeLessThan(1000);
+    expect(grew, `${Math.round(grew / 1e6)} MB`).toBeLessThan(300_000_000);
+  });
+
+  it('header fields keep their quoting rules, read in slices', () => {
+    // Opening and closing quotes dropped, "" read as one quote, a stray
+    // quote and text after a closing quote kept, a delimiter or line end
+    // inside quotes kept as data.
+    const scan = scanCsv(
+      buf('"a""b",c"d,"e,f"g,"h\r\ni",j\r\n1,2,3,4,5\r\n'),
+    );
+    expect(scan.headers).toEqual(['a"b', 'c"d', 'e,fg', 'h\r\ni', 'j']);
+    expect(scan.lineEnding).toBe('CRLF');
+    expect(scanCsv(buf('x,"y"\n1,2')).headers).toEqual(['x', 'y']);
+  });
+});

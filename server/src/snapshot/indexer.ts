@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { FileProperties } from '../salesforce/metadataSoap.js';
 import { log } from '../core/log.js';
+import { xmlBlocks } from '../salesforce/xml.js';
 
 /**
  * Turns an extracted snapshot tree into the normalized artifact index.
@@ -79,6 +80,11 @@ const SIMPLE_DIR_TYPES: Array<{ dir: string; ext: string; type: string }> = [
   { dir: 'permissionsetgroups', ext: '.permissionsetgroup', type: 'PermissionSetGroup' },
   { dir: 'mutingpermissionsets', ext: '.mutingpermissionset', type: 'MutingPermissionSet' },
   { dir: 'quickActions', ext: '.quickAction', type: 'QuickAction' },
+  // S47: Omnistudio Data Mappers — a flat single-file type (describeMetadata
+  // v68, 2026-11-20: suffix rpt, no metaFile); the generic -meta.xml skip is
+  // correct. fileBaseName strips only the final extension, so a versioned
+  // fullName (Name_1) survives intact.
+  { dir: 'omniDataTransforms', ext: '.rpt', type: 'OmniDataTransform' },
 ];
 
 /**
@@ -293,12 +299,12 @@ export function indexSnapshotFiles(
 
 /**
  * Extract raw child XML blocks (e.g. every <fields>…</fields>) from a
- * container document. Regex over the raw text on purpose: it preserves the
- * exact source fragment for display and hashing.
+ * container document. A text scan on purpose: it preserves the exact source
+ * fragment for display and hashing. The blocks the lazy pattern
+ * `/<tag>[\s\S]*?<\/tag>/g` returns, read in one walk (salesforce/xml.ts).
  */
 export function extractChildBlocks(xml: string, tag: string): string[] {
-  const re = new RegExp(`<${tag}>[\\s\\S]*?</${tag}>`, 'g');
-  return xml.match(re) ?? [];
+  return xmlBlocks(xml, tag);
 }
 
 /** Find one child block by its <fullName> (used for retrieve_metadata fragments). */
@@ -307,6 +313,20 @@ export function findChildBlock(xml: string, tag: string, fullName: string): stri
     if (blockFullName(block)?.toLowerCase() === fullName.toLowerCase()) return block;
   }
   return null;
+}
+
+/**
+ * The <fullName>s of a document's child blocks, lower-cased, for many lookups
+ * against one document: `names.has(fullName.toLowerCase())` answers what
+ * `findChildBlock(xml, tag, fullName) !== null` does, without a walk per name.
+ */
+export function childBlockNames(xml: string, tag: string): Set<string> {
+  const names = new Set<string>();
+  for (const block of extractChildBlocks(xml, tag)) {
+    const name = blockFullName(block);
+    if (name !== null) names.add(name.toLowerCase());
+  }
+  return names;
 }
 
 function blockFullName(block: string): string | null {

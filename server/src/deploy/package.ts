@@ -1,5 +1,11 @@
 import { strToU8, zipSync } from 'fflate';
-import { escapeXml } from '../salesforce/xml.js';
+import {
+  escapeXml,
+  withoutXmlBlocks,
+  xmlBlocks,
+  xmlTagTexts,
+  xmlTagValue,
+} from '../salesforce/xml.js';
 import { ContrailError } from '../core/errors.js';
 import type { ContrailDb } from '../core/db.js';
 import type { SnapshotStore } from '../snapshot/store.js';
@@ -319,6 +325,15 @@ const FILE_TYPES: Record<string, FileSpec> = {
     requireMainMeta: true,
     flat: true,
   },
+  // S47: Omnistudio Data Mappers. describeMetadata at v68 (2026-11-20):
+  // directory omniDataTransforms, suffix rpt, inFolder=false,
+  // metaFile=false, no child types — a plain single-file document, no meta
+  // sidecar, no envelope. The Industries developer-guide page's
+  // .omniDataTransform suffix is wrong (describe and Salesforce's CLI
+  // registry both say rpt). Per Salesforce Help the Metadata API deploys
+  // these only where the org's Omnistudio Metadata setting is on; the
+  // analyzeChanges arms say so on every approval page. Explicit-refresh-only.
+  OmniDataTransform: { dir: 'omniDataTransforms', ext: '.rpt' },
 };
 
 const XMLNS_META = 'http://soap.sforce.com/2006/04/metadata';
@@ -1031,6 +1046,24 @@ function validateTypeAndName(type: string, name: string): void {
     }
     return;
   }
+  if (type === 'OmniDataTransform') {
+    // S47: per Salesforce Help, with the Omnistudio Metadata setting on
+    // (the only state in which the Metadata API deploys these) a Data
+    // Mapper name holds letters and digits only — no underscores, dashes or
+    // spaces. The fullName is most likely <Name>_<version> (Salesforce's
+    // guides name the files that way; not yet confirmed against an org), so
+    // both the bare name and one _<digits> suffix are accepted.
+    if (!/^[A-Za-z0-9]+(_[0-9]+)?$/.test(name)) {
+      throw new ContrailError(
+        `invalid OmniDataTransform name "${name}" — letters and digits, optionally ` +
+          `_<version> (e.g. AccountSummaryExtract_1). Per Salesforce Help, Data Mapper ` +
+          `names hold letters and digits only once Omnistudio Metadata is on; Salesforce's ` +
+          `guides name the files <Name>_<version> (exact fullName rule not yet confirmed).`,
+        'bad_component',
+      );
+    }
+    return;
+  }
   if (!NAME_RE.test(name) || name.includes('/')) {
     throw new ContrailError(`invalid component name "${name}"`, 'bad_component');
   }
@@ -1293,6 +1326,22 @@ export function changeDependentWarnings(input: ChangeWarningInput): string[] {
         `. Retrieve-first, carry every existing version forward, edit only Draft versions.`,
     );
   }
+  // S47: a Data Mapper is one document of <omniDataTransformItem> rows, but
+  // whether a modify REMOVES the rows its file omits is not confirmed — so
+  // the type stays OUT of the WHOLE-DOCUMENT REPLACE list above (its
+  // sentence states removal as fact) and gets its own hedged arm. Nor is
+  // it documented what a deploy over an existing Data Mapper does at all:
+  // Salesforce Help says that once Data Mapper Versioning is on an active
+  // version can't be edited, so the org may refuse the modify or land it
+  // some other way. The arm states neither as fact.
+  if (type === 'OmniDataTransform' && change === 'modify') {
+    warnings.push(
+      `MODIFY OF AN EXISTING DATA MAPPER — whether the org updates it in place (per ` +
+        `Salesforce Help, an active version can't be edited once Data Mapper Versioning is ` +
+        `on) is not confirmed, nor whether mapping rows omitted here are removed org-side; ` +
+        `carry every row from a fresh retrieve.`,
+    );
+  }
   // Folder definitions replace their sharing wholesale: the folderShares
   // in this content ARE the folder's sharing after the deploy.
   if ((type === 'ReportFolder' || type === 'DashboardFolder') && change === 'modify') {
@@ -1408,6 +1457,9 @@ export function analyzeChanges(
   deletions: ProposedDeletion[],
 ): { changes: ComponentChange[]; destructive: ComponentChange[] } {
   const changes: ComponentChange[] = [];
+  // The Aura controller advisory below asks the package's grants about each
+  // bundle's controller: one grant index for the whole package, on first use.
+  let packageGrants: ReturnType<typeof grantChecker> | undefined;
   for (const c of components) {
     // A FlowDefinition setting activeVersionNumber 0 is a flow deactivation —
     // label it plainly so the approval page doesn't read as a mysterious "ADD".
@@ -1473,12 +1525,11 @@ export function analyzeChanges(
         );
         // S34 D2: <target> links the bundle to an existing runtime version.
         // Known limitation: a CDATA-wrapped or namespace-prefixed target (or
-        // a commented-out one) evades/false-positives this regex — bounded,
+        // a commented-out one) evades/false-positives this text scan — bounded,
         // since linking never compiles anything, D1 always fires, and the
         // org fails a bad target itself.
-        const target = proposed[`${c.api_name}.bundle-meta.xml`]?.match(
-          /<target>\s*([^<]+?)\s*<\/target>/,
-        )?.[1];
+        const meta = proposed[`${c.api_name}.bundle-meta.xml`];
+        const target = meta === undefined ? undefined : xmlTagValue(meta, 'target');
         if (target) {
           warnings.push(
             `TARGET LINK, NOT A COMPILE — <target> pins this bundle to runtime version ` +
@@ -1528,16 +1579,15 @@ export function analyzeChanges(
         // controller class that may be long-deployed and already granted.
         const controller = mainBody.match(/\bcontroller="([A-Za-z][A-Za-z0-9_]*)"/)?.[1];
         if (controller) {
-          const containerText = components
-            .filter((p) => p.type === 'PermissionSet' || p.type === 'Profile')
-            .map((p) => p.content)
-            .join('\n');
-          const granted = permissionBlocks(containerText, 'classAccesses').some(
-            (b) =>
-              new RegExp(`<apexClass>\\s*${controller}\\s*</apexClass>`, 'i').test(b) &&
-              /<enabled>\s*true\s*<\/enabled>/i.test(b),
+          // The coverage table's class-grant test (the controller name is
+          // letters, digits and underscores, so nothing in it needs escaping).
+          packageGrants ??= grantChecker(
+            components
+              .filter((p) => p.type === 'PermissionSet' || p.type === 'Profile')
+              .map((p) => p.content)
+              .join('\n'),
           );
-          if (!granted) {
+          if (!packageGrants('class', controller)) {
             warnings.push(
               `server-side controller "${controller}" — users need Apex class access ` +
                 `(classAccesses) for it, and no permission set in this package grants it ` +
@@ -1599,7 +1649,7 @@ export function analyzeChanges(
       // <testCase> blocks with and without <conversationHistory>. No claim
       // about when a stalled run releases its in-progress slot — that
       // timing is undocumented.
-      const cases = c.content.match(/<testCase>[\s\S]*?<\/testCase>/g) ?? [];
+      const cases = xmlBlocks(c.content, 'testCase');
       const multi = cases.filter((t) => /<conversationHistory>/.test(t)).length;
       const single = cases.length - multi;
       if (multi > 0 && single > 0) {
@@ -1623,6 +1673,31 @@ export function analyzeChanges(
           `Author your ` +
           `own scorer name for custom logic.`,
       );
+    }
+    // S47: Data Mappers — fires on add AND modify (S34 D1 precedent). The
+    // setting gate is Salesforce Help's; that <active> carries over on
+    // deploy is a Salesforce blog's claim, not yet confirmed; formulaConverted
+    // is the Designer's compiled form of a formula, not hand-writable.
+    if (c.type === 'OmniDataTransform') {
+      warnings.push(
+        `OMNISTUDIO DATA MAPPER — deploys only where the org's Omnistudio Metadata setting ` +
+          `is on (per Salesforce Help). Its <active> value decides whether it lands active ` +
+          `(per a Salesforce blog — not yet confirmed here). Formula items need the Data ` +
+          `Mapper Designer (formulaConverted is Designer-computed); check the result in the ` +
+          `Designer's Preview.`,
+      );
+      // Advisory, never a refusal: the fullName rule is not confirmed, so
+      // a mismatch may be deliberate. Item rows carry no <uniqueName> in
+      // the documented grammar; they are stepped over anyway so only the
+      // header's value is read.
+      const uniqueName = omniDataTransformUniqueName(c.content);
+      if (uniqueName && uniqueName !== c.api_name) {
+        warnings.push(
+          `UNIQUENAME MISMATCH — api_name ${c.api_name} differs from the file's uniqueName ` +
+            `${uniqueName}; Salesforce's guides name Data Mapper files <Name>_<version> ` +
+            `(fullName rule not yet confirmed).`,
+        );
+      }
     }
     // S36: PSG grants are rebuilt asynchronously — fires on add AND modify
     // (S34 D1 precedent: the honesty rides every deploy, by design).
@@ -1675,6 +1750,22 @@ export function analyzeChanges(
         .map((x) => x.api_name),
     );
     const refHosts = new Set(['FlexiPage', 'QuickAction', 'Flow', 'CustomTab']);
+    // The index is asked once per name for the whole package: a host can
+    // repeat one c: name thousands of times. Its lookup ignores ASCII case
+    // (COLLATE NOCASE) and a c: name is ASCII, so the answer is kept under
+    // the lower-cased name and every spelling of it shares one lookup.
+    const indexed = new Map<string, boolean>();
+    const inIndex = (name: string): boolean => {
+      const key = name.toLowerCase();
+      let found = indexed.get(key);
+      if (found === undefined) {
+        found =
+          db.getArtifact(conn.id, 'AuraDefinitionBundle', name) !== null ||
+          db.getArtifact(conn.id, 'LightningComponentBundle', name) !== null;
+        indexed.set(key, found);
+      }
+      return found;
+    };
     for (const entry of changes) {
       if (!refHosts.has(entry.type)) continue;
       const comp = components.find(
@@ -1684,14 +1775,10 @@ export function analyzeChanges(
       const missing = new Set<string>();
       for (const m of comp.content.matchAll(/\bc:([A-Za-z][A-Za-z0-9_]*)/g)) {
         const name = m[1]!;
-        if (packagedBundles.has(name)) continue;
-        if (
-          db.getArtifact(conn.id, 'AuraDefinitionBundle', name) ||
-          db.getArtifact(conn.id, 'LightningComponentBundle', name)
-        ) {
-          continue;
-        }
+        if (packagedBundles.has(name) || missing.has(name) || inIndex(name)) continue;
         missing.add(name);
+        // The warning names the first five; no later name can change it.
+        if (missing.size === 5) break;
       }
       if (missing.size > 0) {
         const list = [...missing].slice(0, 5).join(', ');
@@ -1736,6 +1823,26 @@ export function analyzeChanges(
     }
     return { type: d.type, api_name: d.api_name, change: 'delete', warnings };
   });
+
+  // S47 MIXED PACKAGE: Salesforce Help ("Tool Considerations") and a
+  // Salesforce KB say Omnistudio components can't share a deploy with setup
+  // metadata. Which types count as "setup" is not precisely documented, so
+  // ANY other type in the package (components or deletions) draws the
+  // advisory on every OmniDataTransform entry — never a local refusal; the
+  // org's answer is the authority.
+  {
+    const packageTypes = new Set([...components, ...deletions].map((x) => x.type));
+    if (packageTypes.has('OmniDataTransform') && packageTypes.size > 1) {
+      for (const entry of [...changes, ...destructive]) {
+        if (entry.type !== 'OmniDataTransform') continue;
+        entry.warnings.push(
+          `MIXED PACKAGE — Salesforce says Omnistudio components can't share a deploy with ` +
+            `setup metadata (permission sets, profiles, fields, FlexiPages, Expression ` +
+            `Sets); if the org refuses, deploy the Data Mappers on their own.`,
+        );
+      }
+    }
+  }
 
   return { changes, destructive };
 }
@@ -1800,10 +1907,10 @@ interface PermissionNeed {
  */
 function externalCredentialPrincipals(xml: string): string[] {
   const names: string[] = [];
-  for (const block of xml.match(/<externalCredentialParameters>[\s\S]*?<\/externalCredentialParameters>/g) ?? []) {
-    const type = block.match(/<parameterType>\s*([^<]+?)\s*<\/parameterType>/)?.[1] ?? '';
+  for (const block of xmlBlocks(xml, 'externalCredentialParameters')) {
+    const type = xmlTagValue(block, 'parameterType') ?? '';
     if (!/^(NamedPrincipal|PerUserPrincipal)$/i.test(type)) continue;
-    const name = block.match(/<parameterName>\s*([^<]+?)\s*<\/parameterName>/)?.[1];
+    const name = xmlTagValue(block, 'parameterName');
     if (name) names.push(name);
   }
   return names;
@@ -1815,17 +1922,35 @@ const SCORER_STATUS_RANK: Record<string, number> = { Draft: 0, Available: 1, Arc
 /**
  * S44: versionNumber → status for each <scorerVersion> of an
  * AiAgentScorerDefinition (documented grammar; element names live-confirmed
- * from a retrieved std_* scorer 2026-11-08). Regex, not a parser — the org
- * validates; this only names what the approval page can see.
+ * from a retrieved std_* scorer 2026-11-08). A text scan, not a parser — the
+ * org validates; this only names what the approval page can see.
  */
 function scorerVersionStatuses(xml: string): Map<string, string> {
   const out = new Map<string, string>();
-  for (const block of xml.match(/<scorerVersion>[\s\S]*?<\/scorerVersion>/g) ?? []) {
+  for (const block of xmlBlocks(xml, 'scorerVersion')) {
     const n = block.match(/<versionNumber>\s*(\d+)\s*<\/versionNumber>/)?.[1];
     const s = block.match(/<status>\s*([A-Za-z]+)\s*<\/status>/)?.[1];
     if (n) out.set(n, s ?? '');
   }
   return out;
+}
+
+/**
+ * S47: the header <uniqueName> of an OmniDataTransform document, or
+ * undefined. The <omniDataTransformItem> rows are stepped over first, so a
+ * row's own uniqueName never answers for the mapper. It runs on
+ * agent-supplied content before any org call, so both steps are one-walk
+ * readers from salesforce/xml.ts, never the lazy patterns they replace:
+ * `/<omniDataTransformItem>[\s\S]*?<\/omniDataTransformItem>/g` took 24 s
+ * for 1.8 MB of row openers with no closers, and
+ * `/<uniqueName>\s*([^<]*?)\s*<\/uniqueName>/` took 19 s for 4,000 spaces
+ * after an opener with no closer (both measured on one machine). Either
+ * would have blocked every tool on the server meanwhile.
+ */
+function omniDataTransformUniqueName(content: string): string | undefined {
+  return xmlTagValue(withoutXmlBlocks(content, 'omniDataTransformItem'), 'uniqueName', {
+    emptyOk: true,
+  });
 }
 
 /** Custom entities (need explicit object permissions); standard objects don't. */
@@ -1836,7 +1961,7 @@ function isCustomEntity(name: string): boolean {
 /** Extract the fullNames of inline <fields> in a CustomObject .object body. */
 function inlineFieldNames(objectXml: string): string[] {
   const names: string[] = [];
-  for (const block of objectXml.match(/<fields>[\s\S]*?<\/fields>/g) ?? []) {
+  for (const block of xmlBlocks(objectXml, 'fields')) {
     const m = block.match(/<fullName>([^<]+)<\/fullName>/);
     if (m?.[1]) names.push(m[1].trim());
   }
@@ -1844,72 +1969,142 @@ function inlineFieldNames(objectXml: string): string[] {
 }
 
 function permissionBlocks(text: string, tag: string): string[] {
-  return text.match(new RegExp(`<${tag}>[\\s\\S]*?</${tag}>`, 'g')) ?? [];
+  return xmlBlocks(text, tag);
 }
 
 /**
- * A grant counts only if the component is named in the right permission block
- * AND the enabling flag is on — a mention with readable/allowRead/enabled=false
+ * Where each kind of need is granted: the permission blocks that can grant
+ * it, the element inside them that names the component, and the flag that
+ * must be on. A grant counts only if the component is named in the right
+ * block AND the flag is on — a mention with readable/allowRead/enabled=false
  * (or a Hidden tab) is NOT coverage. False "covered" would defeat the warning.
  */
-function isGranted(containerText: string, need: PermissionNeed): boolean {
-  const named = (block: string, tag: string, name: string): boolean =>
-    new RegExp(`<${tag}>\\s*${escapeRegex(name)}\\s*</${tag}>`, 'i').test(block);
-  const flagOn = (block: string, flag: string): boolean =>
-    new RegExp(`<${flag}>\\s*true\\s*</${flag}>`, 'i').test(block);
+interface GrantRule {
+  blocks: string[];
+  name: string;
+  /** null: the block grants unless its <visibility> is Hidden or None (tabs). */
+  flag: string | null;
+}
 
-  switch (need.kind) {
-    case 'field':
-      return permissionBlocks(containerText, 'fieldPermissions').some(
-        (b) => named(b, 'field', need.api_name) && flagOn(b, 'readable'),
-      );
-    case 'object':
-      return permissionBlocks(containerText, 'objectPermissions').some(
-        (b) => named(b, 'object', need.api_name) && flagOn(b, 'allowRead'),
-      );
-    case 'class':
-      return permissionBlocks(containerText, 'classAccesses').some(
-        (b) => named(b, 'apexClass', need.api_name) && flagOn(b, 'enabled'),
-      );
-    case 'page':
-      return permissionBlocks(containerText, 'pageAccesses').some(
-        (b) => named(b, 'apexPage', need.api_name) && flagOn(b, 'enabled'),
-      );
-    case 'application':
-      return permissionBlocks(containerText, 'applicationVisibilities').some(
-        (b) => named(b, 'application', need.api_name) && flagOn(b, 'visible'),
-      );
-    case 'agent':
-      // S30: agent access is a REAL PermissionSet block (contrast the
-      // Report/Dashboard folder-sharing absence below).
-      return permissionBlocks(containerText, 'agentAccesses').some(
-        (b) => named(b, 'agentName', need.api_name) && flagOn(b, 'enabled'),
-      );
-    case 'credentialPrincipal':
-      // S33: external credential principals are granted by name
-      // "<ExtCredDevName>-<principalName>" in a real PermissionSet block.
-      return permissionBlocks(containerText, 'externalCredentialPrincipalAccesses').some(
-        (b) => named(b, 'externalCredentialPrincipal', need.api_name) && flagOn(b, 'enabled'),
-      );
-    case 'customPermission':
-      // S36: custom permissions grant via <customPermissions><enabled>true
-      // </enabled><name>X</name></customPermissions> (live-confirmed from a
-      // real org's permission set; Profiles use the identical block shape).
-      return permissionBlocks(containerText, 'customPermissions').some(
-        (b) => named(b, 'name', need.api_name) && flagOn(b, 'enabled'),
-      );
-    case 'tab': {
-      const blocks = [
-        ...permissionBlocks(containerText, 'tabVisibilities'),
-        ...permissionBlocks(containerText, 'tabSettings'),
-      ];
-      return blocks.some((b) => {
-        if (!named(b, 'tab', need.api_name)) return false;
-        const vis = b.match(/<visibility>\s*([^<]+?)\s*<\/visibility>/i)?.[1] ?? '';
-        return !/^(hidden|none)$/i.test(vis);
-      });
+const GRANT_RULES: Record<PermissionNeed['kind'], GrantRule> = {
+  field: { blocks: ['fieldPermissions'], name: 'field', flag: 'readable' },
+  object: { blocks: ['objectPermissions'], name: 'object', flag: 'allowRead' },
+  class: { blocks: ['classAccesses'], name: 'apexClass', flag: 'enabled' },
+  page: { blocks: ['pageAccesses'], name: 'apexPage', flag: 'enabled' },
+  application: { blocks: ['applicationVisibilities'], name: 'application', flag: 'visible' },
+  // S30: agent access is a REAL PermissionSet block (contrast the
+  // Report/Dashboard folder-sharing absence below).
+  agent: { blocks: ['agentAccesses'], name: 'agentName', flag: 'enabled' },
+  // S33: external credential principals are granted by name
+  // "<ExtCredDevName>-<principalName>" in a real PermissionSet block.
+  credentialPrincipal: {
+    blocks: ['externalCredentialPrincipalAccesses'],
+    name: 'externalCredentialPrincipal',
+    flag: 'enabled',
+  },
+  // S36: custom permissions grant via <customPermissions><enabled>true
+  // </enabled><name>X</name></customPermissions> (live-confirmed from a
+  // real org's permission set; Profiles use the identical block shape).
+  customPermission: { blocks: ['customPermissions'], name: 'name', flag: 'enabled' },
+  tab: { blocks: ['tabVisibilities', 'tabSettings'], name: 'tab', flag: null },
+};
+
+/**
+ * Answers whether each need of one package is granted, reading the package's
+ * permission set/profile text once per kind of need rather than once per
+ * need: a package can carry thousands of inline fields and a profile with
+ * thousands of grants.
+ *
+ * A need is granted when a granting block of its kind matches
+ * `<name>\s*API_NAME\s*</name>` with the i flag, API_NAME taken literally:
+ * the test this function has always made. Each granting block is filed under
+ * regexCaseKey of the trimmed text of each of its `<name>…</name>` elements.
+ * The regex can only match an element whose text is the API name with white
+ * space around it (unless the name holds "<"), and the trim and the key
+ * ignore exactly what `\s*` and the i flag ignore. So for an API name with no
+ * "<" and no white space at either end, a block is filed under the name's
+ * key exactly when the regex matches it, and the file answers on its own.
+ * Any other name runs the regex: on the blocks filed under its trimmed key,
+ * or on every block when it holds "<" (it could match across elements).
+ *
+ * One difference from the old per-need test, on absurd input only: that
+ * test compiled the regex for every block of the kind, and V8 refuses to
+ * compile one for an API name of about 32,000 characters ("Regular
+ * expression too large"), so it threw whenever the package held such a
+ * block. A name the file answers is no longer an error.
+ */
+function grantChecker(
+  containerText: string,
+): (kind: PermissionNeed['kind'], apiName: string) => boolean {
+  const byKind = new Map<PermissionNeed['kind'], (apiName: string) => boolean>();
+  const answers = new Map<string, boolean>();
+  return (kind, apiName) => {
+    const key = `${kind}:${apiName}`;
+    let granted = answers.get(key);
+    if (granted === undefined) {
+      let grants = byKind.get(kind);
+      if (grants === undefined) {
+        grants = grantIndex(containerText, GRANT_RULES[kind]);
+        byKind.set(kind, grants);
+      }
+      granted = grants(apiName);
+      answers.set(key, granted);
+    }
+    return granted;
+  };
+}
+
+function grantIndex(containerText: string, rule: GrantRule): (apiName: string) => boolean {
+  const flagOn =
+    rule.flag === null ? null : new RegExp(`<${rule.flag}>\\s*true\\s*</${rule.flag}>`, 'i');
+  const granting: string[] = [];
+  for (const tag of rule.blocks) {
+    for (const block of permissionBlocks(containerText, tag)) {
+      const on = flagOn
+        ? flagOn.test(block)
+        : !/^(hidden|none)$/i.test(xmlTagValue(block, 'visibility', { ignoreCase: true }) ?? '');
+      if (on) granting.push(block);
     }
   }
+  const filed = new Map<string, number[]>();
+  granting.forEach((block, i) => {
+    for (const text of xmlTagTexts(block, rule.name, { ignoreCase: true })) {
+      const key = regexCaseKey(text.trim());
+      const list = filed.get(key);
+      if (list === undefined) filed.set(key, [i]);
+      else if (list[list.length - 1] !== i) list.push(i);
+    }
+  });
+  return (apiName) => {
+    const holdsLt = apiName.includes('<');
+    const trimmed = apiName.trim();
+    if (!holdsLt && trimmed === apiName) return filed.has(regexCaseKey(apiName));
+    const named = new RegExp(`<${rule.name}>\\s*${escapeRegex(apiName)}\\s*</${rule.name}>`, 'i');
+    if (holdsLt) return granting.some((block) => named.test(block));
+    const candidates = filed.get(regexCaseKey(trimmed)) ?? [];
+    return candidates.some((i) => named.test(granting[i]!));
+  };
+}
+
+/**
+ * A key two strings share exactly when a non-unicode regex with the i flag
+ * reads them as the same literal text. Each UTF-16 unit maps as ECMAScript's
+ * Canonicalize maps it: to its upper case when that is one unit, unless that
+ * would turn a non-ASCII unit into an ASCII one (so "ı" and "ſ" stay apart
+ * from "i" and "s"). Compared with V8 for every code unit when written.
+ */
+function regexCaseKey(s: string): string {
+  if (!/[\u0080-\uffff]/.test(s)) return s.toUpperCase();
+  let key = '';
+  for (let i = 0; i < s.length; i++) {
+    const unit = s[i]!;
+    const upper = unit.toUpperCase();
+    key +=
+      upper.length === 1 && !(unit.charCodeAt(0) >= 128 && upper.charCodeAt(0) < 128)
+        ? upper
+        : unit;
+  }
+  return key;
 }
 
 /**
@@ -1923,6 +2118,14 @@ function isGranted(containerText: string, need: PermissionNeed): boolean {
  * (folderShares on the folder component), which no PermissionSet grants — an
  * arm here would flag every report deploy as uncovered with advice the human
  * cannot act on. The folder-sharing honesty warning lives in analyzeChanges.
+ *
+ * S47: deliberately NO arm for OmniDataTransform either. No per-component
+ * permission-set grant for running a Data Mapper turned up in Salesforce's
+ * docs, and what Help does name — object permissions on the Omnistudio
+ * config objects for non-admin users who create, update or delete
+ * components — is a standing org-setup grant, not a per-component one this
+ * table could check. The type page does document a header <requiredPermission>
+ * field; what it gates is not yet confirmed, so no arm keys on it.
  *
  * S46 D3: the warning says only what Contrail knows about each uncovered
  * component. `presence(type, apiName)`: true = the live check found it in the
@@ -2033,8 +2236,9 @@ export function analyzePermissionCoverage(
     return 'unknown';
   };
 
+  const isGranted = grantChecker(containerText);
   const uncovered: PermissionCoverage['uncovered'] = needs
-    .filter((n) => !isGranted(containerText, n))
+    .filter((n) => !isGranted(n.kind, n.api_name))
     .map((n) => ({
       type: n.type,
       api_name: n.api_name,
@@ -2137,8 +2341,7 @@ export function readOldContent(
   if (!child) return file;
   // Child artifacts live inside their container file; extract the block.
   const childName = type === 'CustomLabel' ? apiName : apiName.split('.').slice(1).join('.');
-  const re = new RegExp(`<${child.tag}>[\\s\\S]*?</${child.tag}>`, 'g');
-  for (const block of file.match(re) ?? []) {
+  for (const block of xmlBlocks(file, child.tag)) {
     const m = block.match(/<fullName>([^<]+)<\/fullName>/);
     if (m?.[1]?.toLowerCase() === childName.toLowerCase()) return block;
   }

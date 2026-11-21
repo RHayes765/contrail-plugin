@@ -285,7 +285,12 @@ export function registerDeployTools(server: McpServer, deps: ToolDeps): void {
                     '— silently restored to every assigned user), QuickAction (object ' +
                     'actions dotted "Account.New_X", global actions bare; surfaced by page ' +
                     'layouts, global publisher layouts, or Lightning record pages with ' +
-                    'dynamic actions — never by the deploy itself), or child types CustomField / ' +
+                    'dynamic actions — never by the deploy itself), OmniDataTransform ' +
+                    '(Omnistudio Data Mappers; content = the whole <OmniDataTransform> ' +
+                    'document; api_name <Name>_<version>, letters and digits — the exact ' +
+                    'fullName rule is not yet confirmed; per Salesforce Help the Metadata API ' +
+                    "deploys them only where the org's Omnistudio Metadata setting is on; " +
+                    'deploy them apart from setup metadata), or child types CustomField / ' +
                     'ValidationRule / CustomLabel / ListView / RecordType / BotVersion ' +
                     '(dotted MyBot.v1). ' +
                     'Bundle types GenAiFunction / GenAiPlannerBundle / AiAuthoringBundle / ' +

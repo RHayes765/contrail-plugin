@@ -1,6 +1,6 @@
 # Contrail Reference — tools, features, configuration
 
-Everything Contrail can do, in one place. Current as of **v0.40.0** (43 tools).
+Everything Contrail can do, in one place. Current as of **v0.41.0** (43 tools).
 The same tool surface is available in all three installs — the Claude Desktop
 extension (`.mcpb`), the Claude Code plugin, and the Contrail desktop app —
 with a few desktop-app differences [noted at the end](#the-desktop-app).
@@ -1203,6 +1203,34 @@ the type and the page says so. `live_check.retrieve_note`, when present, is
 what the org's retrieve reported, quoted as sent — Contrail does not decide
 what exists from it.
 
+**Omnistudio Metadata setting (S47).** Per Salesforce Help the Metadata API
+can't deploy Omnistudio components until an admin turns on the org's
+Omnistudio Metadata setting (Setup → Omnistudio Settings), and once on it
+can't be turned off. So when the components or deletions include an
+`OmniDataTransform`, validation (dry runs too) also reads that setting — one
+Settings retrieve beside the checkOnly deploy, bounded at 30 seconds — and
+the result carries `omnistudio_metadata` (`state`: `on`, `off` or `unknown`,
+with a `reason` when unknown; on a failed validation it rides `failure`).
+When the setting is off, the approval page's warnings lead with **OMNISTUDIO
+METADATA IS OFF**: Data Mappers that exist there as records are invisible to
+Contrail, so ADD / NOT IN TARGET does not prove none exists. A failed
+validation's note says the same, and a passed dry run carries it as
+`omnistudio_note`. When the setting could not be read, the same places carry
+a neutral line naming the reason; on the page and a passed dry run it adds
+that, if the setting is off, ADD (or a change of "add") does not prove none
+exists. Nothing is refused locally for the setting
+— the org's own answer decides. Every Data Mapper add or modify also carries
+an **OMNISTUDIO DATA MAPPER** warning (the setting; whether it lands active
+follows its `<active>` value per a Salesforce blog, not yet confirmed;
+formula items need the Data Mapper Designer, since `formulaConverted` is
+computed there), plus **UNIQUENAME MISMATCH** when the api_name differs from
+the file's `uniqueName`, **MIXED PACKAGE** when the package holds any other
+type, and on a modify **MODIFY OF AN EXISTING DATA MAPPER** — whether the org
+updates it in place is not confirmed (per Salesforce Help an active version
+can't be edited once Data Mapper Versioning is on), nor whether mapping rows
+the file omits are removed org-side, so carry every row from a fresh
+retrieve.
+
 - `connection` — target, named unmissably to the human.
 - `components` *(≤50)* — each `{type, api_name, content | content_file}`.
   Types include `ApexClass`, `ApexTrigger`, `ApexPage`, `Flow`,
@@ -1249,7 +1277,18 @@ what exists from it.
   every assigned user; the page says so), `QuickAction` (object actions
   dotted `Account.New_X`, global actions bare; a NEW action is surfaced by
   nothing until a layout or a dynamic-actions record page includes it, and
-  the page says so), and child types
+  the page says so), `OmniDataTransform` (S47 — Omnistudio Data Mappers;
+  content is the whole `<OmniDataTransform>` document, one plain
+  `omniDataTransforms/<api_name>.rpt` file with no `-meta.xml`; api_name
+  letters and digits, optionally `_<version>` — Salesforce's guides name the
+  files `<Name>_<version>`, and the exact fullName rule is not yet
+  confirmed; per Salesforce Help it deploys only where the org's Omnistudio
+  Metadata setting is on, and not once the org has turned on Clean Metadata
+  Deployment, after which Help says the legacy Omnistudio types can't be
+  deployed or retrieved and Data Mappers move to `DataMapperDefinition` (a
+  type Contrail does not register); Salesforce says Omnistudio components
+  can't share a deploy with setup metadata, so deploy Data Mappers on their
+  own — see the setting note above), and child types
   `CustomField` / `ValidationRule` / `CustomLabel` / `ListView` /
   `RecordType` / `BotVersion` (dotted API names — `MyBot.v1`). Bundle types
   `GenAiFunction` / `GenAiPlannerBundle` / `AiAuthoringBundle` /
@@ -1765,7 +1804,7 @@ JSON, except that the policy check names the encoding — its problem is
 | | `scopes` | `refresh_token, api, web` | OAuth scopes requested. |
 | `oauth` | `callbackPort` / `callbackPath` | `1717` / `/OauthRedirect` | Must match the connected app's registered callback. |
 | | `flowTimeoutMs` | 10 min | Browser-flow hard limit. |
-| `snapshot` | `types` | 21 types | The default retrieve manifest (ApexClass, ApexTrigger, Flow, CustomObject, CustomLabels, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, ApexPage, GlobalValueSet, Layout, CustomMetadata, LeadConvertSettings, the S36 five: CustomPermission, PermissionSetGroup, MutingPermissionSet, QuickAction, LightningComponentBundle — and S41's AuraDefinitionBundle, which expands to NAMED members from the live inventory because wildcard retrieves drop namespace-free installedEditable bundles, live-confirmed). Report/Dashboard (+ their folders), the Agentforce types, and the integration group (ConnectedApp, NamedCredential, ExternalCredential, AuthProvider, PlatformEventChannel[Member], ManagedEventSubscription) are deployable and indexable but deliberately OUT of the default — `refresh_snapshot types:[…]` pulls them explicitly. Package-installed components (managed OR unlocked) are platform-excluded from wildcard retrieves and never counted as snapshot staleness. |
+| `snapshot` | `types` | 21 types | The default retrieve manifest (ApexClass, ApexTrigger, Flow, CustomObject, CustomLabels, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, ApexPage, GlobalValueSet, Layout, CustomMetadata, LeadConvertSettings, the S36 five: CustomPermission, PermissionSetGroup, MutingPermissionSet, QuickAction, LightningComponentBundle — and S41's AuraDefinitionBundle, which expands to NAMED members from the live inventory because wildcard retrieves drop namespace-free installedEditable bundles, live-confirmed). Report/Dashboard (+ their folders), the Agentforce types, the integration group (ConnectedApp, NamedCredential, ExternalCredential, AuthProvider, PlatformEventChannel[Member], ManagedEventSubscription), and S47's OmniDataTransform (Omnistudio Data Mappers) are deployable and indexable but deliberately OUT of the default — `refresh_snapshot types:[…]` pulls them explicitly. An OmniDataTransform refresh that lists none reads the org's Omnistudio Metadata setting, and warns when it is off that the org's Data Mappers are records the Metadata API can't list or retrieve (on a probed org with the setting off, none of the Data Mappers it held as records was listed). Package-installed components (managed OR unlocked) are platform-excluded from wildcard retrieves and never counted as snapshot staleness. |
 | | `pollIntervalMs` / `retrieveTimeoutMs` | 2 s / 10 min | Retrieve polling. |
 | | `rebaselineAfterDeploy` | `true` | S46: after a successful deploy, re-read the deployed components into the snapshot; `false` restores the manual refresh. |
 | | `rebaselineTimeoutMs` | 60 s | S46: budget for that re-read, inside the execute call; past it the deploy result says the snapshot was not updated. |

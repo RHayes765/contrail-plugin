@@ -1,6 +1,7 @@
 import type { ContrailDb } from '../core/db.js';
 import type { SnapshotStore } from '../snapshot/store.js';
 import { extractChildBlocks } from '../snapshot/indexer.js';
+import { withoutXmlBlocks, xmlBlockText } from '../salesforce/xml.js';
 import { queryDependencies } from './graph.js';
 
 /**
@@ -141,9 +142,9 @@ export interface ObjectAutomation {
 
 // ── parsing (flowgraph.ts idiom) ─────────────────────────────────────────
 
+/** The first <tag> block's text, trimmed; read in one walk (salesforce/xml.ts). */
 function tagValue(block: string, tag: string): string | null {
-  const match = block.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`));
-  return match?.[1]?.trim() ?? null;
+  return xmlBlockText(block, tag)?.trim() ?? null;
 }
 
 /** tagValue, empty → null, the five XML entities decoded (display text only). */
@@ -192,9 +193,10 @@ const NON_TOP_LEVEL_BLOCKS = [
   'waits',
 ];
 
+/** `xml` less each tag's blocks in turn; one walk per tag (salesforce/xml.ts). */
 function stripBlocks(xml: string, tags: string[]): string {
   let out = xml;
-  for (const tag of tags) out = out.replace(new RegExp(`<${tag}>[\\s\\S]*?</${tag}>`, 'g'), '');
+  for (const tag of tags) out = withoutXmlBlocks(out, tag);
   return out;
 }
 

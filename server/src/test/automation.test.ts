@@ -1060,3 +1060,48 @@ describe('the approval-page card', () => {
     }
   });
 });
+
+describe('parseFlowStart in linear time (slow-path follow-up)', () => {
+  // A flow is text an agent deployed, and the approval card for a data write
+  // parses the snapshot's flows (up to 2,000 files). The patterns this
+  // parser used started again from every opener with no closer after it and
+  // read to the end (quadratic): about 16 s for 1 MB of such openers, with
+  // every tool waiting. Each shape must answer in well under a second, and
+  // the same.
+  const MB = 1_000_000;
+  const fill = (unit: string, bytes = MB) => unit.repeat(Math.floor(bytes / unit.length));
+  const body =
+    '<status>Active</status>' +
+    '<processType>AutoLaunchedFlow</processType><start><object>Account</object>' +
+    '<triggerType>RecordAfterSave</triggerType><recordTriggerType>Update</recordTriggerType>' +
+    '</start>';
+  const flow = `<Flow><label>Sync Owner</label>${body}`;
+
+  it('element, label and start openers with no closer, packed close together', () => {
+    const shapes: Array<[string, string, string | null]> = [
+      ['element openers', flow + fill('<actionCalls>'), 'Sync Owner'],
+      // A control: the flow's own label closes first, so the old pattern was
+      // fast here too.
+      ['label openers after the label', flow + fill('<label>'), 'Sync Owner'],
+      // No label of its own: the first label opener has no closer after it.
+      ['label openers and no label', `<Flow>${body}${fill('<label>')}`, null],
+      ['start openers', flow + fill('<start>'), 'Sync Owner'],
+    ];
+    for (const [what, xml, label] of shapes) {
+      const started = performance.now();
+      const start = parseFlowStart(xml);
+      const took = performance.now() - started;
+      expect(start, what).toMatchObject({
+        label,
+        status: 'Active',
+        process_type: 'AutoLaunchedFlow',
+        object: 'Account',
+        trigger_type: 'RecordAfterSave',
+        record_trigger_type: 'Update',
+        entry_criteria: false,
+        scheduled_paths: 0,
+      });
+      expect(took, `${what}: ${Math.round(took)} ms`).toBeLessThan(1000);
+    }
+  });
+});

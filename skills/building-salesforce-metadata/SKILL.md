@@ -272,6 +272,47 @@ directory** and give `validate_deploy` the path:
   the same package or expect the INERT warning. Crossing apiVersion 39/40
   toggles Lightning Locker in orgs not yet on LWS. Only an Aura component
   can be a background utility item — an LWC rewrite is not a substitute.
+- **Omnistudio Data Mappers (`OmniDataTransform`) need an org setting
+  first.** Per Salesforce Help the Metadata API can't deploy Omnistudio
+  components until an admin turns on **Omnistudio Metadata** (Setup →
+  Omnistudio Settings), and it can't be turned off again — that is the
+  client's decision, never a side effect of yours. With it off, the org's
+  Data Mappers are records Contrail can't list or retrieve (an ADD proves
+  nothing), and `validate_deploy` says so on the page. If the org has turned
+  on Clean Metadata Deployment, per Salesforce Help the legacy Omnistudio
+  types can no longer be deployed or retrieved and Data Mappers move to
+  `DataMapperDefinition`, a type Contrail does not register: that org's Data
+  Mappers are out of Contrail's reach, so say so to the human. Never create,
+  edit or delete `OmniDataTransform` / `OmniDataTransformItem` records by any
+  route — `dml_propose`, `bulk_load_propose`, or DML inside `apex_propose`:
+  Salesforce marks both objects internal use only. (Help's one exception, an
+  anonymous-Apex fix for Data Mappers with no VersionNumber that block
+  turning the setting on, is part of that client decision, run as Help
+  writes it.) The file is
+  one plain document, `omniDataTransforms/<api_name>.rpt` (no `-meta.xml`):
+  root `<OmniDataTransform xmlns="http://soap.sforce.com/2006/04/metadata">`,
+  header elements alphabetical, the repeated `<omniDataTransformItem>` rows
+  between `<nullInputsIncludedInOutput>` and `<outputType>`, and only
+  `<name>` and `<type>` (Extract, Transform or Load) required; each row's
+  `<name>` is the Data Mapper's name. Once the setting is on, names hold
+  letters and digits only (no underscores, dashes or spaces); use api_name
+  `<Name>_<version>` matching `<uniqueName>` (e.g. `AccountSummaryExtract_1`)
+  — Salesforce's guides name the files that way, though the exact fullName
+  rule is not yet confirmed. `formulaConverted` is computed by the Data
+  Mapper Designer: build formula rows there, not by hand, and check the
+  result in the Designer's Preview. Set `<active>` on purpose — per a
+  Salesforce blog the source's active state carries over on deploy (not yet
+  confirmed). Deploy Data Mappers in a package of their own: Salesforce says
+  Omnistudio components can't share a deploy with setup metadata
+  (permission sets, profiles, fields, FlexiPages). Treat a modify as a
+  whole replace — retrieve first and carry every row; whether omitted rows
+  are removed org-side is not confirmed. No permission set rides along:
+  no per-component grant for running one turned up in Salesforce's docs,
+  and non-admins who build Data Mappers need object permissions on the
+  Omnistudio config objects (per Help), which is org setup. If a Data
+  Mapper sets `<requiredPermission>`, what it gates is not yet confirmed:
+  check who holds that permission. The type is
+  explicit-refresh-only: `refresh_snapshot types:["OmniDataTransform"]`.
 - **Namespaces** can contain single underscores (`sales_channel__Foo`), so split a
   qualified API name at the **first** `__`, never with a greedy pattern.
 - **Names**: components deploy under `type/Name.ext`; the tools reject names with

@@ -255,7 +255,16 @@ const TEXT_TUPLES = [
  * policy.ts imports node:vm only (the time bound on a ticket pattern's
  * test); evidence.ts imports node built-ins and types
  * from core/policy and connect/pages; members.ts imports node:crypto and
- * mirror units only.
+ * mirror units only. S47 adds salesforce/omnistudioSettings.ts (imports
+ * fflate and types from the mirror unit metadataSoap only) and its test
+ * (vitest, fflate and mirror units only), and gates the engine and extract
+ * tests, byte-identical by hand until now: S47 extended both, and the
+ * engine test's S47 blocks pin the refresh hook both snapshot engines
+ * hand-mirror (it imports the hand-mirrored snapshot/engine and core/db,
+ * as above, and MemoryTokenStore from core/keychain, which both engines
+ * carry with the same exports and which is not gated). Both import
+ * test/fixtures (no imports of its own; the gated semantic test imports it
+ * too), gated with them so a fixture drift shows as a MISMATCH.
  */
 const BYTE_IDENTICAL = [
   'core/grants.ts',
@@ -270,6 +279,7 @@ const BYTE_IDENTICAL = [
   'salesforce/client.ts',
   'salesforce/flowversion.ts',
   'salesforce/metadataSoap.ts',
+  'salesforce/omnistudioSettings.ts',
   'salesforce/oauth.ts',
   'salesforce/pkce.ts',
   'salesforce/tokens.ts',
@@ -295,11 +305,16 @@ const BYTE_IDENTICAL = [
   'test/evidence.test.ts',
   'test/members.test.ts',
   'test/automation.test.ts',
+  'test/csv.test.ts',
   'test/soap.test.ts',
   'test/typecoverage.test.ts',
   'test/config.test.ts',
   'test/db.test.ts',
   'test/semantic.test.ts',
+  'test/omnistudioSettings.test.ts',
+  'test/engine.test.ts',
+  'test/extract.test.ts',
+  'test/fixtures.ts',
 ];
 
 /** Code-identical: every non-comment line equal; comments may differ. */

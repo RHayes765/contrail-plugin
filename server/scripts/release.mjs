@@ -22,7 +22,10 @@ import { ignoredSkillFiles } from './ignored-skills.mjs';
  * `--skip-mirror` is passed explicitly. CI never runs this script.
  */
 
-const dryRun = process.argv.includes('--dry-run');
+// npm 10 consumes `npm run release -- --dry-run` as its own dry-run setting and
+// does NOT pass the flag on in argv; it exports npm_config_dry_run=true instead.
+// Read both, so a dry run can never fall through to commit/tag/push.
+const dryRun = process.argv.includes('--dry-run') || process.env.npm_config_dry_run === 'true';
 const skipMirror = process.argv.includes('--skip-mirror');
 const desktopArg = process.argv.indexOf('--desktop');
 const serverRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -159,7 +162,7 @@ run('git add -A', repoRoot);
 const dirty = execSync('git status --porcelain', { cwd: repoRoot }).toString().trim();
 if (dirty) {
   run(
-    `git commit -m "v${version}" -m "Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"`,
+    `git commit -m "v${version}" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"`,
     repoRoot,
   );
 } else {

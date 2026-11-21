@@ -6805,15 +6805,15 @@ var init_parseUtil = __esm({
           message: issueData.message
         };
       }
-      let errorMessage2 = "";
+      let errorMessage3 = "";
       const maps = errorMaps.filter((m) => !!m).slice().reverse();
       for (const map of maps) {
-        errorMessage2 = map(fullIssue, { data, defaultError: errorMessage2 }).message;
+        errorMessage3 = map(fullIssue, { data, defaultError: errorMessage3 }).message;
       }
       return {
         ...issueData,
         path: fullPath,
-        message: errorMessage2
+        message: errorMessage3
       };
     };
     EMPTY_PATH = [];
@@ -10834,19 +10834,19 @@ var init_Refs = __esm({
 });
 
 // node_modules/zod-to-json-schema/dist/esm/errorMessages.js
-function addErrorMessage(res, key2, errorMessage2, refs) {
+function addErrorMessage(res, key2, errorMessage3, refs) {
   if (!refs?.errorMessages)
     return;
-  if (errorMessage2) {
+  if (errorMessage3) {
     res.errorMessage = {
       ...res.errorMessage,
-      [key2]: errorMessage2
+      [key2]: errorMessage3
     };
   }
 }
-function setResponseValueAndErrors(res, key2, value, errorMessage2, refs) {
+function setResponseValueAndErrors(res, key2, value, errorMessage3, refs) {
   res[key2] = value;
-  addErrorMessage(res, key2, errorMessage2, refs);
+  addErrorMessage(res, key2, errorMessage3, refs);
 }
 var init_errorMessages = __esm({
   "node_modules/zod-to-json-schema/dist/esm/errorMessages.js"() {
@@ -12468,8 +12468,8 @@ var init_protocol = __esm({
                       if (queuedMessage.type === "response") {
                         resolver(message2);
                       } else {
-                        const errorMessage2 = message2;
-                        const error2 = new McpError(errorMessage2.error.code, errorMessage2.error.message, errorMessage2.error.data);
+                        const errorMessage3 = message2;
+                        const error2 = new McpError(errorMessage3.error.code, errorMessage3.error.message, errorMessage3.error.data);
                         resolver(error2);
                       }
                     } else {
@@ -20649,23 +20649,23 @@ var init_server2 = __esm({
           const wrappedHandler = async (request, extra) => {
             const validatedRequest = safeParse3(CallToolRequestSchema, request);
             if (!validatedRequest.success) {
-              const errorMessage2 = validatedRequest.error instanceof Error ? validatedRequest.error.message : String(validatedRequest.error);
-              throw new McpError(ErrorCode.InvalidParams, `Invalid tools/call request: ${errorMessage2}`);
+              const errorMessage3 = validatedRequest.error instanceof Error ? validatedRequest.error.message : String(validatedRequest.error);
+              throw new McpError(ErrorCode.InvalidParams, `Invalid tools/call request: ${errorMessage3}`);
             }
             const { params } = validatedRequest.data;
             const result = await Promise.resolve(handler(request, extra));
             if (params.task) {
               const taskValidationResult = safeParse3(CreateTaskResultSchema, result);
               if (!taskValidationResult.success) {
-                const errorMessage2 = taskValidationResult.error instanceof Error ? taskValidationResult.error.message : String(taskValidationResult.error);
-                throw new McpError(ErrorCode.InvalidParams, `Invalid task creation result: ${errorMessage2}`);
+                const errorMessage3 = taskValidationResult.error instanceof Error ? taskValidationResult.error.message : String(taskValidationResult.error);
+                throw new McpError(ErrorCode.InvalidParams, `Invalid task creation result: ${errorMessage3}`);
               }
               return taskValidationResult.data;
             }
             const validationResult = safeParse3(CallToolResultSchema, result);
             if (!validationResult.success) {
-              const errorMessage2 = validationResult.error instanceof Error ? validationResult.error.message : String(validationResult.error);
-              throw new McpError(ErrorCode.InvalidParams, `Invalid tools/call result: ${errorMessage2}`);
+              const errorMessage3 = validationResult.error instanceof Error ? validationResult.error.message : String(validationResult.error);
+              throw new McpError(ErrorCode.InvalidParams, `Invalid tools/call result: ${errorMessage3}`);
             }
             return validationResult.data;
           };
@@ -21266,12 +21266,12 @@ var init_mcp = __esm({
        * @param errorMessage - The error message.
        * @returns The tool error result.
        */
-      createToolError(errorMessage2) {
+      createToolError(errorMessage3) {
         return {
           content: [
             {
               type: "text",
-              text: errorMessage2
+              text: errorMessage3
             }
           ],
           isError: true
@@ -21289,8 +21289,8 @@ var init_mcp = __esm({
         const parseResult = await safeParseAsync3(schemaToParse, args);
         if (!parseResult.success) {
           const error2 = "error" in parseResult ? parseResult.error : "Unknown error";
-          const errorMessage2 = getParseErrorMessage(error2);
-          throw new McpError(ErrorCode.InvalidParams, `Input validation error: Invalid arguments for tool ${toolName}: ${errorMessage2}`);
+          const errorMessage3 = getParseErrorMessage(error2);
+          throw new McpError(ErrorCode.InvalidParams, `Input validation error: Invalid arguments for tool ${toolName}: ${errorMessage3}`);
         }
         return parseResult.data;
       }
@@ -21314,8 +21314,8 @@ var init_mcp = __esm({
         const parseResult = await safeParseAsync3(outputObj, result.structuredContent);
         if (!parseResult.success) {
           const error2 = "error" in parseResult ? parseResult.error : "Unknown error";
-          const errorMessage2 = getParseErrorMessage(error2);
-          throw new McpError(ErrorCode.InvalidParams, `Output validation error: Invalid structured content for tool ${toolName}: ${errorMessage2}`);
+          const errorMessage3 = getParseErrorMessage(error2);
+          throw new McpError(ErrorCode.InvalidParams, `Output validation error: Invalid structured content for tool ${toolName}: ${errorMessage3}`);
         }
       }
       /**
@@ -21527,8 +21527,8 @@ var init_mcp = __esm({
             const parseResult = await safeParseAsync3(argsObj, request.params.arguments);
             if (!parseResult.success) {
               const error2 = "error" in parseResult ? parseResult.error : "Unknown error";
-              const errorMessage2 = getParseErrorMessage(error2);
-              throw new McpError(ErrorCode.InvalidParams, `Invalid arguments for prompt ${request.params.name}: ${errorMessage2}`);
+              const errorMessage3 = getParseErrorMessage(error2);
+              throw new McpError(ErrorCode.InvalidParams, `Invalid arguments for prompt ${request.params.name}: ${errorMessage3}`);
             }
             const args = parseResult.data;
             const cb = prompt.callback;
@@ -21873,7 +21873,7 @@ var ENGINE_VERSION, SERVER_NAME;
 var init_version = __esm({
   "src/core/version.ts"() {
     "use strict";
-    ENGINE_VERSION = "0.40.0";
+    ENGINE_VERSION = "0.41.0";
     SERVER_NAME = "contrail-engine";
   }
 });
@@ -22703,10 +22703,13 @@ var init_db = __esm({
         ).all(connectionId, type) : this.db.prepare(`SELECT * FROM artifacts WHERE connection_id = ? ORDER BY type, api_name`).all(connectionId);
         return rows.map(rowToArtifact);
       }
+      /** Prepared on first use and kept: one validate can look up thousands of names. */
+      getArtifactStatement;
       getArtifact(connectionId, type, apiName) {
-        const row = this.db.prepare(
+        this.getArtifactStatement ??= this.db.prepare(
           `SELECT * FROM artifacts WHERE connection_id = ? AND type = ? AND api_name = ? COLLATE NOCASE`
-        ).get(connectionId, type, apiName);
+        );
+        const row = this.getArtifactStatement.get(connectionId, type, apiName);
         return row ? rowToArtifact(row) : null;
       }
       /**
@@ -24288,7 +24291,12 @@ var init_config = __esm({
         // BotTemplate, BotBlock — and, S44, AiTestingDefinition and
         // AiAgentScorerDefinition) are explicit-refresh-only too — they are
         // licensing-gated (unlicensed orgs report them unsupported, degraded
-        // per-type with a warning) and need salesforce.apiVersion v66+.
+        // per-type with a warning) and need salesforce.apiVersion v66+. S47:
+        // OmniDataTransform (Omnistudio Data Mappers) is explicit-refresh-only
+        // too — refresh_snapshot types:['OmniDataTransform']. Salesforce's type
+        // page requires an Omnistudio licence, and with the org's Omnistudio
+        // Metadata setting off a probed org listed none of the Data Mappers it
+        // held as records.
         types: [
           "ApexClass",
           "ApexTrigger",
@@ -29568,6 +29576,79 @@ function asArray(value) {
   if (value === void 0 || value === null) return [];
   return Array.isArray(value) ? value : [value];
 }
+function xmlBlocks(text2, tag) {
+  const blocks = [];
+  forEachXmlBlock(text2, tag, (start, end) => {
+    blocks.push(text2.slice(start, end));
+  });
+  return blocks;
+}
+function xmlBlockText(text2, tag) {
+  const open2 = `<${tag}>`;
+  const at = text2.indexOf(open2);
+  if (at === -1) return void 0;
+  const start = at + open2.length;
+  const end = text2.indexOf(`</${tag}>`, start);
+  return end === -1 ? void 0 : text2.slice(start, end);
+}
+function withoutXmlBlocks(text2, tag) {
+  let kept = "";
+  let from = 0;
+  forEachXmlBlock(text2, tag, (start, end) => {
+    kept += text2.slice(from, start);
+    from = end;
+  });
+  return kept + text2.slice(from);
+}
+function forEachXmlBlock(text2, tag, visit) {
+  const open2 = `<${tag}>`;
+  const close = `</${tag}>`;
+  for (let from = 0; ; ) {
+    const start = text2.indexOf(open2, from);
+    if (start === -1) return;
+    const at = text2.indexOf(close, start + open2.length);
+    if (at === -1) return;
+    from = at + close.length;
+    visit(start, from);
+  }
+}
+function xmlTagValue(text2, tag, opts = {}) {
+  const hay = opts.ignoreCase ? foldAsciiCase(text2) : text2;
+  const name = opts.ignoreCase ? foldAsciiCase(tag) : tag;
+  const open2 = `<${name}>`;
+  const close = `</${name}>`;
+  for (let at = hay.indexOf(open2); at !== -1; ) {
+    const start = at + open2.length;
+    const lt = hay.indexOf("<", start);
+    if (lt === -1) return void 0;
+    if (hay.startsWith(close, lt)) {
+      const raw = text2.slice(start, lt);
+      const value = raw.trim();
+      if (value !== "" || opts.emptyOk) return value;
+      if (raw !== "") return raw.slice(-1);
+    }
+    at = hay.indexOf(open2, lt);
+  }
+  return void 0;
+}
+function xmlTagTexts(text2, tag, opts = {}) {
+  const hay = opts.ignoreCase ? foldAsciiCase(text2) : text2;
+  const name = opts.ignoreCase ? foldAsciiCase(tag) : tag;
+  const open2 = `<${name}>`;
+  const close = `</${name}>`;
+  const texts = [];
+  for (let at = hay.indexOf(open2); at !== -1; ) {
+    const start = at + open2.length;
+    const lt = hay.indexOf("<", start);
+    if (lt === -1) break;
+    if (hay.startsWith(close, lt)) texts.push(text2.slice(start, lt));
+    at = hay.indexOf(open2, lt);
+  }
+  return texts;
+}
+function foldAsciiCase(s) {
+  return s.replace(/[A-Z]+/g, (letters) => letters.toLowerCase());
+}
 function xmlDig(node, ...path17) {
   let current = node;
   for (const key2 of path17) {
@@ -29941,6 +30022,121 @@ var init_metadataSoap = __esm({
   }
 });
 
+// src/salesforce/omnistudioSettings.ts
+async function readOmniStudioMetadataSetting(soap, opts) {
+  if (opts.signal?.aborted) return unknown2("cancelled");
+  const stop = new AbortController();
+  let timer;
+  let onAbort;
+  const cut = new Promise((resolve) => {
+    timer = setTimeout(
+      () => resolve(unknown2(`timed out after ${opts.timeoutMs} ms`)),
+      opts.timeoutMs
+    );
+    timer.unref?.();
+    onAbort = () => resolve(unknown2("cancelled"));
+    opts.signal?.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([readSetting(soap, opts.pollIntervalMs, stop.signal), cut]);
+  } finally {
+    clearTimeout(timer);
+    if (onAbort) opts.signal?.removeEventListener("abort", onAbort);
+    stop.abort();
+  }
+}
+async function readSetting(soap, pollIntervalMs, stop) {
+  try {
+    const id = await soap.retrieve({ Settings: ["OmniStudio"] });
+    for (; ; ) {
+      if (stop.aborted) return unknown2("cancelled");
+      const status = await soap.checkRetrieveStatus(id, true);
+      if (status.done) {
+        if (!status.success || !status.zipFile) {
+          const why = status.errorMessage ?? status.status;
+          return unknown2(`the settings retrieve failed: ${clip(why)}`);
+        }
+        return settingFromZip(status.zipFile, status.messages ?? []);
+      }
+      await delay2(pollIntervalMs, stop);
+    }
+  } catch (err2) {
+    return unknown2(`the settings retrieve failed: ${clip(errorMessage(err2))}`);
+  }
+}
+function settingFromZip(zip, messages) {
+  let xml;
+  try {
+    const entries = unzipSync(zip, { filter: (f) => f.name.endsWith(SETTINGS_FILE) });
+    const key2 = Object.keys(entries).find((k) => k.endsWith(SETTINGS_FILE));
+    if (key2 !== void 0) xml = strFromU8(entries[key2]);
+  } catch (err2) {
+    return unknown2(`the settings retrieve's zip could not be read: ${clip(errorMessage(err2))}`);
+  }
+  if (xml === void 0) {
+    const said = messages.map((m2) => m2.problem).join("; ");
+    return unknown2(
+      `the settings retrieve returned no OmniStudio settings file${said ? `: ${clip(said)}` : ""}`
+    );
+  }
+  const m = /<enableOmniStudioMetadata>\s*(true|false)\s*<\/enableOmniStudioMetadata>/.exec(xml);
+  if (!m) {
+    return unknown2(
+      "the org's OmniStudioSettings has no enableOmniStudioMetadata field (no Omnistudio licence?)"
+    );
+  }
+  return { state: m[1] === "true" ? "on" : "off" };
+}
+function omniStudioValidateText(alias, setting, where) {
+  if (setting.state === "on") return null;
+  if (setting.state === "off") {
+    return `OMNISTUDIO METADATA IS OFF in "${alias}" \u2014 Salesforce Help says the Metadata API can't deploy Omnistudio components until an admin turns on Omnistudio Metadata (Setup \u2192 Omnistudio Settings; it can't be turned off again). Data Mappers that exist there as records are invisible to Contrail` + (where === "page" ? ", so ADD / NOT IN TARGET below does not prove none exists." : where === "dry" ? ', so a change of "add" here does not prove none exists.' : ".");
+  }
+  const reason = setting.reason ?? "no reason given";
+  return `Omnistudio Metadata setting not read in "${alias}" (${reason}). Per Salesforce Help, the Metadata API deploys Omnistudio components only where that setting is on.` + (where === "page" ? " If it is off, Data Mappers that exist there as records are invisible to Contrail, so ADD / NOT IN TARGET below does not prove none exists." : where === "dry" ? ' If it is off, Data Mappers that exist there as records are invisible to Contrail, so a change of "add" here does not prove none exists.' : "");
+}
+function omniStudioRefreshText(setting) {
+  if (setting.state === "off") {
+    return "OmniDataTransform: 0 listed \u2014 the org's Omnistudio Metadata setting is off, so its Data Mappers are records the Metadata API can't list or retrieve.";
+  }
+  if (setting.state === "unknown") {
+    return `OmniDataTransform: 0 listed, and the org's Omnistudio Metadata setting could not be read (${setting.reason ?? "no reason given"}); where that setting is off, Data Mappers are records the Metadata API can't list, so 0 may not mean none.`;
+  }
+  return null;
+}
+function clip(text2) {
+  return text2.length > 200 ? `${text2.slice(0, 200)}\u2026` : text2;
+}
+function errorMessage(err2) {
+  try {
+    return String(err2 instanceof Error ? err2.message : err2);
+  } catch {
+    return "an error with no readable message";
+  }
+}
+function delay2(ms, signal) {
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    timer.unref?.();
+    signal.addEventListener("abort", done, { once: true });
+  });
+}
+var OMNISTUDIO_SETTING_TIMEOUT_MS, SETTINGS_FILE, unknown2;
+var init_omnistudioSettings = __esm({
+  "src/salesforce/omnistudioSettings.ts"() {
+    "use strict";
+    init_esm2();
+    OMNISTUDIO_SETTING_TIMEOUT_MS = 3e4;
+    SETTINGS_FILE = "settings/OmniStudio.settings";
+    unknown2 = (reason) => ({ state: "unknown", reason });
+  }
+});
+
 // src/salesforce/rest.ts
 function truncate(s, n) {
   return s.length > n ? `${s.slice(0, n)}\u2026` : s;
@@ -30188,14 +30384,21 @@ ${f.text}`).join("\n");
   return artifacts;
 }
 function extractChildBlocks(xml, tag) {
-  const re = new RegExp(`<${tag}>[\\s\\S]*?</${tag}>`, "g");
-  return xml.match(re) ?? [];
+  return xmlBlocks(xml, tag);
 }
 function findChildBlock(xml, tag, fullName) {
   for (const block of extractChildBlocks(xml, tag)) {
     if (blockFullName(block)?.toLowerCase() === fullName.toLowerCase()) return block;
   }
   return null;
+}
+function childBlockNames(xml, tag) {
+  const names = /* @__PURE__ */ new Set();
+  for (const block of extractChildBlocks(xml, tag)) {
+    const name = blockFullName(block);
+    if (name !== null) names.add(name.toLowerCase());
+  }
+  return names;
 }
 function blockFullName(block) {
   const m = block.match(/<fullName>([^<]+)<\/fullName>/);
@@ -30226,6 +30429,7 @@ var init_indexer = __esm({
   "src/snapshot/indexer.ts"() {
     "use strict";
     init_log();
+    init_xml();
     SIMPLE_DIR_TYPES = [
       { dir: "classes", ext: ".cls", type: "ApexClass" },
       { dir: "triggers", ext: ".trigger", type: "ApexTrigger" },
@@ -30284,7 +30488,12 @@ var init_indexer = __esm({
       { dir: "customPermissions", ext: ".customPermission", type: "CustomPermission" },
       { dir: "permissionsetgroups", ext: ".permissionsetgroup", type: "PermissionSetGroup" },
       { dir: "mutingpermissionsets", ext: ".mutingpermissionset", type: "MutingPermissionSet" },
-      { dir: "quickActions", ext: ".quickAction", type: "QuickAction" }
+      { dir: "quickActions", ext: ".quickAction", type: "QuickAction" },
+      // S47: Omnistudio Data Mappers — a flat single-file type (describeMetadata
+      // v68, 2026-11-20: suffix rpt, no metaFile); the generic -meta.xml skip is
+      // correct. fileBaseName strips only the final extension, so a versioned
+      // fullName (Name_1) survives intact.
+      { dir: "omniDataTransforms", ext: ".rpt", type: "OmniDataTransform" }
     ];
     FOLDERED_DIR_TYPES = [
       { dir: "reports", ext: ".report", type: "Report", folderType: "ReportFolder" },
@@ -30568,9 +30777,9 @@ function extractBotRefs(xml) {
   return refs.list();
 }
 function addSubjectRef(refs, xml) {
-  const subject = xml.match(/<subjectName>\s*([^<]+?)\s*<\/subjectName>/)?.[1];
+  const subject = xmlTagValue(xml, "subjectName");
   if (!subject) return;
-  const kind = xml.match(/<subjectType>\s*([^<]+?)\s*<\/subjectType>/)?.[1]?.toUpperCase();
+  const kind = xmlTagValue(xml, "subjectType")?.toUpperCase();
   refs.add(kind === "PROMPT" ? "GenAiPromptTemplate" : "Bot", subject);
 }
 function extractAiEvaluationDefinitionRefs(xml) {
@@ -30581,13 +30790,38 @@ function extractAiEvaluationDefinitionRefs(xml) {
 function extractAiTestingDefinitionRefs(xml) {
   const refs = new RefSet();
   addSubjectRef(refs, xml);
-  for (const m of xml.matchAll(/<scorer(?:\s[^>]*)?>([\s\S]*?)<\/scorer>/g)) {
-    const name = m[1].match(/<name>\s*([^<]+?)\s*<\/name>/)?.[1];
+  for (const text2 of scorerTexts(xml)) {
+    const name = xmlTagValue(text2, "name");
     if (name && !isStudioCatalogScorer(name)) {
       refs.add("AiAgentScorerDefinition", name);
     }
   }
   return refs.list();
+}
+function scorerTexts(xml) {
+  const open2 = "<scorer";
+  const close = "</scorer>";
+  const texts = [];
+  for (let at = xml.indexOf(open2); at !== -1; ) {
+    const after = at + open2.length;
+    const next = xml[after];
+    let start;
+    if (next === ">") {
+      start = after + 1;
+    } else if (next !== void 0 && /\s/.test(next)) {
+      const gt = xml.indexOf(">", after + 1);
+      if (gt === -1) break;
+      start = gt + 1;
+    } else {
+      at = xml.indexOf(open2, at + 1);
+      continue;
+    }
+    const end = xml.indexOf(close, start);
+    if (end === -1) break;
+    texts.push(xml.slice(start, end));
+    at = xml.indexOf(open2, end + close.length);
+  }
+  return texts;
 }
 function extractAiAgentScorerDefinitionRefs(xml) {
   const refs = new RefSet();
@@ -30596,6 +30830,39 @@ function extractAiAgentScorerDefinitionRefs(xml) {
   }
   for (const m of xml.matchAll(/<agentApiName>([^<]+)<\/agentApiName>/g)) {
     refs.add("Bot", m[1]);
+  }
+  return refs.list();
+}
+function extractOmniDataTransformRefs(xml, known) {
+  const refs = new RefSet();
+  const ident = /^[A-Za-z][A-Za-z0-9_]*$/;
+  const ROW = "omniDataTransformItem";
+  const ROW_OPEN = `<${ROW}>`;
+  const ROW_CLOSE = `</${ROW}>`;
+  const isLoad = /<type>\s*Load\s*<\/type>/i.test(withoutXmlBlocks(xml, ROW));
+  const value = (row, tag) => xmlTagValue(row, tag, { emptyOk: true }) ?? "";
+  const addObject = (raw) => {
+    if (!ident.test(raw) || raw.toLowerCase() === "json") return;
+    const object3 = known.objects.get(raw.toLowerCase());
+    if (object3) refs.add("CustomObject", object3);
+  };
+  const addField = (object3, field) => {
+    if (!ident.test(object3) || !ident.test(field) || object3.toLowerCase() === "json") return;
+    const qualified = known.fields.get(`${object3}.${field}`.toLowerCase());
+    if (qualified) refs.add("CustomField", qualified);
+  };
+  for (const block of xmlBlocks(xml, ROW)) {
+    const row = block.slice(ROW_OPEN.length, block.length - ROW_CLOSE.length);
+    const output = value(row, "outputObjectName");
+    const lookup = value(row, "lookupObjectName");
+    addObject(value(row, "inputObjectName"));
+    addObject(output);
+    addObject(lookup);
+    if (isLoad) addField(output, value(row, "outputFieldName"));
+    if (lookup) {
+      addField(lookup, value(row, "lookupByFieldName"));
+      addField(lookup, value(row, "lookupReturnedFieldName"));
+    }
   }
   return refs.list();
 }
@@ -30789,6 +31056,8 @@ function extractAllEdges(connectionId, artifacts, known = buildKnownArtifacts(ar
       add(a.type, a.apiName, extractAiTestingDefinitionRefs(a.content));
     } else if (a.type === "AiAgentScorerDefinition") {
       add(a.type, a.apiName, extractAiAgentScorerDefinitionRefs(a.content));
+    } else if (a.type === "OmniDataTransform") {
+      add(a.type, a.apiName, extractOmniDataTransformRefs(a.content, known));
     } else if (a.type === "NamedCredential") {
       add(a.type, a.apiName, extractNamedCredentialRefs(a.content));
     } else if (a.type === "ExternalCredential") {
@@ -31250,6 +31519,15 @@ function validateTypeAndName(type, name) {
     }
     return;
   }
+  if (type === "OmniDataTransform") {
+    if (!/^[A-Za-z0-9]+(_[0-9]+)?$/.test(name)) {
+      throw new ContrailError(
+        `invalid OmniDataTransform name "${name}" \u2014 letters and digits, optionally _<version> (e.g. AccountSummaryExtract_1). Per Salesforce Help, Data Mapper names hold letters and digits only once Omnistudio Metadata is on; Salesforce's guides name the files <Name>_<version> (exact fullName rule not yet confirmed).`,
+        "bad_component"
+      );
+    }
+    return;
+  }
   if (!NAME_RE.test(name) || name.includes("/")) {
     throw new ContrailError(`invalid component name "${name}"`, "bad_component");
   }
@@ -31356,6 +31634,11 @@ function changeDependentWarnings(input) {
       `SCORER VERSIONS ARE APPEND-ONLY \u2014 the org never deletes a <scorerVersion>: one omitted from this document is NOT removed` + (omitted.length > 0 ? ` (org-side versions omitted here: ${omitted.join(", ")})` : "") + `. Status is documented one-way (Draft \u2192 Available \u2192 Archived); a regression here is not something the org performs` + (regressed.length > 0 ? ` (regressed here: ${regressed.join("; ")})` : "") + `. Retrieve-first, carry every existing version forward, edit only Draft versions.`
     );
   }
+  if (type === "OmniDataTransform" && change === "modify") {
+    warnings.push(
+      `MODIFY OF AN EXISTING DATA MAPPER \u2014 whether the org updates it in place (per Salesforce Help, an active version can't be edited once Data Mapper Versioning is on) is not confirmed, nor whether mapping rows omitted here are removed org-side; carry every row from a fresh retrieve.`
+    );
+  }
   if ((type === "ReportFolder" || type === "DashboardFolder") && change === "modify") {
     warnings.push(
       `FOLDER REPLACE \u2014 the folderShares in this content fully replace the folder's sharing; shares omitted here are revoked.`
@@ -31404,6 +31687,7 @@ function auraBundleReferenced(db, conn, components, c) {
 }
 function analyzeChanges(db, store, conn, components, deletions) {
   const changes = [];
+  let packageGrants;
   for (const c of components) {
     if (c.type === "FlowDefinition" && /<activeVersionNumber>\s*0\s*<\/activeVersionNumber>/.test(c.content)) {
       changes.push({
@@ -31452,9 +31736,8 @@ function analyzeChanges(db, store, conn, components, deletions) {
         warnings2.push(
           `DRAFT STAGE ONLY \u2014 this deploy stages Agent Script as a draft in Agentforce Studio. Nothing is compiled and the RUNNING AGENT IS UNCHANGED: topics, actions, and behavior go live only when a human publishes the draft (Agentforce Studio, or Salesforce's Agentforce DX publish command). A green deploy here is a staged draft, not a shipped agent.`
         );
-        const target = proposed[`${c.api_name}.bundle-meta.xml`]?.match(
-          /<target>\s*([^<]+?)\s*<\/target>/
-        )?.[1];
+        const meta = proposed[`${c.api_name}.bundle-meta.xml`];
+        const target = meta === void 0 ? void 0 : xmlTagValue(meta, "target");
         if (target) {
           warnings2.push(
             `TARGET LINK, NOT A COMPILE \u2014 <target> pins this bundle to runtime version "${target}"; the deploy FAILS unless that Bot/BotVersion already exists in the org or ships in this same package. Linking never compiles or publishes anything.`
@@ -31478,11 +31761,10 @@ function analyzeChanges(db, store, conn, components, deletions) {
         const mainBody = proposed[mainFile] ?? "";
         const controller = mainBody.match(/\bcontroller="([A-Za-z][A-Za-z0-9_]*)"/)?.[1];
         if (controller) {
-          const containerText = components.filter((p) => p.type === "PermissionSet" || p.type === "Profile").map((p) => p.content).join("\n");
-          const granted = permissionBlocks(containerText, "classAccesses").some(
-            (b) => new RegExp(`<apexClass>\\s*${controller}\\s*</apexClass>`, "i").test(b) && /<enabled>\s*true\s*<\/enabled>/i.test(b)
+          packageGrants ??= grantChecker(
+            components.filter((p) => p.type === "PermissionSet" || p.type === "Profile").map((p) => p.content).join("\n")
           );
-          if (!granted) {
+          if (!packageGrants("class", controller)) {
             warnings2.push(
               `server-side controller "${controller}" \u2014 users need Apex class access (classAccesses) for it, and no permission set in this package grants it (it may already be granted org-side; not checkable from here).`
             );
@@ -31515,7 +31797,7 @@ function analyzeChanges(db, store, conn, components, deletions) {
       warnings.push(
         `BETA SUITE, RUNS NOTHING \u2014 this deploy stores an Agentforce Studio test suite; it executes no test. Runs happen through run_agent_eval (on the org probed a deployed suite appeared in the Studio Tests tab only after its first run, never in Testing Center); Salesforce marks both the type and its runner Beta (grammar and runner can change). Contrail does not validate scorer names; per Salesforce's library the org refuses an unknown name at deploy \u2014 not yet live-confirmed, so a green deploy never proves a scorer ran.`
       );
-      const cases = c.content.match(/<testCase>[\s\S]*?<\/testCase>/g) ?? [];
+      const cases = xmlBlocks(c.content, "testCase");
       const multi = cases.filter((t) => /<conversationHistory>/.test(t)).length;
       const single = cases.length - multi;
       if (multi > 0 && single > 0) {
@@ -31528,6 +31810,17 @@ function analyzeChanges(db, store, conn, components, deletions) {
       warnings.push(
         `SYSTEM-PROVISIONED SCORER \u2014 Salesforce creates std_* scorers for each agent (last modified by Automated Process); an edit may be overwritten or refused org-side. Author your own scorer name for custom logic.`
       );
+    }
+    if (c.type === "OmniDataTransform") {
+      warnings.push(
+        `OMNISTUDIO DATA MAPPER \u2014 deploys only where the org's Omnistudio Metadata setting is on (per Salesforce Help). Its <active> value decides whether it lands active (per a Salesforce blog \u2014 not yet confirmed here). Formula items need the Data Mapper Designer (formulaConverted is Designer-computed); check the result in the Designer's Preview.`
+      );
+      const uniqueName = omniDataTransformUniqueName(c.content);
+      if (uniqueName && uniqueName !== c.api_name) {
+        warnings.push(
+          `UNIQUENAME MISMATCH \u2014 api_name ${c.api_name} differs from the file's uniqueName ${uniqueName}; Salesforce's guides name Data Mapper files <Name>_<version> (fullName rule not yet confirmed).`
+        );
+      }
     }
     if (c.type === "PermissionSetGroup") {
       warnings.push(
@@ -31553,6 +31846,16 @@ function analyzeChanges(db, store, conn, components, deletions) {
       ).map((x) => x.api_name)
     );
     const refHosts = /* @__PURE__ */ new Set(["FlexiPage", "QuickAction", "Flow", "CustomTab"]);
+    const indexed = /* @__PURE__ */ new Map();
+    const inIndex = (name) => {
+      const key2 = name.toLowerCase();
+      let found = indexed.get(key2);
+      if (found === void 0) {
+        found = db.getArtifact(conn.id, "AuraDefinitionBundle", name) !== null || db.getArtifact(conn.id, "LightningComponentBundle", name) !== null;
+        indexed.set(key2, found);
+      }
+      return found;
+    };
     for (const entry of changes) {
       if (!refHosts.has(entry.type)) continue;
       const comp = components.find(
@@ -31562,11 +31865,9 @@ function analyzeChanges(db, store, conn, components, deletions) {
       const missing = /* @__PURE__ */ new Set();
       for (const m of comp.content.matchAll(/\bc:([A-Za-z][A-Za-z0-9_]*)/g)) {
         const name = m[1];
-        if (packagedBundles.has(name)) continue;
-        if (db.getArtifact(conn.id, "AuraDefinitionBundle", name) || db.getArtifact(conn.id, "LightningComponentBundle", name)) {
-          continue;
-        }
+        if (packagedBundles.has(name) || missing.has(name) || inIndex(name)) continue;
         missing.add(name);
+        if (missing.size === 5) break;
       }
       if (missing.size > 0) {
         const list = [...missing].slice(0, 5).join(", ");
@@ -31595,6 +31896,17 @@ function analyzeChanges(db, store, conn, components, deletions) {
     }
     return { type: d.type, api_name: d.api_name, change: "delete", warnings };
   });
+  {
+    const packageTypes = new Set([...components, ...deletions].map((x) => x.type));
+    if (packageTypes.has("OmniDataTransform") && packageTypes.size > 1) {
+      for (const entry of [...changes, ...destructive]) {
+        if (entry.type !== "OmniDataTransform") continue;
+        entry.warnings.push(
+          `MIXED PACKAGE \u2014 Salesforce says Omnistudio components can't share a deploy with setup metadata (permission sets, profiles, fields, FlexiPages, Expression Sets); if the org refuses, deploy the Data Mappers on their own.`
+        );
+      }
+    }
+  }
   return { changes, destructive };
 }
 function sourceOf(c) {
@@ -31602,85 +31914,97 @@ function sourceOf(c) {
 }
 function externalCredentialPrincipals(xml) {
   const names = [];
-  for (const block of xml.match(/<externalCredentialParameters>[\s\S]*?<\/externalCredentialParameters>/g) ?? []) {
-    const type = block.match(/<parameterType>\s*([^<]+?)\s*<\/parameterType>/)?.[1] ?? "";
+  for (const block of xmlBlocks(xml, "externalCredentialParameters")) {
+    const type = xmlTagValue(block, "parameterType") ?? "";
     if (!/^(NamedPrincipal|PerUserPrincipal)$/i.test(type)) continue;
-    const name = block.match(/<parameterName>\s*([^<]+?)\s*<\/parameterName>/)?.[1];
+    const name = xmlTagValue(block, "parameterName");
     if (name) names.push(name);
   }
   return names;
 }
 function scorerVersionStatuses(xml) {
   const out = /* @__PURE__ */ new Map();
-  for (const block of xml.match(/<scorerVersion>[\s\S]*?<\/scorerVersion>/g) ?? []) {
+  for (const block of xmlBlocks(xml, "scorerVersion")) {
     const n = block.match(/<versionNumber>\s*(\d+)\s*<\/versionNumber>/)?.[1];
     const s = block.match(/<status>\s*([A-Za-z]+)\s*<\/status>/)?.[1];
     if (n) out.set(n, s ?? "");
   }
   return out;
 }
+function omniDataTransformUniqueName(content) {
+  return xmlTagValue(withoutXmlBlocks(content, "omniDataTransformItem"), "uniqueName", {
+    emptyOk: true
+  });
+}
 function isCustomEntity(name) {
   return /__(c|b|e|x)$/i.test(name);
 }
 function inlineFieldNames(objectXml) {
   const names = [];
-  for (const block of objectXml.match(/<fields>[\s\S]*?<\/fields>/g) ?? []) {
+  for (const block of xmlBlocks(objectXml, "fields")) {
     const m = block.match(/<fullName>([^<]+)<\/fullName>/);
     if (m?.[1]) names.push(m[1].trim());
   }
   return names;
 }
 function permissionBlocks(text2, tag) {
-  return text2.match(new RegExp(`<${tag}>[\\s\\S]*?</${tag}>`, "g")) ?? [];
+  return xmlBlocks(text2, tag);
 }
-function isGranted(containerText, need) {
-  const named = (block, tag, name) => new RegExp(`<${tag}>\\s*${escapeRegex2(name)}\\s*</${tag}>`, "i").test(block);
-  const flagOn = (block, flag) => new RegExp(`<${flag}>\\s*true\\s*</${flag}>`, "i").test(block);
-  switch (need.kind) {
-    case "field":
-      return permissionBlocks(containerText, "fieldPermissions").some(
-        (b) => named(b, "field", need.api_name) && flagOn(b, "readable")
-      );
-    case "object":
-      return permissionBlocks(containerText, "objectPermissions").some(
-        (b) => named(b, "object", need.api_name) && flagOn(b, "allowRead")
-      );
-    case "class":
-      return permissionBlocks(containerText, "classAccesses").some(
-        (b) => named(b, "apexClass", need.api_name) && flagOn(b, "enabled")
-      );
-    case "page":
-      return permissionBlocks(containerText, "pageAccesses").some(
-        (b) => named(b, "apexPage", need.api_name) && flagOn(b, "enabled")
-      );
-    case "application":
-      return permissionBlocks(containerText, "applicationVisibilities").some(
-        (b) => named(b, "application", need.api_name) && flagOn(b, "visible")
-      );
-    case "agent":
-      return permissionBlocks(containerText, "agentAccesses").some(
-        (b) => named(b, "agentName", need.api_name) && flagOn(b, "enabled")
-      );
-    case "credentialPrincipal":
-      return permissionBlocks(containerText, "externalCredentialPrincipalAccesses").some(
-        (b) => named(b, "externalCredentialPrincipal", need.api_name) && flagOn(b, "enabled")
-      );
-    case "customPermission":
-      return permissionBlocks(containerText, "customPermissions").some(
-        (b) => named(b, "name", need.api_name) && flagOn(b, "enabled")
-      );
-    case "tab": {
-      const blocks = [
-        ...permissionBlocks(containerText, "tabVisibilities"),
-        ...permissionBlocks(containerText, "tabSettings")
-      ];
-      return blocks.some((b) => {
-        if (!named(b, "tab", need.api_name)) return false;
-        const vis = b.match(/<visibility>\s*([^<]+?)\s*<\/visibility>/i)?.[1] ?? "";
-        return !/^(hidden|none)$/i.test(vis);
-      });
+function grantChecker(containerText) {
+  const byKind = /* @__PURE__ */ new Map();
+  const answers = /* @__PURE__ */ new Map();
+  return (kind, apiName) => {
+    const key2 = `${kind}:${apiName}`;
+    let granted = answers.get(key2);
+    if (granted === void 0) {
+      let grants = byKind.get(kind);
+      if (grants === void 0) {
+        grants = grantIndex(containerText, GRANT_RULES[kind]);
+        byKind.set(kind, grants);
+      }
+      granted = grants(apiName);
+      answers.set(key2, granted);
+    }
+    return granted;
+  };
+}
+function grantIndex(containerText, rule) {
+  const flagOn = rule.flag === null ? null : new RegExp(`<${rule.flag}>\\s*true\\s*</${rule.flag}>`, "i");
+  const granting = [];
+  for (const tag of rule.blocks) {
+    for (const block of permissionBlocks(containerText, tag)) {
+      const on = flagOn ? flagOn.test(block) : !/^(hidden|none)$/i.test(xmlTagValue(block, "visibility", { ignoreCase: true }) ?? "");
+      if (on) granting.push(block);
     }
   }
+  const filed = /* @__PURE__ */ new Map();
+  granting.forEach((block, i) => {
+    for (const text2 of xmlTagTexts(block, rule.name, { ignoreCase: true })) {
+      const key2 = regexCaseKey(text2.trim());
+      const list = filed.get(key2);
+      if (list === void 0) filed.set(key2, [i]);
+      else if (list[list.length - 1] !== i) list.push(i);
+    }
+  });
+  return (apiName) => {
+    const holdsLt = apiName.includes("<");
+    const trimmed = apiName.trim();
+    if (!holdsLt && trimmed === apiName) return filed.has(regexCaseKey(apiName));
+    const named = new RegExp(`<${rule.name}>\\s*${escapeRegex2(apiName)}\\s*</${rule.name}>`, "i");
+    if (holdsLt) return granting.some((block) => named.test(block));
+    const candidates = filed.get(regexCaseKey(trimmed)) ?? [];
+    return candidates.some((i) => named.test(granting[i]));
+  };
+}
+function regexCaseKey(s) {
+  if (!/[\u0080-\uffff]/.test(s)) return s.toUpperCase();
+  let key2 = "";
+  for (let i = 0; i < s.length; i++) {
+    const unit = s[i];
+    const upper = unit.toUpperCase();
+    key2 += upper.length === 1 && !(unit.charCodeAt(0) >= 128 && upper.charCodeAt(0) < 128) ? upper : unit;
+  }
+  return key2;
 }
 function analyzePermissionCoverage(components, presence) {
   const containers = components.filter((c) => c.type === "PermissionSet" || c.type === "Profile");
@@ -31742,7 +32066,8 @@ function analyzePermissionCoverage(components, presence) {
     if (need.owner && presence?.(need.owner.type, need.owner.api_name) === false) return "new";
     return "unknown";
   };
-  const uncovered = needs.filter((n) => !isGranted(containerText, n)).map((n) => ({
+  const isGranted = grantChecker(containerText);
+  const uncovered = needs.filter((n) => !isGranted(n.kind, n.api_name)).map((n) => ({
     type: n.type,
     api_name: n.api_name,
     permission: n.permission,
@@ -31795,14 +32120,13 @@ function readOldContent(store, conn, type, apiName, filePath) {
   const child = typeEntry(CHILD_TYPES, type);
   if (!child) return file;
   const childName = type === "CustomLabel" ? apiName : apiName.split(".").slice(1).join(".");
-  const re = new RegExp(`<${child.tag}>[\\s\\S]*?</${child.tag}>`, "g");
-  for (const block of file.match(re) ?? []) {
+  for (const block of xmlBlocks(file, child.tag)) {
     const m = block.match(/<fullName>([^<]+)<\/fullName>/);
     if (m?.[1]?.toLowerCase() === childName.toLowerCase()) return block;
   }
   return null;
 }
-var FILE_TYPES, XMLNS_META, CHILD_TYPES, NAME_RE, FOLDER_SEGMENT_RE, BUNDLE_REL_SEGMENT_RE, BUNDLE_MAX_FILES, BUNDLE_MAX_DEPTH, AURA_SECONDARIES, AURA_MAX_FILE_BYTES, AURA_DEFTYPE_FILES, XMLNS, MANIFEST_TYPE_AFTER, SCORER_STATUS_RANK;
+var FILE_TYPES, XMLNS_META, CHILD_TYPES, NAME_RE, FOLDER_SEGMENT_RE, BUNDLE_REL_SEGMENT_RE, BUNDLE_MAX_FILES, BUNDLE_MAX_DEPTH, AURA_SECONDARIES, AURA_MAX_FILE_BYTES, AURA_DEFTYPE_FILES, XMLNS, MANIFEST_TYPE_AFTER, SCORER_STATUS_RANK, GRANT_RULES;
 var init_package = __esm({
   "src/deploy/package.ts"() {
     "use strict";
@@ -31984,7 +32308,16 @@ var init_package = __esm({
         envelopeMainSuffix: [".cmp", ".app", ".evt", ".intf", ".tokens"],
         requireMainMeta: true,
         flat: true
-      }
+      },
+      // S47: Omnistudio Data Mappers. describeMetadata at v68 (2026-11-20):
+      // directory omniDataTransforms, suffix rpt, inFolder=false,
+      // metaFile=false, no child types — a plain single-file document, no meta
+      // sidecar, no envelope. The Industries developer-guide page's
+      // .omniDataTransform suffix is wrong (describe and Salesforce's CLI
+      // registry both say rpt). Per Salesforce Help the Metadata API deploys
+      // these only where the org's Omnistudio Metadata setting is on; the
+      // analyzeChanges arms say so on every approval page. Explicit-refresh-only.
+      OmniDataTransform: { dir: "omniDataTransforms", ext: ".rpt" }
     };
     XMLNS_META = "http://soap.sforce.com/2006/04/metadata";
     CHILD_TYPES = {
@@ -32066,6 +32399,28 @@ var init_package = __esm({
       AiAgentScorerDefinition: ["GenAiPromptTemplate"]
     };
     SCORER_STATUS_RANK = { Draft: 0, Available: 1, Archived: 2 };
+    GRANT_RULES = {
+      field: { blocks: ["fieldPermissions"], name: "field", flag: "readable" },
+      object: { blocks: ["objectPermissions"], name: "object", flag: "allowRead" },
+      class: { blocks: ["classAccesses"], name: "apexClass", flag: "enabled" },
+      page: { blocks: ["pageAccesses"], name: "apexPage", flag: "enabled" },
+      application: { blocks: ["applicationVisibilities"], name: "application", flag: "visible" },
+      // S30: agent access is a REAL PermissionSet block (contrast the
+      // Report/Dashboard folder-sharing absence below).
+      agent: { blocks: ["agentAccesses"], name: "agentName", flag: "enabled" },
+      // S33: external credential principals are granted by name
+      // "<ExtCredDevName>-<principalName>" in a real PermissionSet block.
+      credentialPrincipal: {
+        blocks: ["externalCredentialPrincipalAccesses"],
+        name: "externalCredentialPrincipal",
+        flag: "enabled"
+      },
+      // S36: custom permissions grant via <customPermissions><enabled>true
+      // </enabled><name>X</name></customPermissions> (live-confirmed from a
+      // real org's permission set; Profiles use the identical block shape).
+      customPermission: { blocks: ["customPermissions"], name: "name", flag: "enabled" },
+      tab: { blocks: ["tabVisibilities", "tabSettings"], name: "tab", flag: null }
+    };
   }
 });
 
@@ -32401,6 +32756,27 @@ import path5 from "node:path";
 function preImageKey(type, apiName) {
   return `${type}:${apiName}`;
 }
+function livePresence(images) {
+  const fieldNames = /* @__PURE__ */ new Map();
+  return (type, apiName) => {
+    const image = images.get(preImageKey(type, apiName));
+    if (image) return image.present;
+    if (type === "CustomField") {
+      const dot = apiName.indexOf(".");
+      const obj = dot > 0 ? images.get(preImageKey("CustomObject", apiName.slice(0, dot))) : void 0;
+      if (obj?.present === false) return false;
+      if (obj?.present === true && obj.content !== void 0) {
+        let names = fieldNames.get(obj);
+        if (names === void 0) {
+          names = childBlockNames(obj.content, "fields");
+          fieldNames.set(obj, names);
+        }
+        return names.has(apiName.slice(dot + 1).toLowerCase());
+      }
+    }
+    return null;
+  };
+}
 function preImageRetrieveMemberFor(type, apiName) {
   if (stampSourceFor(type) !== "listMetadata" && isProbeable({ type, api_name: apiName })) {
     return { type, member: apiName };
@@ -32567,10 +32943,10 @@ async function retrieveNamedMembers(soap, manifest, opts) {
       opts.onProgress?.(`${label} (poll ${poll}, status ${status.status})`);
       opts.onPoll?.();
       if (opts.signal?.aborted) return failed("cancelled");
-      await delay2(opts.pollIntervalMs, opts.signal);
+      await delay3(opts.pollIntervalMs, opts.signal);
     }
   } catch (err2) {
-    return failed(`retrieve_failed:${errorMessage(err2)}`);
+    return failed(`retrieve_failed:${errorMessage2(err2)}`);
   }
 }
 async function runRetrieve(soap, manifest, opts) {
@@ -32581,7 +32957,7 @@ async function runRetrieve(soap, manifest, opts) {
   } catch (err2) {
     return {
       ok: false,
-      reason: `retrieve_failed:${errorMessage(err2)}`,
+      reason: `retrieve_failed:${errorMessage2(err2)}`,
       messages: retrieved.messages
     };
   }
@@ -32598,7 +32974,7 @@ async function listDates(soap, members) {
     for (const t of [...flat.unsupportedTypes, ...foldered.unsupportedTypes]) unsupported.add(t);
     return { props: [...flat.props, ...foldered.props], unsupported };
   } catch (err2) {
-    return { props: null, unsupported, failure: errorMessage(err2) };
+    return { props: null, unsupported, failure: errorMessage2(err2) };
   }
 }
 function resolveMember(m, files, zipEntries, listing, probe) {
@@ -32721,10 +33097,10 @@ function text(bytes) {
 function sha2562(content) {
   return crypto2.createHash("sha256").update(content, "utf8").digest("hex");
 }
-function errorMessage(err2) {
+function errorMessage2(err2) {
   return String(err2 instanceof Error ? err2.message : err2);
 }
-function delay2(ms, signal) {
+function delay3(ms, signal) {
   return new Promise((resolve) => {
     const done = () => {
       clearTimeout(timer);
@@ -33631,7 +34007,7 @@ function countByType(artifacts) {
   for (const a of artifacts) counts[a.type] = (counts[a.type] ?? 0) + 1;
   return counts;
 }
-function delay3(ms) {
+function delay4(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms).unref?.());
 }
 function publicState(job) {
@@ -33651,6 +34027,7 @@ var init_engine = __esm({
   "src/snapshot/engine.ts"() {
     "use strict";
     init_metadataSoap();
+    init_omnistudioSettings();
     init_rest();
     init_indexer();
     init_extract();
@@ -33860,7 +34237,7 @@ var init_engine = __esm({
               error: String(err2 instanceof Error ? err2.message : err2)
             })
           ),
-          delay3(this.config.snapshot.toolWaitMs).then(() => null)
+          delay4(this.config.snapshot.toolWaitMs).then(() => null)
         ]);
         if (winner) {
           this.jobs.delete(key2);
@@ -34169,10 +34546,12 @@ var init_engine = __esm({
         job.progress = "listing metadata";
         let listedProps = [];
         let unsupportedTypes = [];
+        let listed = false;
         try {
           const detailed = await soap.listMetadataDetailed(types);
           listedProps = detailed.props;
           unsupportedTypes = detailed.unsupportedTypes;
+          listed = true;
         } catch (err2) {
           warnings.push(`listMetadata failed (${String(err2 instanceof Error ? err2.message : err2)}); staleness data will be limited`);
         }
@@ -34184,6 +34563,10 @@ var init_engine = __esm({
             `${unsupportedTypes.join(", ")} not supported by this org/API version \u2014 skipped (feature not licensed, or salesforce.apiVersion too old).`
           );
         }
+        const omniP = listed && types.includes("OmniDataTransform") && !unsupportedTypes.includes("OmniDataTransform") && !listedProps.some((p) => p.type === "OmniDataTransform") ? readOmniStudioMetadataSetting(soap, {
+          timeoutMs: OMNISTUDIO_SETTING_TIMEOUT_MS,
+          pollIntervalMs: this.config.snapshot.pollIntervalMs
+        }) : null;
         job.progress = "starting retrieve";
         const retrieveMembers = buildRetrieveMembers(retrieveTypes, listedProps, warnings);
         if (Object.keys(retrieveMembers).length === 0) {
@@ -34207,7 +34590,7 @@ var init_engine = __esm({
           }
           poll += 1;
           job.progress = `retrieving (poll ${poll}, status ${status.status})`;
-          await delay3(this.config.snapshot.pollIntervalMs);
+          await delay4(this.config.snapshot.pollIntervalMs);
           status = await soap.checkRetrieveStatus(retrieveId, true);
         }
         if (!status.success || !status.zipFile) {
@@ -34258,6 +34641,11 @@ var init_engine = __esm({
         const orgDeps = await fetchOrgDependencyEdges(rest, conn.id, retrieveTypes);
         warnings.push(...orgDeps.warnings);
         this.db.replaceEdges(conn.id, "org", retrieveTypes, orgDeps.edges);
+        if (omniP) {
+          job.progress = "reading the Omnistudio Metadata setting";
+          const omniWarning = omniStudioRefreshText(await omniP);
+          if (omniWarning) warnings.push(omniWarning);
+        }
         const summary = {
           connection: conn.alias,
           types,
@@ -34366,7 +34754,9 @@ var init_engine = __esm({
       QuickAction: "quickActions",
       LightningComponentBundle: "lwc",
       // S41: Aura component bundles.
-      AuraDefinitionBundle: "aura"
+      AuraDefinitionBundle: "aura",
+      // S47: Omnistudio Data Mappers (explicit-refresh-only).
+      OmniDataTransform: "omniDataTransforms"
     };
   }
 });
@@ -34459,8 +34849,11 @@ function scanCsv(bytes, delimiter = ",") {
   const text2 = (hadBom ? bytes.subarray(3) : bytes).toString("utf8");
   if (text2.trim().length === 0) throw new ContrailError("the CSV file is empty", "bad_csv");
   const warnings = [];
+  const warned = /* @__PURE__ */ new Set();
   const warnOnce = (msg) => {
-    if (!warnings.includes(msg)) warnings.push(msg);
+    if (warned.has(msg)) return;
+    warned.add(msg);
+    warnings.push(msg);
   };
   let headers = null;
   let headerFieldCount = 0;
@@ -34474,6 +34867,12 @@ function scanCsv(bytes, delimiter = ",") {
   let recordStartLine = 1;
   let line = 1;
   const headerFields = [];
+  let segment = 0;
+  const take = (end, next) => {
+    if (headers !== null) return;
+    field += text2.slice(segment, end);
+    segment = next;
+  };
   const finishHeader = () => {
     headerFields.push(field);
     headers = headerFields.map((h) => h.trim());
@@ -34485,8 +34884,16 @@ function scanCsv(bytes, delimiter = ",") {
         "bad_csv"
       );
     }
-    const lower = headers.map((h) => h.toLowerCase());
-    const dupe = lower.find((h, i) => lower.indexOf(h) !== i);
+    const seen = /* @__PURE__ */ new Set();
+    let dupe;
+    for (const h of headers) {
+      const lower = h.toLowerCase();
+      if (seen.has(lower)) {
+        dupe = lower;
+        break;
+      }
+      seen.add(lower);
+    }
     if (dupe !== void 0) {
       throw new ContrailError(`duplicate column name in the header: ${dupe}`, "bad_csv");
     }
@@ -34535,30 +34942,31 @@ function scanCsv(bytes, delimiter = ",") {
     if (inQuotes) {
       if (ch === '"') {
         if (text2[i + 1] === '"') {
-          if (headers === null) field += '"';
+          take(i + 1, i + 2);
           i += 1;
         } else {
+          take(i, i + 1);
           inQuotes = false;
         }
-      } else {
-        if (ch === "\n") line += 1;
-        if (headers === null) field += ch;
+      } else if (ch === "\n") {
+        line += 1;
       }
       continue;
     }
     if (ch === '"') {
       if (!fieldHasContent) {
+        take(i, i + 1);
         inQuotes = true;
         fieldHasContent = true;
         recordHasContent = true;
       } else {
         warnOnce(`stray double-quote inside a field (first at line ${line}) \u2014 check the file's quoting`);
-        if (headers === null) field += '"';
       }
       continue;
     }
     if (ch === delimiter) {
       if (headers === null) {
+        take(i, i + 1);
         headerFields.push(field);
         field = "";
       }
@@ -34576,6 +34984,7 @@ function scanCsv(bytes, delimiter = ",") {
       }
       noteLineEnding("CRLF");
       line += 1;
+      take(i, i + 2);
       endRecord(i + 2 >= text2.length);
       i += 1;
       continue;
@@ -34583,10 +34992,10 @@ function scanCsv(bytes, delimiter = ",") {
     if (ch === "\n") {
       noteLineEnding("LF");
       line += 1;
+      take(i, i + 1);
       endRecord(i + 1 >= text2.length);
       continue;
     }
-    if (headers === null) field += ch;
     fieldHasContent = true;
     recordHasContent = true;
   }
@@ -34596,7 +35005,10 @@ function scanCsv(bytes, delimiter = ",") {
       "bad_csv"
     );
   }
-  if (recordHasContent || fieldsInRecord > 1) endRecord(false);
+  if (recordHasContent || fieldsInRecord > 1) {
+    take(text2.length, text2.length);
+    endRecord(false);
+  }
   if (headers === null) throw new ContrailError("the CSV file has no header row", "bad_csv");
   if (rowCount === 0) {
     throw new ContrailError("the CSV has a header but zero data rows \u2014 nothing to load", "bad_csv");
@@ -34704,8 +35116,7 @@ var init_graph = __esm({
 
 // src/deps/automation.ts
 function tagValue(block, tag) {
-  const match = block.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`));
-  return match?.[1]?.trim() ?? null;
+  return xmlBlockText(block, tag)?.trim() ?? null;
 }
 function textValue(block, tag) {
   const raw = tagValue(block, tag);
@@ -34714,7 +35125,7 @@ function textValue(block, tag) {
 }
 function stripBlocks(xml, tags) {
   let out = xml;
-  for (const tag of tags) out = out.replace(new RegExp(`<${tag}>[\\s\\S]*?</${tag}>`, "g"), "");
+  for (const tag of tags) out = withoutXmlBlocks(out, tag);
   return out;
 }
 function parseFlowStart(xml) {
@@ -35215,6 +35626,7 @@ var init_automation = __esm({
   "src/deps/automation.ts"() {
     "use strict";
     init_indexer();
+    init_xml();
     init_graph();
     AUTOMATION_FLOW_FILE_CAP = 2e3;
     FANOUT_FLOWS = 10;
@@ -37994,7 +38406,7 @@ function summarizeOps(steps) {
   for (const s of steps) counts.set(s.operation, (counts.get(s.operation) ?? 0) + 1);
   return [...counts.entries()].map(([op, n]) => `${n} ${op}`).join(" / ");
 }
-function delay4(ms) {
+function delay5(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms).unref?.());
 }
 var REF_TOKEN_RE, POLICY_CHANGE_NOTICE_MS, POLICY_REFUSAL_CODES, STALE_JOB_MS2, TARGET_CHECK_DEADLINE_MS, ORG_CLOCK_MARGIN_MS, CHILD_STAMP_MARGIN_MS, TARGET_CHECK_NOT_APPLICABLE, TARGET_CHECK_NOT_APPLICABLE_BULK, NO_BASELINE_REASONS, EXISTENCE_CHECKED_REASONS, NOTHING_COMPARED_NOTE, DeployEngine, AUTOMATION_CARD_MAX_OBJECTS, PAGE_DIFF_LIMITS, PAGE_DIFF_BUDGET_CHARS, PAGE_DIFF_BUDGET_NOTE, REQUEST_ID_RE, TargetCheckDeadline;
@@ -38002,9 +38414,9 @@ var init_engine2 = __esm({
   "src/deploy/engine.ts"() {
     "use strict";
     init_policy();
-    init_indexer();
     init_members();
     init_metadataSoap();
+    init_omnistudioSettings();
     init_rest();
     init_bulk();
     init_csv();
@@ -39380,27 +39792,6 @@ var init_engine2 = __esm({
         return old === null ? null : documentRowDiff(old, c.content, label, false);
       }
       /**
-       * S46 D3: what the live check knows about one permission-needing
-       * component — true = it found it in the org, false = it found it absent,
-       * null = it cannot place it. A member of the package answers from its own
-       * pre-image. A field authored inline in a CustomObject document has no
-       * pre-image of its own, so it answers from that object's: absent with the
-       * object, else by whether the object's live document holds its block.
-       */
-      livePresence(live, type, apiName) {
-        const image = live.images.get(preImageKey(type, apiName));
-        if (image) return image.present;
-        if (type === "CustomField") {
-          const dot = apiName.indexOf(".");
-          const obj = dot > 0 ? live.images.get(preImageKey("CustomObject", apiName.slice(0, dot))) : void 0;
-          if (obj?.present === false) return false;
-          if (obj?.present === true && obj.content !== void 0) {
-            return findChildBlock(obj.content, "fields", apiName.slice(dot + 1)) !== null;
-          }
-        }
-        return null;
-      }
-      /**
        * S45 hook 6: the page-top live-check lines — the UNAVAILABLE banner when
        * the retrieve failed (the only case where "the org was not re-read" is
        * true), else the CHANGED-IN-TARGET summary and the dates-unavailable line.
@@ -39664,11 +40055,11 @@ var init_engine2 = __esm({
             }
             fs12.unlinkSync(target);
           }
-          const unknown2 = opts.unknown;
+          const unknown3 = opts.unknown;
           const plan = {
             request_id: request.id,
             connection: conn.alias,
-            executed_at: unknown2 ? null : (/* @__PURE__ */ new Date()).toISOString(),
+            executed_at: unknown3 ? null : (/* @__PURE__ */ new Date()).toISOString(),
             retrieved_at: live.at,
             retrieve_started_at: live.started_at,
             target_check: opts.targetCheck ?? null,
@@ -39679,10 +40070,10 @@ var init_engine2 = __esm({
             covered: pre.covered ?? [],
             // A package with no pre-image files never refers to "these files":
             // its README already hedges what it can revert ("if it committed").
-            note: unknown2 ? `Contrail lost track of this deploy (${unknown2.error.slice(0, 300)}); check Setup \u2192 Deployment Status.` + (pre.components.length > 0 ? ` If it committed, these files are what the org held when this package was validated.` : "") : "Pre-images retrieved when this deploy was validated; README.txt says what a revert does and does not undo. Contrail never deploys a revert on its own.",
-            ...unknown2 ? {
+            note: unknown3 ? `Contrail lost track of this deploy (${unknown3.error.slice(0, 300)}); check Setup \u2192 Deployment Status.` + (pre.components.length > 0 ? ` If it committed, these files are what the org held when this package was validated.` : "") : "Pre-images retrieved when this deploy was validated; README.txt says what a revert does and does not undo. Contrail never deploys a revert on its own.",
+            ...unknown3 ? {
               outcome: "unknown",
-              ...unknown2.deployId ? { deploy_id: unknown2.deployId } : {}
+              ...unknown3.deployId ? { deploy_id: unknown3.deployId } : {}
             } : {}
           };
           const finalized = finalizeRevertPackage(dir, plan);
@@ -39695,13 +40086,13 @@ var init_engine2 = __esm({
               restores: plan.components.length,
               deletes: plan.destructive.length,
               not_restorable: plan.not_restorable.length,
-              ...unknown2 ? { outcome: "unknown" } : {}
+              ...unknown3 ? { outcome: "unknown" } : {}
             }
           });
           return {
             revert_package: {
               dir,
-              ...unknown2 ? { outcome: "unknown" } : {},
+              ...unknown3 ? { outcome: "unknown" } : {},
               restores: plan.components,
               deletes: plan.destructive,
               not_restorable: plan.not_restorable,
@@ -39805,6 +40196,14 @@ var init_engine2 = __esm({
             queryStamps: this.stampQueryFor(conn)
           });
         }
+        const omniP = [...input.components, ...input.destructive].some(
+          (c) => c.type === "OmniDataTransform"
+        ) ? readOmniStudioMetadataSetting(soap, {
+          timeoutMs: OMNISTUDIO_SETTING_TIMEOUT_MS,
+          pollIntervalMs: this.config.snapshot.pollIntervalMs,
+          signal: ctl.signal
+        }) : null;
+        let omni = null;
         if (job) {
           job.progress = input.dryRun ? "validating with Salesforce (checkOnly)" : "validating with Salesforce (checkOnly) \xB7 retrieving live pre-images";
         }
@@ -39818,6 +40217,10 @@ var init_engine2 = __esm({
             runTests: input.runTests
           });
           result = await this.pollDeploy(soap, validationId, job);
+          if (omniP) {
+            if (job) job.progress = "reading the Omnistudio Metadata setting";
+            omni = await omniP;
+          }
           if (result.success && preImagesP) {
             awaitingPreImages = true;
             if (job) job.progress = "retrieving live pre-images";
@@ -39826,6 +40229,7 @@ var init_engine2 = __esm({
         } finally {
           ctl.abort();
         }
+        const omniKey = omni ? { omnistudio_metadata: omni } : {};
         if (!result.success) {
           this.audit.record("deploy.validation_failed", {
             connectionId: conn.id,
@@ -39839,6 +40243,7 @@ var init_engine2 = __esm({
           });
           const deletingFlow = input.destructive.some((d) => d.type === "Flow");
           const note = input.dryRun ? "Dry run: validation FAILED. Fix the failures and check again (dry_run), or validate for approval once the package is final." : deletingFlow ? 'Validation failed \u2014 no confirmation code was issued. Deleting a flow via the Metadata API is unreliable: an ACTIVE flow must be turned off first with deactivate_flow, and even an INACTIVE flow often fails validation with "insufficient access rights on cross-reference id". If it does, delete the flow in Setup \u2192 Flows (its objects can be deleted here once the flow is gone). Fix any other failures and re-validate.' : "Validation failed \u2014 no confirmation code was issued. Fix the failures and validate again.";
+          const omniNote = omni ? omniStudioValidateText(conn.alias, omni, "note") : null;
           return {
             summary: null,
             validation_passed: false,
@@ -39849,7 +40254,8 @@ var init_engine2 = __esm({
               tests_run: result.numberTestsTotal,
               test_failures: result.numberTestErrors,
               test_failure_detail: this.gateTestDetail(conn, result),
-              note,
+              note: omniNote ? `${note} ${omniNote}` : note,
+              ...omniKey,
               // S46 (B): a failed dry run reports the policies too — mid-build
               // dry runs are the ones that fail. Never approvable either way.
               ...input.dryRun && prePolicy ? { policy_check: dryRunPolicyCheck(prePolicy) } : {}
@@ -39870,6 +40276,7 @@ var init_engine2 = __esm({
               ...sourceProvenance(input.components)
             }
           });
+          const omniDryNote = omni ? omniStudioValidateText(conn.alias, omni, "dry") : null;
           const drySummary = {
             connection: conn.alias,
             org_type: conn.orgType,
@@ -39890,6 +40297,8 @@ var init_engine2 = __esm({
             permission_warning: analyzePermissionCoverage(input.components).warning,
             expires_at: null,
             live_check: null,
+            ...omniKey,
+            ...omniDryNote ? { omnistudio_note: omniDryNote } : {},
             // S46 (B): what a real validation would be refused for — reported, not enforced.
             ...prePolicy ? { policy_check: dryRunPolicyCheck(prePolicy) } : {}
           };
@@ -39929,7 +40338,7 @@ var init_engine2 = __esm({
         const review = this.applyLivePreImages(conn, input, changes, destructive, live, aura);
         const permCoverage = analyzePermissionCoverage(
           input.components,
-          live.status === "ok" ? (type, name) => this.livePresence(live, type, name) : void 0
+          live.status === "ok" ? livePresence(live.images) : void 0
         );
         const gate = this.policyGate(conn, "deploy", input.viaTool ?? "validate_deploy", {
           destructive: input.destructive.length > 0,
@@ -39965,7 +40374,8 @@ var init_engine2 = __esm({
           destructive,
           blast,
           live_check: liveCheck,
-          governance: minted.stored
+          governance: minted.stored,
+          ...omniKey
         };
         const code = generateConfirmationCode();
         const expiresAt = new Date(Date.now() + this.config.deploy.codeTtlMs).toISOString();
@@ -40003,9 +40413,11 @@ var init_engine2 = __esm({
           permission_warning: permCoverage.warning,
           expires_at: expiresAt,
           live_check: liveCheck,
-          governance: minted.forAgent
+          governance: minted.forAgent,
+          ...omniKey
         };
         const diffs = this.rowDiffs(conn, input, changes, live);
+        const omniLine = omni ? omniStudioValidateText(conn.alias, omni, "page") : null;
         const view = {
           kind: "deploy",
           code,
@@ -40044,8 +40456,10 @@ var init_engine2 = __esm({
           ],
           blast,
           // S45 hook 6: the live-check lines ride view.warnings, so the phone's
-          // warning count includes them with notify.ts untouched.
+          // warning count includes them with notify.ts untouched. S47: the
+          // Omnistudio Metadata line leads — it can make the whole deploy moot.
           warnings: [
+            ...omniLine ? [omniLine] : [],
             ...permCoverage.warning ? [permCoverage.warning] : [],
             ...this.liveCheckWarnings(conn, input, live, review.changedInTarget)
           ]
@@ -41716,7 +42130,7 @@ columns: ${columnsLabel(m.headers)}`,
           if (job) {
             job.progress = `${stepLabel} \u2014 ${info.state} (${info.numberRecordsProcessed.toLocaleString("en-US")} processed, ${info.numberRecordsFailed.toLocaleString("en-US")} failed)`;
           }
-          await delay4(this.config.bulkLoad.pollIntervalMs);
+          await delay5(this.config.bulkLoad.pollIntervalMs);
           info = await getIngestJob(rest, this.config.salesforce.apiVersion, jobId);
         }
         return info;
@@ -42620,7 +43034,7 @@ columns: ${columnsLabel(m.headers)}`,
           if (job) {
             job.progress = `${result.status} (poll ${poll}${result.numberComponentsTotal ? `, ${result.numberComponentsDeployed}/${result.numberComponentsTotal} components` : ""})`;
           }
-          await delay4(this.config.deploy.pollIntervalMs);
+          await delay5(this.config.deploy.pollIntervalMs);
           result = await soap.checkDeployStatus(id);
         }
         return result;
@@ -42671,7 +43085,7 @@ columns: ${columnsLabel(m.headers)}`,
               error: String(err2 instanceof Error ? err2.message : err2)
             })
           ),
-          delay4(waitMs).then(() => null)
+          delay5(waitMs).then(() => null)
         ]);
         if (winner) {
           this.jobs.delete(key2);
@@ -45108,7 +45522,30 @@ function fitToBudget(records, budget) {
   return { kept, dropped: records.length - kept.length };
 }
 function stripSoqlLiterals(soql) {
-  return soql.replace(/'(?:[^'\\]|\\.)*'/g, "''");
+  let out = "";
+  let copied = 0;
+  let quote = soql.indexOf("'");
+  scan: while (quote !== -1) {
+    for (let i = quote + 1; i < soql.length; ) {
+      const ch = soql[i];
+      if (ch === "'") {
+        out += `${soql.slice(copied, quote)}''`;
+        copied = i + 1;
+        quote = soql.indexOf("'", copied);
+        continue scan;
+      }
+      if (ch !== "\\") {
+        i += 1;
+      } else if (i + 1 < soql.length && !SOQL_LINE_ENDS.has(soql[i + 1])) {
+        i += 2;
+      } else {
+        quote = soql.indexOf("'", i + 1);
+        continue scan;
+      }
+    }
+    break;
+  }
+  return out + soql.slice(copied);
 }
 function truncateDeep(value) {
   if (typeof value === "string" && value.length > MAX_STRING_FIELD) {
@@ -45493,7 +45930,7 @@ async function pollAgentStudioRun(client, apiVersion, alias, runId, includeDetai
     ...includeDetails ? { raw_test_cases: truncateDeep(rawCases) } : {}
   });
 }
-var GRANT_GATED_SOBJECTS, DEFAULT_ROWS, MAX_ROWS, MAX_RESPONSE_CHARS, LOG_SLICE, DEFAULT_REPORT_ROWS, MAX_REPORT_GROUPS, MAX_STRING_FIELD, SF_ID_RE, TRACE_LEVEL_PRESETS, RUNNER_TYPE, RUNNER_BY_RUN_ID_PREFIX, HTML_ENTITIES, asObject, normScalar;
+var GRANT_GATED_SOBJECTS, DEFAULT_ROWS, MAX_ROWS, MAX_RESPONSE_CHARS, LOG_SLICE, DEFAULT_REPORT_ROWS, MAX_REPORT_GROUPS, SOQL_LINE_ENDS, MAX_STRING_FIELD, SF_ID_RE, TRACE_LEVEL_PRESETS, RUNNER_TYPE, RUNNER_BY_RUN_ID_PREFIX, HTML_ENTITIES, asObject, normScalar;
 var init_data = __esm({
   "src/tools/data.ts"() {
     "use strict";
@@ -45524,6 +45961,7 @@ var init_data = __esm({
     LOG_SLICE = 3e4;
     DEFAULT_REPORT_ROWS = 200;
     MAX_REPORT_GROUPS = 200;
+    SOQL_LINE_ENDS = /* @__PURE__ */ new Set(["\n", "\r", "\u2028", "\u2029"]);
     MAX_STRING_FIELD = 1e4;
     SF_ID_RE = /^[a-zA-Z0-9]{15}([a-zA-Z0-9]{3})?$/;
     TRACE_LEVEL_PRESETS = {
@@ -45735,7 +46173,7 @@ function registerDeployTools(server, deps) {
         components: external_exports.array(
           external_exports.object({
             type: external_exports.string().describe(
-              `ApexClass, ApexTrigger, ApexPage, Flow, CustomObject, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, GlobalValueSet, ConnectedApp, NamedCredential / ExternalCredential / AuthProvider (credential metadata NEVER carries working secrets: per-principal values are entered in Setup after deploy, retrieves return placeholders, and principals need externalCredentialPrincipalAccesses on a permission set), PlatformEventChannel(Member), ManagedEventSubscription, Layout, CustomMetadata (records, dotted Type.Record names), LeadConvertSettings (SINGLETON \u2014 api_name is literally "LeadConvertSettings"; a modify replaces ALL lead field mappings, retrieve-first), Report / Dashboard (folder-qualified "FolderDevName/Name" api_names; deploy the ReportFolder/DashboardFolder component first or in the same package for a new folder), ReportFolder / DashboardFolder (content = the whole <ReportFolder> doc with folderShares \u2014 folder sharing is what makes reports visible), Agentforce types Bot, GenAiPlugin (agent topics \u2014 modifying one on an ACTIVE agent needs the human to deactivate it first), GenAiPromptTemplate (activeVersionIdentifier is org-generated: retrieve-first, never hand-type it), GenAiPromptTemplateActv, AiEvaluationDefinition (legacy Testing Center test definitions), AiTestingDefinition (Agentforce Studio Tests-tab suites \u2014 Salesforce marks the type and its runner BETA; a deploy stores the suite and runs nothing \u2014 run_agent_eval runs it (on the org probed a deployed suite appeared in the Tests tab only after its first run); a modify replaces the whole suite), AiAgentScorerDefinition (custom scorers; versions are APPEND-ONLY org-side \u2014 retrieve-first and carry every version forward; a GenAiPromptTemplate it engines on may ship in the same package \u2014 package.xml lists the template first), BotTemplate, BotBlock, CustomPermission (pairs with a customPermissions grant on a permission set \u2014 ungranted it does nothing), PermissionSetGroup (members DETACH if omitted on modify; the org recalculates grants ASYNCHRONOUSLY after deploy \u2014 verify Status via soql_query), MutingPermissionSet (a muted permission omitted on modify is UN-MUTED \u2014 silently restored to every assigned user), QuickAction (object actions dotted "Account.New_X", global actions bare; surfaced by page layouts, global publisher layouts, or Lightning record pages with dynamic actions \u2014 never by the deploy itself), or child types CustomField / ValidationRule / CustomLabel / ListView / RecordType / BotVersion (dotted MyBot.v1). Bundle types GenAiFunction / GenAiPlannerBundle / AiAuthoringBundle / LightningComponentBundle / AuraDefinitionBundle (one component = a directory of files) take a Contrail bundle ENVELOPE as content: JSON {"contrail_bundle":1, "files": {"<relative path>": "<body>", ...}} \u2014 the file set retrieve_metadata's bundle_files listing shows, main file included (e.g. "My_Fn.genAiFunction-meta.xml"). LightningComponentBundle (LWC) requires <Name>.js + <Name>.js-meta.xml; .html/.css/.svg and subdirectories (e.g. secondary templates) are normal, __tests__ and dot-files never deploy, and the org compiles on deploy. AuraDefinitionBundle is FLAT (no subfolders), every file <Name>-prefixed, exactly ONE primary (<Name>.cmp|.app|.evt|.intf|.tokens) plus its required <Name>.<kind>-meta.xml (pins apiVersion); secondaries are <Name>Controller/Helper/Renderer.js, .css, .design (.cmp only), .svg, .auradoc; namespace-free names only. Refresh the snapshot before modifying an org-existing bundle \u2014 the whole directory is replaced (files the envelope omits are DELETED org-side). AiAuthoringBundle deploys as a DRAFT STAGE: exactly <Name>.agent (plaintext Agent Script) + <Name>.bundle-meta.xml; nothing compiles and the running agent is unchanged until a human publishes the draft. Agent publish/preview stay human; activate/deactivate goes through agent_activation_propose/execute (its own ritual), and agent test runs (Testing Center or Studio) through run_agent_eval.`
+              `ApexClass, ApexTrigger, ApexPage, Flow, CustomObject, PermissionSet, CustomTab, FlexiPage, CustomApplication, ReportType, GlobalValueSet, ConnectedApp, NamedCredential / ExternalCredential / AuthProvider (credential metadata NEVER carries working secrets: per-principal values are entered in Setup after deploy, retrieves return placeholders, and principals need externalCredentialPrincipalAccesses on a permission set), PlatformEventChannel(Member), ManagedEventSubscription, Layout, CustomMetadata (records, dotted Type.Record names), LeadConvertSettings (SINGLETON \u2014 api_name is literally "LeadConvertSettings"; a modify replaces ALL lead field mappings, retrieve-first), Report / Dashboard (folder-qualified "FolderDevName/Name" api_names; deploy the ReportFolder/DashboardFolder component first or in the same package for a new folder), ReportFolder / DashboardFolder (content = the whole <ReportFolder> doc with folderShares \u2014 folder sharing is what makes reports visible), Agentforce types Bot, GenAiPlugin (agent topics \u2014 modifying one on an ACTIVE agent needs the human to deactivate it first), GenAiPromptTemplate (activeVersionIdentifier is org-generated: retrieve-first, never hand-type it), GenAiPromptTemplateActv, AiEvaluationDefinition (legacy Testing Center test definitions), AiTestingDefinition (Agentforce Studio Tests-tab suites \u2014 Salesforce marks the type and its runner BETA; a deploy stores the suite and runs nothing \u2014 run_agent_eval runs it (on the org probed a deployed suite appeared in the Tests tab only after its first run); a modify replaces the whole suite), AiAgentScorerDefinition (custom scorers; versions are APPEND-ONLY org-side \u2014 retrieve-first and carry every version forward; a GenAiPromptTemplate it engines on may ship in the same package \u2014 package.xml lists the template first), BotTemplate, BotBlock, CustomPermission (pairs with a customPermissions grant on a permission set \u2014 ungranted it does nothing), PermissionSetGroup (members DETACH if omitted on modify; the org recalculates grants ASYNCHRONOUSLY after deploy \u2014 verify Status via soql_query), MutingPermissionSet (a muted permission omitted on modify is UN-MUTED \u2014 silently restored to every assigned user), QuickAction (object actions dotted "Account.New_X", global actions bare; surfaced by page layouts, global publisher layouts, or Lightning record pages with dynamic actions \u2014 never by the deploy itself), OmniDataTransform (Omnistudio Data Mappers; content = the whole <OmniDataTransform> document; api_name <Name>_<version>, letters and digits \u2014 the exact fullName rule is not yet confirmed; per Salesforce Help the Metadata API deploys them only where the org's Omnistudio Metadata setting is on; deploy them apart from setup metadata), or child types CustomField / ValidationRule / CustomLabel / ListView / RecordType / BotVersion (dotted MyBot.v1). Bundle types GenAiFunction / GenAiPlannerBundle / AiAuthoringBundle / LightningComponentBundle / AuraDefinitionBundle (one component = a directory of files) take a Contrail bundle ENVELOPE as content: JSON {"contrail_bundle":1, "files": {"<relative path>": "<body>", ...}} \u2014 the file set retrieve_metadata's bundle_files listing shows, main file included (e.g. "My_Fn.genAiFunction-meta.xml"). LightningComponentBundle (LWC) requires <Name>.js + <Name>.js-meta.xml; .html/.css/.svg and subdirectories (e.g. secondary templates) are normal, __tests__ and dot-files never deploy, and the org compiles on deploy. AuraDefinitionBundle is FLAT (no subfolders), every file <Name>-prefixed, exactly ONE primary (<Name>.cmp|.app|.evt|.intf|.tokens) plus its required <Name>.<kind>-meta.xml (pins apiVersion); secondaries are <Name>Controller/Helper/Renderer.js, .css, .design (.cmp only), .svg, .auradoc; namespace-free names only. Refresh the snapshot before modifying an org-existing bundle \u2014 the whole directory is replaced (files the envelope omits are DELETED org-side). AiAuthoringBundle deploys as a DRAFT STAGE: exactly <Name>.agent (plaintext Agent Script) + <Name>.bundle-meta.xml; nothing compiles and the running agent is unchanged until a human publishes the draft. Agent publish/preview stay human; activate/deactivate goes through agent_activation_propose/execute (its own ritual), and agent test runs (Testing Center or Studio) through run_agent_eval.`
             ),
             api_name: external_exports.string().describe("Full API name; children dotted (Account.MyField__c)."),
             content: external_exports.string().optional().describe(
@@ -47874,7 +48312,7 @@ async function startApexServer(spawnLsp, serverScript, workspaceRoot) {
   client.notify("initialized", {});
   return client;
 }
-function delay5(ms) {
+function delay6(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms).unref?.());
 }
 async function checkApexOnce(client, fileUri, text2, version2, deadline) {
@@ -47898,7 +48336,7 @@ async function checkApexOnce(client, fileUri, text2, version2, deadline) {
       } catch (err2) {
         const message2 = err2 instanceof Error ? err2.message : String(err2);
         if (message2.includes("Unhandled method")) {
-          await delay5(PULL_INTERVAL_MS);
+          await delay6(PULL_INTERVAL_MS);
           continue;
         }
         throw err2;
@@ -47918,7 +48356,7 @@ async function checkApexOnce(client, fileUri, text2, version2, deadline) {
         emptyStreak = 0;
         if (Date.now() - stableSince >= SEMANTIC_STABLE_MS) return mapDiagnostics(list);
       }
-      await delay5(PULL_INTERVAL_MS);
+      await delay6(PULL_INTERVAL_MS);
     }
   } finally {
     try {

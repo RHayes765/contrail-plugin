@@ -8,11 +8,55 @@ The Contrail engine shipped as a Claude plugin: a local stdio MCP server (the
 For the narrative overview see [CONTRAIL_OVERVIEW.md](CONTRAIL_OVERVIEW.md); to
 install, see [Getting Started](Getting%20Started.md).
 
-**Status: v0.40.0 — one-click packaging (MCPB)** on top of the completed
+**Status: v0.41.0 — one-click packaging (MCPB)** on top of the completed
 P0.1–P0.6 Phase 0 surface. `npm run mcpb` builds `contrail-<version>.mcpb`, a
 single MCP Bundle that installs into Claude Desktop via Settings → Desktop App →
 Extensions (no Node install, no npm, no config editing on the target machine) and covers
 Windows x64/ARM and macOS Intel/Apple Silicon from one file. 43 tools.
+
+**Omnistudio Data Mappers (S47).** `OmniDataTransform`, the Metadata API type
+behind Omnistudio Data Mappers (which document generation templates use), is
+deployable, indexed and explicit-refresh
+(`refresh_snapshot types:["OmniDataTransform"]`). Salesforce marks the
+OmniDataTransform and OmniDataTransformItem objects internal use only — their
+records are not to be created, edited or deleted — so the Data Mapper Designer
+and this type are the supported routes, unless the org has turned on Clean
+Metadata Deployment: per Salesforce Help the legacy Omnistudio types can then
+no longer be deployed or retrieved, and Data Mappers move to
+`DataMapperDefinition`, a type Contrail does not register. A Data Mapper is
+one plain `omniDataTransforms/<api_name>.rpt` document (folder and suffix
+from the org's own describe; the Industries guide's `.omniDataTransform`
+suffix is wrong). Its api_name is letters and digits, optionally
+`_<version>`: Salesforce's
+guides name the files `<Name>_<version>`, and the exact fullName rule is not
+yet confirmed against an org. Per Salesforce Help the Metadata API deploys
+Omnistudio components only where the org's **Omnistudio Metadata** setting is
+on, and that setting can't be turned off again. So whenever a package holds a
+Data Mapper, `validate_deploy` reads the setting (one Settings retrieve,
+alongside the validation, dry runs too) and returns it as
+`omnistudio_metadata`; when it is off, the approval page leads with
+OMNISTUDIO METADATA IS OFF — Data Mappers that exist there as records are
+invisible to Contrail, so an ADD proves nothing — and a failed validation's
+note, or a passed dry run's `omnistudio_note`, says the same. The setting is
+reported, never enforced: the org's own answer decides. A
+`refresh_snapshot` that lists no Data Mappers now says why
+when the setting is off, where it used to be a silent zero. Every add or
+modify carries a Data Mapper note on the page (the setting; whether it lands
+active follows its `<active>` value per a Salesforce blog, not yet confirmed
+here; formula items need the Designer, whose `formulaConverted` can't be
+reliably hand-written), and the page also warns when the api_name differs from the
+file's `uniqueName`, when the package mixes Data Mappers with any other type
+(Salesforce says Omnistudio components can't share a deploy with setup
+metadata), and, on a modify, that neither an in-place update (per Salesforce
+Help an active version can't be edited once Data Mapper Versioning is on) nor
+the removal of omitted mapping rows is confirmed. The permission-coverage
+check has no Data Mapper
+arm: no per-component grant for running one turned up in Salesforce's docs,
+and the type's documented `<requiredPermission>` field is not yet confirmed
+to gate anything. Dependency edges join a Data Mapper to
+the objects its rows name and the fields its Load and lookup rows name,
+where the index holds them — read from Salesforce's documented grammar, not
+yet from a retrieved file. No new tool (still 43).
 
 **Skills on every surface; flow pages built by the engine (S46).** The skill
 pack now travels inside every install and the server serves it itself. Its

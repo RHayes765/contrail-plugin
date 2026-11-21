@@ -541,3 +541,270 @@ describe('S30: unsupported-type refresh degrade', () => {
     expect(outcome.error).toMatch(/nothing retrievable/);
   });
 });
+
+describe('S47: a Data Mapper refresh owns omniDataTransforms/', () => {
+  const MAPPER_RPT = 'omniDataTransforms/AccountSummaryExtract_1.rpt';
+  const MAPPER_PROPS = ['OmniDataTransform', 'AccountSummaryExtract_1', MAPPER_RPT] as const;
+  const MAPPER_XML =
+    '<OmniDataTransform xmlns="http://soap.sforce.com/2006/04/metadata">' +
+    '<name>AccountSummaryExtract</name><type>Extract</type>' +
+    '<uniqueName>AccountSummaryExtract_1</uniqueName></OmniDataTransform>';
+
+  // The shared stub answers everything except the OmniDataTransform listing
+  // and retrieve, which follow `org.mapperListed`.
+  function stubMapperSalesforce(org: { mapperListed: boolean }): void {
+    stubSalesforce();
+    const shared = globalThis.fetch;
+    vi.stubGlobal('fetch', async (input: string | URL, init?: RequestInit) => {
+      const body = String(init?.body ?? '');
+      if (
+        body.includes('<met:listMetadata>') &&
+        body.includes('<met:type>OmniDataTransform</met:type>')
+      ) {
+        return new Response(
+          soapEnvelope(
+            `<listMetadataResponse xmlns="http://soap.sforce.com/2006/04/metadata">
+               ${org.mapperListed ? listResult(...MAPPER_PROPS) : ''}
+             </listMetadataResponse>`,
+          ),
+        );
+      }
+      if (
+        body.includes('<met:retrieve>') &&
+        body.includes('<met:name>OmniDataTransform</met:name>')
+      ) {
+        return new Response(
+          soapEnvelope(
+            `<retrieveResponse xmlns="http://soap.sforce.com/2006/04/metadata">
+               <result><id>09S-mapper</id><done>false</done><state>Queued</state></result>
+             </retrieveResponse>`,
+          ),
+        );
+      }
+      if (body.includes('<met:asyncProcessId>09S-mapper</met:asyncProcessId>')) {
+        const entries: Record<string, Uint8Array> = {
+          'unpackaged/package.xml': strToU8('<Package/>'),
+        };
+        if (org.mapperListed) entries[`unpackaged/${MAPPER_RPT}`] = strToU8(MAPPER_XML);
+        const zip = Buffer.from(zipSync(entries)).toString('base64');
+        return new Response(
+          soapEnvelope(
+            `<checkRetrieveStatusResponse xmlns="http://soap.sforce.com/2006/04/metadata">
+               <result><done>true</done><status>Succeeded</status><success>true</success>
+                 <id>09S-mapper</id><zipFile>${zip}</zipFile>
+                 ${org.mapperListed ? fileProp(...MAPPER_PROPS) : ''}
+               </result>
+             </checkRetrieveStatusResponse>`,
+          ),
+        );
+      }
+      return shared(input, init);
+    });
+  }
+
+  it('an empty Data Mapper retrieve still clears omniDataTransforms/, and only it', async () => {
+    const org = { mapperListed: true };
+    stubMapperSalesforce(org);
+    const conn = db.getConnection(connId)!;
+    await engine.refresh(conn, TYPES);
+    const first = await engine.refresh(conn, ['OmniDataTransform']);
+    expect(first.status).toBe('complete');
+    expect(store.readCurrentFile(connId, MAPPER_RPT)).toContain('AccountSummaryExtract');
+    expect(db.getArtifact(connId, 'OmniDataTransform', 'AccountSummaryExtract_1')).toBeTruthy();
+
+    // The org now lists none, so the retrieve brings back no omniDataTransforms/
+    // entry. TYPE_DIRS names the type's own directory, so it is cleared anyway:
+    // without that entry the index row would go while the stale .rpt stayed.
+    org.mapperListed = false;
+    const second = await engine.refresh(conn, ['OmniDataTransform']);
+    expect(second.status).toBe('complete');
+    expect(store.readCurrentFile(connId, MAPPER_RPT)).toBeNull();
+    expect(db.getArtifact(connId, 'OmniDataTransform', 'AccountSummaryExtract_1')).toBeNull();
+
+    // Every other type's snapshot and index survive.
+    expect(store.readCurrentFile(connId, 'classes/InvoiceService.cls')).toContain(
+      'InvoiceHelper.process',
+    );
+    expect(store.readCurrentFile(connId, 'flows/Send_Invoice.flow')).toContain('Send Invoice');
+    expect(db.getArtifact(connId, 'ApexClass', 'InvoiceService')).toBeTruthy();
+    expect(db.getArtifact(connId, 'CustomField', 'Invoice__c.Amount__c')).toBeTruthy();
+  });
+});
+
+describe('S47: an empty Data Mapper listing reads the Omnistudio Metadata setting', () => {
+  const OFF_WARNING =
+    "OmniDataTransform: 0 listed — the org's Omnistudio Metadata setting is off, so its Data " +
+    "Mappers are records the Metadata API can't list or retrieve.";
+  /** 'absent' = the org's settings file has no enableOmniStudioMetadata field. */
+  let setting: 'on' | 'off' | 'absent';
+  let mapperListed: boolean;
+  /** A listing that names OmniDataTransform faults with this code ('none' = it answers). */
+  let listingFault: 'none' | 'INVALID_TYPE' | 'UNKNOWN_EXCEPTION';
+  let soapBodies: string[];
+  const settingsRetrieves = () =>
+    soapBodies.filter(
+      (b) => b.includes('<met:retrieve>') && b.includes('<met:name>Settings</met:name>'),
+    );
+
+  // The shared stub answers everything except the OmniDataTransform listing,
+  // the Settings retrieve and its status.
+  beforeEach(() => {
+    setting = 'off';
+    mapperListed = false;
+    listingFault = 'none';
+    soapBodies = [];
+    const shared = globalThis.fetch;
+    vi.stubGlobal('fetch', async (input: string | URL, init?: RequestInit) => {
+      const body = String(init?.body ?? '');
+      if (String(input).includes('/services/Soap/m/')) soapBodies.push(body);
+      if (
+        body.includes('<met:listMetadata>') &&
+        body.includes('<met:type>OmniDataTransform</met:type>')
+      ) {
+        if (listingFault !== 'none') {
+          const said =
+            listingFault === 'INVALID_TYPE'
+              ? 'INVALID_TYPE: Cannot use: OmniDataTransform in this version'
+              : 'UNKNOWN_EXCEPTION: An unexpected error occurred';
+          return new Response(
+            soapEnvelope(
+              `<soapenv:Fault><faultcode>sf:${listingFault}</faultcode>
+               <faultstring>${said}</faultstring></soapenv:Fault>`,
+            ),
+            { status: 500 },
+          );
+        }
+        const row = listResult(
+          'OmniDataTransform',
+          'AccountSummaryExtract_1',
+          'omniDataTransforms/AccountSummaryExtract_1.rpt',
+        );
+        return new Response(
+          soapEnvelope(
+            `<listMetadataResponse xmlns="http://soap.sforce.com/2006/04/metadata">
+               ${mapperListed ? row : ''}
+             </listMetadataResponse>`,
+          ),
+        );
+      }
+      if (body.includes('<met:retrieve>') && body.includes('<met:name>Settings</met:name>')) {
+        return new Response(
+          soapEnvelope(
+            `<retrieveResponse xmlns="http://soap.sforce.com/2006/04/metadata">
+               <result><id>09S-omni</id><done>false</done><state>Queued</state></result>
+             </retrieveResponse>`,
+          ),
+        );
+      }
+      if (body.includes('<met:asyncProcessId>09S-omni</met:asyncProcessId>')) {
+        const field =
+          setting === 'absent'
+            ? ''
+            : `<enableOmniStudioMetadata>${setting === 'on'}</enableOmniStudioMetadata>`;
+        const zip = zipSync({
+          'unpackaged/package.xml': strToU8('<Package/>'),
+          'unpackaged/settings/OmniStudio.settings': strToU8(
+            `<OmniStudioSettings xmlns="http://soap.sforce.com/2006/04/metadata">${field}</OmniStudioSettings>`,
+          ),
+        });
+        return new Response(
+          soapEnvelope(
+            `<checkRetrieveStatusResponse xmlns="http://soap.sforce.com/2006/04/metadata">
+               <result><done>true</done><status>Succeeded</status><success>true</success>
+                 <id>09S-omni</id><zipFile>${Buffer.from(zip).toString('base64')}</zipFile>
+               </result>
+             </checkRetrieveStatusResponse>`,
+          ),
+        );
+      }
+      return shared(input, init);
+    });
+  });
+
+  it('0 listed + setting off: the refresh says why, once', async () => {
+    const outcome = await engine.refresh(db.getConnection(connId)!, ['OmniDataTransform']);
+    expect(outcome.status).toBe('complete');
+    if (outcome.status !== 'complete') return;
+    expect(outcome.summary.warnings).toContain(OFF_WARNING);
+    expect(outcome.summary.warnings.filter((w) => w.startsWith('OmniDataTransform:'))).toHaveLength(
+      1,
+    );
+    expect(settingsRetrieves()).toHaveLength(1);
+    expect(settingsRetrieves()[0]).toContain(
+      '<met:types><met:members>OmniStudio</met:members><met:name>Settings</met:name></met:types>',
+    );
+  });
+
+  it('0 listed + setting on: no warning (0 then means none)', async () => {
+    setting = 'on';
+    const outcome = await engine.refresh(db.getConnection(connId)!, ['OmniDataTransform']);
+    expect(outcome.status).toBe('complete');
+    if (outcome.status !== 'complete') return;
+    expect(outcome.summary.warnings.filter((w) => /omnistudio/i.test(w))).toEqual([]);
+    expect(settingsRetrieves()).toHaveLength(1);
+  });
+
+  it('0 listed + setting unreadable: a neutral note naming the reason', async () => {
+    setting = 'absent';
+    const outcome = await engine.refresh(db.getConnection(connId)!, ['OmniDataTransform']);
+    expect(outcome.status).toBe('complete');
+    if (outcome.status !== 'complete') return;
+    expect(outcome.summary.warnings).toContain(
+      "OmniDataTransform: 0 listed, and the org's Omnistudio Metadata setting could not be read " +
+        "(the org's OmniStudioSettings has no enableOmniStudioMetadata field (no Omnistudio " +
+        "licence?)); where that setting is off, Data Mappers are records the Metadata API can't " +
+        'list, so 0 may not mean none.',
+    );
+    expect(outcome.summary.warnings).not.toContain(OFF_WARNING);
+  });
+
+  it('a listing with Data Mappers, or a refresh without the type, reads no setting', async () => {
+    mapperListed = true;
+    const listed = await engine.refresh(db.getConnection(connId)!, ['OmniDataTransform']);
+    expect(listed.status).toBe('complete');
+    if (listed.status !== 'complete') return;
+    expect(listed.summary.warnings.filter((w) => /omnistudio/i.test(w))).toEqual([]);
+
+    const others = await engine.refresh(db.getConnection(connId)!, TYPES);
+    expect(others.status).toBe('complete');
+    expect(settingsRetrieves()).toEqual([]);
+  });
+
+  it('a FAILED listing reads no setting: nothing was listed, so "0 listed" would be false', async () => {
+    listingFault = 'UNKNOWN_EXCEPTION';
+    const outcome = await engine.refresh(db.getConnection(connId)!, ['OmniDataTransform']);
+    expect(outcome.status).toBe('complete');
+    if (outcome.status !== 'complete') return;
+    // The listing's own warning stands alone.
+    expect(
+      outcome.summary.warnings.some(
+        (w) => w.startsWith('listMetadata failed (') && w.includes('UNKNOWN_EXCEPTION'),
+      ),
+    ).toBe(true);
+    expect(
+      outcome.summary.warnings.filter((w) => w.startsWith('OmniDataTransform: 0 listed')),
+    ).toEqual([]);
+    expect(outcome.summary.warnings.filter((w) => /omnistudio/i.test(w))).toEqual([]);
+    expect(settingsRetrieves()).toEqual([]);
+  });
+
+  it('a type the org refuses (INVALID_TYPE) reads no setting: "not supported" stands alone', async () => {
+    listingFault = 'INVALID_TYPE';
+    // An org without the licence: its settings would not answer either.
+    setting = 'absent';
+    const outcome = await engine.refresh(db.getConnection(connId)!, [
+      'ApexClass',
+      'OmniDataTransform',
+    ]);
+    expect(outcome.status).toBe('complete');
+    if (outcome.status !== 'complete') return;
+    expect(outcome.summary.warnings).toContain(
+      'OmniDataTransform not supported by this org/API version — skipped ' +
+        '(feature not licensed, or salesforce.apiVersion too old).',
+    );
+    expect(outcome.summary.warnings.filter((w) => /omnistudio/i.test(w))).toEqual([]);
+    expect(settingsRetrieves()).toEqual([]);
+    // The healthy type still refreshed.
+    expect(db.getArtifact(connId, 'ApexClass', 'InvoiceService')).toBeTruthy();
+  });
+});

@@ -390,6 +390,39 @@ describe('soql_query', () => {
     expect(textOf(result)).toContain('diagnostics_read');
   });
 
+  it('reads literals in one pass: 1 MB of escaped quotes in a literal that never closes', async () => {
+    // The pattern this check used started again from each of the 500,000
+    // escaped quotes and read to the end (quadratic: minutes, with every
+    // tool waiting). The literal never closes, so the text after it stays
+    // visible, as before: FOR UPDATE is still refused, with no org call.
+    const query = `SELECT Id FROM Account WHERE Name = '${"\\'".repeat(500_000)} FOR UPDATE`;
+    const started = performance.now();
+    const result = await client.callTool({
+      name: 'soql_query',
+      arguments: { connection: 'data-org', query },
+    });
+    const took = performance.now() - started;
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain('FOR UPDATE locks rows');
+    expect(took, `${Math.round(took)} ms`).toBeLessThan(1000);
+  });
+
+  it('a backslash before a line end escapes nothing, as in the pattern it replaces', async () => {
+    // No literal can start at the first quote (the backslash cannot escape
+    // the newline); the next one runs from the quote after "b" to the one
+    // before "x", and the quote after ApexLog never closes. So ApexLog is
+    // outside every literal, and gated.
+    const result = await client.callTool({
+      name: 'soql_query',
+      arguments: {
+        connection: 'data-only',
+        query: "SELECT Id FROM Account WHERE Name = 'a\\\nb' AND Type = 'x FROM ApexLog'",
+      },
+    });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain('diagnostics_read');
+  });
+
   it('reports COUNT() results via total_size without a bogus truncated flag', async () => {
     const result = await client.callTool({
       name: 'soql_query',

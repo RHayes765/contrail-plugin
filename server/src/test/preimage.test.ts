@@ -28,6 +28,7 @@ import {
   finalizeRevertPackage,
   hhmm,
   listDates,
+  livePresence,
   preImageKey,
   preImageListQueryFor,
   preImageRetrieveMemberFor,
@@ -2742,5 +2743,64 @@ describe('targetMovedRefusalText — one source for the three refusals', () => {
     const pad = (n: number) => String(n).padStart(2, '0');
     expect(hhmm(d.toISOString())).toBe(`${pad(d.getHours())}:${pad(d.getMinutes())}`);
     expect(hhmm('not a date')).toBe('not a date');
+  });
+});
+
+describe('livePresence (S46 D3; slow-path follow-up)', () => {
+  const image = (present: boolean | null, content?: string): PreImage =>
+    ({
+      present,
+      source: 'retrieve',
+      content,
+      last_modified_date: null,
+      last_modified_by: null,
+      comparable: true,
+      restorable: true,
+    }) as PreImage;
+
+  it("answers from a member's own pre-image, else from its object's live document", () => {
+    const images = new Map<string, PreImage>([
+      [
+        preImageKey('CustomObject', 'Obj__c'),
+        image(
+          true,
+          '<CustomObject><fields><fullName> Amount__c </fullName></fields>' +
+            '<fields><label>x</label></fields></CustomObject>',
+        ),
+      ],
+      [preImageKey('CustomObject', 'Gone__c'), image(false)],
+      [preImageKey('CustomField', 'Obj__c.Own__c'), image(null)],
+      [preImageKey('ApexClass', 'Svc'), image(true)],
+    ]);
+    const presence = livePresence(images);
+    expect(presence('CustomField', 'Obj__c.amount__c')).toBe(true);
+    expect(presence('CustomField', 'Obj__c.Other__c')).toBe(false);
+    expect(presence('CustomField', 'Obj__c.Own__c')).toBeNull();
+    expect(presence('CustomField', 'Gone__c.Any__c')).toBe(false);
+    expect(presence('CustomField', 'Unknown__c.Any__c')).toBeNull();
+    expect(presence('CustomField', 'NoDot')).toBeNull();
+    expect(presence('ApexClass', 'Svc')).toBe(true);
+    expect(presence('ApexClass', 'Other')).toBeNull();
+  });
+
+  it('reads each live object once, however many inline fields are asked about', () => {
+    // 15,000 inline fields against a 3,000-field live object: reading the
+    // object once per field took about 5 s, with every tool waiting.
+    const live =
+      '<CustomObject>' +
+      Array.from(
+        { length: 3000 },
+        (_, i) => `<fields><fullName>L${i}__c</fullName><!-- ${'x'.repeat(60)} --></fields>`,
+      ).join('') +
+      '</CustomObject>';
+    const presence = livePresence(new Map([[preImageKey('CustomObject', 'Obj__c'), image(true, live)]]));
+    const started = performance.now();
+    const found = Array.from({ length: 15_000 }, (_, i) =>
+      presence('CustomField', `Obj__c.${i % 5 === 0 ? 'L' : 'N'}${i}__c`),
+    ).filter((p) => p === true).length;
+    const took = performance.now() - started;
+    // L0, L5 … L2995 are in the live object; the rest are not.
+    expect(found).toBe(600);
+    expect(took, `${Math.round(took)} ms`).toBeLessThan(1000);
   });
 });

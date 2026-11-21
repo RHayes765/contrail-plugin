@@ -9,6 +9,11 @@ import {
   MetadataSoapClient,
   type FileProperties,
 } from '../salesforce/metadataSoap.js';
+import {
+  OMNISTUDIO_SETTING_TIMEOUT_MS,
+  omniStudioRefreshText,
+  readOmniStudioMetadataSetting,
+} from '../salesforce/omnistudioSettings.js';
 import { RestClient } from '../salesforce/rest.js';
 import { SnapshotStore } from './store.js';
 import { indexSnapshotFiles } from './indexer.js';
@@ -803,10 +808,12 @@ export class SnapshotEngine {
     job.progress = 'listing metadata';
     let listedProps: FileProperties[] = [];
     let unsupportedTypes: string[] = [];
+    let listed = false;
     try {
       const detailed = await soap.listMetadataDetailed(types);
       listedProps = detailed.props;
       unsupportedTypes = detailed.unsupportedTypes;
+      listed = true;
     } catch (err) {
       warnings.push(`listMetadata failed (${String(err instanceof Error ? err.message : err)}); staleness data will be limited`);
     }
@@ -822,6 +829,20 @@ export class SnapshotEngine {
           `(feature not licensed, or salesforce.apiVersion too old).`,
       );
     }
+    // S47: a Data Mapper listing that came back EMPTY may be the org's
+    // Omnistudio Metadata setting, not an empty org — read the setting
+    // alongside the retrieve (never rejects). A failed listing or a type the
+    // org refused already carries its own warning.
+    const omniP =
+      listed &&
+      types.includes('OmniDataTransform') &&
+      !unsupportedTypes.includes('OmniDataTransform') &&
+      !listedProps.some((p) => p.type === 'OmniDataTransform')
+        ? readOmniStudioMetadataSetting(soap, {
+            timeoutMs: OMNISTUDIO_SETTING_TIMEOUT_MS,
+            pollIntervalMs: this.config.snapshot.pollIntervalMs,
+          })
+        : null;
 
     job.progress = 'starting retrieve';
     const retrieveMembers = buildRetrieveMembers(retrieveTypes, listedProps, warnings);
@@ -914,6 +935,12 @@ export class SnapshotEngine {
     const orgDeps = await fetchOrgDependencyEdges(rest, conn.id, retrieveTypes);
     warnings.push(...orgDeps.warnings);
     this.db.replaceEdges(conn.id, 'org', retrieveTypes, orgDeps.edges);
+
+    if (omniP) {
+      job.progress = 'reading the Omnistudio Metadata setting';
+      const omniWarning = omniStudioRefreshText(await omniP);
+      if (omniWarning) warnings.push(omniWarning);
+    }
 
     const summary: RefreshSummary = {
       connection: conn.alias,
@@ -1221,6 +1248,8 @@ const TYPE_DIRS: Record<string, string> = {
   LightningComponentBundle: 'lwc',
   // S41: Aura component bundles.
   AuraDefinitionBundle: 'aura',
+  // S47: Omnistudio Data Mappers (explicit-refresh-only).
+  OmniDataTransform: 'omniDataTransforms',
 };
 
 /** The refreshed types' own directories — null if any requested type has no known mapping. */

@@ -671,3 +671,38 @@ describe('S46: member-refresh accessors (C)', () => {
     expect(db.amendDeployRequestResult('no-such-request', '{}')).toBe(false);
   });
 });
+
+describe('getArtifact (slow-path follow-up)', () => {
+  it('prepares its statement once across 60,000 lookups', () => {
+    // A validate asks the snapshot index about names an agent wrote (the
+    // c: references in a package's pages, for one). Preparing the statement
+    // on every call cost about 40 µs a lookup: about 2.4 s for these. The
+    // prepare calls are counted, not timed, so a slow machine cannot flake.
+    const sqlite = (db as unknown as { db: { prepare: (sql: string) => unknown } }).db;
+    db.replaceArtifactsForTypes('conn-a', ['ApexClass'], [
+      {
+        connectionId: 'conn-a',
+        type: 'ApexClass',
+        apiName: 'Svc',
+        filePath: 'classes/Svc.cls',
+        contentHash: 'h',
+        lastModifiedDate: null,
+        lastModifiedBy: null,
+        retrievedAt: '2026-11-01T00:00:00.000Z',
+        content: '',
+      },
+    ]);
+    const prepare = vi.spyOn(sqlite, 'prepare');
+    let found = 0;
+    try {
+      for (let i = 0; i < 60_000; i++) {
+        if (db.getArtifact('conn-a', 'ApexClass', i % 2 === 1 ? 'svc' : `Missing${i}`)) found += 1;
+      }
+      expect(db.getArtifact('conn-b', 'ApexClass', 'Svc')).toBeNull();
+      expect(prepare.mock.calls.length).toBeLessThanOrEqual(1);
+    } finally {
+      prepare.mockRestore();
+    }
+    expect(found).toBe(30_000);
+  });
+});
